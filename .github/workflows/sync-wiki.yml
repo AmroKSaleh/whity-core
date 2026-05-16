@@ -1,0 +1,103 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/wiki/**'
+      - '.github/workflows/sync-wiki.yml'
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Git credentials
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+
+          # Store credentials for later use
+          echo "WIKI_REPO_URL=https://github.com/${REPO}.wiki.git" >> $GITHUB_ENV
+          echo "GITHUB_TOKEN_VAR=${GITHUB_TOKEN}" >> $GITHUB_ENV
+
+      - name: Clone or init wiki repo
+        env:
+          WIKI_REPO_URL: ${{ env.WIKI_REPO_URL }}
+          GITHUB_TOKEN_VAR: ${{ env.GITHUB_TOKEN_VAR }}
+        run: |
+          # Create credentials file for git
+          cat > ~/.netrc << EOF
+          machine github.com
+          login github-actions[bot]
+          password ${GITHUB_TOKEN_VAR}
+          EOF
+          chmod 600 ~/.netrc
+
+          # Try to clone, if fails (wiki doesn't exist yet), init locally
+          git clone "${WIKI_REPO_URL}" wiki-repo 2>/dev/null || {
+            mkdir -p wiki-repo
+            cd wiki-repo
+            git init
+            git remote add origin "${WIKI_REPO_URL}"
+            cd ..
+          }
+
+      - name: Copy wiki documentation
+        run: |
+          # Copy all markdown files from docs/wiki to wiki-repo
+          for file in docs/wiki/*.md; do
+            filename=$(basename "$file")
+            cp "$file" "wiki-repo/$filename"
+          done
+
+          # GitHub wiki convention: Home.md (not HOME.md)
+          if [ -f "wiki-repo/HOME.md" ]; then
+            mv wiki-repo/HOME.md wiki-repo/Home.md
+          fi
+
+      - name: Create wiki navigation
+        run: |
+          # Create sidebar for navigation
+          cat > wiki-repo/_Sidebar.md << 'SIDEBAR_EOF'
+## Documentation
+
+- [[Home]]
+- [[Installation]]
+- [[Plugin-Development]]
+- [[Architecture]]
+
+## Links
+
+- [README](https://github.com/${{ github.repository }}/blob/main/README.md)
+- [CONTRIBUTING](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md)
+SIDEBAR_EOF
+
+      - name: Commit and push wiki
+        working-directory: wiki-repo
+        env:
+          WIKI_REPO_URL: ${{ env.WIKI_REPO_URL }}
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+
+          # Add all changes
+          git add .
+
+          # Commit with a safe message (no external input)
+          git commit -m "docs: sync documentation from main repository" || {
+            echo "No changes to commit, wiki is up to date"
+            exit 0
+          }
+
+          # Push to wiki repo
+          git push -u origin master 2>/dev/null || git push -u origin main
+        continue-on-error: true
