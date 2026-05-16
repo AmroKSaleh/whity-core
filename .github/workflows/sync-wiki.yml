@@ -65,6 +65,8 @@ jobs:
           fi
 
       - name: Create wiki navigation
+        env:
+          REPO: ${{ github.repository }}
         run: |
           # Create sidebar for navigation
           cat > wiki-repo/_Sidebar.md << 'SIDEBAR_EOF'
@@ -77,8 +79,8 @@ jobs:
 
 ## Links
 
-- [README](https://github.com/${{ github.repository }}/blob/main/README.md)
-- [CONTRIBUTING](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md)
+- [README](https://github.com/$REPO/blob/main/README.md)
+- [CONTRIBUTING](https://github.com/$REPO/blob/main/CONTRIBUTING.md)
 SIDEBAR_EOF
 
       - name: Commit and push wiki
