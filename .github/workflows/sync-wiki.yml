@@ -15,7 +15,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.0
 
       - name: Setup Git credentials
         env:
@@ -66,19 +66,19 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           # Create sidebar for navigation
-          cat > wiki-repo/_Sidebar.md <<- 'SIDEBAR_EOF'
-            ## Documentation
+          cat > wiki-repo/_Sidebar.md << 'SIDEBAR_EOF'
+## Whity Core Documentation
 
-            - [[Home]]
-            - [[Installation]]
-            - [[Plugin-Development]]
-            - [[Architecture]]
+- [[Home]]
+- [[Design-System-Overview]]
+- [[Theme-Customization]]
+- [[Shadcn-UI-Setup]]
 
-            ## Links
+## Links
 
-            - [README](https://github.com/$REPO/blob/main/README.md)
-            - [CONTRIBUTING](https://github.com/$REPO/blob/main/CONTRIBUTING.md)
-          SIDEBAR_EOF
+- [README](https://github.com/$REPO/blob/main/README.md)
+- [CONTRIBUTING](https://github.com/$REPO/blob/main/CONTRIBUTING.md)
+SIDEBAR_EOF
 
       - name: Commit and push wiki
         working-directory: wiki-repo
@@ -92,11 +92,16 @@ jobs:
           git add .
 
           # Commit with a safe message (no external input)
-          git commit -m "docs: sync documentation from main repository" || {
+          if ! git commit -m "docs: sync documentation from main repository"; then
             echo "No changes to commit, wiki is up to date"
             exit 0
-          }
+          fi
 
-          # Push to wiki repo
-          git push -u origin master 2>/dev/null || git push -u origin main
-        continue-on-error: true
+          # Push to wiki repo (GitHub wiki uses master by default)
+          git push -u origin master 2>/dev/null || {
+            echo "Trying alternative push..."
+            git push -u origin main
+          } || {
+            echo "Warning: Could not push to wiki"
+            exit 0
+          }
