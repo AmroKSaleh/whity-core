@@ -22,7 +22,8 @@
       "Whity\\Auth\\": "src/Auth/",
       "Whity\\Database\\": "src/Database/",
       "Whity\\Http\\": "src/Http/",
-      "Whity\\Cli\\": "src/Cli/"
+      "Whity\\Cli\\": "src/Cli/",
+      "Whity\\Plugins\\": "plugins/"
     }
   },
   "autoload-dev": {
