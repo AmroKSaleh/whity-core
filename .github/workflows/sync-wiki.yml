@@ -67,18 +67,18 @@ jobs:
         run: |
           # Create sidebar for navigation
           cat > wiki-repo/_Sidebar.md << 'SIDEBAR_EOF'
-## Whity Core Documentation
+          ## Whity Core Documentation
 
-- [[Home]]
-- [[Design-System-Overview]]
-- [[Theme-Customization]]
-- [[Shadcn-UI-Setup]]
+          - [[Home]]
+          - [[Design-System-Overview]]
+          - [[Theme-Customization]]
+          - [[Shadcn-UI-Setup]]
 
-## Links
+          ## Links
 
-- [README](https://github.com/$REPO/blob/main/README.md)
-- [CONTRIBUTING](https://github.com/$REPO/blob/main/CONTRIBUTING.md)
-SIDEBAR_EOF
+          - [README](https://github.com/$REPO/blob/main/README.md)
+          - [CONTRIBUTING](https://github.com/$REPO/blob/main/CONTRIBUTING.md)
+          SIDEBAR_EOF
 
       - name: Commit and push wiki
         working-directory: wiki-repo
