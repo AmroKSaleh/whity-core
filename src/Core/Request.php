@@ -89,6 +89,11 @@ class Request
      *
      * Extracts request data from $_SERVER, $_GET, and php://input.
      *
+     * WARNING: php://input can only be read once per request. Subsequent reads
+     * will return an empty string. This is a PHP limitation that affects all code
+     * using this method. Consider buffering the input if you need to read it
+     * multiple times.
+     *
      * @return self Request instance populated from superglobals
      */
     public static function fromGlobals(): self
@@ -124,7 +129,7 @@ class Request
      */
     private function normalizeHeaderName(string $name): string
     {
-        return strtolower(str_replace('_', '-', $name));
+        return HeaderUtil::normalize($name);
     }
 
     /**

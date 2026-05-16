@@ -59,7 +59,7 @@ class Router
             }
 
             $matches = [];
-            if (preg_match($route['pattern'], $path, $matches)) {
+            if (preg_match($route['pattern'], $path, $matches) === 1) {
                 // Extract named parameters
                 $params = [];
                 foreach ($matches as $key => $value) {

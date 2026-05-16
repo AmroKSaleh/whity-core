@@ -67,10 +67,17 @@ class Response
      * @param mixed $data Data to encode as JSON
      * @param int $statusCode HTTP status code (default: 200)
      * @return self JSON response instance
+     * @throws \RuntimeException If JSON encoding fails
      */
     public static function json(mixed $data, int $statusCode = 200): self
     {
         $body = json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($body === false) {
+            throw new \RuntimeException(
+                'JSON encoding failed: ' . json_last_error_msg(),
+                json_last_error()
+            );
+        }
         return new self($statusCode, $body, [
             'Content-Type' => 'application/json',
         ]);
@@ -102,9 +109,15 @@ class Response
      * be called only once and after all other output is complete.
      *
      * @return void
+     * @throws \RuntimeException If headers have already been sent
      */
     public function send(): void
     {
+        // Check if headers have already been sent
+        if (headers_sent()) {
+            throw new \RuntimeException('Headers already sent');
+        }
+
         // Set status code
         http_response_code($this->statusCode);
 
@@ -133,13 +146,13 @@ class Response
     }
 
     /**
-     * Normalize header names to a consistent format (capitalize words separated by hyphens)
+     * Normalize header names to a consistent format (lowercase with hyphens)
      *
      * @param string $name Header name
      * @return string Normalized header name
      */
     private function normalizeHeaderName(string $name): string
     {
-        return implode('-', array_map('ucfirst', explode('-', strtolower($name))));
+        return HeaderUtil::normalize($name);
     }
 }
