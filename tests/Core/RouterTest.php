@@ -1,0 +1,175 @@
+<?php
+
+namespace Tests\Core;
+
+use PHPUnit\Framework\TestCase;
+use Whity\Core\Router;
+use Whity\Core\Request;
+
+/**
+ * Tests for Router class
+ */
+class RouterTest extends TestCase
+{
+    private Router $router;
+
+    protected function setUp(): void
+    {
+        $this->router = new Router();
+    }
+
+    /**
+     * Test matching a simple path without parameters
+     */
+    public function testMatchesSimplePath(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/users', $handler);
+
+        $request = new Request('GET', '/users');
+        $match = $this->router->match($request);
+
+        $this->assertNotNull($match);
+        $this->assertSame($handler, $match['handler']);
+        $this->assertEmpty($match['params']);
+        $this->assertNull($match['requiredRole']);
+    }
+
+    /**
+     * Test that different HTTP methods do not match
+     */
+    public function testDoesNotMatchDifferentMethod(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/users', $handler);
+
+        $request = new Request('POST', '/users');
+        $match = $this->router->match($request);
+
+        $this->assertNull($match);
+    }
+
+    /**
+     * Test matching a path with parameters
+     */
+    public function testMatchesPathWithParam(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/users/{id}', $handler);
+
+        $request = new Request('GET', '/users/42');
+        $match = $this->router->match($request);
+
+        $this->assertNotNull($match);
+        $this->assertSame($handler, $match['handler']);
+        $this->assertSame(['id' => '42'], $match['params']);
+        $this->assertNull($match['requiredRole']);
+    }
+
+    /**
+     * Test matching multiple parameters in a path
+     */
+    public function testMatchesPathWithMultipleParams(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/users/{userId}/posts/{postId}', $handler);
+
+        $request = new Request('GET', '/users/42/posts/100');
+        $match = $this->router->match($request);
+
+        $this->assertNotNull($match);
+        $this->assertSame(['userId' => '42', 'postId' => '100'], $match['params']);
+    }
+
+    /**
+     * Test that similar paths do not match incorrectly
+     */
+    public function testDoesNotMatchSimilarPath(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/users', $handler);
+
+        $request = new Request('GET', '/users/');
+        $match = $this->router->match($request);
+
+        $this->assertNull($match);
+    }
+
+    /**
+     * Test registering route with required role
+     */
+    public function testRegisterRouteWithRequiredRole(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('POST', '/admin/users', $handler, 'admin');
+
+        $request = new Request('POST', '/admin/users');
+        $match = $this->router->match($request);
+
+        $this->assertNotNull($match);
+        $this->assertSame('admin', $match['requiredRole']);
+    }
+
+    /**
+     * Test middleware addition
+     */
+    public function testAddMiddleware(): void
+    {
+        $middleware1 = static fn() => null;
+        $middleware2 = static fn() => null;
+
+        $this->router->addMiddleware($middleware1);
+        $this->router->addMiddleware($middleware2);
+
+        $middlewares = $this->router->getMiddleware();
+        $this->assertCount(2, $middlewares);
+        $this->assertSame($middleware1, $middlewares[0]);
+        $this->assertSame($middleware2, $middlewares[1]);
+    }
+
+    /**
+     * Test case-insensitive HTTP method matching
+     */
+    public function testCaseInsensitiveMethodMatching(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('get', '/users', $handler);
+
+        $request = new Request('GET', '/users');
+        $match = $this->router->match($request);
+
+        $this->assertNotNull($match);
+    }
+
+    /**
+     * Test that path parameters don't match forward slashes
+     */
+    public function testParameterDoesNotMatchSlash(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/users/{id}', $handler);
+
+        $request = new Request('GET', '/users/42/extra');
+        $match = $this->router->match($request);
+
+        $this->assertNull($match);
+    }
+
+    /**
+     * Test matching multiple routes and returning the correct one
+     */
+    public function testMatchesCorrectRouteFromMultiple(): void
+    {
+        $handler1 = static fn() => 'handler1';
+        $handler2 = static fn() => 'handler2';
+
+        $this->router->register('GET', '/users', $handler1);
+        $this->router->register('GET', '/posts', $handler2);
+
+        $request = new Request('GET', '/posts');
+        $match = $this->router->match($request);
+
+        $this->assertNotNull($match);
+        $this->assertSame($handler2, $match['handler']);
+    }
+}
