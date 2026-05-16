@@ -10,3 +10,7 @@
 node_modules/
 dist/
 build/
+
+# Docs: only wiki should be committed
+docs/*
+!docs/wiki/
