@@ -54,10 +54,7 @@ jobs:
       - name: Copy wiki documentation
         run: |
           # Copy all markdown files from docs/wiki to wiki-repo
-          for file in docs/wiki/*.md; do
-            filename=$(basename "$file")
-            cp "$file" "wiki-repo/$filename"
-          done
+          cp docs/wiki/*.md wiki-repo/
 
           # GitHub wiki convention: Home.md (not HOME.md)
           if [ -f "wiki-repo/HOME.md" ]; then
