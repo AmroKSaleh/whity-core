@@ -2,6 +2,20 @@
 
 Whity Core uses a comprehensive CSS custom properties (variables) system for theming, powered by OKLCH color space for perceptually uniform colors across light and dark modes.
 
+## Token Architecture
+
+```
+src/design/tokens/
+├── base.json                    ← Master definitions
+├── generate-tokens.js           ← Generation script
+└── generated/
+    ├── tokens.json             ← For programmatic use
+    └── tokens.dart             ← For Flutter mobile
+
+web/app/
+└── globals.css                  ← Web tokens (source of truth)
+```
+
 ## Token Structure
 
 ### Core UI Colors
@@ -178,9 +192,65 @@ All color tokens are designed for WCAG AA+ contrast:
 - Focus states (`ring` color) clearly visible on all backgrounds
 - High Contrast theme variant available for accessibility needs
 
+## Token Generation
+
+Tokens are automatically generated for multiple platforms:
+
+### Generate All Tokens
+```bash
+cd web
+npm run tokens:generate
+```
+
+### Generate Specific Formats
+```bash
+# JSON for programmatic access
+npm run tokens:generate:json
+
+# Dart for Flutter mobile
+npm run tokens:generate:dart
+```
+
+### Generated Output
+
+**tokens.json** — For programmatic use:
+```json
+{
+  "light": { "primary": "oklch(...)", ... },
+  "dark": { "primary": "oklch(...)", ... },
+  "fonts": { "font-sans": "...", ... }
+}
+```
+
+**tokens.dart** — For Flutter:
+```dart
+class AppTokens {
+  static const lightTokens = <String, Color>{
+    'primary': Color(0xFF3B82F6),
+    // ...
+  };
+  static const darkTokens = <String, Color>{...};
+}
+```
+
+### For White-Label Tenants
+
+1. Load `tokens.json` programmatically
+2. Customize colors per tenant
+3. Generate CSS variables dynamically
+4. Inject at runtime
+
+```javascript
+const baseTokens = require('./tokens.json');
+const tenantTokens = { ...baseTokens, ...customization };
+const css = generateCss(tenantTokens);
+// Inject into page
+```
+
 ## Resources
 
-- **Token Generator:** https://ui.shadcn.com/create
+- **shadcn Token Generator:** https://ui.shadcn.com/create
 - **OKLCH Colors:** https://oklch.com/ (interactive color picker)
 - **Color Contrast Checker:** https://www.tpgi.com/color-contrast-checker/
 - **Tailwind CSS Variables:** https://tailwindcss.com/docs/adding-custom-styles#using-css-variables
+- **Token Generation:** See `src/design/tokens/generate-tokens.js` in repository

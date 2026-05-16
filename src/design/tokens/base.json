@@ -1,0 +1,102 @@
+{
+  "name": "Whity Core Design Tokens",
+  "description": "Master design token definitions for web, mobile, and desktop platforms",
+  "version": "1.0.0",
+  "platforms": {
+    "web": {
+      "type": "css-custom-properties",
+      "location": "../../web/app/globals.css",
+      "description": "CSS variables used by Tailwind CSS and shadcn-ui components"
+    },
+    "mobile": {
+      "type": "dart-constants",
+      "location": "./generated/tokens.dart",
+      "description": "Dart constants for Flutter Material Design 3 integration"
+    }
+  },
+  "colors": {
+    "light": {
+      "background": "oklch(1 0 0)",
+      "foreground": "oklch(0.145 0 0)",
+      "card": "oklch(1 0 0)",
+      "card-foreground": "oklch(0.145 0 0)",
+      "popover": "oklch(1 0 0)",
+      "popover-foreground": "oklch(0.145 0 0)",
+      "primary": "oklch(0.205 0 0)",
+      "primary-foreground": "oklch(0.985 0 0)",
+      "secondary": "oklch(0.97 0 0)",
+      "secondary-foreground": "oklch(0.205 0 0)",
+      "muted": "oklch(0.97 0 0)",
+      "muted-foreground": "oklch(0.556 0 0)",
+      "accent": "oklch(0.97 0 0)",
+      "accent-foreground": "oklch(0.205 0 0)",
+      "destructive": "oklch(0.577 0.245 27.325)",
+      "border": "oklch(0.922 0 0)",
+      "input": "oklch(0.922 0 0)",
+      "ring": "oklch(0.708 0 0)"
+    },
+    "dark": {
+      "background": "oklch(0.145 0 0)",
+      "foreground": "oklch(0.985 0 0)",
+      "card": "oklch(0.205 0 0)",
+      "card-foreground": "oklch(0.985 0 0)",
+      "popover": "oklch(0.205 0 0)",
+      "popover-foreground": "oklch(0.985 0 0)",
+      "primary": "oklch(0.922 0 0)",
+      "primary-foreground": "oklch(0.205 0 0)",
+      "secondary": "oklch(0.269 0 0)",
+      "secondary-foreground": "oklch(0.985 0 0)",
+      "muted": "oklch(0.269 0 0)",
+      "muted-foreground": "oklch(0.708 0 0)",
+      "accent": "oklch(0.269 0 0)",
+      "accent-foreground": "oklch(0.985 0 0)",
+      "destructive": "oklch(0.704 0.191 22.216)",
+      "border": "oklch(1 0 0 / 10%)",
+      "input": "oklch(1 0 0 / 15%)",
+      "ring": "oklch(0.556 0 0)"
+    },
+    "semantic": {
+      "success": "oklch(0.84 0.15 142.5)",
+      "warning": "oklch(0.84 0.18 70)",
+      "error": "oklch(0.63 0.26 29.2)",
+      "info": "oklch(0.68 0.19 231.6)"
+    }
+  },
+  "typography": {
+    "font-sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "font-mono": "'Geist Mono', monospace",
+    "font-heading": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+  },
+  "spacing": {
+    "unit": "8px",
+    "scale": {
+      "0": "0px",
+      "1": "4px",
+      "2": "8px",
+      "3": "12px",
+      "4": "16px",
+      "6": "24px",
+      "8": "32px"
+    }
+  },
+  "borderRadius": {
+    "base": "0.625rem",
+    "sm": "4px",
+    "md": "6px",
+    "lg": "8px",
+    "xl": "12px",
+    "2xl": "16px",
+    "3xl": "20px",
+    "4xl": "24px"
+  },
+  "accessibility": {
+    "contrastRatio": "WCAG AA+",
+    "colorSpace": "OKLCH",
+    "description": "Perceptually uniform color space with verified accessibility compliance"
+  },
+  "whiteLabelSupport": {
+    "enabled": true,
+    "approach": "CSS variable injection",
+    "description": "Tokens can be customized per tenant at runtime via CSS variable override"
+  }
+}

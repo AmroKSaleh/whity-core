@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tokens:generate": "node ../src/design/tokens/generate-tokens.js",
+    "tokens:generate:json": "node ../src/design/tokens/generate-tokens.js json",
+    "tokens:generate:dart": "node ../src/design/tokens/generate-tokens.js dart"
   },
   "dependencies": {
     "@tabler/icons-react": "^3.44.0",
