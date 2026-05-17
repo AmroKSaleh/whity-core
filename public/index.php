@@ -63,6 +63,7 @@ use Whity\Core\Response;
 use Whity\Core\PluginLoader;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
+use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
 
@@ -116,13 +117,37 @@ $pluginLoader->load();
 // 7. Initialize HTTP kernel
 $kernel = new HttpKernel($router, $rbacMiddleware);
 
+// 8. Register authentication handler
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser);
+$router->register('POST', '/api/login', [$authHandler, 'handle'], null);
+
 // Handle single request
 try {
     // Create request from PHP superglobals
     $request = Request::fromGlobals();
 
+    // Handle OPTIONS preflight requests for CORS
+    if ($request->getMethod() === 'OPTIONS') {
+        $response = new Response(204, '', [
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
+        ]);
+        $response->send();
+        exit;
+    }
+
     // Handle request through kernel
     $response = $kernel->handle($request);
+
+    // Get current headers and add CORS
+    $headers = $response->getHeaders();
+    $headers['Access-Control-Allow-Origin'] = '*';
+    $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+    $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+
+    // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
+    $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
 
     // Send response to client
     $response->send();
@@ -130,6 +155,11 @@ try {
     // Handle any uncaught exceptions
     try {
         $errorResponse = Response::error('Internal server error', 500);
+        $errorHeaders = $errorResponse->getHeaders();
+        $errorHeaders['Access-Control-Allow-Origin'] = '*';
+        $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+        $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+        $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
         $errorResponse->send();
     } catch (\Throwable $sendError) {
         // If send also fails, just log it
