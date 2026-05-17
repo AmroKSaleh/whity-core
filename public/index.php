@@ -66,6 +66,10 @@ use Whity\Auth\RoleChecker;
 use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
+use Whity\Api\UsersApiHandler;
+use Whity\Api\RolesApiHandler;
+use Whity\Api\TenantsApiHandler;
+use Whity\Api\PermissionsApiHandler;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -120,6 +124,29 @@ $kernel = new HttpKernel($router, $rbacMiddleware);
 // 8. Register authentication handler
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
+
+// 9. Register API handlers
+$usersHandler = new UsersApiHandler($db->getPdo());
+$router->register('GET', '/api/users', [$usersHandler, 'list'], 'admin');
+$router->register('POST', '/api/users', [$usersHandler, 'create'], 'admin');
+$router->register('PATCH', '/api/users/{id}', [$usersHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/users/{id}', [$usersHandler, 'delete'], 'admin');
+
+$rolesHandler = new RolesApiHandler($db->getPdo());
+$router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
+$router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
+$router->register('PATCH', '/api/roles/{id}', [$rolesHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/roles/{id}', [$rolesHandler, 'delete'], 'admin');
+$router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
+
+$tenantsHandler = new TenantsApiHandler($db->getPdo());
+$router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
+$router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], 'admin');
+$router->register('PATCH', '/api/tenants/{id}', [$tenantsHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'admin');
+
+$permissionsHandler = new PermissionsApiHandler($db->getPdo());
+$router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
 
 // Handle single request
 try {

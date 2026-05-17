@@ -1,0 +1,217 @@
+<?php
+
+namespace Whity\Api;
+
+use Whity\Core\Request;
+use Whity\Core\Response;
+use PDO;
+
+/**
+ * Tenants API Handler
+ *
+ * Handles CRUD operations for tenants with slug management.
+ */
+class TenantsApiHandler
+{
+    private PDO $db;
+
+    public function __construct(PDO $db)
+    {
+        $this->db = $db;
+    }
+
+    /**
+     * GET /api/tenants - List all tenants
+     */
+    public function list(Request $request): Response
+    {
+        try {
+            $stmt = $this->db->prepare('
+                SELECT t.id, t.name, t.slug, t.created_at,
+                       COUNT(u.id) as userCount
+                FROM tenants t
+                LEFT JOIN users u ON t.id = u.tenant_id
+                GROUP BY t.id
+                ORDER BY t.created_at DESC
+            ');
+            $stmt->execute();
+            $tenants = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            return Response::json(['data' => $tenants], 200);
+        } catch (\Exception $e) {
+            return Response::error('Failed to fetch tenants: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * POST /api/tenants - Create a new tenant
+     */
+    public function create(Request $request): Response
+    {
+        try {
+            $body = json_decode($request->getBody(), true);
+
+            if (empty($body['name'])) {
+                return Response::error('Tenant name is required', 400);
+            }
+
+            $name = $body['name'];
+            $slug = $body['slug'] ?? $this->generateSlug($name);
+
+            // Validate slug format
+            if (!preg_match('/^[a-z0-9-]+$/', $slug)) {
+                return Response::error('Slug must contain only lowercase letters, numbers, and hyphens', 400);
+            }
+
+            // Check if name already exists
+            $checkStmt = $this->db->prepare('SELECT id FROM tenants WHERE name = ?');
+            $checkStmt->execute([$name]);
+            if ($checkStmt->fetch()) {
+                return Response::error('Tenant name already exists', 409);
+            }
+
+            // Check if slug already exists
+            $checkSlugStmt = $this->db->prepare('SELECT id FROM tenants WHERE slug = ?');
+            $checkSlugStmt->execute([$slug]);
+            if ($checkSlugStmt->fetch()) {
+                return Response::error('Slug already exists', 409);
+            }
+
+            // Insert tenant
+            $stmt = $this->db->prepare('
+                INSERT INTO tenants (name, slug, created_at)
+                VALUES (?, ?, NOW())
+            ');
+            $stmt->execute([$name, $slug]);
+            $tenantId = $this->db->lastInsertId();
+
+            return Response::json([
+                'data' => [
+                    'id' => (int)$tenantId,
+                    'name' => $name,
+                    'slug' => $slug,
+                    'userCount' => 0,
+                    'created_at' => date('Y-m-d H:i:s')
+                ]
+            ], 201);
+        } catch (\Exception $e) {
+            return Response::error('Failed to create tenant: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * PATCH /api/tenants/{id} - Update a tenant
+     */
+    public function update(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('Tenant ID is required', 400);
+            }
+
+            $body = json_decode($request->getBody(), true);
+
+            // Get current tenant
+            $stmt = $this->db->prepare('SELECT * FROM tenants WHERE id = ?');
+            $stmt->execute([$id]);
+            $tenant = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$tenant) {
+                return Response::error('Tenant not found', 404);
+            }
+
+            $updates = [];
+            $params_array = [];
+
+            // Update name
+            if (isset($body['name']) && $body['name'] !== $tenant['name']) {
+                $checkStmt = $this->db->prepare('SELECT id FROM tenants WHERE name = ? AND id != ?');
+                $checkStmt->execute([$body['name'], $id]);
+                if ($checkStmt->fetch()) {
+                    return Response::error('Tenant name already exists', 409);
+                }
+                $updates[] = 'name = ?';
+                $params_array[] = $body['name'];
+            }
+
+            // Update slug
+            if (isset($body['slug']) && $body['slug'] !== $tenant['slug']) {
+                if (!preg_match('/^[a-z0-9-]+$/', $body['slug'])) {
+                    return Response::error('Slug must contain only lowercase letters, numbers, and hyphens', 400);
+                }
+                $checkSlugStmt = $this->db->prepare('SELECT id FROM tenants WHERE slug = ? AND id != ?');
+                $checkSlugStmt->execute([$body['slug'], $id]);
+                if ($checkSlugStmt->fetch()) {
+                    return Response::error('Slug already exists', 409);
+                }
+                $updates[] = 'slug = ?';
+                $params_array[] = $body['slug'];
+            }
+
+            if (!empty($updates)) {
+                $params_array[] = $id;
+                $sql = 'UPDATE tenants SET ' . implode(', ', $updates) . ' WHERE id = ?';
+                $updateStmt = $this->db->prepare($sql);
+                $updateStmt->execute($params_array);
+            }
+
+            return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant updated']], 200);
+        } catch (\Exception $e) {
+            return Response::error('Failed to update tenant: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * DELETE /api/tenants/{id} - Delete a tenant
+     */
+    public function delete(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('Tenant ID is required', 400);
+            }
+
+            $stmt = $this->db->prepare('SELECT id FROM tenants WHERE id = ?');
+            $stmt->execute([$id]);
+            if (!$stmt->fetch()) {
+                return Response::error('Tenant not found', 404);
+            }
+
+            // Check if tenant has users
+            $checkStmt = $this->db->prepare('SELECT COUNT(*) as count FROM users WHERE tenant_id = ?');
+            $checkStmt->execute([$id]);
+            $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
+            if ($result['count'] > 0) {
+                return Response::error('Cannot delete tenant with ' . $result['count'] . ' user(s)', 409);
+            }
+
+            // Delete tenant
+            $deleteStmt = $this->db->prepare('DELETE FROM tenants WHERE id = ?');
+            $deleteStmt->execute([$id]);
+
+            return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant deleted']], 200);
+        } catch (\Exception $e) {
+            return Response::error('Failed to delete tenant: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Generate a URL-friendly slug from a string
+     */
+    private function generateSlug(string $text): string
+    {
+        // Convert to lowercase
+        $slug = strtolower($text);
+        // Replace spaces with hyphens
+        $slug = str_replace(' ', '-', $slug);
+        // Remove special characters
+        $slug = preg_replace('/[^a-z0-9-]/', '', $slug);
+        // Replace multiple hyphens with single hyphen
+        $slug = preg_replace('/-+/', '-', $slug);
+        // Trim hyphens from start and end
+        $slug = trim($slug, '-');
+        return $slug;
+    }
+}

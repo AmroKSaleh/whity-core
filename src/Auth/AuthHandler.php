@@ -43,7 +43,7 @@ class AuthHandler
      * @param Request $request HTTP request with email and password in JSON body
      * @return Response HTTP response with token/user (200) or error (401)
      */
-    public function handle(Request $request): Response
+    public function handle(Request $request, array $params = []): Response
     {
         // Parse request body
         $body = json_decode($request->getBody(), true);
