@@ -4,6 +4,7 @@ Welcome to the Whity Core documentation.
 
 ## Quick Links
 
+- **[Sprint 1 Setup Guide](Sprint-1-Setup.md)** — Local development setup for Sprint 1 MVP
 - **[Installation](Installation.md)** — Setup guide
 - **[Plugin Development](Plugin-Development.md)** — Build plugins
 - **[Architecture](Architecture.md)** — Design principles
