@@ -63,6 +63,7 @@ use Whity\Core\Response;
 use Whity\Core\PluginLoader;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
+use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
 
@@ -115,6 +116,10 @@ $pluginLoader->load();
 
 // 7. Initialize HTTP kernel
 $kernel = new HttpKernel($router, $rbacMiddleware);
+
+// 8. Register authentication handler
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser);
+$router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 
 // Handle single request
 try {
