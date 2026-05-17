@@ -5,9 +5,56 @@
  *
  * Bootstrap entry point for FrankenPHP persistent workers.
  * Initializes all components and handles incoming HTTP requests in a persistent loop.
+ * Also supports console commands when invoked via CLI.
  */
 
 declare(strict_types=1);
+
+// Check if running from CLI
+$isCli = php_sapi_name() === 'cli';
+
+if ($isCli && isset($argv[1])) {
+    // Handle console commands - load autoloader first
+    $command = $argv[1];
+
+    // Load environment variables from .env file (skip if already set)
+    $envFile = dirname(__DIR__) . '/.env';
+    if (file_exists($envFile)) {
+        $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            // Skip comments and empty lines
+            if (empty(trim($line)) || strpos(trim($line), '#') === 0) {
+                continue;
+            }
+
+            // Parse KEY=VALUE format
+            if (strpos($line, '=') !== false) {
+                [$key, $value] = explode('=', $line, 2);
+                $key = trim($key);
+                $value = trim($value);
+
+                // Only set if not already in environment
+                if (!getenv($key) && !isset($_ENV[$key])) {
+                    $_ENV[$key] = $value;
+                    putenv("{$key}={$value}");
+                }
+            }
+        }
+    }
+
+    // Require composer autoloader
+    require dirname(__DIR__) . '/vendor/autoload.php';
+
+    if ($command === 'generate:openapi') {
+        $className = 'Whity\Console\GenerateOpenApiSchemaCommand';
+        exit($className::execute($argv));
+    }
+
+    echo "Unknown command: {$command}\n";
+    echo "Available commands:\n";
+    echo "  generate:openapi    Generate OpenAPI 3.0 schema\n";
+    exit(1);
+}
 
 use Whity\Database\Database;
 use Whity\Core\Router;

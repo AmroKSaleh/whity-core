@@ -20,6 +20,7 @@
     "psr-4": {
       "Whity\\Core\\": "src/Core/",
       "Whity\\Auth\\": "src/Auth/",
+      "Whity\\Console\\": "src/Console/",
       "Whity\\Database\\": "src/Database/",
       "Whity\\Http\\": "src/Http/",
       "Whity\\Cli\\": "src/Cli/",

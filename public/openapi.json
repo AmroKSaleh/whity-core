@@ -1,0 +1,50 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Whity Core API",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8000",
+            "description": "Development server"
+        }
+    ],
+    "paths": {
+        "/api/admin/stats": {
+            "get": {
+                "summary": "Get Api/admin/stats",
+                "tags": [
+                    "Admin"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful response"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "schemas": [],
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+                "description": "JWT Bearer token authentication"
+            }
+        }
+    }
+}
