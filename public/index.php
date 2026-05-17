@@ -126,8 +126,23 @@ try {
     // Create request from PHP superglobals
     $request = Request::fromGlobals();
 
+    // Handle OPTIONS preflight requests for CORS
+    if ($request->getMethod() === 'OPTIONS') {
+        $response = new Response('', 204);
+        $response->setHeader('Access-Control-Allow-Origin', '*');
+        $response->setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        $response->setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        $response->send();
+        exit;
+    }
+
     // Handle request through kernel
     $response = $kernel->handle($request);
+
+    // Add CORS headers for local development
+    $response->setHeader('Access-Control-Allow-Origin', '*');
+    $response->setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    $response->setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     // Send response to client
     $response->send();
