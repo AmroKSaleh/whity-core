@@ -128,10 +128,11 @@ try {
 
     // Handle OPTIONS preflight requests for CORS
     if ($request->getMethod() === 'OPTIONS') {
-        $response = new Response('', 204);
-        $response->setHeader('Access-Control-Allow-Origin', '*');
-        $response->setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        $response->setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        $response = new Response('', 204, [
+            'Access-Control-Allow-Origin' => '*',
+            'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
+        ]);
         $response->send();
         exit;
     }
@@ -139,10 +140,14 @@ try {
     // Handle request through kernel
     $response = $kernel->handle($request);
 
-    // Add CORS headers for local development
-    $response->setHeader('Access-Control-Allow-Origin', '*');
-    $response->setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    $response->setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    // Get current headers and add CORS
+    $headers = $response->getHeaders();
+    $headers['Access-Control-Allow-Origin'] = '*';
+    $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+    $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+
+    // Create new response with CORS headers
+    $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
 
     // Send response to client
     $response->send();
