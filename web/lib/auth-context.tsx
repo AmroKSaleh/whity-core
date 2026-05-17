@@ -78,10 +78,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       } else {
         // Decode token and extract user info
         const payload = decodeJWT(storedToken);
-        if (payload && payload.id && payload.email) {
+        const userId = payload?.id || payload?.user_id;
+        if (payload && userId && payload.email) {
           setToken(storedToken);
           setUser({
-            id: payload.id,
+            id: userId,
             email: payload.email,
             role: payload.role || '',
           });
@@ -127,9 +128,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(data.user);
       } else {
         const payload = decodeJWT(authToken);
-        if (payload && payload.id && payload.email) {
+        const userId = payload?.id || payload?.user_id;
+        if (payload && userId && payload.email) {
           setUser({
-            id: payload.id,
+            id: userId,
             email: payload.email,
             role: payload.role || '',
           });
