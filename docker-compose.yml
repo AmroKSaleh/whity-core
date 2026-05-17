@@ -16,5 +16,24 @@ services:
       timeout: 5s
       retries: 5
 
+  frankenphp:
+    image: dunglas/frankenphp:latest
+    container_name: whity_frankenphp
+    ports:
+      - "8000:80"
+    environment:
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /app
+
 volumes:
   postgres_data:
