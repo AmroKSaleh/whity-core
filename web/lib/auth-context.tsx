@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 
 interface User {
   id: number;
@@ -151,9 +151,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.removeItem('whity_auth_token');
   };
 
-  const isAuthenticated = (): boolean => {
+  const isAuthenticated = useCallback((): boolean => {
     return !!token && !!user;
-  };
+  }, [token, user]);
 
   const apiClient = async (
     url: string,

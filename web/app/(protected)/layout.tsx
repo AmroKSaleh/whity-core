@@ -16,7 +16,7 @@ export default function ProtectedLayout({
     if (!isLoading && !isAuthenticated()) {
       router.push('/login');
     }
-  }, [isLoading, router]);
+  }, [isLoading, isAuthenticated, router]);
 
   if (isLoading) {
     return (
