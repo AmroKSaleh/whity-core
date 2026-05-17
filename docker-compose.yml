@@ -17,7 +17,9 @@ services:
       retries: 5
 
   frankenphp:
-    image: dunglas/frankenphp:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: whity_frankenphp
     ports:
       - "8000:80"
@@ -28,6 +30,9 @@ services:
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}
       JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      CADDY_GLOBAL_OPTIONS: "auto_https off"
+      SERVER_NAME: ":80"
+      SERVER_ROOT: "public/"
     volumes:
       - .:/app
     depends_on:
