@@ -15,19 +15,21 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus email field on mount
+  // Handle hydration and mount
   useEffect(() => {
+    setIsMounted(true);
     emailInputRef.current?.focus();
   }, []);
 
   // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated()) {
+    if (isMounted && isAuthenticated()) {
       router.push('/dashboard');
     }
-  }, [isAuthenticated, router]);
+  }, [isAuthenticated, router, isMounted]);
 
   const validateFields = (): boolean => {
     const errors: { email?: string; password?: string } = {};
@@ -62,7 +64,7 @@ export default function LoginPage() {
     }
   };
 
-  const isFormDisabled = isSubmitting || isLoading;
+  const isFormDisabled = !isMounted || isSubmitting || isLoading;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
