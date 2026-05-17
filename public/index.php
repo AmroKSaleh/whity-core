@@ -12,13 +12,14 @@ declare(strict_types=1);
 use Whity\Database\Database;
 use Whity\Core\Router;
 use Whity\Core\Request;
+use Whity\Core\Response;
 use Whity\Core\PluginLoader;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
 
-// Load environment variables from .env file
+// Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
 if (file_exists($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -34,9 +35,11 @@ if (file_exists($envFile)) {
             $key = trim($key);
             $value = trim($value);
 
-            // Set environment variable
-            $_ENV[$key] = $value;
-            putenv("{$key}={$value}");
+            // Only set if not already in environment
+            if (!getenv($key) && !isset($_ENV[$key])) {
+                $_ENV[$key] = $value;
+                putenv("{$key}={$value}");
+            }
         }
     }
 }
@@ -66,22 +69,24 @@ $pluginLoader->load();
 // 7. Initialize HTTP kernel
 $kernel = new HttpKernel($router, $rbacMiddleware);
 
-// FrankenPHP persistent worker loop
-while (true) {
+// Handle single request
+try {
+    // Create request from PHP superglobals
+    $request = Request::fromGlobals();
+
+    // Handle request through kernel
+    $response = $kernel->handle($request);
+
+    // Send response to client
+    $response->send();
+} catch (\Throwable $e) {
+    // Handle any uncaught exceptions
     try {
-        // Create request from PHP superglobals
-        $request = Request::fromGlobals();
-
-        // Handle request through kernel
-        $response = $kernel->handle($request);
-
-        // Send response to client
-        $response->send();
-    } catch (\Throwable $e) {
-        // Handle any uncaught exceptions
-        http_response_code(500);
-        header('Content-Type: application/json');
-        echo json_encode(['error' => 'Internal server error']);
-        error_log($e->getMessage() . "\n" . $e->getTraceAsString());
+        $errorResponse = Response::error('Internal server error', 500);
+        $errorResponse->send();
+    } catch (\Throwable $sendError) {
+        // If send also fails, just log it
+        error_log('Failed to send error response: ' . $sendError->getMessage());
     }
+    error_log($e->getMessage() . "\n" . $e->getTraceAsString());
 }
