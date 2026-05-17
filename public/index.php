@@ -146,8 +146,8 @@ try {
     $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
     $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
 
-    // Create new response with CORS headers
-    $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
+    // Create new response with CORS headers (correct parameter order: body, statusCode, headers)
+    $response = new Response($response->getBody(), $response->getStatusCode(), $headers);
 
     // Send response to client
     $response->send();
@@ -155,6 +155,11 @@ try {
     // Handle any uncaught exceptions
     try {
         $errorResponse = Response::error('Internal server error', 500);
+        $errorHeaders = $errorResponse->getHeaders();
+        $errorHeaders['Access-Control-Allow-Origin'] = '*';
+        $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+        $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+        $errorResponse = new Response($errorResponse->getBody(), 500, $errorHeaders);
         $errorResponse->send();
     } catch (\Throwable $sendError) {
         // If send also fails, just log it
