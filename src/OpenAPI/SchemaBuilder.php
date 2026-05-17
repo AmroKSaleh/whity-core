@@ -11,7 +11,7 @@ namespace Whity\OpenAPI;
 class SchemaBuilder
 {
     /**
-     * @var array The OpenAPI specification
+     * @var array<string, mixed> The OpenAPI specification
      */
     private array $spec = [];
 
@@ -48,7 +48,7 @@ class SchemaBuilder
      *
      * @param string $path The path (e.g., /api/users)
      * @param string $method The HTTP method (GET, POST, etc.)
-     * @param array $operation The operation details
+     * @param array<string, mixed> $operation The operation details
      * @return self
      */
     public function addPath(string $path, string $method, array $operation): self
@@ -84,7 +84,7 @@ class SchemaBuilder
     /**
      * Build and return the OpenAPI specification
      *
-     * @return array The complete OpenAPI spec
+     * @return array<string, mixed> The complete OpenAPI spec
      */
     public function build(): array
     {
