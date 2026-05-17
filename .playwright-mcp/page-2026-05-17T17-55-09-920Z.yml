@@ -1,0 +1,26 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e33]:
+    - generic [ref=e34]:
+      - heading "Dashboard" [level=1] [ref=e35]
+      - button "Logout" [ref=e36] [cursor=pointer]
+    - generic [ref=e37]: This is a protected page. You are viewing this because you are authenticated.
+    - generic [ref=e38]:
+      - generic [ref=e39]:
+        - generic [ref=e40]: User Information
+        - generic [ref=e41]: Your authenticated user details
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - text: Email
+          - paragraph [ref=e45]: admin@whity.local
+        - generic [ref=e46]:
+          - text: User ID
+          - paragraph [ref=e47]: "3"
+        - generic [ref=e48]:
+          - text: Role
+          - paragraph [ref=e49]: Admin
+        - generic [ref=e50]:
+          - text: JWT Token (Preview)
+          - paragraph [ref=e51]: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkI...
+  - button "Open Next.js Dev Tools" [ref=e9] [cursor=pointer]:
+    - img [ref=e10]
+  - alert [ref=e32]

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 
 interface User {
   id: number;
@@ -16,6 +16,10 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   isAuthenticated: () => boolean;
+  apiClient: (
+    url: string,
+    options?: RequestInit
+  ) => Promise<Response>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -74,10 +78,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       } else {
         // Decode token and extract user info
         const payload = decodeJWT(storedToken);
-        if (payload && payload.id && payload.email) {
+        const userId = payload?.id || payload?.user_id;
+        if (payload && userId && payload.email) {
           setToken(storedToken);
           setUser({
-            id: payload.id,
+            id: userId,
             email: payload.email,
             role: payload.role || '',
           });
@@ -123,9 +128,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(data.user);
       } else {
         const payload = decodeJWT(authToken);
-        if (payload && payload.id && payload.email) {
+        const userId = payload?.id || payload?.user_id;
+        if (payload && userId && payload.email) {
           setUser({
-            id: payload.id,
+            id: userId,
             email: payload.email,
             role: payload.role || '',
           });
@@ -147,8 +153,34 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.removeItem('whity_auth_token');
   };
 
-  const isAuthenticated = (): boolean => {
+  const isAuthenticated = useCallback((): boolean => {
     return !!token && !!user;
+  }, [token, user]);
+
+  const apiClient = async (
+    url: string,
+    options?: RequestInit
+  ): Promise<Response> => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const fullUrl = url.startsWith('http') ? url : `${apiUrl}${url}`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(typeof options?.headers === 'object' && !Array.isArray(options.headers)
+        ? (options.headers as Record<string, string>)
+        : {}),
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(fullUrl, {
+      ...options,
+      headers,
+    });
+
+    return response;
   };
 
   const value: AuthContextType = {
@@ -159,6 +191,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     login,
     logout,
     isAuthenticated,
+    apiClient,
   };
 
   return (
