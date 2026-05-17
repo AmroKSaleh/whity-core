@@ -50,20 +50,21 @@ class HttpKernel
             return Response::error('Not Found', 404);
         }
 
-        // Extract handler and requiredRole from match result
+        // Extract handler, params, and requiredRole from match result
         $handler = $matchedRoute['handler'];
+        $params = $matchedRoute['params'] ?? [];
         $requiredRole = $matchedRoute['requiredRole'];
 
         // If a role is required, apply RBAC middleware
         if ($requiredRole !== null) {
-            // Create a closure that wraps the handler
-            $next = fn(Request $req) => $handler($req);
+            // Create a closure that wraps the handler, passing params
+            $next = fn(Request $req) => $handler($req, $params);
 
             // Pass through RBAC middleware
             return $this->rbacMiddleware->handle($request, $next, $requiredRole);
         }
 
-        // Otherwise, call handler directly
-        return $handler($request);
+        // Otherwise, call handler directly with params
+        return $handler($request, $params);
     }
 }
