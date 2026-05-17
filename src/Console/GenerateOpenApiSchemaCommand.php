@@ -45,12 +45,11 @@ class GenerateOpenApiSchemaCommand
             // Require composer autoloader
             require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
-            // Initialize database (needed for plugin initialization)
-            $db = Database::connect();
-
             // Initialize router and plugin loader
             $router = new Router();
             $pluginLoader = new PluginLoader(dirname(__DIR__, 2) . '/plugins', $router);
+
+            // Load plugins - plugin metadata is available without database connection
             $pluginLoader->load();
 
             // Generate schema
