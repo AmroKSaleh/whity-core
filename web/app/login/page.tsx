@@ -64,7 +64,10 @@ export default function LoginPage() {
     }
   };
 
-  const isFormDisabled = !isMounted || isSubmitting || isLoading;
+  // On server, always render as enabled to match client hydration
+  // After mount, use actual state
+  const isFormDisabled = isMounted ? (isSubmitting || isLoading) : false;
+  const buttonText = isFormDisabled ? 'Signing in...' : 'Sign in';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
@@ -137,7 +140,7 @@ export default function LoginPage() {
               className="w-full"
               disabled={isFormDisabled}
             >
-              {isSubmitting || isLoading ? 'Signing in...' : 'Sign in'}
+              {buttonText}
             </Button>
           </form>
 
