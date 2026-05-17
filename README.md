@@ -33,6 +33,7 @@ Web / Desktop / Mobile Clients
 - **[Installation Guide](docs/wiki/Installation.md)** — Setup, configuration, troubleshooting
 - **[Plugin Development](docs/wiki/Plugin-Development.md)** — How to build plugins
 - **[Architecture](docs/wiki/Architecture.md)** — Design principles and runtime model
+- **[OpenAPI Schema Generation](docs/wiki/OpenAPI-Schema-Generation.md)** — API documentation and client code generation
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Development guidelines
 - **[SECURITY.md](SECURITY.md)** — Security vulnerability reporting
 
@@ -50,6 +51,21 @@ docker-compose exec frankenphp php whity migrate
 # Health check
 curl http://localhost:8000/api/health
 ```
+
+## API Documentation
+
+The API is automatically documented using OpenAPI 3.0 schema:
+
+```bash
+php public/index.php generate:openapi
+```
+
+This generates `public/openapi.json` which can be used with:
+- **API Documentation UI:** Swagger UI, ReDoc
+- **Client Code Generation:** TypeScript, Python, Go, etc.
+- **Testing Tools:** Insomnia, Postman
+
+See [OpenAPI Schema Generation](docs/wiki/OpenAPI-Schema-Generation.md) for details.
 
 ## Technology Stack
 
