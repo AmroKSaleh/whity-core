@@ -128,7 +128,7 @@ try {
 
     // Handle OPTIONS preflight requests for CORS
     if ($request->getMethod() === 'OPTIONS') {
-        $response = new Response('', 204, [
+        $response = new Response(204, '', [
             'Access-Control-Allow-Origin' => '*',
             'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
             'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
@@ -146,8 +146,8 @@ try {
     $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
     $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
 
-    // Create new response with CORS headers (correct parameter order: body, statusCode, headers)
-    $response = new Response($response->getBody(), $response->getStatusCode(), $headers);
+    // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
+    $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
 
     // Send response to client
     $response->send();
@@ -159,7 +159,7 @@ try {
         $errorHeaders['Access-Control-Allow-Origin'] = '*';
         $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
         $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
-        $errorResponse = new Response($errorResponse->getBody(), 500, $errorHeaders);
+        $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
         $errorResponse->send();
     } catch (\Throwable $sendError) {
         // If send also fails, just log it
