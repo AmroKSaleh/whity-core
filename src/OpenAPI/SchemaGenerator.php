@@ -119,7 +119,7 @@ class SchemaGenerator
      */
     private function getTag(string $path): string
     {
-        $parts = array_filter(explode('/', $path));
+        $parts = array_values(array_filter(explode('/', $path)));
         if (count($parts) >= 2) {
             return ucfirst($parts[1]); // e.g., /api/users -> Users
         }

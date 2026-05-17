@@ -55,6 +55,21 @@ class SchemaGeneratorTest extends TestCase
         $this->assertArrayHasKey('bearerAuth', $spec['components']['securitySchemes']);
     }
 
+    public function testSchemaGeneratesCorrectTags(): void
+    {
+        $mockPlugin = $this->createMockPlugin('/api/admin/stats', 'GET', 'admin');
+        $mockLoader = $this->createMock(PluginLoader::class);
+        $mockLoader->method('getPlugins')->willReturn([$mockPlugin]);
+
+        $generator = new SchemaGenerator('Whity API', '1.0.0', $mockLoader);
+        $spec = $generator->generate();
+
+        // AdminStats is at /api/admin/stats, tag should be "Admin" (2nd path segment after /api/)
+        $this->assertArrayHasKey('/api/admin/stats', $spec['paths']);
+        $statsOperation = $spec['paths']['/api/admin/stats']['get'];
+        $this->assertContains('Admin', $statsOperation['tags']);
+    }
+
     /**
      * Create a mock plugin for testing
      *
