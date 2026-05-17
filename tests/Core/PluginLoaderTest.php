@@ -122,6 +122,9 @@ PHP;
      */
     public function testLoadsMultiplePlugins(): void
     {
+        // Use unique identifier to avoid class redeclaration in tests
+        $uid = uniqid();
+
         // Create first plugin
         $plugin1Code = <<<'PHP'
 <?php
@@ -132,7 +135,7 @@ use Whity\Core\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
-class AdminStats implements PluginInterface
+class TestAdminStats1 implements PluginInterface
 {
     public function getRoute(): string
     {
@@ -166,7 +169,7 @@ use Whity\Core\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
-class HealthCheck implements PluginInterface
+class TestHealthCheck1 implements PluginInterface
 {
     public function getRoute(): string
     {
@@ -190,8 +193,8 @@ class HealthCheck implements PluginInterface
 }
 PHP;
 
-        file_put_contents($this->tempDir . '/AdminStats.php', $plugin1Code);
-        file_put_contents($this->tempDir . '/HealthCheck.php', $plugin2Code);
+        file_put_contents($this->tempDir . '/TestAdminStats1.php', $plugin1Code);
+        file_put_contents($this->tempDir . '/TestHealthCheck1.php', $plugin2Code);
 
         // Load plugins
         $loader = new PluginLoader($this->tempDir, $this->router);

@@ -111,18 +111,36 @@ class Router
      */
     private function pathToPattern(string $path): string
     {
-        // Escape all regex special characters except {}
-        $escaped = preg_quote($path, '#');
-
-        // Replace escaped {param} with named capture groups
+        // Replace {param} placeholders with regex named capture groups first
         $pattern = preg_replace_callback(
-            '#\\{([a-zA-Z_][a-zA-Z0-9_]*)\\}#',
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)\}#',
             static function (array $matches): string {
                 $paramName = $matches[1];
                 return "(?P<{$paramName}>[^/]+)";
             },
-            $escaped
+            $path
         );
+
+        // Now escape the remaining special regex characters (but not our capture groups)
+        // We do this by replacing our capture groups temporarily
+        $placeholders = [];
+        $pattern = preg_replace_callback(
+            '#\(\?P<[a-zA-Z_][a-zA-Z0-9_]*>[^)]+\)#',
+            static function (array $matches) use (&$placeholders): string {
+                $key = '__PARAM_' . count($placeholders) . '__';
+                $placeholders[$key] = $matches[0];
+                return $key;
+            },
+            $pattern
+        );
+
+        // Escape regex special chars in the remaining path
+        $pattern = preg_quote($pattern, '#');
+
+        // Restore the capture groups
+        foreach ($placeholders as $key => $value) {
+            $pattern = str_replace(preg_quote($key, '#'), $value, $pattern);
+        }
 
         // Anchor the pattern to match the entire path
         return "#^{$pattern}$#";

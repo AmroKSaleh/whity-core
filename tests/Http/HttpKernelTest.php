@@ -146,8 +146,9 @@ class HttpKernelTest extends TestCase
         $response = $this->kernel->handle($request);
 
         $headers = $response->getHeaders();
-        $this->assertArrayHasKey('X-Custom-Header', $headers);
-        $this->assertSame('custom-value', $headers['X-Custom-Header']);
+        // Headers are normalized to lowercase with hyphens
+        $this->assertArrayHasKey('x-custom-header', $headers);
+        $this->assertSame('custom-value', $headers['x-custom-header']);
     }
 
     /**
