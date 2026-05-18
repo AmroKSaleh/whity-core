@@ -13,6 +13,8 @@ import {
   IconLogout,
   IconMenu2,
   IconX,
+  IconChevronLeft,
+  IconChevronRight,
 } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 
@@ -64,7 +66,7 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Mobile/Tablet toggle button */}
+      {/* Mobile toggle button - only show on mobile */}
       <button
         onClick={toggleSidebar}
         className="fixed top-4 left-4 z-50 md:hidden p-2 rounded-lg bg-background border border-border hover:bg-muted transition-colors"
@@ -93,15 +95,32 @@ export function Sidebar() {
           }
         `}
       >
-        {/* Header */}
-        <div className={`border-b border-border transition-all duration-300 ${isCollapsed ? 'p-3' : 'p-6'}`}>
-          {!isCollapsed ? (
-            <>
-              <h1 className="text-2xl font-bold">Whity</h1>
-              <p className="text-sm text-muted-foreground mt-1">Admin</p>
-            </>
-          ) : (
-            <div className="text-xl font-bold text-center font-black">W</div>
+        {/* Header with collapse button for desktop */}
+        <div className={`border-b border-border transition-all duration-300 flex items-center justify-between ${isCollapsed ? 'p-3' : 'p-6'}`}>
+          <div className="flex-1">
+            {!isCollapsed ? (
+              <>
+                <h1 className="text-2xl font-bold">Whity</h1>
+                <p className="text-sm text-muted-foreground mt-1">Admin</p>
+              </>
+            ) : (
+              <div className="text-xl font-bold text-center font-black">W</div>
+            )}
+          </div>
+
+          {/* Collapse/Expand button - only show on desktop */}
+          {!isMobile && (
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="p-1 hover:bg-background rounded transition-colors ml-2"
+              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {isCollapsed ? (
+                <IconChevronRight size={20} />
+              ) : (
+                <IconChevronLeft size={20} />
+              )}
+            </button>
           )}
         </div>
 
