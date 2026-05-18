@@ -76,6 +76,7 @@ use Whity\Api\PluginsApiHandler;
 use Whity\Api\MigrationsApiHandler;
 use Whity\Api\AdminApiHandler;
 use Whity\Api\OusApiHandler;
+use Whity\Api\NavigationApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Deployment\DeploymentManager;
@@ -127,6 +128,50 @@ $permissionRegistry = new PermissionRegistry();
 $hookManager = new HookManager();
 \Whity\register_service(HookManager::class, $hookManager);
 
+// Register core navigation items
+$hookManager->listen('navigation.register', function (&$items) {
+    $items[] = [
+        'id' => 'dashboard',
+        'label' => 'Dashboard',
+        'href' => '/admin',
+        'icon' => 'dashboard',
+        'group' => 'admin',
+        'order' => 1,
+    ];
+    $items[] = [
+        'id' => 'users',
+        'label' => 'Users',
+        'href' => '/admin/users',
+        'icon' => 'users',
+        'group' => 'admin',
+        'order' => 2,
+    ];
+    $items[] = [
+        'id' => 'roles',
+        'label' => 'Roles',
+        'href' => '/admin/roles',
+        'icon' => 'lock',
+        'group' => 'admin',
+        'order' => 3,
+    ];
+    $items[] = [
+        'id' => 'ous',
+        'label' => 'Organizational Units',
+        'href' => '/admin/ous',
+        'icon' => 'building-community',
+        'group' => 'admin',
+        'order' => 4,
+    ];
+    $items[] = [
+        'id' => 'tenants',
+        'label' => 'Tenants',
+        'href' => '/admin/tenants',
+        'icon' => 'building',
+        'group' => 'admin',
+        'order' => 5,
+    ];
+});
+
 // 5. Initialize role checker
 $roleChecker = new RoleChecker($db, $permissionRegistry);
 
@@ -175,6 +220,9 @@ $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'a
 
 $permissionsHandler = new PermissionsApiHandler($db->getPdo());
 $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
+
+$navigationHandler = new NavigationApiHandler($hookManager);
+$router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
 
 $deploymentHandler = new DeploymentApiHandler($deploymentManager);
 $router->register('POST', '/api/deployments/apply', [$deploymentHandler, 'apply'], 'admin');

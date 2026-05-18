@@ -11,8 +11,22 @@ import {
   IconX,
   IconChevronLeft,
   IconChevronRight,
+  IconDashboard,
+  IconUsers,
+  IconLock,
+  IconBuilding,
+  IconBuildingCommunity,
 } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
+import type { IconProps } from '@tabler/icons-react';
+
+const iconMap: Record<string, React.ComponentType<IconProps>> = {
+  dashboard: IconDashboard,
+  users: IconUsers,
+  lock: IconLock,
+  building: IconBuilding,
+  'building-community': IconBuildingCommunity,
+};
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -131,7 +145,7 @@ export function Sidebar() {
                 )}
                 <div className="space-y-1">
                   {items.map((item, index) => {
-                    const Icon = item.icon;
+                    const Icon = iconMap[item.icon] || IconDashboard;
                     const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
 
                     return (
