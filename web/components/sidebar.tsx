@@ -3,13 +3,9 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { useNavigation } from '@/lib/navigation-context';
 import { Button } from '@/components/ui/button';
 import {
-  IconDashboard,
-  IconUsers,
-  IconShield,
-  IconBuilding,
-  IconChartBar,
   IconLogout,
   IconMenu2,
   IconX,
@@ -18,18 +14,12 @@ import {
 } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 
-const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: IconDashboard },
-  { href: '/admin/users', label: 'Users', icon: IconUsers },
-  { href: '/admin/roles', label: 'Roles', icon: IconShield },
-  { href: '/admin/tenants', label: 'Tenants', icon: IconBuilding },
-  { href: '/admin/stats', label: 'Statistics', icon: IconChartBar },
-];
-
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
+  const { groups, getGroupedItems } = useNavigation();
+  const groupedItems = getGroupedItems();
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -125,29 +115,52 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-2 space-y-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
-            
+        <nav className="flex-1 p-2 space-y-3 overflow-y-auto">
+          {Array.from(groupedItems.entries()).map(([groupId, items]) => {
+            if (items.length === 0) return null;
+
+            const group = groups.find((g) => g.id === groupId);
+            const isUngrouped = groupId === '_ungrouped';
+
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => isMobile && setIsOpen(false)}
-              >
-                <Button
-                  variant={isActive ? 'default' : 'ghost'}
-                  size={isCollapsed && !isMobile ? 'icon' : 'default'}
-                  className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
-                  title={isCollapsed && !isMobile ? item.label : undefined}
-                >
-                  <Icon size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 flex-shrink-0'} />
-                  {(!isCollapsed || isMobile) && (
-                    <span className="flex-1 text-left">{item.label}</span>
-                  )}
-                </Button>
-              </Link>
+              <div key={groupId}>
+                {!isUngrouped && group && (
+                  <div className={`text-xs font-semibold uppercase text-muted-foreground px-2 mb-2 ${isCollapsed && !isMobile ? 'text-center' : ''}`}>
+                    {!isCollapsed && !isMobile ? group.label : ''}
+                  </div>
+                )}
+                <div className="space-y-1">
+                  {items.map((item, index) => {
+                    const Icon = item.icon;
+                    const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+
+                    return (
+                      <Link
+                        key={item.id}
+                        href={item.href}
+                        onClick={() => isMobile && setIsOpen(false)}
+                      >
+                        <Button
+                          variant={isActive ? 'default' : 'ghost'}
+                          size={isCollapsed && !isMobile ? 'icon' : 'default'}
+                          className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
+                          title={isCollapsed && !isMobile ? item.label : `${index + 1}. ${item.label}`}
+                        >
+                          <Icon size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 flex-shrink-0'} />
+                          {(!isCollapsed || isMobile) && (
+                            <>
+                              <span className="text-xs text-muted-foreground mr-2 w-5">
+                                {index + 1}
+                              </span>
+                              <span className="flex-1 text-left">{item.label}</span>
+                            </>
+                          )}
+                        </Button>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
             );
           })}
         </nav>

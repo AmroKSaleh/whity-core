@@ -25,28 +25,48 @@ class TenantsApiHandler
     }
 
     /**
-     * GET /api/tenants - List current tenant
+     * GET /api/tenants - List current tenant or all tenants if system user
      */
     public function list(Request $request): Response
     {
         try {
             $currentTenantId = TenantContext::getTenantId();
-            $stmt = $this->db->prepare('
-                SELECT t.id, t.name, t.slug, t.created_at,
-                       COUNT(u.id) as userCount
-                FROM tenants t
-                LEFT JOIN users u ON t.id = u.tenant_id
-                WHERE t.id = ?
-                GROUP BY t.id
-            ');
-            $stmt->execute([$currentTenantId]);
-            $tenant = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$tenant) {
+            // System users (tenant_id=0) can see all tenants
+            $isSystemUser = $currentTenantId === 0;
+
+            if ($isSystemUser) {
+                // System user: return all tenants except system tenant itself
+                $stmt = $this->db->prepare('
+                    SELECT t.id, t.name, t.slug, t.created_at,
+                           COUNT(u.id) as userCount
+                    FROM tenants t
+                    LEFT JOIN users u ON t.id = u.tenant_id
+                    WHERE t.id != 0
+                    GROUP BY t.id
+                    ORDER BY t.created_at DESC
+                ');
+                $stmt->execute();
+            } else {
+                // Regular user: return only their tenant
+                $stmt = $this->db->prepare('
+                    SELECT t.id, t.name, t.slug, t.created_at,
+                           COUNT(u.id) as userCount
+                    FROM tenants t
+                    LEFT JOIN users u ON t.id = u.tenant_id
+                    WHERE t.id = ?
+                    GROUP BY t.id
+                ');
+                $stmt->execute([$currentTenantId]);
+            }
+
+            $tenants = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (empty($tenants) && !$isSystemUser) {
                 return Response::error('Tenant not found', 404);
             }
 
-            return Response::json(['data' => [$tenant]], 200);
+            return Response::json(['data' => $tenants], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to fetch tenant: ' . $e->getMessage(), 500);
         }

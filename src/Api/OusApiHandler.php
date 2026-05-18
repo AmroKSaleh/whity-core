@@ -33,13 +33,24 @@ class OusApiHandler
         try {
             $tenantId = TenantContext::getTenantId();
 
-            $stmt = $this->db->prepare('
-                SELECT id, tenant_id, parent_id, name, slug, description, created_at
-                FROM organizational_units
-                WHERE tenant_id = ?
-                ORDER BY id
-            ');
-            $stmt->execute([$tenantId]);
+            // System users (tenant_id=0) can see all OUs from all tenants
+            if ($tenantId === 0) {
+                $stmt = $this->db->prepare('
+                    SELECT id, tenant_id, parent_id, name, slug, description, created_at
+                    FROM organizational_units
+                    ORDER BY tenant_id, id
+                ');
+                $stmt->execute();
+            } else {
+                $stmt = $this->db->prepare('
+                    SELECT id, tenant_id, parent_id, name, slug, description, created_at
+                    FROM organizational_units
+                    WHERE tenant_id = ?
+                    ORDER BY id
+                ');
+                $stmt->execute([$tenantId]);
+            }
+
             $ous = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             return Response::json(['data' => $ous], 200);

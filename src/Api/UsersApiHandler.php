@@ -26,21 +26,33 @@ class UsersApiHandler
     }
 
     /**
-     * GET /api/users - List all users for current tenant
+     * GET /api/users - List all users for current tenant or all users if system user
      */
     public function list(Request $request): Response
     {
         try {
             $tenantId = TenantContext::getTenantId();
 
-            $stmt = $this->db->prepare('
-                SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
-                FROM users u
-                JOIN roles r ON u.role_id = r.id
-                WHERE u.tenant_id = ?
-                ORDER BY u.created_at DESC
-            ');
-            $stmt->execute([$tenantId]);
+            // System users (tenant_id=0) can see all users from all tenants
+            if ($tenantId === 0) {
+                $stmt = $this->db->prepare('
+                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
+                    FROM users u
+                    JOIN roles r ON u.role_id = r.id
+                    ORDER BY u.tenant_id, u.created_at DESC
+                ');
+                $stmt->execute();
+            } else {
+                $stmt = $this->db->prepare('
+                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
+                    FROM users u
+                    JOIN roles r ON u.role_id = r.id
+                    WHERE u.tenant_id = ?
+                    ORDER BY u.created_at DESC
+                ');
+                $stmt->execute([$tenantId]);
+            }
+
             $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Remove password from response

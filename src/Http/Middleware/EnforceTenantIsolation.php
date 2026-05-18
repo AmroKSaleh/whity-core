@@ -68,7 +68,14 @@ class EnforceTenantIsolation
         }
 
         // Set tenant context (this locks it for the request lifetime)
-        TenantContext::setTenantId($payload['tenant_id']);
+        // System tenant (ID 0) users bypass isolation and can access all tenants
+        $tenantId = $payload['tenant_id'];
+        if ($tenantId === 0 || $tenantId === '0') {
+            // System user - mark as system but don't set a specific tenant context
+            // This allows system users to access cross-tenant endpoints
+            $payload['is_system_user'] = true;
+        }
+        TenantContext::setTenantId((int)$tenantId);
 
         // Attach user data to request
         $request->user = (object) $payload;

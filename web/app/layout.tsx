@@ -4,6 +4,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/lib/auth-context";
 import { ToastProvider } from "@/lib/toast-context";
+import { NavigationProvider } from "@/lib/navigation-context";
 import { ToastContainer } from "@/components/ui/toast-container";
 
 const notoSans = Noto_Sans({subsets:['latin'],variable:'--font-sans'});
@@ -36,8 +37,10 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <AuthProvider>
           <ToastProvider>
-            {children}
-            <ToastContainer />
+            <NavigationProvider>
+              {children}
+              <ToastContainer />
+            </NavigationProvider>
           </ToastProvider>
         </AuthProvider>
       </body>
