@@ -67,9 +67,10 @@ export function EditRoleModal({
 
   useEffect(() => {
     if (isOpen) {
-      Promise.all([fetchPermissions(), fetchRole()]);
+      fetchPermissions();
+      fetchRole();
     }
-  }, [isOpen, role.id]);
+  }, [isOpen, role.id, apiClient, addToast]);
 
   useEffect(() => {
     if (roleData) {
@@ -131,7 +132,7 @@ export function EditRoleModal({
         body: JSON.stringify({
           name: data.name,
           description: data.description,
-          permissionIds: data.permissionIds,
+          permissions: data.permissionIds,
         }),
       });
 
