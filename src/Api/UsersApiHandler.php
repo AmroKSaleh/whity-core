@@ -190,6 +190,27 @@ class UsersApiHandler
                 return Response::error('Role changes are not allowed via this endpoint', 403);
             }
 
+            // Support ou_id assignment with tenant validation
+            if (isset($body['ou_id'])) {
+                $ouId = $body['ou_id'];
+
+                // NULL and 0 are valid (user in root)
+                if ($ouId !== null && $ouId !== 0 && $ouId !== '') {
+                    // SECURITY: ou_id must belong to current tenant
+                    $stmtCheckOu = $this->db->prepare('SELECT id FROM organizational_units WHERE id = ? AND tenant_id = ?');
+                    $stmtCheckOu->execute([$ouId, $currentTenantId]);
+                    if (!$stmtCheckOu->fetch()) {
+                        return Response::error('OU does not belong to current tenant', 403);
+                    }
+                    // Safe to update ou_id
+                    $updates[] = 'ou_id = ?';
+                    $params_array[] = $ouId;
+                } else {
+                    // Set to NULL (user in root)
+                    $updates[] = 'ou_id = NULL';
+                }
+            }
+
             if (empty($updates)) {
                 return Response::json(['data' => ['id' => (int)$id, 'message' => 'No updates provided']], 200);
             }
