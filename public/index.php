@@ -71,8 +71,10 @@ use Whity\Api\UsersApiHandler;
 use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
 use Whity\Api\PermissionsApiHandler;
+use Whity\Api\DeploymentApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Deployment\DeploymentManager;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -139,6 +141,9 @@ $kernel->use($tenantIsolationMiddleware);
 $pluginLoader = new PluginLoader(__DIR__ . '/../plugins', $router);
 $pluginLoader->load();
 
+// 9b. Initialize deployment manager
+$deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage/deployments');
+
 // 10. Register authentication handler
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
@@ -166,6 +171,12 @@ $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'a
 
 $permissionsHandler = new PermissionsApiHandler($db->getPdo());
 $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
+
+$deploymentHandler = new DeploymentApiHandler($deploymentManager);
+$router->register('POST', '/api/deployments/apply', [$deploymentHandler, 'apply'], 'admin');
+$router->register('POST', '/api/deployments/rollback', [$deploymentHandler, 'rollback'], 'admin');
+$router->register('GET', '/api/deployments/status', [$deploymentHandler, 'status'], 'admin');
+$router->register('POST', '/api/migrations/rollback', [$deploymentHandler, 'rollbackMigration'], 'admin');
 
 // Handle single request
 try {
