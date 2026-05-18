@@ -264,7 +264,7 @@ try {
     if ($request->getMethod() === 'OPTIONS') {
         $response = new Response(204, '', [
             'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+            'Access-Control-Allow-Methods' => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
             'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
         ]);
         $response->send();
@@ -277,7 +277,7 @@ try {
     // Get current headers and add CORS
     $headers = $response->getHeaders();
     $headers['Access-Control-Allow-Origin'] = '*';
-    $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+    $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
     $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
 
     // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
@@ -291,7 +291,7 @@ try {
         $errorResponse = Response::error('Internal server error', 500);
         $errorHeaders = $errorResponse->getHeaders();
         $errorHeaders['Access-Control-Allow-Origin'] = '*';
-        $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+        $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
         $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
         $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
         $errorResponse->send();
