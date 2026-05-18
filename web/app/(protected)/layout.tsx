@@ -10,10 +10,10 @@ export default function ProtectedLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const { isLoading, token, user } = useAuth();
+  const { isLoading, user } = useAuth();
   const router = useRouter();
 
-  const isAuthenticated = !!token && !!user;
+  const isAuthenticated = !!user;
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
