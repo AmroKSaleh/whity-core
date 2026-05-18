@@ -66,6 +66,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
+use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Api\UsersApiHandler;
 use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
@@ -118,18 +119,23 @@ $roleChecker = new RoleChecker($db, $permissionRegistry);
 // 6. Initialize RBAC middleware
 $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
 
-// 7. Initialize plugin loader and load plugins
+// 7. Initialize tenant isolation middleware
+$tenantIsolationMiddleware = new EnforceTenantIsolation($jwtParser);
+
+// 8. Initialize HTTP kernel and register middleware
+$kernel = new HttpKernel($router, $rbacMiddleware);
+// Register middleware in order (tenant isolation BEFORE RBAC)
+$kernel->use($tenantIsolationMiddleware);
+
+// 9. Initialize plugin loader and load plugins
 $pluginLoader = new PluginLoader(__DIR__ . '/../plugins', $router);
 $pluginLoader->load();
 
-// 8. Initialize HTTP kernel
-$kernel = new HttpKernel($router, $rbacMiddleware);
-
-// 9. Register authentication handler
+// 10. Register authentication handler
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 
-// 10. Register API handlers
+// 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo());
 $router->register('GET', '/api/users', [$usersHandler, 'list'], 'admin');
 $router->register('POST', '/api/users', [$usersHandler, 'create'], 'admin');

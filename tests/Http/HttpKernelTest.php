@@ -5,6 +5,7 @@ namespace Tests\Http;
 use PHPUnit\Framework\TestCase;
 use Whity\Http\HttpKernel;
 use Whity\Http\RbacMiddleware;
+use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Core\Router;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -230,5 +231,123 @@ class HttpKernelTest extends TestCase
         // Verify tenant context is cleaned up even after exception
         $this->assertFalse(TenantContext::hasTenant());
         $this->assertNull(TenantContext::getTenantId());
+    }
+
+    /**
+     * Test middleware execution order (tenant isolation before RBAC)
+     */
+    public function testMiddlewareExecutionOrder(): void
+    {
+        // Track the execution order of middleware
+        $executionOrder = [];
+
+        // Create a test middleware class
+        $testMiddleware = new class($executionOrder) {
+            private array $executionOrder;
+
+            public function __construct(array &$executionOrder)
+            {
+                $this->executionOrder = &$executionOrder;
+            }
+
+            public function handle(Request $request, callable $next): Response
+            {
+                $this->executionOrder[] = 'middleware_before';
+                $response = $next($request);
+                $this->executionOrder[] = 'middleware_after';
+                return $response;
+            }
+        };
+
+        // Create a simple handler
+        $handler = static function(Request $request) use (&$executionOrder): Response {
+            $executionOrder[] = 'handler';
+            return Response::json(['message' => 'success']);
+        };
+
+        $this->router->register('GET', '/test', $handler);
+
+        // Create kernel with middleware
+        $kernel = new HttpKernel($this->router, $this->rbacMiddleware);
+        $kernel->use($testMiddleware);
+
+        // Execute request
+        $request = new Request('GET', '/test');
+        $response = $kernel->handle($request);
+
+        // Verify response is successful
+        $this->assertSame(200, $response->getStatusCode());
+
+        // Verify middleware execution order
+        $this->assertSame(['middleware_before', 'handler', 'middleware_after'], $executionOrder);
+    }
+
+    /**
+     * Test that EnforceTenantIsolation middleware sets TenantContext before routing
+     */
+    public function testEnforceTenantIsolationRunsBeforeRouting(): void
+    {
+        $jwtParser = $this->createMock(JwtParser::class);
+        $tenantMiddleware = new EnforceTenantIsolation($jwtParser);
+
+        // Track if tenant was set when handler was called
+        $tenantIdWhenHandlerRan = null;
+        $handler = static function(Request $request) use (&$tenantIdWhenHandlerRan): Response {
+            $tenantIdWhenHandlerRan = TenantContext::getTenantId();
+            return Response::json(['tenant' => $tenantIdWhenHandlerRan]);
+        };
+
+        $this->router->register('GET', '/test', $handler);
+
+        $kernel = new HttpKernel($this->router, $this->rbacMiddleware);
+        $kernel->use($tenantMiddleware);
+
+        // Create request with valid JWT
+        $validToken = 'valid.jwt.token';
+        $payload = [
+            'user_id' => 123,
+            'tenant_id' => 42,
+            'email' => 'user@example.com'
+        ];
+
+        $jwtParser->expects($this->once())
+            ->method('parse')
+            ->with($validToken)
+            ->willReturn($payload);
+
+        $request = new Request('GET', '/test', ['Authorization' => "Bearer {$validToken}"]);
+        $response = $kernel->handle($request);
+
+        // Verify response is successful
+        $this->assertSame(200, $response->getStatusCode());
+
+        // Verify tenant was set before handler ran
+        $this->assertSame(42, $tenantIdWhenHandlerRan);
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame(42, $responseData['tenant']);
+    }
+
+    /**
+     * Test that tenant isolation middleware returns 401 when authorization is missing
+     */
+    public function testTenantIsolationReturns401OnMissingAuth(): void
+    {
+        $jwtParser = $this->createMock(JwtParser::class);
+        $tenantMiddleware = new EnforceTenantIsolation($jwtParser);
+
+        $handler = static fn(Request $req) => Response::json(['message' => 'success']);
+        $this->router->register('GET', '/test', $handler);
+
+        $kernel = new HttpKernel($this->router, $this->rbacMiddleware);
+        $kernel->use($tenantMiddleware);
+
+        // Request without Authorization header
+        $request = new Request('GET', '/test');
+        $response = $kernel->handle($request);
+
+        // Verify 401 response
+        $this->assertSame(401, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame('Missing or invalid Authorization header', $responseData['error']);
     }
 }
