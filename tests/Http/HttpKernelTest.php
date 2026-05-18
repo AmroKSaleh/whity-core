@@ -10,6 +10,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Tenant\TenantContext;
 
 /**
  * Tests for HttpKernel class
@@ -30,6 +31,12 @@ class HttpKernelTest extends TestCase
         $this->rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
 
         $this->kernel = new HttpKernel($this->router, $this->rbacMiddleware);
+    }
+
+    protected function tearDown(): void
+    {
+        // Clean up TenantContext after each test to avoid state leakage
+        TenantContext::reset();
     }
 
     /**
@@ -167,5 +174,61 @@ class HttpKernelTest extends TestCase
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertStringContainsString('POST', $response->getBody());
+    }
+
+    /**
+     * Test that TenantContext is cleaned up after request completes
+     */
+    public function testTenantContextIsCleanedUpAfterRequest(): void
+    {
+        // Create a handler that sets a tenant in the context
+        $handler = static function(Request $request): Response {
+            // Set tenant context during request handling
+            TenantContext::setTenantId(42);
+            return Response::json(['message' => 'success']);
+        };
+
+        $this->router->register('GET', '/test', $handler);
+
+        // Execute the request
+        $request = new Request('GET', '/test');
+        $response = $this->kernel->handle($request);
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        // Verify tenant context is cleaned up after request
+        $this->assertFalse(TenantContext::hasTenant());
+        $this->assertNull(TenantContext::getTenantId());
+    }
+
+    /**
+     * Test that TenantContext is cleaned up even when handler throws exception
+     */
+    public function testTenantContextIsCleanedUpEvenWhenExceptionThrown(): void
+    {
+        // Create a handler that sets tenant context and then throws exception
+        $handler = static function(Request $request): Response {
+            TenantContext::setTenantId(99);
+            throw new \Exception('Handler error');
+        };
+
+        $this->router->register('GET', '/error', $handler);
+
+        // Execute the request and expect exception
+        $request = new Request('GET', '/error');
+
+        $caughtException = null;
+        try {
+            $this->kernel->handle($request);
+        } catch (\Exception $e) {
+            $caughtException = $e;
+        }
+
+        $this->assertNotNull($caughtException);
+        $this->assertSame('Handler error', $caughtException->getMessage());
+
+        // Verify tenant context is cleaned up even after exception
+        $this->assertFalse(TenantContext::hasTenant());
+        $this->assertNull(TenantContext::getTenantId());
     }
 }
