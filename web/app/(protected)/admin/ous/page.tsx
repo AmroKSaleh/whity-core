@@ -91,13 +91,13 @@ export default function OUsPage() {
   );
 
   return (
-    <div className="ml-64 min-h-screen bg-slate-50 dark:bg-slate-950">
+    <>
       <AdminHeader
         title="Organizational Units"
         description="Manage organizational units and hierarchies"
       />
 
-      <div className="flex-1 space-y-8 p-8">
+      <div className="space-y-8 p-8">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Organizational Units</h2>
@@ -176,6 +176,6 @@ export default function OUsPage() {
           ou={selectedOu}
         />
       )}
-    </div>
+    </>
   );
 }
