@@ -32,7 +32,8 @@
   },
   "autoload-dev": {
     "psr-4": {
-      "Whity\\Tests\\": "tests/"
+      "Whity\\Tests\\": "tests/",
+      "Tests\\": "tests/"
     }
   },
   "minimum-stability": "dev",
