@@ -27,9 +27,10 @@ class JwtParser
      *
      * Splits the token into header, payload, and signature components.
      * Verifies the signature using HMAC-SHA256 and checks token expiration.
+     * Validates that jti and type fields are present in the payload.
      *
      * @param string $token The JWT token to parse
-     * @return array|null The decoded payload as an array, or null if invalid/expired
+     * @return array|null The decoded payload as an array, or null if invalid/expired/missing required fields
      */
     public function parse(string $token): ?array
     {
@@ -65,6 +66,11 @@ class JwtParser
             return null;
         }
 
+        // Validate required fields: jti and type
+        if (!isset($payload['jti']) || !isset($payload['type'])) {
+            return null;
+        }
+
         return $payload;
     }
 
@@ -72,14 +78,21 @@ class JwtParser
      * Create a new JWT token
      *
      * Generates a JWT token with HS256 signature, automatically adding
-     * an expiration timestamp to the payload.
+     * an expiration timestamp and unique jti (token ID) to the payload.
      *
      * @param array $payload The payload data to include in the token
      * @param int $expiresIn Token expiration time in seconds (default: 3600)
+     * @param string $type Token type: 'access' (15 min) or 'refresh' (7 days)
      * @return string The complete JWT token
      */
-    public function create(array $payload, int $expiresIn = 3600): string
+    public function create(array $payload, int $expiresIn = 3600, string $type = 'access'): string
     {
+        // Generate unique jti: 16 random bytes converted to 32-char hex string
+        $payload['jti'] = bin2hex(random_bytes(16));
+
+        // Add token type
+        $payload['type'] = $type;
+
         // Add expiration claim
         $payload['exp'] = time() + $expiresIn;
 

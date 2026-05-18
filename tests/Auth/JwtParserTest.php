@@ -184,4 +184,187 @@ class JwtParserTest extends TestCase
         $parsed = $this->parser->parse($token);
         $this->assertNull($parsed);
     }
+
+    /**
+     * Test that create() generates a valid jti (32 hex characters)
+     */
+    public function testCreateGeneratesValidJti(): void
+    {
+        $payload = ['sub' => 'user123'];
+        $token = $this->parser->create($payload);
+        $parsed = $this->parser->parse($token);
+
+        $this->assertNotNull($parsed);
+        $this->assertArrayHasKey('jti', $parsed);
+        // jti should be 32 hex characters (16 random bytes * 2)
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{32}$/', $parsed['jti']);
+    }
+
+    /**
+     * Test that create() includes type field with default value 'access'
+     */
+    public function testCreateIncludesTypeFieldDefault(): void
+    {
+        $payload = ['sub' => 'user123'];
+        $token = $this->parser->create($payload);
+        $parsed = $this->parser->parse($token);
+
+        $this->assertNotNull($parsed);
+        $this->assertArrayHasKey('type', $parsed);
+        $this->assertSame('access', $parsed['type']);
+    }
+
+    /**
+     * Test that create() accepts and includes 'refresh' type
+     */
+    public function testCreateIncludesRefreshType(): void
+    {
+        $payload = ['sub' => 'user123'];
+        $token = $this->parser->create($payload, 3600, 'refresh');
+        $parsed = $this->parser->parse($token);
+
+        $this->assertNotNull($parsed);
+        $this->assertArrayHasKey('type', $parsed);
+        $this->assertSame('refresh', $parsed['type']);
+    }
+
+    /**
+     * Test that create() accepts and includes 'access' type explicitly
+     */
+    public function testCreateIncludesAccessType(): void
+    {
+        $payload = ['sub' => 'user123'];
+        $token = $this->parser->create($payload, 3600, 'access');
+        $parsed = $this->parser->parse($token);
+
+        $this->assertNotNull($parsed);
+        $this->assertArrayHasKey('type', $parsed);
+        $this->assertSame('access', $parsed['type']);
+    }
+
+    /**
+     * Test that each call to create() generates a unique jti
+     */
+    public function testCreateGeneratesUniqueJti(): void
+    {
+        $payload = ['sub' => 'user123'];
+
+        $token1 = $this->parser->create($payload);
+        $parsed1 = $this->parser->parse($token1);
+
+        $token2 = $this->parser->create($payload);
+        $parsed2 = $this->parser->parse($token2);
+
+        $this->assertNotNull($parsed1);
+        $this->assertNotNull($parsed2);
+        // jti values should be different
+        $this->assertNotSame($parsed1['jti'], $parsed2['jti']);
+    }
+
+    /**
+     * Test that parse() returns null if jti is missing
+     */
+    public function testParseReturnsNullIfJtiMissing(): void
+    {
+        // Manually create a token without jti
+        $payload = [
+            'sub' => 'user123',
+            'type' => 'access',
+            'exp' => time() + 3600
+        ];
+
+        $header = [
+            'alg' => 'HS256',
+            'typ' => 'JWT'
+        ];
+
+        $headerB64 = strtr(base64_encode(json_encode($header)), '+/', '-_');
+        $payloadB64 = strtr(base64_encode(json_encode($payload)), '+/', '-_');
+
+        // Create a fake signature (won't be valid, but we need the structure)
+        $fakeSignature = 'fakesignature';
+        $token = $headerB64 . '.' . $payloadB64 . '.' . $fakeSignature;
+
+        $parsed = $this->parser->parse($token);
+        $this->assertNull($parsed);
+    }
+
+    /**
+     * Test that parse() returns null if type is missing
+     */
+    public function testParseReturnsNullIfTypeMissing(): void
+    {
+        // Manually create a token without type
+        $payload = [
+            'sub' => 'user123',
+            'jti' => 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
+            'exp' => time() + 3600
+        ];
+
+        $header = [
+            'alg' => 'HS256',
+            'typ' => 'JWT'
+        ];
+
+        $headerB64 = strtr(base64_encode(json_encode($header)), '+/', '-_');
+        $payloadB64 = strtr(base64_encode(json_encode($payload)), '+/', '-_');
+
+        // Create a fake signature
+        $fakeSignature = 'fakesignature';
+        $token = $headerB64 . '.' . $payloadB64 . '.' . $fakeSignature;
+
+        $parsed = $this->parser->parse($token);
+        $this->assertNull($parsed);
+    }
+
+    /**
+     * Test that parse() returns null if both jti and type are missing
+     */
+    public function testParseReturnsNullIfBothJtiAndTypeMissing(): void
+    {
+        // Create payload without jti and type
+        $payload = [
+            'sub' => 'user123',
+            'exp' => time() + 3600
+        ];
+
+        $header = [
+            'alg' => 'HS256',
+            'typ' => 'JWT'
+        ];
+
+        $headerB64 = strtr(base64_encode(json_encode($header)), '+/', '-_');
+        $payloadB64 = strtr(base64_encode(json_encode($payload)), '+/', '-_');
+        $fakeSignature = 'fakesignature';
+        $token = $headerB64 . '.' . $payloadB64 . '.' . $fakeSignature;
+
+        $parsed = $this->parser->parse($token);
+        $this->assertNull($parsed);
+    }
+
+    /**
+     * Test that jti and type survive a full create/parse cycle
+     */
+    public function testJtiAndTypeSurviveFullCycle(): void
+    {
+        $payload = [
+            'sub' => 'user123',
+            'email' => 'user@example.com',
+            'roles' => ['admin', 'user']
+        ];
+
+        // Create with explicit type
+        $token = $this->parser->create($payload, 3600, 'refresh');
+        $parsed = $this->parser->parse($token);
+
+        $this->assertNotNull($parsed);
+        // Verify original payload data is preserved
+        $this->assertSame('user123', $parsed['sub']);
+        $this->assertSame('user@example.com', $parsed['email']);
+        $this->assertSame(['admin', 'user'], $parsed['roles']);
+        // Verify new fields are present
+        $this->assertArrayHasKey('jti', $parsed);
+        $this->assertArrayHasKey('type', $parsed);
+        $this->assertSame('refresh', $parsed['type']);
+    }
 }
