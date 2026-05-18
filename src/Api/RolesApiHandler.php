@@ -4,6 +4,8 @@ namespace Whity\Api;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Hooks\HookManager;
+use Whity\Core\Tenant\TenantContext;
 use PDO;
 
 /**
@@ -66,6 +68,19 @@ class RolesApiHandler
                 return Response::error('Role already exists', 409);
             }
 
+            // Dispatch filter hook before creating role
+            $hookManager = app(HookManager::class);
+            $roleData = $hookManager->dispatch('role.creating', [
+                'name' => $name,
+                'description' => $description,
+                'permissions' => $permissions,
+            ]);
+
+            // Extract potentially modified data from hook response
+            $name = $roleData['name'];
+            $description = $roleData['description'];
+            $permissions = $roleData['permissions'];
+
             // Insert role
             $stmt = $this->db->prepare('
                 INSERT INTO roles (name, description, created_at)
@@ -84,6 +99,20 @@ class RolesApiHandler
                     $permStmt->execute([$roleId, $permissionId]);
                 }
             }
+
+            // Dispatch synchronous hook after role is created
+            $hookManager->dispatch('role.created', [
+                'id' => (int)$roleId,
+                'name' => $name,
+                'description' => $description,
+                'permissions' => $permissions,
+            ]);
+
+            // Dispatch asynchronous hook for background tasks
+            $hookManager->dispatchAsync('role.created.async', [
+                'id' => (int)$roleId,
+                'name' => $name,
+            ]);
 
             return Response::json([
                 'data' => [
@@ -119,6 +148,13 @@ class RolesApiHandler
             if (!$role) {
                 return Response::error('Role not found', 404);
             }
+
+            // Dispatch filter hook before updating role
+            $hookManager = app(HookManager::class);
+            $hookManager->dispatch('role.updating', [
+                'id' => (int)$id,
+                'changes' => $body,
+            ]);
 
             // Update role fields
             $updates = [];
@@ -164,6 +200,12 @@ class RolesApiHandler
                 }
             }
 
+            // Dispatch synchronous hook after role is updated
+            $hookManager->dispatch('role.updated', [
+                'id' => (int)$id,
+                'changes' => $body,
+            ]);
+
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role updated']], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to update role: ' . $e->getMessage(), 500);
@@ -195,6 +237,12 @@ class RolesApiHandler
                 return Response::error('Cannot delete role in use by ' . $result['count'] . ' user(s)', 409);
             }
 
+            // Dispatch filter hook before deleting role
+            $hookManager = app(HookManager::class);
+            $hookManager->dispatch('role.deleting', [
+                'id' => (int)$id,
+            ]);
+
             // Delete permissions first
             $permStmt = $this->db->prepare('DELETE FROM role_permissions WHERE role_id = ?');
             $permStmt->execute([$id]);
@@ -202,6 +250,16 @@ class RolesApiHandler
             // Delete role
             $deleteStmt = $this->db->prepare('DELETE FROM roles WHERE id = ?');
             $deleteStmt->execute([$id]);
+
+            // Dispatch synchronous hook after role is deleted
+            $hookManager->dispatch('role.deleted', [
+                'id' => (int)$id,
+            ]);
+
+            // Dispatch asynchronous hook for background tasks
+            $hookManager->dispatchAsync('role.deleted.async', [
+                'id' => (int)$id,
+            ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role deleted']], 200);
         } catch (\Exception $e) {

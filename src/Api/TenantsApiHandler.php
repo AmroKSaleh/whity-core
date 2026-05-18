@@ -4,6 +4,8 @@ namespace Whity\Api;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Hooks\HookManager;
+use Whity\Core\Tenant\TenantContext;
 use PDO;
 
 /**
@@ -77,6 +79,17 @@ class TenantsApiHandler
                 return Response::error('Slug already exists', 409);
             }
 
+            // Dispatch filter hook before creating tenant
+            $hookManager = app(HookManager::class);
+            $tenantData = $hookManager->dispatch('tenant.creating', [
+                'name' => $name,
+                'slug' => $slug,
+            ]);
+
+            // Extract potentially modified data from hook response
+            $name = $tenantData['name'];
+            $slug = $tenantData['slug'];
+
             // Insert tenant
             $stmt = $this->db->prepare('
                 INSERT INTO tenants (name, slug, created_at)
@@ -84,6 +97,19 @@ class TenantsApiHandler
             ');
             $stmt->execute([$name, $slug]);
             $tenantId = $this->db->lastInsertId();
+
+            // Dispatch synchronous hook after tenant is created
+            $hookManager->dispatch('tenant.created', [
+                'id' => (int)$tenantId,
+                'name' => $name,
+                'slug' => $slug,
+            ]);
+
+            // Dispatch asynchronous hook for background tasks
+            $hookManager->dispatchAsync('tenant.created.async', [
+                'id' => (int)$tenantId,
+                'name' => $name,
+            ]);
 
             return Response::json([
                 'data' => [
@@ -121,6 +147,13 @@ class TenantsApiHandler
                 return Response::error('Tenant not found', 404);
             }
 
+            // Dispatch filter hook before updating tenant
+            $hookManager = app(HookManager::class);
+            $hookManager->dispatch('tenant.updating', [
+                'id' => (int)$id,
+                'changes' => $body,
+            ]);
+
             $updates = [];
             $params_array = [];
 
@@ -156,6 +189,12 @@ class TenantsApiHandler
                 $updateStmt->execute($params_array);
             }
 
+            // Dispatch synchronous hook after tenant is updated
+            $hookManager->dispatch('tenant.updated', [
+                'id' => (int)$id,
+                'changes' => $body,
+            ]);
+
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant updated']], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to update tenant: ' . $e->getMessage(), 500);
@@ -187,9 +226,25 @@ class TenantsApiHandler
                 return Response::error('Cannot delete tenant with ' . $result['count'] . ' user(s)', 409);
             }
 
+            // Dispatch filter hook before deleting tenant
+            $hookManager = app(HookManager::class);
+            $hookManager->dispatch('tenant.deleting', [
+                'id' => (int)$id,
+            ]);
+
             // Delete tenant
             $deleteStmt = $this->db->prepare('DELETE FROM tenants WHERE id = ?');
             $deleteStmt->execute([$id]);
+
+            // Dispatch synchronous hook after tenant is deleted
+            $hookManager->dispatch('tenant.deleted', [
+                'id' => (int)$id,
+            ]);
+
+            // Dispatch asynchronous hook for background tasks
+            $hookManager->dispatchAsync('tenant.deleted.async', [
+                'id' => (int)$id,
+            ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant deleted']], 200);
         } catch (\Exception $e) {
