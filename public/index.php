@@ -75,6 +75,7 @@ use Whity\Api\DeploymentApiHandler;
 use Whity\Api\PluginsApiHandler;
 use Whity\Api\MigrationsApiHandler;
 use Whity\Api\AdminApiHandler;
+use Whity\Api\OusApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Deployment\DeploymentManager;
@@ -193,6 +194,16 @@ $router->register('POST', '/api/migrations/rollback', [$migrationsHandler, 'roll
 
 $adminHandler = new AdminApiHandler($db, __DIR__ . '/../database/migrations');
 $router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
+
+// 12. Register OUs API handler
+$ousHandler = new OusApiHandler($db->getPdo(), $hookManager);
+$router->register('GET', '/api/ous', [$ousHandler, 'list'], 'admin');
+$router->register('POST', '/api/ous', [$ousHandler, 'create'], 'admin');
+$router->register('GET', '/api/ous/{id}', [$ousHandler, 'get'], 'admin');
+$router->register('PATCH', '/api/ous/{id}', [$ousHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/ous/{id}', [$ousHandler, 'delete'], 'admin');
+$router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
+$router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
 
 // Handle single request
 try {

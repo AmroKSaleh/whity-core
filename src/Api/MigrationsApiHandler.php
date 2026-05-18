@@ -111,15 +111,24 @@ class MigrationsApiHandler
      */
     private function getExecutedMigrations(): array
     {
-        $stmt = $this->db->getPdo()->prepare('SELECT migration_name, executed_at FROM core_schema_migrations');
-        $stmt->execute();
-        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        try {
+            $stmt = $this->db->getPdo()->prepare('SELECT migration_name, executed_at FROM core_schema_migrations');
+            $stmt->execute();
+            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $executed = [];
-        foreach ($results as $row) {
-            $executed[$row['migration_name']] = $row;
+            $executed = [];
+            foreach ($results as $row) {
+                $executed[$row['migration_name']] = $row;
+            }
+            return $executed;
+        } catch (\PDOException $e) {
+            // If the migrations table doesn't exist yet, return empty array
+            // This handles the bootstrap case on first run
+            if (strpos($e->getMessage(), 'core_schema_migrations') !== false) {
+                return [];
+            }
+            throw $e;
         }
-        return $executed;
     }
 
     /**
@@ -160,16 +169,34 @@ class MigrationsApiHandler
         if ($direction === 'up') {
             $className::up($this->db);
 
-            $stmt = $this->db->getPdo()->prepare('
-                INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
-                VALUES (?, NOW(), ?)
-            ');
-            $stmt->execute([$name, (int)((microtime(true) - $start) * 1000)]);
+            // Try to record the migration, but don't fail if the migrations table doesn't exist yet
+            // (it will be created by migration 005)
+            try {
+                $stmt = $this->db->getPdo()->prepare('
+                    INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
+                    VALUES (?, NOW(), ?)
+                ');
+                $stmt->execute([$name, (int)((microtime(true) - $start) * 1000)]);
+            } catch (\PDOException $e) {
+                // If the migrations table doesn't exist yet, silently skip recording
+                // It will be recorded in subsequent runs once the table exists
+                if (strpos($e->getMessage(), 'core_schema_migrations') === false) {
+                    throw $e;
+                }
+            }
         } else {
             $className::down($this->db);
 
-            $stmt = $this->db->getPdo()->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
-            $stmt->execute([$name]);
+            // Try to remove the migration record, but don't fail if it doesn't exist
+            try {
+                $stmt = $this->db->getPdo()->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
+                $stmt->execute([$name]);
+            } catch (\PDOException $e) {
+                // If the migrations table doesn't exist, silently skip
+                if (strpos($e->getMessage(), 'core_schema_migrations') === false) {
+                    throw $e;
+                }
+            }
         }
     }
 }

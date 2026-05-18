@@ -76,17 +76,29 @@ class RbacMiddleware
                 return Response::error('Invalid token payload', 401);
             }
 
-            // Check if user has required role
-            if ($requiredRole !== null) {
-                if (!$this->roleChecker->hasRole($userId, $requiredRole)) {
+            // Check if token includes a role (for system/CLI tokens)
+            if (isset($payload['role'])) {
+                $tokenRole = $payload['role'];
+                if ($requiredRole !== null && $tokenRole !== $requiredRole) {
                     return Response::error('Insufficient permissions', 403);
                 }
-            }
-
-            // Check if user has required permission
-            if ($requiredPermission !== null) {
-                if (!$this->roleChecker->hasPermission($userId, $requiredPermission)) {
+                // For token-based roles, skip permission check (CLI admin has all permissions)
+                if ($requiredPermission !== null && $tokenRole !== 'admin') {
                     return Response::error('Insufficient permissions', 403);
+                }
+            } else {
+                // Check if user has required role
+                if ($requiredRole !== null) {
+                    if (!$this->roleChecker->hasRole($userId, $requiredRole)) {
+                        return Response::error('Insufficient permissions', 403);
+                    }
+                }
+
+                // Check if user has required permission
+                if ($requiredPermission !== null) {
+                    if (!$this->roleChecker->hasPermission($userId, $requiredPermission)) {
+                        return Response::error('Insufficient permissions', 403);
+                    }
                 }
             }
         }

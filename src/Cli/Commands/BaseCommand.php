@@ -20,6 +20,8 @@ use Whity\Api\TenantsApiHandler;
 use Whity\Api\PermissionsApiHandler;
 use Whity\Api\PluginsApiHandler;
 use Whity\Api\MigrationsApiHandler;
+use Whity\Api\OusApiHandler;
+use Whity\Core\Deployment\DeploymentManager;
 
 /**
  * Base Command class for CLI commands
@@ -65,7 +67,8 @@ abstract class BaseCommand
         $this->kernel = new HttpKernel($router, $rbacMiddleware);
         $this->kernel->use($tenantIsolationMiddleware);
 
-        $pluginLoader = new PluginLoader(dirname(__DIR__, 4) . '/plugins', $router);
+        $baseDir = dirname(__DIR__, 3);
+        $pluginLoader = new PluginLoader($baseDir . '/plugins', $router);
         $pluginLoader->load();
 
         // Register API handlers (copied from public/index.php)
@@ -91,23 +94,33 @@ abstract class BaseCommand
         $permissionsHandler = new PermissionsApiHandler($db->getPdo());
         $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
 
-        $pluginsHandler = new PluginsApiHandler(dirname(__DIR__, 4) . '/plugins');
+        $pluginsHandler = new PluginsApiHandler($baseDir . '/plugins');
         $router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], 'admin');
         $router->register('POST', '/api/plugins/{id}/enable', [$pluginsHandler, 'enable'], 'admin');
         $router->register('POST', '/api/plugins/{id}/disable', [$pluginsHandler, 'disable'], 'admin');
         $router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], 'admin');
 
-        $migrationsHandler = new MigrationsApiHandler($db, dirname(__DIR__, 4) . '/database/migrations');
+        $migrationsHandler = new MigrationsApiHandler($db, $baseDir . '/database/migrations');
         $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');
         $router->register('POST', '/api/migrations/run', [$migrationsHandler, 'run'], 'admin');
         $router->register('POST', '/api/migrations/rollback', [$migrationsHandler, 'rollback'], 'admin');
 
+        $ousHandler = new OusApiHandler($db->getPdo(), $hookManager);
+        $router->register('GET', '/api/ous', [$ousHandler, 'list'], 'admin');
+        $router->register('POST', '/api/ous', [$ousHandler, 'create'], 'admin');
+        $router->register('GET', '/api/ous/{id}', [$ousHandler, 'get'], 'admin');
+        $router->register('PATCH', '/api/ous/{id}', [$ousHandler, 'update'], 'admin');
+        $router->register('DELETE', '/api/ous/{id}', [$ousHandler, 'delete'], 'admin');
+        $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
+        $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
+
         // Generate a CLI token if none provided
         if (!$this->token) {
             $this->token = $jwtParser->create([
+                'user_id' => 0,
                 'sub' => 'cli-admin',
                 'role' => 'admin',
-                'tenant_id' => 1 // System tenant
+                'tenant_id' => 1
             ]);
         }
     }
