@@ -34,15 +34,16 @@ class RbacMiddleware
     /**
      * Handle request with RBAC validation
      *
-     * Extracts and validates JWT token from Authorization header, checks user role if required,
+     * Extracts and validates JWT token from Authorization header, checks user role and/or permission if required,
      * and attaches user data to the request object before passing to next handler.
      *
      * @param Request $request The incoming HTTP request
      * @param callable $next The next middleware/handler in the pipeline
      * @param ?string $requiredRole Optional role name to enforce authorization
+     * @param ?string $requiredPermission Optional permission string to enforce authorization
      * @return Response HTTP response
      */
-    public function handle(Request $request, callable $next, ?string $requiredRole = null): Response
+    public function handle(Request $request, callable $next, ?string $requiredRole = null, ?string $requiredPermission = null): Response
     {
         // Extract Authorization header
         $authHeader = $request->getHeader('Authorization');
@@ -66,8 +67,8 @@ class RbacMiddleware
             return Response::error('Invalid token payload', 401);
         }
 
-        // Check role if required
-        if ($requiredRole !== null) {
+        // Check role or permission if required
+        if ($requiredRole !== null || $requiredPermission !== null) {
             $userId = $payload['user_id'];
 
             // Ensure user_id is an integer
@@ -76,8 +77,17 @@ class RbacMiddleware
             }
 
             // Check if user has required role
-            if (!$this->roleChecker->hasRole($userId, $requiredRole)) {
-                return Response::error('Insufficient permissions', 403);
+            if ($requiredRole !== null) {
+                if (!$this->roleChecker->hasRole($userId, $requiredRole)) {
+                    return Response::error('Insufficient permissions', 403);
+                }
+            }
+
+            // Check if user has required permission
+            if ($requiredPermission !== null) {
+                if (!$this->roleChecker->hasPermission($userId, $requiredPermission)) {
+                    return Response::error('Insufficient permissions', 403);
+                }
             }
         }
 

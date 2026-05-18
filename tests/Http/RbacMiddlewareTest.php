@@ -297,4 +297,127 @@ class RbacMiddlewareTest extends TestCase
 
         $this->assertSame(200, $response->getStatusCode());
     }
+
+    /**
+     * Test valid token with sufficient permission allows
+     */
+    public function testHandleWithValidPermissionAllowsRequest(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = [
+            'user_id' => 123,
+            'email' => 'user@example.com'
+        ];
+
+        $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
+        $next = fn(Request $req) => new Response(200, 'Success');
+
+        $this->mockJwtParser->method('parse')
+            ->with($validToken)
+            ->willReturn($payload);
+
+        $this->mockRoleChecker->method('hasPermission')
+            ->with(123, 'edit:users')
+            ->willReturn(true);
+
+        $response = $this->middleware->handle($request, $next, null, 'edit:users');
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('Success', $response->getBody());
+        $this->assertNotNull($request->user);
+        $this->assertSame(123, $request->user->user_id);
+    }
+
+    /**
+     * Test valid token with insufficient permission denies
+     */
+    public function testHandleWithInvalidPermissionReturnsForbidden(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = [
+            'user_id' => 123,
+            'email' => 'user@example.com'
+        ];
+
+        $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
+        $next = fn(Request $req) => new Response(200, 'Success');
+
+        $this->mockJwtParser->method('parse')
+            ->with($validToken)
+            ->willReturn($payload);
+
+        $this->mockRoleChecker->method('hasPermission')
+            ->with(123, 'delete:users')
+            ->willReturn(false);
+
+        $response = $this->middleware->handle($request, $next, null, 'delete:users');
+
+        $this->assertSame(403, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame('Insufficient permissions', $responseData['error']);
+    }
+
+    /**
+     * Test both role and permission checks must pass when both are required
+     */
+    public function testHandleWithBothRoleAndPermissionRequiresBoth(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = [
+            'user_id' => 123,
+            'email' => 'user@example.com'
+        ];
+
+        $request = new Request('GET', '/api/admin', ['Authorization' => "Bearer {$validToken}"]);
+        $next = fn(Request $req) => new Response(200, 'Success');
+
+        $this->mockJwtParser->method('parse')
+            ->with($validToken)
+            ->willReturn($payload);
+
+        $this->mockRoleChecker->method('hasRole')
+            ->with(123, 'admin')
+            ->willReturn(true);
+
+        $this->mockRoleChecker->method('hasPermission')
+            ->with(123, 'manage:permissions')
+            ->willReturn(true);
+
+        $response = $this->middleware->handle($request, $next, 'admin', 'manage:permissions');
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('Success', $response->getBody());
+    }
+
+    /**
+     * Test permission check passes when only permission is required regardless of role
+     */
+    public function testHandleWithOnlyPermissionCheckIgnoresRole(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = [
+            'user_id' => 123,
+            'email' => 'user@example.com'
+        ];
+
+        $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
+        $next = fn(Request $req) => new Response(200, 'Success');
+
+        $this->mockJwtParser->method('parse')
+            ->with($validToken)
+            ->willReturn($payload);
+
+        // Only hasPermission should be called, not hasRole
+        $this->mockRoleChecker->expects($this->never())
+            ->method('hasRole');
+
+        $this->mockRoleChecker->method('hasPermission')
+            ->with(123, 'read:reports')
+            ->willReturn(true);
+
+        $response = $this->middleware->handle($request, $next, null, 'read:reports');
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('Success', $response->getBody());
+    }
 }
