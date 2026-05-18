@@ -7,6 +7,7 @@ import {
   IconUsers,
   IconLock,
   IconBuilding,
+  IconOrganization,
 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 
@@ -25,6 +26,11 @@ const navItems = [
     label: 'Roles',
     href: '/admin/roles',
     icon: IconLock,
+  },
+  {
+    label: 'Organizational Units',
+    href: '/admin/ous',
+    icon: IconOrganization,
   },
   {
     label: 'Tenants',
