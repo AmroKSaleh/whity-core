@@ -146,7 +146,9 @@ export function Sidebar() {
                 <div className="space-y-1">
                   {navItems.map((item, index) => {
                     const Icon = iconMap[item.icon] || IconDashboard;
-                    const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
+                    const hrefSegments = item.href.split('/').filter(Boolean).length;
+                    const isActive = pathname === item.href ||
+                      (pathname.startsWith(item.href + '/') && hrefSegments > 1);
 
                     return (
                       <Link
