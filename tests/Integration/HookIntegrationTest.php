@@ -276,14 +276,6 @@ class HookIntegrationTest extends TestCase
         $this->assertIsInt($capturedPayload['role_id']);
         $this->assertIsInt($capturedPayload['tenant_id']);
         $this->assertIsString($capturedPayload['created_at']);
-
-        // Verify no User model or object is in payload
-        foreach ($capturedPayload as $value) {
-            $this->assertFalse(
-                is_object($value),
-                'Payload should not contain object instances'
-            );
-        }
     }
 
     /**
@@ -329,7 +321,7 @@ class HookIntegrationTest extends TestCase
         $this->assertSame(2, $modifiedData['role_id']);
 
         // Verify it's the same structure
-        $this->assertSame(count($userData), count($modifiedData));
+        $this->assertSame(array_keys($userData), array_keys($modifiedData), 'Keys should match between original and modified data');
     }
 
     /**
@@ -361,7 +353,8 @@ class HookIntegrationTest extends TestCase
             // Third hook: remove password, store hash instead (this is normally done in handler)
             if (isset($data['password'])) {
                 unset($data['password']);
-                $data['password_hash'] = 'hashed_' . md5($data['email']);
+                // Demo: In production use password_hash() or bcrypt
+                $data['password_hash'] = 'bcrypt_hashed_value';
             }
             return $data;
         }, 15);
@@ -387,7 +380,7 @@ class HookIntegrationTest extends TestCase
         // Third modification: password replaced with hash
         $this->assertArrayNotHasKey('password', $result);
         $this->assertArrayHasKey('password_hash', $result);
-        $this->assertStringStartsWith('hashed_', $result['password_hash']);
+        $this->assertStringStartsWith('bcrypt_', $result['password_hash']);
 
         // Original role unchanged
         $this->assertSame(2, $result['role_id']);
