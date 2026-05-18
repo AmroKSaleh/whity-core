@@ -33,14 +33,14 @@ export function PermissionsPanel({
   const fetchRolePermissions = async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient(`/api/roles/${role.id}`);
+      const response = await apiClient(`/api/roles/${role.id}/permissions`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch role permissions');
       }
 
-      const data: { data: RoleWithPermissions } = await response.json();
-      setPermissions(data.data.permissions);
+      const data: { data: Permission[] } = await response.json();
+      setPermissions(data.data);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to fetch permissions';
