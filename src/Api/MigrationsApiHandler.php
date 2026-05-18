@@ -1,0 +1,175 @@
+<?php
+
+namespace Whity\Api;
+
+use Whity\Core\Request;
+use Whity\Core\Response;
+use Whity\Database\Database;
+use PDO;
+
+/**
+ * Migrations API Handler
+ *
+ * Handles database migrations management.
+ */
+class MigrationsApiHandler
+{
+    private Database $db;
+    private string $migrationDir;
+
+    public function __construct(Database $db, string $migrationDir)
+    {
+        $this->db = $db;
+        $this->migrationDir = $migrationDir;
+    }
+
+    /**
+     * GET /api/migrations - List all migrations and their status
+     */
+    public function list(Request $request): Response
+    {
+        try {
+            $executed = $this->getExecutedMigrations();
+            $files = $this->getMigrationFiles();
+
+            $migrations = [];
+            foreach ($files as $file) {
+                $name = pathinfo($file, PATHINFO_FILENAME);
+                $isExecuted = isset($executed[$name]);
+
+                $migrations[] = [
+                    'name' => $name,
+                    'executed' => $isExecuted,
+                    'executed_at' => $isExecuted ? $executed[$name]['executed_at'] : null
+                ];
+            }
+
+            return Response::json(['data' => $migrations], 200);
+        } catch (\Exception $e) {
+            return Response::error('Failed to list migrations: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * POST /api/migrations/run - Run pending migrations
+     */
+    public function run(Request $request): Response
+    {
+        try {
+            $executed = $this->getExecutedMigrations();
+            $files = $this->getMigrationFiles();
+            $count = 0;
+
+            foreach ($files as $file) {
+                $name = pathinfo($file, PATHINFO_FILENAME);
+                if (!isset($executed[$name])) {
+                    $this->executeMigration($file, 'up');
+                    $count++;
+                }
+            }
+
+            return Response::json(['data' => ['count' => $count]], 200);
+        } catch (\Exception $e) {
+            return Response::error('Migration failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * POST /api/migrations/rollback - Rollback last migration
+     */
+    public function rollback(Request $request): Response
+    {
+        try {
+            $stmt = $this->db->getPdo()->prepare('
+                SELECT migration_name FROM core_schema_migrations
+                ORDER BY executed_at DESC LIMIT 1
+            ');
+            $stmt->execute();
+            $last = $stmt->fetch();
+
+            if (!$last) {
+                return Response::error('No migrations to rollback', 400);
+            }
+
+            $name = $last['migration_name'];
+            $file = $this->migrationDir . '/' . $name . '.php';
+
+            if (!file_exists($file)) {
+                return Response::error("Migration file {$name}.php not found", 500);
+            }
+
+            $this->executeMigration($file, 'down');
+
+            return Response::json(['data' => ['message' => "Rolled back {$name}"]], 200);
+        } catch (\Exception $e) {
+            return Response::error('Rollback failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get list of executed migrations from database
+     */
+    private function getExecutedMigrations(): array
+    {
+        $stmt = $this->db->getPdo()->prepare('SELECT migration_name, executed_at FROM core_schema_migrations');
+        $stmt->execute();
+        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $executed = [];
+        foreach ($results as $row) {
+            $executed[$row['migration_name']] = $row;
+        }
+        return $executed;
+    }
+
+    /**
+     * Get list of migration files from directory
+     */
+    private function getMigrationFiles(): array
+    {
+        $files = scandir($this->migrationDir);
+        $migrationFiles = [];
+        foreach ($files as $file) {
+            if (pathinfo($file, PATHINFO_EXTENSION) === 'php') {
+                $migrationFiles[] = $this->migrationDir . '/' . $file;
+            }
+        }
+        sort($migrationFiles);
+        return $migrationFiles;
+    }
+
+    /**
+     * Execute a migration file
+     */
+    private function executeMigration(string $file, string $direction): void
+    {
+        require_once $file;
+        $name = pathinfo($file, PATHINFO_FILENAME);
+
+        // Extract class name (e.g., 001_create_users -> CreateUsers)
+        $parts = explode('_', $name);
+        array_shift($parts); // Remove prefix number
+        $className = 'Database\\Migrations\\' . implode('', array_map('ucfirst', $parts));
+
+        if (!class_exists($className)) {
+            throw new \Exception("Migration class {$className} not found in {$file}");
+        }
+
+        $start = microtime(true);
+
+        if ($direction === 'up') {
+            $className::up($this->db);
+
+            $stmt = $this->db->getPdo()->prepare('
+                INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
+                VALUES (?, NOW(), ?)
+            ');
+            $stmt->execute([$name, (int)((microtime(true) - $start) * 1000)]);
+        } else {
+            $className::down($this->db);
+
+            $stmt = $this->db->getPdo()->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
+            $stmt->execute([$name]);
+        }
+    }
+}

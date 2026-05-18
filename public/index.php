@@ -72,6 +72,8 @@ use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
 use Whity\Api\PermissionsApiHandler;
 use Whity\Api\DeploymentApiHandler;
+use Whity\Api\PluginsApiHandler;
+use Whity\Api\MigrationsApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Deployment\DeploymentManager;
@@ -176,7 +178,17 @@ $deploymentHandler = new DeploymentApiHandler($deploymentManager);
 $router->register('POST', '/api/deployments/apply', [$deploymentHandler, 'apply'], 'admin');
 $router->register('POST', '/api/deployments/rollback', [$deploymentHandler, 'rollback'], 'admin');
 $router->register('GET', '/api/deployments/status', [$deploymentHandler, 'status'], 'admin');
-$router->register('POST', '/api/migrations/rollback', [$deploymentHandler, 'rollbackMigration'], 'admin');
+
+$pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins');
+$router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], 'admin');
+$router->register('POST', '/api/plugins/{id}/enable', [$pluginsHandler, 'enable'], 'admin');
+$router->register('POST', '/api/plugins/{id}/disable', [$pluginsHandler, 'disable'], 'admin');
+$router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], 'admin');
+
+$migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
+$router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');
+$router->register('POST', '/api/migrations/run', [$migrationsHandler, 'run'], 'admin');
+$router->register('POST', '/api/migrations/rollback', [$migrationsHandler, 'rollback'], 'admin');
 
 // Handle single request
 try {

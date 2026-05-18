@@ -1,0 +1,58 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Whity Core CLI Tool
+ *
+ * Entry point for whity-core command-line operations.
+ */
+
+declare(strict_types=1);
+
+// Ensure we are running from CLI
+if (php_sapi_name() !== 'cli') {
+    echo "This script must be run from the command line.\n";
+    exit(1);
+}
+
+// Load environment variables from .env file (skip if already set)
+$envFile = dirname(__DIR__) . '/.env';
+if (file_exists($envFile)) {
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (empty(trim($line)) || strpos(trim($line), '#') === 0) {
+            continue;
+        }
+
+        if (strpos($line, '=') !== false) {
+            [$key, $value] = explode('=', $line, 2);
+            $key = trim($key);
+            $value = trim($value);
+
+            $_ENV[$key] = $value;
+            putenv("{$key}={$value}");
+        }
+    }
+}
+
+// Require composer autoloader
+$autoloader = dirname(__DIR__) . '/vendor/autoload.php';
+if (!file_exists($autoloader)) {
+    // Try root directory if in a worktree
+    $autoloader = dirname(__DIR__, 3) . '/vendor/autoload.php';
+}
+
+if (!file_exists($autoloader)) {
+    echo "Error: Composer autoloader not found. Please run 'composer install'.\n";
+    exit(1);
+}
+require $autoloader;
+
+// Import helpers
+require dirname(__DIR__) . '/src/helpers.php';
+
+use Whity\Cli\CliRunner;
+
+// Initialize and run the CLI
+$runner = new CliRunner();
+exit($runner->run($argv));
