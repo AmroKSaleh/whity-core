@@ -36,12 +36,12 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
   const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState(ou.name);
   const [description, setDescription] = useState(ou.description || '');
-  const [parentId, setParentId] = useState<string>(ou.parent_id ? ou.parent_id.toString() : '');
+  const [parentId, setParentId] = useState<string>(ou.parent_id ? ou.parent_id.toString() : 'null');
 
   useEffect(() => {
     setName(ou.name);
     setDescription(ou.description || '');
-    setParentId(ou.parent_id ? ou.parent_id.toString() : '');
+    setParentId(ou.parent_id ? ou.parent_id.toString() : 'null');
   }, [ou]);
 
   const handleUpdate = async () => {
@@ -57,7 +57,7 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
         description: description.trim(),
       };
 
-      if (parentId) {
+      if (parentId && parentId !== 'null') {
         payload.parent_id = parseInt(parentId, 10);
       }
 
@@ -129,7 +129,7 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
                 <SelectValue placeholder="Select a parent OU (optional)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">None (Root OU)</SelectItem>
+                <SelectItem value="null">None (Root OU)</SelectItem>
                 {availableParents.map((ou) => (
                   <SelectItem key={ou.id} value={ou.id.toString()}>
                     {ou.name}

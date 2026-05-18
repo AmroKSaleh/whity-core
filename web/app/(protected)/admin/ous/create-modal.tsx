@@ -35,7 +35,7 @@ export function CreateOuModal({ isOpen, onClose, onSuccess, ous }: CreateOuModal
   const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [parentId, setParentId] = useState<string>('');
+  const [parentId, setParentId] = useState<string>('null');
 
   const handleCreate = async () => {
     if (!name.trim()) {
@@ -50,7 +50,7 @@ export function CreateOuModal({ isOpen, onClose, onSuccess, ous }: CreateOuModal
         description: description.trim(),
       };
 
-      if (parentId) {
+      if (parentId && parentId !== 'null') {
         payload.parent_id = parseInt(parentId, 10);
       }
 
@@ -126,6 +126,7 @@ export function CreateOuModal({ isOpen, onClose, onSuccess, ous }: CreateOuModal
                 <SelectValue placeholder="Select a parent OU (optional)" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="null">None (Root OU)</SelectItem>
                 {ous.map((ou) => (
                   <SelectItem key={ou.id} value={ou.id.toString()}>
                     {ou.name}
