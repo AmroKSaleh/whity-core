@@ -44,7 +44,7 @@ use Whity\Core\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
-class AdminStats implements PluginInterface
+class TestAdminStatsForFileLoad implements PluginInterface
 {
     public function getRoute(): string
     {
@@ -68,7 +68,7 @@ class AdminStats implements PluginInterface
 }
 PHP;
 
-        file_put_contents($this->tempDir . '/AdminStats.php', $pluginCode);
+        file_put_contents($this->tempDir . '/TestAdminStatsForFileLoad.php', $pluginCode);
 
         // Load plugins
         $loader = new PluginLoader($this->tempDir, $this->router);
