@@ -145,6 +145,7 @@ $router->register('DELETE', '/api/users/{id}', [$usersHandler, 'delete'], 'admin
 $rolesHandler = new RolesApiHandler($db->getPdo());
 $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
 $router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
+$router->register('GET', '/api/roles/{id}', [$rolesHandler, 'get'], 'admin');
 $router->register('PATCH', '/api/roles/{id}', [$rolesHandler, 'update'], 'admin');
 $router->register('DELETE', '/api/roles/{id}', [$rolesHandler, 'delete'], 'admin');
 $router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], 'admin');

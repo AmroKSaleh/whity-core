@@ -46,6 +46,49 @@ class RolesApiHandler
     }
 
     /**
+     * GET /api/roles/{id} - Get a single role with permissions
+     */
+    public function get(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('Role ID is required', 400);
+            }
+
+            // Get role details
+            $stmt = $this->db->prepare('
+                SELECT id, name, description, created_at
+                FROM roles
+                WHERE id = ?
+            ');
+            $stmt->execute([$id]);
+            $role = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$role) {
+                return Response::error('Role not found', 404);
+            }
+
+            // Get role permissions
+            $permStmt = $this->db->prepare('
+                SELECT p.id, p.name, p.description
+                FROM permissions p
+                JOIN role_permissions rp ON p.id = rp.permission_id
+                WHERE rp.role_id = ?
+                ORDER BY p.name
+            ');
+            $permStmt->execute([$id]);
+            $permissions = $permStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $role['permissions'] = $permissions;
+
+            return Response::json(['data' => $role], 200);
+        } catch (\Exception $e) {
+            return Response::error('Failed to fetch role: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * POST /api/roles - Create a new role
      */
     public function create(Request $request): Response
