@@ -17,6 +17,8 @@ class PermissionRegistry
      * Permissions organized by plugin ID
      *
      * Structure: ['plugin_id' => ['permission1', 'permission2']]
+     *
+     * @var array<string, array<string>> Permissions keyed by plugin ID
      */
     protected array $pluginPermissions = [];
 
@@ -42,7 +44,7 @@ class PermissionRegistry
      * dispatches a 'permission.registered' hook for monitoring/logging.
      *
      * @param string $pluginId The plugin ID
-     * @param array $permissions Array of permission strings
+     * @param array<string> $permissions Array of permission strings
      * @return void
      */
     public function registerPermissions(string $pluginId, array $permissions): void
@@ -82,7 +84,7 @@ class PermissionRegistry
      * Get permissions for a specific plugin
      *
      * @param string $pluginId The plugin ID
-     * @return array The permissions array for this plugin, or empty array if not registered
+     * @return array<string> The permissions array for this plugin, or empty array if not registered
      */
     public function getPluginPermissions(string $pluginId): array
     {
@@ -92,7 +94,7 @@ class PermissionRegistry
     /**
      * Get all active permissions from all registered plugins
      *
-     * @return array Permissions keyed by plugin ID
+     * @return array<string, array<string>> Permissions keyed by plugin ID
      */
     public function getAllActivePermissions(): array
     {
@@ -102,7 +104,7 @@ class PermissionRegistry
     /**
      * Get list of all registered plugin IDs
      *
-     * @return array Array of plugin IDs
+     * @return array<string> Array of plugin IDs
      */
     public function getRegisteredPlugins(): array
     {
