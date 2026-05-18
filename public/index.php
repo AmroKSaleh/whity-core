@@ -52,8 +52,9 @@ if ($isCli && isset($argv[1])) {
 
     if ($command === 'migrate') {
         $migrationsCommand = new \Whity\Cli\Commands\MigrationsCommand();
-        // Remove the command name from argv, pass remaining arguments
-        array_shift($argv);
+        // Remove script name and command name, pass remaining arguments
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'migrate' command
         exit($migrationsCommand->execute($argv));
     }
 
