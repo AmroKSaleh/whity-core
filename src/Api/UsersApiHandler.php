@@ -148,11 +148,12 @@ class UsersApiHandler
                 return Response::error('User ID is required', 400);
             }
 
+            $currentTenantId = TenantContext::getTenantId();
             $body = json_decode($request->getBody(), true);
 
-            // Get current user
-            $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ?');
-            $stmt->execute([$id]);
+            // Get user to update
+            $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?');
+            $stmt->execute([$id, $currentTenantId]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user) {
@@ -184,9 +185,9 @@ class UsersApiHandler
                 $params_array[] = password_hash($body['password'], PASSWORD_BCRYPT);
             }
 
+            // CRITICAL: role_id cannot be changed via this endpoint - prevents privilege escalation
             if (isset($body['role_id'])) {
-                $updates[] = 'role_id = ?';
-                $params_array[] = $body['role_id'];
+                return Response::error('Role changes are not allowed via this endpoint', 403);
             }
 
             if (empty($updates)) {
@@ -215,14 +216,15 @@ class UsersApiHandler
                 return Response::error('User ID is required', 400);
             }
 
-            $stmt = $this->db->prepare('SELECT id FROM users WHERE id = ?');
-            $stmt->execute([$id]);
+            $currentTenantId = TenantContext::getTenantId();
+            $stmt = $this->db->prepare('SELECT id FROM users WHERE id = ? AND tenant_id = ?');
+            $stmt->execute([$id, $currentTenantId]);
             if (!$stmt->fetch()) {
                 return Response::error('User not found', 404);
             }
 
-            $deleteStmt = $this->db->prepare('DELETE FROM users WHERE id = ?');
-            $deleteStmt->execute([$id]);
+            $deleteStmt = $this->db->prepare('DELETE FROM users WHERE id = ? AND tenant_id = ?');
+            $deleteStmt->execute([$id, $currentTenantId]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'User deleted']], 200);
         } catch (\Exception $e) {

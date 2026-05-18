@@ -74,6 +74,7 @@ use Whity\Api\PermissionsApiHandler;
 use Whity\Api\DeploymentApiHandler;
 use Whity\Api\PluginsApiHandler;
 use Whity\Api\MigrationsApiHandler;
+use Whity\Api\AdminApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Deployment\DeploymentManager;
@@ -189,6 +190,9 @@ $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migra
 $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');
 $router->register('POST', '/api/migrations/run', [$migrationsHandler, 'run'], 'admin');
 $router->register('POST', '/api/migrations/rollback', [$migrationsHandler, 'rollback'], 'admin');
+
+$adminHandler = new AdminApiHandler($db, __DIR__ . '/../database/migrations');
+$router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
 
 // Handle single request
 try {

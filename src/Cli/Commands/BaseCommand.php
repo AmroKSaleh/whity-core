@@ -84,10 +84,9 @@ abstract class BaseCommand
         $router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
 
         $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
+        // Only GET allowed - tenants can view their own info
+        // Create/update/delete restricted to system administrators (CLI only)
         $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
-        $router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], 'admin');
-        $router->register('PATCH', '/api/tenants/{id}', [$tenantsHandler, 'update'], 'admin');
-        $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'admin');
 
         $permissionsHandler = new PermissionsApiHandler($db->getPdo());
         $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
