@@ -111,4 +111,49 @@ class RoleChecker
 
         return array_map(static fn($row) => $row['permission_string'], $results);
     }
+
+    /**
+     * Get effective roles for a user including OU-inherited roles
+     *
+     * Returns roles from both direct assignment and OU membership.
+     * Uses a UNION query to combine:
+     * 1. User's direct role from users.role_id
+     * 2. Roles assigned to the user's OU via ou_role_assignments
+     *
+     * @param int $userId The user ID to query
+     * @param int $tenantId The tenant ID for scoping
+     * @return array<int, string> Map of role_id => role_name
+     */
+    public function getEffectiveRolesForUser(int $userId, int $tenantId): array
+    {
+        $sql = '
+            SELECT DISTINCT r.id, r.name
+            FROM roles r
+            WHERE r.id IN (
+                -- Direct role from users table
+                SELECT u.role_id FROM users u WHERE u.id = :userId AND u.tenant_id = :tenantId
+                UNION
+                -- Roles from OU assignments
+                SELECT ora.role_id FROM ou_role_assignments ora
+                WHERE ora.ou_id = (SELECT ou_id FROM users WHERE id = :userId AND tenant_id = :tenantId)
+                  AND ora.tenant_id = :tenantId
+            )
+        ';
+
+        $statement = $this->db->query($sql, [
+            ':userId' => $userId,
+            ':tenantId' => $tenantId
+        ]);
+        $results = $statement->fetchAll();
+
+        if ($results === false || empty($results)) {
+            return [];
+        }
+
+        $roles = [];
+        foreach ($results as $row) {
+            $roles[(int)$row['id']] = $row['name'];
+        }
+        return $roles;
+    }
 }
