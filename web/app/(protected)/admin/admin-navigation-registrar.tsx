@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import {
   IconDashboard,
   IconUsers,
@@ -10,62 +11,67 @@ import {
 import { useRegisterNavigationGroup, useRegisterNavigation } from '@/lib/navigation-context';
 
 export function AdminNavigationRegistrar() {
-  // Register admin group
-  useRegisterNavigationGroup({
+  // Memoize group to prevent infinite loops
+  const adminGroup = useMemo(() => ({
     id: 'admin',
     label: 'Admin',
     order: 1,
-  });
+  }), []);
 
-  // Register dashboard
-  useRegisterNavigation({
+  useRegisterNavigationGroup(adminGroup);
+
+  // Memoize items to prevent dependencies from changing
+  const dashboardItem = useMemo(() => ({
     id: 'dashboard',
     label: 'Dashboard',
     href: '/admin',
     icon: IconDashboard,
     group: 'admin',
     order: 1,
-  });
+  }), []);
 
-  // Register users
-  useRegisterNavigation({
+  const usersItem = useMemo(() => ({
     id: 'users',
     label: 'Users',
     href: '/admin/users',
     icon: IconUsers,
     group: 'admin',
     order: 2,
-  });
+  }), []);
 
-  // Register roles
-  useRegisterNavigation({
+  const rolesItem = useMemo(() => ({
     id: 'roles',
     label: 'Roles',
     href: '/admin/roles',
     icon: IconLock,
     group: 'admin',
     order: 3,
-  });
+  }), []);
 
-  // Register organizational units
-  useRegisterNavigation({
+  const ousItem = useMemo(() => ({
     id: 'ous',
     label: 'Organizational Units',
     href: '/admin/ous',
     icon: IconBuildingCommunity,
     group: 'admin',
     order: 4,
-  });
+  }), []);
 
-  // Register tenants
-  useRegisterNavigation({
+  const tenantsItem = useMemo(() => ({
     id: 'tenants',
     label: 'Tenants',
     href: '/admin/tenants',
     icon: IconBuilding,
     group: 'admin',
     order: 5,
-  });
+  }), []);
+
+  // Register each item
+  useRegisterNavigation(dashboardItem);
+  useRegisterNavigation(usersItem);
+  useRegisterNavigation(rolesItem);
+  useRegisterNavigation(ousItem);
+  useRegisterNavigation(tenantsItem);
 
   return null;
 }
