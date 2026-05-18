@@ -35,7 +35,7 @@ class AuthHandler
      *
      * Processes login requests by:
      * 1. Extracting email and password from request body
-     * 2. Querying users table with tenant_id = 1
+     * 2. Querying users table by email (globally unique)
      * 3. Verifying password using password_verify()
      * 4. Creating JWT token with user claims
      * 5. Returning token and user data on success or error on failure
@@ -56,13 +56,13 @@ class AuthHandler
         $email = $body['email'];
         $password = $body['password'];
 
-        // Query user by email and tenant_id
+        // Query user by email (globally unique)
         $stmt = $this->db->prepare('
-            SELECT id, email, password, role_id
+            SELECT id, email, password, role_id, tenant_id
             FROM users
-            WHERE tenant_id = ? AND email = ?
+            WHERE email = ?
         ');
-        $stmt->execute([1, $email]);
+        $stmt->execute([$email]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         // User not found
@@ -86,9 +86,10 @@ class AuthHandler
 
         $roleName = $roleData['name'];
 
-        // Create JWT token
+        // Create JWT token with tenant_id for multi-tenant isolation
         $token = $this->jwtParser->create([
             'user_id' => $user['id'],
+            'tenant_id' => $user['tenant_id'],
             'email' => $user['email'],
             'role' => $roleName
         ], 86400); // 24 hours expiration
