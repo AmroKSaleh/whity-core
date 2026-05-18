@@ -215,6 +215,9 @@ $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage
 // 10. Register authentication handler
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
+$router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
+$router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);
+$router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], null);
 
 // 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
