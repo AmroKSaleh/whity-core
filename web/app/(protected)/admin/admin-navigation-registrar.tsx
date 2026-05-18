@@ -5,7 +5,7 @@ import {
   IconUsers,
   IconLock,
   IconBuilding,
-  IconOrganization,
+  IconBuildingCommunity,
 } from '@tabler/icons-react';
 import { useRegisterNavigationGroup, useRegisterNavigation } from '@/lib/navigation-context';
 
@@ -52,7 +52,7 @@ export function AdminNavigationRegistrar() {
     id: 'ous',
     label: 'Organizational Units',
     href: '/admin/ous',
-    icon: IconOrganization,
+    icon: IconBuildingCommunity,
     group: 'admin',
     order: 4,
   });

@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Sidebar } from '@/components/sidebar';
+import { AdminNavigationRegistrar } from './admin/admin-navigation-registrar';
 
 export default function ProtectedLayout({
   children,
@@ -34,16 +35,19 @@ export default function ProtectedLayout({
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
-      {/* Sidebar - responsive widths handled in component */}
-      <Sidebar />
+    <>
+      <AdminNavigationRegistrar />
+      <div className="flex min-h-screen bg-background">
+        {/* Sidebar - responsive widths handled in component */}
+        <Sidebar />
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="p-6 md:p-8 max-w-7xl">
-          {children}
-        </div>
-      </main>
-    </div>
+        {/* Main Content */}
+        <main className="flex-1 overflow-auto">
+          <div className="p-6 md:p-8 max-w-7xl">
+            {children}
+          </div>
+        </main>
+      </div>
+    </>
   );
 }
