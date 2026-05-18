@@ -14,17 +14,17 @@ class CreateSystemTenant
 {
     public static function up(Database $db): void
     {
-        // Insert system tenant with explicit ID 0
-        // PostgreSQL allows INSERT with explicit serial value if we use setval to update sequence
-        $db->exec('ALTER SEQUENCE tenants_id_seq RESTART WITH 0');
+        // Allow sequence to include 0 as a valid value for system tenant
+        $db->exec('ALTER SEQUENCE tenants_id_seq MINVALUE 0');
 
+        // Insert system tenant with explicit ID 0
         $db->query(
             'INSERT INTO tenants (id, name, created_at) VALUES (0, :name, NOW()) ON CONFLICT DO NOTHING',
             [':name' => 'System']
         );
 
-        // Reset sequence to start at 1 for normal tenants
-        $db->exec('ALTER SEQUENCE tenants_id_seq RESTART WITH 1');
+        // Reset sequence to start at 1 for normal tenants (and restore MINVALUE)
+        $db->exec('ALTER SEQUENCE tenants_id_seq RESTART WITH 1 MINVALUE 1');
 
         // Create system admin user
         $adminPassword = password_hash('system_admin_123', PASSWORD_BCRYPT);

@@ -50,9 +50,18 @@ if ($isCli && isset($argv[1])) {
         exit($className::execute($argv));
     }
 
+    if ($command === 'migrate') {
+        $migrationsCommand = new \Whity\Cli\Commands\MigrationsCommand();
+        // Remove script name and command name, pass remaining arguments
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'migrate' command
+        exit($migrationsCommand->execute($argv));
+    }
+
     echo "Unknown command: {$command}\n";
     echo "Available commands:\n";
     echo "  generate:openapi    Generate OpenAPI 3.0 schema\n";
+    echo "  migrate             Manage database migrations\n";
     exit(1);
 }
 
@@ -238,9 +247,9 @@ $router->register('POST', '/api/plugins/{id}/disable', [$pluginsHandler, 'disabl
 $router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], 'admin');
 
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
+// Only allow read-only access to migration status via API
+// Mutations (run/rollback) are performed via CLI only for security
 $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');
-$router->register('POST', '/api/migrations/run', [$migrationsHandler, 'run'], 'admin');
-$router->register('POST', '/api/migrations/rollback', [$migrationsHandler, 'rollback'], 'admin');
 
 $adminHandler = new AdminApiHandler($db, __DIR__ . '/../database/migrations');
 $router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
