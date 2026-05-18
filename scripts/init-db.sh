@@ -38,10 +38,10 @@ done
 
 # Create database if it doesn't exist
 echo -e "${YELLOW}Creating database '${DB_NAME}'...${NC}"
-if docker exec whity_postgres psql -U ${DB_USER} -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
+if docker exec whity_postgres psql -U ${DB_USER} -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1; then
     echo -e "${GREEN}✓ Database already exists${NC}"
 else
-    docker exec whity_postgres psql -U ${DB_USER} -c "CREATE DATABASE ${DB_NAME};"
+    docker exec whity_postgres psql -U ${DB_USER} -d postgres -c "CREATE DATABASE ${DB_NAME};"
     echo -e "${GREEN}✓ Database created${NC}"
 fi
 
