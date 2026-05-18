@@ -40,6 +40,11 @@ class EnforceTenantIsolation
      */
     public function handle(Request $request, callable $next): Response
     {
+        // Skip tenant isolation for public endpoints (no JWT required)
+        if ($this->isPublicRoute($request->getPath())) {
+            return $next($request);
+        }
+
         // Extract Authorization header
         $authHeader = $request->getHeader('Authorization');
 
@@ -93,5 +98,21 @@ class EnforceTenantIsolation
     {
         // Remove "Bearer " prefix and return the token
         return substr($authHeader, 7);
+    }
+
+    /**
+     * Check if a route is public (doesn't require tenant context)
+     *
+     * @param string $path The request path
+     * @return bool True if the route is public
+     */
+    private function isPublicRoute(string $path): bool
+    {
+        // Public routes that don't require JWT/tenant context
+        $publicRoutes = [
+            '/api/login',
+        ];
+
+        return in_array($path, $publicRoutes, true);
     }
 }
