@@ -16,10 +16,12 @@ use PDO;
 class TenantsApiHandler
 {
     private PDO $db;
+    private HookManager $hookManager;
 
-    public function __construct(PDO $db)
+    public function __construct(PDO $db, HookManager $hookManager)
     {
         $this->db = $db;
+        $this->hookManager = $hookManager;
     }
 
     /**
@@ -80,8 +82,7 @@ class TenantsApiHandler
             }
 
             // Dispatch filter hook before creating tenant
-            $hookManager = app(HookManager::class);
-            $tenantData = $hookManager->dispatch('tenant.creating', [
+            $tenantData = $this->hookManager->dispatch('tenant.creating', [
                 'name' => $name,
                 'slug' => $slug,
             ]);
@@ -99,14 +100,14 @@ class TenantsApiHandler
             $tenantId = $this->db->lastInsertId();
 
             // Dispatch synchronous hook after tenant is created
-            $hookManager->dispatch('tenant.created', [
+            $this->hookManager->dispatch('tenant.created', [
                 'id' => (int)$tenantId,
                 'name' => $name,
                 'slug' => $slug,
             ]);
 
             // Dispatch asynchronous hook for background tasks
-            $hookManager->dispatchAsync('tenant.created.async', [
+            $this->hookManager->dispatchAsync('tenant.created.async', [
                 'id' => (int)$tenantId,
                 'name' => $name,
             ]);
@@ -148,8 +149,7 @@ class TenantsApiHandler
             }
 
             // Dispatch filter hook before updating tenant
-            $hookManager = app(HookManager::class);
-            $hookManager->dispatch('tenant.updating', [
+            $this->hookManager->dispatch('tenant.updating', [
                 'id' => (int)$id,
                 'changes' => $body,
             ]);
@@ -190,7 +190,7 @@ class TenantsApiHandler
             }
 
             // Dispatch synchronous hook after tenant is updated
-            $hookManager->dispatch('tenant.updated', [
+            $this->hookManager->dispatch('tenant.updated', [
                 'id' => (int)$id,
                 'changes' => $body,
             ]);
@@ -227,8 +227,7 @@ class TenantsApiHandler
             }
 
             // Dispatch filter hook before deleting tenant
-            $hookManager = app(HookManager::class);
-            $hookManager->dispatch('tenant.deleting', [
+            $this->hookManager->dispatch('tenant.deleting', [
                 'id' => (int)$id,
             ]);
 
@@ -237,12 +236,12 @@ class TenantsApiHandler
             $deleteStmt->execute([$id]);
 
             // Dispatch synchronous hook after tenant is deleted
-            $hookManager->dispatch('tenant.deleted', [
+            $this->hookManager->dispatch('tenant.deleted', [
                 'id' => (int)$id,
             ]);
 
             // Dispatch asynchronous hook for background tasks
-            $hookManager->dispatchAsync('tenant.deleted.async', [
+            $this->hookManager->dispatchAsync('tenant.deleted.async', [
                 'id' => (int)$id,
             ]);
 

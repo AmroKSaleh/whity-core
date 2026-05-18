@@ -16,10 +16,12 @@ use PDO;
 class RolesApiHandler
 {
     private PDO $db;
+    private HookManager $hookManager;
 
-    public function __construct(PDO $db)
+    public function __construct(PDO $db, HookManager $hookManager)
     {
         $this->db = $db;
+        $this->hookManager = $hookManager;
     }
 
     /**
@@ -119,8 +121,8 @@ class RolesApiHandler
             }
 
             // Dispatch filter hook before creating role
-            $hookManager = app(HookManager::class);
-            $roleData = $hookManager->dispatch('role.creating', [
+            // Use injected hookManager
+            $roleData = $this->hookManager->dispatch('role.creating', [
                 'name' => $name,
                 'description' => $description,
                 'permissions' => $permissions,
@@ -151,7 +153,7 @@ class RolesApiHandler
             }
 
             // Dispatch synchronous hook after role is created
-            $hookManager->dispatch('role.created', [
+            $this->hookManager->dispatch('role.created', [
                 'id' => (int)$roleId,
                 'name' => $name,
                 'description' => $description,
@@ -159,7 +161,7 @@ class RolesApiHandler
             ]);
 
             // Dispatch asynchronous hook for background tasks
-            $hookManager->dispatchAsync('role.created.async', [
+            $this->hookManager->dispatchAsync('role.created.async', [
                 'id' => (int)$roleId,
                 'name' => $name,
             ]);
@@ -200,8 +202,8 @@ class RolesApiHandler
             }
 
             // Dispatch filter hook before updating role
-            $hookManager = app(HookManager::class);
-            $hookManager->dispatch('role.updating', [
+            // Use injected hookManager
+            $this->hookManager->dispatch('role.updating', [
                 'id' => (int)$id,
                 'changes' => $body,
             ]);
@@ -251,7 +253,7 @@ class RolesApiHandler
             }
 
             // Dispatch synchronous hook after role is updated
-            $hookManager->dispatch('role.updated', [
+            $this->hookManager->dispatch('role.updated', [
                 'id' => (int)$id,
                 'changes' => $body,
             ]);
@@ -288,8 +290,8 @@ class RolesApiHandler
             }
 
             // Dispatch filter hook before deleting role
-            $hookManager = app(HookManager::class);
-            $hookManager->dispatch('role.deleting', [
+            // Use injected hookManager
+            $this->hookManager->dispatch('role.deleting', [
                 'id' => (int)$id,
             ]);
 
@@ -302,12 +304,12 @@ class RolesApiHandler
             $deleteStmt->execute([$id]);
 
             // Dispatch synchronous hook after role is deleted
-            $hookManager->dispatch('role.deleted', [
+            $this->hookManager->dispatch('role.deleted', [
                 'id' => (int)$id,
             ]);
 
             // Dispatch asynchronous hook for background tasks
-            $hookManager->dispatchAsync('role.deleted.async', [
+            $this->hookManager->dispatchAsync('role.deleted.async', [
                 'id' => (int)$id,
             ]);
 

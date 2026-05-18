@@ -72,6 +72,7 @@ use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
 use Whity\Api\PermissionsApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\Hooks\HookManager;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -101,6 +102,9 @@ if (file_exists($envFile)) {
 // Require composer autoloader
 require dirname(__DIR__) . '/vendor/autoload.php';
 
+// Require helpers
+require dirname(__DIR__) . '/src/helpers.php';
+
 // 1. Initialize database connection
 $db = Database::connect();
 
@@ -112,6 +116,10 @@ $jwtParser = new JwtParser($_ENV['JWT_SECRET'] ?? 'dev_secret');
 
 // 4. Initialize permission registry
 $permissionRegistry = new PermissionRegistry();
+
+// 4b. Initialize hook manager and register in service container
+$hookManager = new HookManager();
+\Whity\register_service(HookManager::class, $hookManager);
 
 // 5. Initialize role checker
 $roleChecker = new RoleChecker($db, $permissionRegistry);
@@ -136,13 +144,13 @@ $authHandler = new AuthHandler($db->getPdo(), $jwtParser);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 
 // 11. Register API handlers
-$usersHandler = new UsersApiHandler($db->getPdo());
+$usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/users', [$usersHandler, 'list'], 'admin');
 $router->register('POST', '/api/users', [$usersHandler, 'create'], 'admin');
 $router->register('PATCH', '/api/users/{id}', [$usersHandler, 'update'], 'admin');
 $router->register('DELETE', '/api/users/{id}', [$usersHandler, 'delete'], 'admin');
 
-$rolesHandler = new RolesApiHandler($db->getPdo());
+$rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
 $router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
 $router->register('GET', '/api/roles/{id}', [$rolesHandler, 'get'], 'admin');
@@ -150,7 +158,7 @@ $router->register('PATCH', '/api/roles/{id}', [$rolesHandler, 'update'], 'admin'
 $router->register('DELETE', '/api/roles/{id}', [$rolesHandler, 'delete'], 'admin');
 $router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
 
-$tenantsHandler = new TenantsApiHandler($db->getPdo());
+$tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
 $router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], 'admin');
 $router->register('PATCH', '/api/tenants/{id}', [$tenantsHandler, 'update'], 'admin');

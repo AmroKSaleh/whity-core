@@ -17,10 +17,12 @@ use PDO;
 class UsersApiHandler
 {
     private PDO $db;
+    private HookManager $hookManager;
 
-    public function __construct(PDO $db)
+    public function __construct(PDO $db, HookManager $hookManager)
     {
         $this->db = $db;
+        $this->hookManager = $hookManager;
     }
 
     /**
@@ -88,8 +90,7 @@ class UsersApiHandler
             }
 
             // Dispatch filter hook before creating user
-            $hookManager = app(HookManager::class);
-            $userData = $hookManager->dispatch('user.creating', [
+            $userData = $this->hookManager->dispatch('user.creating', [
                 'email' => $email,
                 'password' => $body['password'], // Pass plaintext password to hooks
                 'role_id' => $roleId,
@@ -110,7 +111,7 @@ class UsersApiHandler
             $userId = $this->db->lastInsertId();
 
             // Dispatch synchronous hook after user is created
-            $hookManager->dispatch('user.created', [
+            $this->hookManager->dispatch('user.created', [
                 'id' => (int)$userId,
                 'email' => $email,
                 'role_id' => (int)$roleId,
@@ -118,7 +119,7 @@ class UsersApiHandler
             ]);
 
             // Dispatch asynchronous hook for background tasks
-            $hookManager->dispatchAsync('user.created.async', [
+            $this->hookManager->dispatchAsync('user.created.async', [
                 'id' => (int)$userId,
                 'email' => $email,
             ]);
