@@ -37,6 +37,7 @@ class AuthHandlerTest extends TestCase
         $mockUserStatement = $this->createMock(PDOStatement::class);
         $mockUserStatement->method('fetch')->willReturn([
             'id' => 1,
+            'tenant_id' => 1,
             'email' => 'admin@whity.local',
             'password' => $hashedPassword,
             'role_id' => 1
@@ -93,6 +94,7 @@ class AuthHandlerTest extends TestCase
         $mockStatement = $this->createMock(PDOStatement::class);
         $mockStatement->method('fetch')->willReturn([
             'id' => 1,
+            'tenant_id' => 1,
             'email' => 'admin@whity.local',
             'password' => $hashedPassword,
             'role_id' => 1
