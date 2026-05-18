@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { apiClient } from './api-client';
 
 interface User {
   id: number;
@@ -9,12 +10,11 @@ interface User {
 }
 
 interface AuthContextType {
-  token: string | null;
   user: User | null;
   isLoading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   isAuthenticated: () => boolean;
   apiClient: (
     url: string,
@@ -24,77 +24,39 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-interface JWTPayload {
-  exp?: number;
-  id?: number;
-  email?: string;
-  role?: string;
-  [key: string]: any;
-}
-
-function decodeJWT(token: string): JWTPayload | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return null;
-    }
-    const payload = parts[1];
-    const decoded = atob(payload);
-    return JSON.parse(decoded);
-  } catch (error) {
-    return null;
-  }
-}
-
-function isTokenExpired(token: string): boolean {
-  const payload = decodeJWT(token);
-  if (!payload || !payload.exp) {
-    return true;
-  }
-  const expiryTime = payload.exp * 1000; // Convert to milliseconds
-  return Date.now() >= expiryTime;
-}
-
 interface AuthProviderProps {
   children: ReactNode;
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize from localStorage on mount
+  // Boot sequence: Initialize from /api/me on mount
   useEffect(() => {
-    const storedToken = localStorage.getItem('whity_auth_token');
+    const initializeAuth = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const response = await fetch(`${apiUrl}/api/me`, {
+          credentials: 'include', // Browser will auto-attach httpOnly cookies
+        });
 
-    if (storedToken) {
-      // Check if token is expired
-      if (isTokenExpired(storedToken)) {
-        localStorage.removeItem('whity_auth_token');
-        setToken(null);
-        setUser(null);
-      } else {
-        // Decode token and extract user info
-        const payload = decodeJWT(storedToken);
-        const userId = payload?.id || payload?.user_id;
-        if (payload && userId && payload.email) {
-          setToken(storedToken);
-          setUser({
-            id: userId,
-            email: payload.email,
-            role: payload.role || '',
-          });
+        if (response.ok) {
+          const data = await response.json();
+          setUser(data.user);
         } else {
-          localStorage.removeItem('whity_auth_token');
-          setToken(null);
           setUser(null);
         }
+      } catch (error) {
+        // Network error or no session - user is not authenticated
+        setUser(null);
+      } finally {
+        setIsLoading(false);
       }
-    }
+    };
 
-    setIsLoading(false);
+    initializeAuth();
   }, []);
 
   const login = async (email: string, password: string): Promise<void> => {
@@ -109,6 +71,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email, password }),
+        credentials: 'include', // Browser will auto-set httpOnly cookies
       });
 
       if (!response.ok) {
@@ -117,26 +80,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json();
-      const authToken = data.token;
-
-      // Store token in localStorage
-      localStorage.setItem('whity_auth_token', authToken);
-      setToken(authToken);
-
-      // Decode and set user from response or token
-      if (data.user) {
-        setUser(data.user);
-      } else {
-        const payload = decodeJWT(authToken);
-        const userId = payload?.id || payload?.user_id;
-        if (payload && userId && payload.email) {
-          setUser({
-            id: userId,
-            email: payload.email,
-            role: payload.role || '',
-          });
-        }
-      }
+      // Extract user from response (token is set as httpOnly cookie by server)
+      setUser(data.user);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Login failed';
       setError(errorMessage);
@@ -146,52 +91,40 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const logout = (): void => {
-    setToken(null);
-    setUser(null);
-    setError(null);
-    localStorage.removeItem('whity_auth_token');
+  const logout = async (): Promise<void> => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      await fetch(`${apiUrl}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('Logout request failed:', error);
+    } finally {
+      setUser(null);
+      setError(null);
+    }
   };
 
   const isAuthenticated = useCallback((): boolean => {
-    return !!token && !!user;
-  }, [token, user]);
+    return !!user;
+  }, [user]);
 
-  const apiClient = async (
-    url: string,
-    options?: RequestInit
-  ): Promise<Response> => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const fullUrl = url.startsWith('http') ? url : `${apiUrl}${url}`;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(typeof options?.headers === 'object' && !Array.isArray(options.headers)
-        ? (options.headers as Record<string, string>)
-        : {}),
-    };
-
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const response = await fetch(fullUrl, {
-      ...options,
-      headers,
-    });
-
-    return response;
-  };
+  const apiClientFunc = useCallback(
+    (url: string, options?: RequestInit): Promise<Response> => {
+      return apiClient(url, options);
+    },
+    []
+  );
 
   const value: AuthContextType = {
-    token,
     user,
     isLoading,
     error,
     login,
     logout,
     isAuthenticated,
-    apiClient,
+    apiClient: apiClientFunc,
   };
 
   return (

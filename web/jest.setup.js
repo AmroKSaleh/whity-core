@@ -1,4 +1,6 @@
 // jest.setup.js
+import '@testing-library/jest-dom';
+
 // Polyfill Response for node environment
 if (typeof global.Response === 'undefined') {
   global.Response = class Response {

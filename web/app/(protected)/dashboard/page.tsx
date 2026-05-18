@@ -53,7 +53,7 @@ export default function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle>Authentication Details</CardTitle>
-          <CardDescription>Your JWT token and user information</CardDescription>
+          <CardDescription>Your user information</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Email */}
@@ -62,14 +62,11 @@ export default function DashboardPage() {
             <p className="mt-2 font-mono text-sm bg-muted p-3 rounded">{auth.user?.email}</p>
           </div>
 
-          {/* Token Preview */}
+          {/* Auth Note */}
           <div>
-            <label className="text-sm font-medium text-muted-foreground">JWT Token (First 100 chars)</label>
-            <p className="mt-2 font-mono text-xs bg-muted p-3 rounded break-all">
-              {auth.token ? auth.token.substring(0, 100) + '...' : 'Not available'}
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Use this token with the API by adding: <code className="bg-muted px-2 py-1 rounded">Authorization: Bearer {'{token}'}</code>
+            <label className="text-sm font-medium text-muted-foreground">Authentication Method</label>
+            <p className="mt-2 text-sm text-muted-foreground">
+              You are authenticated using secure httpOnly cookies. Your JWT token is stored securely on the server and is not accessible from JavaScript for security purposes.
             </p>
           </div>
         </CardContent>
