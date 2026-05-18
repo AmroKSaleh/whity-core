@@ -20,7 +20,9 @@ class GenerateOpenApiSchemaCommandTest extends TestCase
 
     public function testGenerateOpenApiSchemaCommand(): void
     {
+        ob_start();
         $result = GenerateOpenApiSchemaCommand::execute(['generate:openapi']);
+        ob_end_clean();
 
         $this->assertEquals(0, $result);
         $this->assertFileExists($this->outputPath);
@@ -28,7 +30,9 @@ class GenerateOpenApiSchemaCommandTest extends TestCase
 
     public function testGeneratedSchemaIsValidJson(): void
     {
+        ob_start();
         GenerateOpenApiSchemaCommand::execute(['generate:openapi']);
+        ob_end_clean();
 
         $content = file_get_contents($this->outputPath);
         $spec = json_decode($content, true);
@@ -40,7 +44,9 @@ class GenerateOpenApiSchemaCommandTest extends TestCase
 
     public function testGeneratedSchemaHasRequiredComponents(): void
     {
+        ob_start();
         GenerateOpenApiSchemaCommand::execute(['generate:openapi']);
+        ob_end_clean();
 
         $content = file_get_contents($this->outputPath);
         $spec = json_decode($content, true);
