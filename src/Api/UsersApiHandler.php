@@ -4,6 +4,8 @@ namespace Whity\Api;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Hooks\HookManager;
+use Whity\Core\Tenant\TenantContext;
 use PDO;
 
 /**
@@ -22,18 +24,21 @@ class UsersApiHandler
     }
 
     /**
-     * GET /api/users - List all users
+     * GET /api/users - List all users for current tenant
      */
     public function list(Request $request): Response
     {
         try {
+            $tenantId = TenantContext::getTenantId();
+
             $stmt = $this->db->prepare('
                 SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
                 FROM users u
                 JOIN roles r ON u.role_id = r.id
+                WHERE u.tenant_id = ?
                 ORDER BY u.created_at DESC
             ');
-            $stmt->execute();
+            $stmt->execute([$tenantId]);
             $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             // Remove password from response
@@ -73,7 +78,7 @@ class UsersApiHandler
             $email = $body['email'];
             $password = password_hash($body['password'], PASSWORD_BCRYPT);
             $roleId = $body['role_id'] ?? 2; // Default to 'user' role
-            $tenantId = $body['tenant_id'] ?? 1; // Default to tenant 1
+            $tenantId = TenantContext::getTenantId();
 
             // Check if email already exists
             $checkStmt = $this->db->prepare('SELECT id FROM users WHERE email = ? AND tenant_id = ?');
@@ -81,6 +86,19 @@ class UsersApiHandler
             if ($checkStmt->fetch()) {
                 return Response::error('Email already exists for this tenant', 409);
             }
+
+            // Dispatch filter hook before creating user
+            $hookManager = app(HookManager::class);
+            $userData = $hookManager->dispatch('user.creating', [
+                'email' => $email,
+                'password' => $body['password'], // Pass plaintext password to hooks
+                'role_id' => $roleId,
+            ]);
+
+            // Extract potentially modified data from hook response
+            $email = $userData['email'];
+            $roleId = $userData['role_id'];
+            $password = password_hash($userData['password'], PASSWORD_BCRYPT);
 
             // Insert new user
             $stmt = $this->db->prepare('
@@ -90,6 +108,20 @@ class UsersApiHandler
             $stmt->execute([$email, $password, $roleId, $tenantId]);
 
             $userId = $this->db->lastInsertId();
+
+            // Dispatch synchronous hook after user is created
+            $hookManager->dispatch('user.created', [
+                'id' => (int)$userId,
+                'email' => $email,
+                'role_id' => (int)$roleId,
+                'tenant_id' => (int)$tenantId
+            ]);
+
+            // Dispatch asynchronous hook for background tasks
+            $hookManager->dispatchAsync('user.created.async', [
+                'id' => (int)$userId,
+                'email' => $email,
+            ]);
 
             return Response::json([
                 'data' => [
