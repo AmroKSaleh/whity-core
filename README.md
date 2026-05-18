@@ -12,6 +12,7 @@ Whity Core is the foundational framework for building data-driven applications w
 - ✅ **RBAC Tenant Isolation** — All queries filtered by tenant_id, enforced at database layer
 - ✅ **OpenAPI-First** — Backend generates schema, frontend/mobile auto-generate types
 - ✅ **Zero-Downtime Updates** — Atomic code overlay + schema migrations + auto-rollback
+- ✅ **CLI Operations** — Command-line interface for migrations, plugins, and tenants
 
 ## Architecture
 
@@ -46,7 +47,7 @@ cd whity-core
 docker-compose up
 
 # Run migrations
-docker-compose exec frankenphp php whity migrate
+php bin/whity-cli migrate run
 
 # Health check
 curl http://localhost:8000/api/health
