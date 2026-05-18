@@ -70,6 +70,7 @@ use Whity\Api\UsersApiHandler;
 use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
 use Whity\Api\PermissionsApiHandler;
+use Whity\Core\RBAC\PermissionRegistry;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -108,24 +109,27 @@ $router = new Router();
 // 3. Initialize JWT parser
 $jwtParser = new JwtParser($_ENV['JWT_SECRET'] ?? 'dev_secret');
 
-// 4. Initialize role checker
-$roleChecker = new RoleChecker($db);
+// 4. Initialize permission registry
+$permissionRegistry = new PermissionRegistry();
 
-// 5. Initialize RBAC middleware
+// 5. Initialize role checker
+$roleChecker = new RoleChecker($db, $permissionRegistry);
+
+// 6. Initialize RBAC middleware
 $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
 
-// 6. Initialize plugin loader and load plugins
+// 7. Initialize plugin loader and load plugins
 $pluginLoader = new PluginLoader(__DIR__ . '/../plugins', $router);
 $pluginLoader->load();
 
-// 7. Initialize HTTP kernel
+// 8. Initialize HTTP kernel
 $kernel = new HttpKernel($router, $rbacMiddleware);
 
-// 8. Register authentication handler
+// 9. Register authentication handler
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 
-// 9. Register API handlers
+// 10. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo());
 $router->register('GET', '/api/users', [$usersHandler, 'list'], 'admin');
 $router->register('POST', '/api/users', [$usersHandler, 'create'], 'admin');
