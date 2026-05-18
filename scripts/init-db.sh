@@ -45,9 +45,14 @@ else
     echo -e "${GREEN}✓ Database created${NC}"
 fi
 
-# Run migrations
+# Run migrations via CLI (no authentication required)
 echo -e "${YELLOW}Running migrations...${NC}"
-php public/index.php migrations:run 2>/dev/null || true
+if docker exec whity_frankenphp php public/index.php migrate run > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Migrations completed${NC}"
+else
+    echo -e "${RED}✗ Migrations failed${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}✓ Database initialization complete${NC}"
 echo ""
