@@ -7,7 +7,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}🚀 Starting Whity Core Development Servers${NC}"
-echo -e "${YELLOW}Backend (FrankenPHP):${NC} http://localhost:8000"
+echo -e "${YELLOW}Backend (FrankenPHP + PostgreSQL):${NC} http://localhost:8000"
 echo -e "${YELLOW}Frontend (Next.js):${NC} http://localhost:3000"
 echo ""
 echo -e "${YELLOW}Press Ctrl+C to stop all servers${NC}"
@@ -17,8 +17,9 @@ echo ""
 cleanup() {
     echo ""
     echo -e "${YELLOW}Stopping servers...${NC}"
-    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
-    wait $BACKEND_PID $FRONTEND_PID 2>/dev/null
+    kill $FRONTEND_PID 2>/dev/null
+    docker-compose down 2>/dev/null
+    wait $FRONTEND_PID 2>/dev/null
     echo -e "${GREEN}✓ All servers stopped${NC}"
     exit 0
 }
@@ -26,13 +27,14 @@ cleanup() {
 # Set trap to cleanup on Ctrl+C
 trap cleanup SIGINT SIGTERM
 
-# Start FrankenPHP backend
-echo -e "${GREEN}Starting backend...${NC}"
-frankenphp run --config /etc/frankenphp/Caddyfile --adapter caddyfile &
-BACKEND_PID=$!
+# Start Docker services (FrankenPHP + PostgreSQL)
+echo -e "${GREEN}Starting backend services...${NC}"
+docker-compose up &
+DOCKER_PID=$!
 
-# Wait a moment for backend to start
-sleep 2
+# Wait a moment for backend to be ready
+echo -e "${YELLOW}Waiting for backend to be ready...${NC}"
+sleep 5
 
 # Start Next.js frontend
 echo -e "${GREEN}Starting frontend...${NC}"
