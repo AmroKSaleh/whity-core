@@ -105,26 +105,25 @@ class HookManagerTest extends TestCase
      */
     public function testDispatchAsyncQueuesPayload(): void
     {
-        // Mock the Queue class
-        $queueMock = $this->createMock(Queue::class);
-        $queueMock->expects($this->once())
-            ->method('push')
+        TenantContext::setTenantId(1);
+
+        // Mock the logger to verify async dispatch calls Queue::push
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('info')
             ->with(
-                $this->equalTo('whity-core-async-hooks'),
-                $this->callback(function($payload) {
-                    return is_array($payload) && isset($payload['_context']);
+                $this->equalTo('Async Job Queued on [whity-core-async-hooks]'),
+                $this->callback(function($context) {
+                    return isset($context['queue']) &&
+                           $context['queue'] === 'whity-core-async-hooks' &&
+                           isset($context['payload']) &&
+                           isset($context['payload']['_context']);
                 })
             );
 
-        TenantContext::setTenantId(1);
+        Queue::setLogger($logger);
 
-        // Use reflection to inject mock
-        $reflection = new \ReflectionClass($this->hookManager);
-        $property = $reflection->getProperty('queue');
-        $property->setAccessible(true);
-        $property->setValue($this->hookManager, $queueMock);
-
-        // This should not throw
+        // This should not throw and should queue the payload
         $this->hookManager->dispatchAsync('test_event', ['key' => 'value']);
     }
 

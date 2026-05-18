@@ -24,19 +24,6 @@ class HookManager
     protected array $listeners = [];
 
     /**
-     * Queue instance for async hook dispatching
-     */
-    protected Queue $queue;
-
-    /**
-     * Constructor
-     */
-    public function __construct()
-    {
-        $this->queue = new Queue();
-    }
-
-    /**
      * Register a listener for an event
      *
      * @param string $eventName The event to listen for
@@ -115,7 +102,7 @@ class HookManager
         ];
 
         // Queue the payload for async processing
-        $this->queue->push('whity-core-async-hooks', $payload);
+        Queue::push('whity-core-async-hooks', $payload);
     }
 
     /**
