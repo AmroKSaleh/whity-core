@@ -30,7 +30,7 @@ class RolesApiHandler
         try {
             $stmt = $this->db->prepare('
                 SELECT r.id, r.name, r.description, r.created_at,
-                       COUNT(rp.id) as permissionCount
+                       COUNT(rp.id) as permission_count
                 FROM roles r
                 LEFT JOIN role_permissions rp ON r.id = rp.role_id
                 GROUP BY r.id
@@ -38,6 +38,13 @@ class RolesApiHandler
             ');
             $stmt->execute();
             $roles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Normalize keys to camelCase
+            $roles = array_map(function ($role) {
+                $role['permissionCount'] = (int)($role['permission_count'] ?? 0);
+                unset($role['permission_count']);
+                return $role;
+            }, $roles);
 
             return Response::json(['data' => $roles], 200);
         } catch (\Exception $e) {
