@@ -118,6 +118,7 @@ class EnforceTenantIsolation
         // Public routes that don't require JWT/tenant context
         $publicRoutes = [
             '/api/login',
+            '/api/navigation',
         ];
 
         return in_array($path, $publicRoutes, true);

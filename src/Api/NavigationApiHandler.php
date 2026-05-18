@@ -21,12 +21,11 @@ class NavigationApiHandler
     public function list(Request $request): Response
     {
         try {
-            $items = [];
-
             // Dispatch hook for plugins to register navigation items
-            $this->hookManager->dispatch('navigation.register', [
-                'items' => &$items,
+            $result = $this->hookManager->dispatch('navigation.register', [
+                'items' => [],
             ]);
+            $items = $result['items'] ?? [];
 
             // Sort items by group then by order
             usort($items, function ($a, $b) {

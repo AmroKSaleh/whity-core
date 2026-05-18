@@ -32,7 +32,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
-  const { groups, getGroupedItems } = useNavigation();
+  const { items, getGroupedItems } = useNavigation();
   const groupedItems = getGroupedItems();
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -130,21 +130,21 @@ export function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 p-2 space-y-3 overflow-y-auto">
-          {Array.from(groupedItems.entries()).map(([groupId, items]) => {
-            if (items.length === 0) return null;
+          {Array.from(groupedItems.entries()).map(([groupId, navItems]) => {
+            if (navItems.length === 0) return null;
 
-            const group = groups.find((g) => g.id === groupId);
             const isUngrouped = groupId === '_ungrouped';
+            const groupLabel = groupId.charAt(0).toUpperCase() + groupId.slice(1);
 
             return (
               <div key={groupId}>
-                {!isUngrouped && group && (
+                {!isUngrouped && (
                   <div className={`text-xs font-semibold uppercase text-muted-foreground px-2 mb-2 ${isCollapsed && !isMobile ? 'text-center' : ''}`}>
-                    {!isCollapsed && !isMobile ? group.label : ''}
+                    {!isCollapsed && !isMobile ? groupLabel : ''}
                   </div>
                 )}
                 <div className="space-y-1">
-                  {items.map((item, index) => {
+                  {navItems.map((item, index) => {
                     const Icon = iconMap[item.icon] || IconDashboard;
                     const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
 

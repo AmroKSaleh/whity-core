@@ -129,7 +129,8 @@ $hookManager = new HookManager();
 \Whity\register_service(HookManager::class, $hookManager);
 
 // Register core navigation items
-$hookManager->listen('navigation.register', function (&$items) {
+$hookManager->listen('navigation.register', function ($data, $context) {
+    $items = $data['items'] ?? [];
     $items[] = [
         'id' => 'dashboard',
         'label' => 'Dashboard',
@@ -170,6 +171,7 @@ $hookManager->listen('navigation.register', function (&$items) {
         'group' => 'admin',
         'order' => 5,
     ];
+    return ['items' => $items];
 });
 
 // 5. Initialize role checker
