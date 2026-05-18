@@ -58,10 +58,18 @@ if ($isCli && isset($argv[1])) {
         exit($migrationsCommand->execute($argv));
     }
 
+    if ($command === 'revoked-tokens:cleanup') {
+        $db = \Whity\Database\Database::connect();
+        $cleanupCommand = new \Whity\Commands\RevokedTokensCleanupCommand($db->getPdo());
+        $cleanupCommand->execute();
+        exit(0);
+    }
+
     echo "Unknown command: {$command}\n";
     echo "Available commands:\n";
-    echo "  generate:openapi    Generate OpenAPI 3.0 schema\n";
-    echo "  migrate             Manage database migrations\n";
+    echo "  generate:openapi           Generate OpenAPI 3.0 schema\n";
+    echo "  migrate                    Manage database migrations\n";
+    echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
     exit(1);
 }
 

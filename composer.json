@@ -26,6 +26,7 @@
       "Whity\\Database\\": "src/Database/",
       "Whity\\Http\\": "src/Http/",
       "Whity\\Cli\\": "src/Cli/",
+      "Whity\\Commands\\": "src/Commands/",
       "Whity\\OpenAPI\\": "src/OpenAPI/",
       "Whity\\Plugins\\": "plugins/"
     }
