@@ -45,6 +45,11 @@ class RbacMiddleware
      */
     public function handle(Request $request, callable $next, ?string $requiredRole = null, ?string $requiredPermission = null): Response
     {
+        // If no role or permission required, skip RBAC validation
+        if ($requiredRole === null && $requiredPermission === null) {
+            return $next($request);
+        }
+
         // Extract Authorization header
         $authHeader = $request->getHeader('Authorization');
 

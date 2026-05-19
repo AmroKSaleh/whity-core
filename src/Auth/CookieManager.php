@@ -30,11 +30,11 @@ class CookieManager
     {
         $cookieHeader = sprintf(
             'access_token=%s; Max-Age=%d; Path=/api%s',
-            urlencode($token),
+            $token,
             $expirySeconds,
             self::SECURE_FLAGS
         );
-        header('Set-Cookie: ' . $cookieHeader);
+        header('Set-Cookie: ' . $cookieHeader, false);
     }
 
     /**
@@ -50,12 +50,12 @@ class CookieManager
     public static function setRefreshToken(string $token, int $expirySeconds = 604800): void
     {
         $cookieHeader = sprintf(
-            'refresh_token=%s; Max-Age=%d; Path=/api/auth/refresh%s',
-            urlencode($token),
+            'refresh_token=%s; Max-Age=%d; Path=/api%s',
+            $token,
             $expirySeconds,
             self::SECURE_FLAGS
         );
-        header('Set-Cookie: ' . $cookieHeader);
+        header('Set-Cookie: ' . $cookieHeader, false);
     }
 
     /**
@@ -72,7 +72,7 @@ class CookieManager
             'access_token=; Max-Age=0; Path=/api%s',
             self::SECURE_FLAGS
         );
-        header('Set-Cookie: ' . $cookieHeader);
+        header('Set-Cookie: ' . $cookieHeader, false);
     }
 
     /**
@@ -86,10 +86,10 @@ class CookieManager
     public static function clearRefreshToken(): void
     {
         $cookieHeader = sprintf(
-            'refresh_token=; Max-Age=0; Path=/api/auth/refresh%s',
+            'refresh_token=; Max-Age=0; Path=/api%s',
             self::SECURE_FLAGS
         );
-        header('Set-Cookie: ' . $cookieHeader);
+        header('Set-Cookie: ' . $cookieHeader, false);
     }
 
     /**
