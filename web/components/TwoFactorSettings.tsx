@@ -90,7 +90,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="w-[90vw] max-w-2xl">
         <DialogHeader>
           <DialogTitle>Enable Two-Factor Authentication</DialogTitle>
           <DialogDescription>
