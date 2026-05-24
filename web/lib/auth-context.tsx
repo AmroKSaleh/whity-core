@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { apiClient as apiClientModule } from './api-client';
 
 interface User {
   id: number;
@@ -16,6 +17,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: () => boolean;
+  refreshAuth: () => Promise<void>;
   apiClient: (
     url: string,
     options?: RequestInit
@@ -153,31 +155,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const isAuthenticated = useCallback((): boolean => {
-    return !!token && !!user;
-  }, [token, user]);
+  const refreshAuth = async (): Promise<void> => {
+    try {
+      const response = await fetch('/api/me', {
+        credentials: 'include',
+      });
 
-  const apiClient = async (
-    url: string,
-    options?: RequestInit
-  ): Promise<Response> => {
-    const fullUrl = url.startsWith('http') ? url : url;
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(typeof options?.headers === 'object' && !Array.isArray(options.headers)
-        ? (options.headers as Record<string, string>)
-        : {}),
-    };
-
-    const response = await fetch(fullUrl, {
-      ...options,
-      headers,
-      credentials: 'include',
-    });
-
-    return response;
+      if (response.ok) {
+        const data = await response.json();
+        if (data.user) {
+          setUser(data.user);
+        }
+      } else {
+        setUser(null);
+      }
+    } catch (error) {
+      console.error('Failed to refresh auth:', error);
+      setUser(null);
+    }
   };
+
+  const isAuthenticated = useCallback((): boolean => {
+    return !!user;
+  }, [user]);
+
+  const apiClient = useCallback(
+    (url: string, options?: RequestInit): Promise<Response> => {
+      return apiClientModule(url, options);
+    },
+    []
+  );
 
   const value: AuthContextType = {
     token,
@@ -187,6 +194,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     login,
     logout,
     isAuthenticated,
+    refreshAuth,
     apiClient,
   };
 

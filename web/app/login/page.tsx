@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthenticated, login, isLoading, error } = useAuth();
+  const { isAuthenticated, login, isLoading, error, refreshAuth } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
@@ -59,6 +59,7 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
     try {
+      // Check for 2FA requirement first
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: {
@@ -79,8 +80,8 @@ export default function LoginPage() {
           twoFactorInputRef.current?.focus();
         }, 0);
       } else if (response.ok) {
-        // Login successful, redirect to dashboard
-        const data = await response.json();
+        // Login successful - refresh auth state and redirect
+        await refreshAuth();
         router.push('/dashboard');
       } else {
         const errorData = await response.json().catch(() => ({}));
@@ -115,7 +116,8 @@ export default function LoginPage() {
       });
 
       if (response.ok) {
-        // 2FA successful, redirect to dashboard
+        // 2FA successful - refresh auth state and redirect
+        await refreshAuth();
         router.push('/dashboard');
       } else if (response.status === 401) {
         setTwoFactorError('Invalid authenticator code. Please try again.');
