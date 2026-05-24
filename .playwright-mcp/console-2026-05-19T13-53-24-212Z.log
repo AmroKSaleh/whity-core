@@ -1,0 +1,7 @@
+[      31ms] [VERBOSE] [DOM] Input elements should have autocomplete attributes (suggested: "current-password"): (More info: https://goo.gl/9p2vKq) %o @ http://localhost:3000/login:0
+[      51ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/063q_next_dist_0cr2any._.js:2477
+[      60ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/063q_next_dist_0cr2any._.js:2477
+[     128ms] [ERROR] Failed to load resource: net::ERR_CONTENT_DECODING_FAILED @ http://localhost:3000/api/navigation:0
+[     128ms] [ERROR] Error fetching navigation: TypeError: Failed to fetch
+    at NavigationProvider.useEffect.fetchNavigation (http://localhost:3000/_next/static/chunks/web_0x.gdff._.js:298:53) @ http://localhost:3000/_next/static/chunks/063q_next_dist_0cr2any._.js:3318
+[    3186ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/api/login:0

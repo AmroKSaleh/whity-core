@@ -1,0 +1,75 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e40]:
+    - button "Toggle sidebar" [ref=e41] [cursor=pointer]:
+      - img [ref=e42]
+    - complementary [ref=e43]:
+      - generic [ref=e45]:
+        - heading "Whity" [level=1] [ref=e46]
+        - paragraph [ref=e47]: Admin
+      - navigation [ref=e48]
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - paragraph [ref=e51]: Logged in as
+          - paragraph [ref=e52]: test@whity.local
+        - button "Logout" [ref=e53] [cursor=pointer]:
+          - img
+          - text: Logout
+    - main [ref=e54]:
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - heading "Welcome back!" [level=1] [ref=e58]
+          - paragraph [ref=e59]: You're logged in as test@whity.local
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - generic [ref=e63]: Your User ID
+            - generic [ref=e65]: "2"
+          - generic [ref=e66]:
+            - generic [ref=e68]: Your Role
+            - generic [ref=e70]: Admin
+          - generic [ref=e71]:
+            - generic [ref=e73]: Authentication
+            - generic [ref=e75]: JWT Token Active
+        - generic [ref=e76]:
+          - generic [ref=e77]:
+            - generic [ref=e78]: Authentication Details
+            - generic [ref=e79]: Your user information
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - text: Email
+              - paragraph [ref=e82]: test@whity.local
+            - generic [ref=e83]:
+              - text: Authentication Method
+              - paragraph [ref=e84]: You are authenticated using secure httpOnly cookies. Your JWT token is stored securely on the server and is not accessible from JavaScript for security purposes.
+        - generic [ref=e85]:
+          - generic [ref=e86]:
+            - generic [ref=e87]: Getting Started
+            - generic [ref=e88]: Explore the admin panel using the sidebar
+          - list [ref=e90]:
+            - listitem [ref=e91]:
+              - text: •
+              - strong [ref=e92]: Users
+              - text: "- Manage system users and their roles"
+            - listitem [ref=e93]:
+              - text: •
+              - strong [ref=e94]: Roles
+              - text: "- Create and manage roles with permissions"
+            - listitem [ref=e95]:
+              - text: •
+              - strong [ref=e96]: Tenants
+              - text: "- Manage multi-tenant organizations"
+            - listitem [ref=e97]:
+              - text: •
+              - strong [ref=e98]: Statistics
+              - text: "- View system statistics and metrics"
+  - generic [ref=e22] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e23]:
+      - img [ref=e24]
+    - generic [ref=e31]:
+      - button "Open issues overlay" [ref=e32]:
+        - generic [ref=e33]:
+          - generic [ref=e34]: "0"
+          - generic [ref=e35]: "1"
+        - generic [ref=e36]: Issue
+      - button "Collapse issues badge" [ref=e37]:
+        - img [ref=e38]
+  - alert [ref=e27]

@@ -21,10 +21,9 @@ export interface ApiClientOptions extends RequestInit {
  * @returns true if refresh succeeded, false otherwise
  */
 async function refreshAccessToken(): Promise<boolean> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
   try {
-    const response = await fetch(`${apiUrl}/api/auth/refresh`, {
+    // Use relative URL - Next.js rewrites will proxy to backend
+    const response = await fetch('/api/auth/refresh', {
       method: 'POST',
       credentials: 'include',
     });
@@ -57,8 +56,9 @@ export async function apiClient(
   url: string,
   options?: ApiClientOptions
 ): Promise<Response> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const fullUrl = url.startsWith('http') ? url : `${apiUrl}${url}`;
+  // Use relative URLs which Next.js will proxy to the backend
+  // No need for absolute URLs - the rewrite in next.config.ts handles it
+  const fullUrl = url.startsWith('http') ? url : url;
 
   // Extract skipRefresh from options and remove it before passing to fetch
   const { skipRefresh = false, ...fetchOptions } = options || {};

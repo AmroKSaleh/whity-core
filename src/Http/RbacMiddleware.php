@@ -50,16 +50,33 @@ class RbacMiddleware
             return $next($request);
         }
 
-        // Extract Authorization header
+        // Extract token from Authorization header or access_token cookie
+        $token = null;
         $authHeader = $request->getHeader('Authorization');
 
-        // Check if Authorization header is present and properly formatted
-        if ($authHeader === null || !$this->isValidBearerFormat($authHeader)) {
-            return Response::error('Missing or invalid Authorization header', 401);
+        if ($authHeader !== null && $this->isValidBearerFormat($authHeader)) {
+            // Extract token from "Bearer <token>" format
+            $token = $this->extractToken($authHeader);
+        } else {
+            // Try to get token from access_token cookie via Cookie header
+            $cookieHeader = $request->getHeader('Cookie');
+            if ($cookieHeader !== null) {
+                // Parse cookie header: "name1=value1; name2=value2"
+                $cookies = [];
+                foreach (explode(';', $cookieHeader) as $cookie) {
+                    $parts = explode('=', trim($cookie), 2);
+                    if (count($parts) === 2) {
+                        $cookies[$parts[0]] = $parts[1];
+                    }
+                }
+                $token = $cookies['access_token'] ?? null;
+            }
         }
 
-        // Extract token from "Bearer <token>" format
-        $token = $this->extractToken($authHeader);
+        // Check if token is present
+        if ($token === null) {
+            return Response::error('Missing or invalid Authorization header', 401);
+        }
 
         // Parse and validate JWT
         $payload = $this->jwtParser->parse($token);

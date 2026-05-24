@@ -27,8 +27,9 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     const fetchNavigation = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const response = await fetch(`${apiUrl}/api/navigation`);
+        const response = await fetch('/api/navigation', {
+          credentials: 'include',
+        });
         if (!response.ok) throw new Error('Failed to fetch navigation');
         const data = await response.json();
         setItems(data.data || []);

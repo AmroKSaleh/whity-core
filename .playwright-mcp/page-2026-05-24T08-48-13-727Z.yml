@@ -1,0 +1,41 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: Welcome to Whity
+      - generic [ref=e8]: Sign in to your account to continue
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - alert [ref=e42]:
+          - generic [ref=e43]: Login failed
+        - generic [ref=e11]:
+          - text: Email
+          - textbox "Email" [ref=e12]:
+            - /placeholder: Enter your email
+            - text: test@whity.local
+        - generic [ref=e13]:
+          - text: Password
+          - textbox "Password" [ref=e14]:
+            - /placeholder: Enter your password
+            - text: test
+        - button "Sign in" [ref=e15] [cursor=pointer]
+      - generic [ref=e16]:
+        - paragraph [ref=e17]: Demo Credentials
+        - generic [ref=e18]:
+          - paragraph [ref=e19]:
+            - text: "Email:"
+            - code [ref=e20]: admin@whity.local
+          - paragraph [ref=e21]:
+            - text: "Password:"
+            - code [ref=e22]: password
+  - generic [ref=e27] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e28]:
+      - img [ref=e29]
+    - generic [ref=e32]:
+      - button "Open issues overlay" [ref=e33]:
+        - generic [ref=e34]:
+          - generic [ref=e35]: "0"
+          - generic [ref=e36]: "1"
+        - generic [ref=e37]: Issue
+      - button "Collapse issues badge" [ref=e38]:
+        - img [ref=e39]
+  - alert [ref=e41]

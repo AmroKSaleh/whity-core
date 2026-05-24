@@ -1,7 +1,6 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { apiClient } from './api-client';
 
 interface User {
   id: number;
@@ -10,6 +9,7 @@ interface User {
 }
 
 interface AuthContextType {
+  token: string | null;
   user: User | null;
   isLoading: boolean;
   error: string | null;
@@ -24,33 +24,63 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+interface JWTPayload {
+  exp?: number;
+  id?: number;
+  email?: string;
+  role?: string;
+  [key: string]: any;
+}
+
+function decodeJWT(token: string): JWTPayload | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return null;
+    }
+    const payload = parts[1];
+    const decoded = atob(payload);
+    return JSON.parse(decoded);
+  } catch (error) {
+    return null;
+  }
+}
+
+function isTokenExpired(token: string): boolean {
+  const payload = decodeJWT(token);
+  if (!payload || !payload.exp) {
+    return true;
+  }
+  const expiryTime = payload.exp * 1000; // Convert to milliseconds
+  return Date.now() >= expiryTime;
+}
+
 interface AuthProviderProps {
   children: ReactNode;
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Boot sequence: Initialize from /api/me on mount
+  // Initialize user from /api/me on mount (uses httpOnly cookies)
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const response = await fetch(`${apiUrl}/api/me`, {
-          credentials: 'include', // Browser will auto-attach httpOnly cookies
+        const response = await fetch('/api/me', {
+          credentials: 'include',
         });
 
         if (response.ok) {
           const data = await response.json();
-          setUser(data.user);
-        } else {
-          setUser(null);
+          if (data.user) {
+            setUser(data.user);
+          }
         }
       } catch (error) {
-        // Network error or no session - user is not authenticated
-        setUser(null);
+        console.error('Failed to initialize auth:', error);
       } finally {
         setIsLoading(false);
       }
@@ -64,14 +94,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/login`, {
+      const response = await fetch('/api/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ email, password }),
-        credentials: 'include', // Browser will auto-set httpOnly cookies
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -80,8 +109,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json();
-      // Extract user from response (token is set as httpOnly cookie by server)
-      setUser(data.user);
+      const authToken = data.token;
+
+      // Store token in localStorage
+      localStorage.setItem('whity_auth_token', authToken);
+      setToken(authToken);
+
+      // Decode and set user from response or token
+      if (data.user) {
+        setUser(data.user);
+      } else {
+        const payload = decodeJWT(authToken);
+        const userId = payload?.id || payload?.user_id;
+        if (payload && userId && payload.email) {
+          setUser({
+            id: userId,
+            email: payload.email,
+            role: payload.role || '',
+          });
+        }
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Login failed';
       setError(errorMessage);
@@ -93,38 +140,54 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = async (): Promise<void> => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      await fetch(`${apiUrl}/api/auth/logout`, {
+      await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'include',
       });
     } catch (error) {
       console.error('Logout request failed:', error);
     } finally {
+      setToken(null);
       setUser(null);
       setError(null);
     }
   };
 
   const isAuthenticated = useCallback((): boolean => {
-    return !!user;
-  }, [user]);
+    return !!token && !!user;
+  }, [token, user]);
 
-  const apiClientFunc = useCallback(
-    (url: string, options?: RequestInit): Promise<Response> => {
-      return apiClient(url, options);
-    },
-    []
-  );
+  const apiClient = async (
+    url: string,
+    options?: RequestInit
+  ): Promise<Response> => {
+    const fullUrl = url.startsWith('http') ? url : url;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(typeof options?.headers === 'object' && !Array.isArray(options.headers)
+        ? (options.headers as Record<string, string>)
+        : {}),
+    };
+
+    const response = await fetch(fullUrl, {
+      ...options,
+      headers,
+      credentials: 'include',
+    });
+
+    return response;
+  };
 
   const value: AuthContextType = {
+    token,
     user,
     isLoading,
     error,
     login,
     logout,
     isAuthenticated,
-    apiClient: apiClientFunc,
+    apiClient,
   };
 
   return (

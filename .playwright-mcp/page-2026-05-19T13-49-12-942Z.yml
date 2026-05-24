@@ -1,0 +1,28 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: Welcome to Whity
+      - generic [ref=e6]: Sign in to your account to continue
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]:
+          - text: Email
+          - textbox "Email" [disabled]:
+            - /placeholder: Enter your email
+        - generic [ref=e10]:
+          - text: Password
+          - textbox "Password" [disabled]:
+            - /placeholder: Enter your password
+        - button "Signing in..." [disabled]
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: Demo Credentials
+        - generic [ref=e13]:
+          - paragraph [ref=e14]:
+            - text: "Email:"
+            - code [ref=e15]: admin@whity.local
+          - paragraph [ref=e16]:
+            - text: "Password:"
+            - code [ref=e17]: password
+  - button "Open Next.js Dev Tools" [ref=e23] [cursor=pointer]:
+    - img [ref=e24]
+  - alert [ref=e27]

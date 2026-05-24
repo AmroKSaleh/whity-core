@@ -14,7 +14,8 @@ namespace Whity\Auth;
  */
 class CookieManager
 {
-    private const SECURE_FLAGS = '; HttpOnly; Secure; SameSite=Strict';
+    // Remove Secure flag for development (localhost HTTP). Production should use HTTPS.
+    private const SECURE_FLAGS = '; HttpOnly; SameSite=Lax';
 
     /**
      * Set access token cookie
