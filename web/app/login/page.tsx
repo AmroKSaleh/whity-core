@@ -23,6 +23,7 @@ export default function LoginPage() {
   const [backupCodeMode, setBackupCodeMode] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const twoFactorInputRef = useRef<HTMLInputElement>(null);
+  const recoveryCodeInputRef = useRef<HTMLInputElement>(null);
 
   // Handle hydration and mount
   useEffect(() => {
@@ -323,6 +324,7 @@ export default function LoginPage() {
                       Recovery Code
                     </label>
                     <Input
+                      ref={recoveryCodeInputRef}
                       id="recoveryCode"
                       type="text"
                       placeholder="XXXXXXXX"
@@ -376,6 +378,14 @@ export default function LoginPage() {
                     setBackupCodeMode(!backupCodeMode);
                     setTwoFactorCode('');
                     setTwoFactorError(null);
+
+                    if (!backupCodeMode) {
+                      // Entering recovery mode - focus recovery input
+                      setTimeout(() => recoveryCodeInputRef.current?.focus(), 0);
+                    } else {
+                      // Returning to authenticator - focus authenticator input
+                      setTimeout(() => twoFactorInputRef.current?.focus(), 0);
+                    }
                   }}
                   className="text-blue-600 hover:text-blue-700 underline"
                 >
