@@ -15,3 +15,4 @@ build/
 docs/*
 !docs/wiki/
 .worktrees/
+.phpunit.cache/
