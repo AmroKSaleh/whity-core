@@ -118,8 +118,10 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
                 Can't scan? Enter this code manually:
               </p>
               <div className="flex items-center gap-2">
-                <code className="bg-gray-100 p-2 rounded flex-1 overflow-hidden text-sm truncate cursor-pointer hover:bg-gray-200"
-                      title={secret}>
+                <code
+                  className="bg-gray-100 p-2 rounded flex-1 min-w-0 overflow-hidden text-sm cursor-pointer hover:bg-gray-200 block whitespace-nowrap"
+                  style={{ textOverflow: 'ellipsis' }}
+                  title={secret}>
                   {secret}
                 </code>
                 <button
@@ -127,7 +129,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
                   onClick={() => {
                     navigator.clipboard.writeText(secret);
                   }}
-                  className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm whitespace-nowrap"
+                  className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm whitespace-nowrap flex-shrink-0"
                 >
                   Copy
                 </button>
