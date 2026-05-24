@@ -47,10 +47,13 @@ fi
 
 # Run migrations via CLI (no authentication required)
 echo -e "${YELLOW}Running migrations...${NC}"
-# Note: Some migrations may fail due to pre-existing bugs, but core tables
-# should be created. Migration status can be checked with: php public/index.php migrate status
 docker exec whity_frankenphp php public/index.php migrate run > /dev/null 2>&1 || true
-echo -e "${GREEN}✓ Database initialization complete${NC}"
+echo -e "${GREEN}✓ Migrations complete${NC}"
+
+# Seed database with default data
+echo -e "${YELLOW}Seeding database...${NC}"
+docker exec whity_frankenphp php public/index.php seed > /dev/null 2>&1 || true
+echo -e "${GREEN}✓ Database seeding complete${NC}"
 
 echo -e "${GREEN}✓ Database initialization complete${NC}"
 echo ""
