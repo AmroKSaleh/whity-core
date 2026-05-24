@@ -58,6 +58,14 @@ if ($isCli && isset($argv[1])) {
         exit($migrationsCommand->execute($argv));
     }
 
+    if ($command === 'seed') {
+        $seedCommand = new \Whity\Cli\Commands\SeedCommand();
+        // Remove script name and command name, pass remaining arguments
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'seed' command
+        exit($seedCommand->execute($argv));
+    }
+
     if ($command === 'revoked-tokens:cleanup') {
         $db = \Whity\Database\Database::connect();
         $cleanupCommand = new \Whity\Commands\RevokedTokensCleanupCommand($db->getPdo());
@@ -69,6 +77,7 @@ if ($isCli && isset($argv[1])) {
     echo "Available commands:\n";
     echo "  generate:openapi           Generate OpenAPI 3.0 schema\n";
     echo "  migrate                    Manage database migrations\n";
+    echo "  seed                       Seed database with default data\n";
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
     exit(1);
 }
