@@ -108,7 +108,6 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
                     value={qrCodeUrl}
                     size={200}
                     level="H"
-                    includeMargin={true}
                     className="border border-gray-200 rounded p-2"
                   />
                 </div>
