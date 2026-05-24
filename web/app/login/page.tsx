@@ -322,7 +322,7 @@ export default function LoginPage() {
                     <label htmlFor="recoveryCode" className="text-sm font-medium">
                       Recovery Code
                     </label>
-                    <input
+                    <Input
                       id="recoveryCode"
                       type="text"
                       placeholder="XXXXXXXX"
@@ -336,7 +336,7 @@ export default function LoginPage() {
                       }}
                       disabled={twoFactorLoading}
                       maxLength={8}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono text-center text-lg tracking-wider"
+                      className="text-center text-lg tracking-wider font-mono"
                     />
                     <p className="text-xs text-slate-500">Format: 8 characters (e.g., ABC12345)</p>
                   </div>
@@ -359,7 +359,7 @@ export default function LoginPage() {
                       setBackupCodeMode(false);
                       setTwoFactorCode('');
                       setTwoFactorError(null);
-                      // Focus will be handled in next task
+                      setTimeout(() => twoFactorInputRef.current?.focus(), 0);
                     }}
                     disabled={twoFactorLoading}
                   >
