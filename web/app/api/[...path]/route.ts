@@ -62,6 +62,7 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
     const responseHeaders = new Headers(response.headers);
     responseHeaders.delete('transfer-encoding');
     responseHeaders.delete('content-encoding'); // Remove since we've already decompressed via response.text()
+    responseHeaders.delete('content-length'); // Recalculate based on decompressed text length
 
     const result = new Response(responseText, {
       status: response.status,
