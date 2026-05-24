@@ -158,20 +158,22 @@ class TenantsApiHandler
     {
         try {
             $id = $params['id'] ?? null;
-            if (!$id) {
+            if (!$id && $id !== '0' && $id !== 0) {
                 return Response::error('Tenant ID is required', 400);
             }
 
             $currentTenantId = TenantContext::getTenantId();
-            if ((int)$id !== $currentTenantId) {
+            $isSystemUser = $currentTenantId === 0;
+
+            if (!$isSystemUser && (int)$id !== $currentTenantId) {
                 return Response::error('Unauthorized: Cannot update other tenants', 403);
             }
 
             $body = json_decode($request->getBody(), true);
 
             // Get current tenant
-            $stmt = $this->db->prepare('SELECT * FROM tenants WHERE id = ? AND id = ?');
-            $stmt->execute([$id, $currentTenantId]);
+            $stmt = $this->db->prepare('SELECT * FROM tenants WHERE id = ?');
+            $stmt->execute([$id]);
             $tenant = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$tenant) {
@@ -238,17 +240,23 @@ class TenantsApiHandler
     {
         try {
             $id = $params['id'] ?? null;
-            if (!$id) {
+            if (!$id && $id !== '0' && $id !== 0) {
                 return Response::error('Tenant ID is required', 400);
             }
 
+            if ((int)$id === 0) {
+                return Response::error('Cannot delete system tenant', 400);
+            }
+
             $currentTenantId = TenantContext::getTenantId();
-            if ((int)$id !== $currentTenantId) {
+            $isSystemUser = $currentTenantId === 0;
+
+            if (!$isSystemUser && (int)$id !== $currentTenantId) {
                 return Response::error('Unauthorized: Cannot delete other tenants', 403);
             }
 
-            $stmt = $this->db->prepare('SELECT id FROM tenants WHERE id = ? AND id = ?');
-            $stmt->execute([$id, $currentTenantId]);
+            $stmt = $this->db->prepare('SELECT id FROM tenants WHERE id = ?');
+            $stmt->execute([$id]);
             if (!$stmt->fetch()) {
                 return Response::error('Tenant not found', 404);
             }
