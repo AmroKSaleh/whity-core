@@ -11,7 +11,7 @@ use Whity\Database\Database;
  * where child entities cannot exist without their parent.
  *
  * This ensures consistent deletion behavior:
- * - Deleting a tenant cascades to delete all its users, roles, permissions, deployments, etc.
+ * - Deleting a tenant cascades to delete all its users, deployments, migration rollbacks, etc.
  * - Deleting a role cascades to delete role-permission mappings and revokes it from users/OUs.
  * - Deleting permissions cascades to remove from role-permission mappings.
  *
@@ -44,10 +44,11 @@ class AddCascadingDeletes
             ADD CONSTRAINT deployments_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
         ');
 
+        // Fix migration_rollbacks table: tenant_id should cascade delete
         $db->exec('
-            ALTER TABLE deployment_steps
-            DROP CONSTRAINT IF EXISTS deployment_steps_tenant_id_fkey,
-            ADD CONSTRAINT deployment_steps_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+            ALTER TABLE migration_rollbacks
+            DROP CONSTRAINT IF EXISTS migration_rollbacks_tenant_id_fkey,
+            ADD CONSTRAINT migration_rollbacks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
         ');
     }
 
@@ -76,9 +77,9 @@ class AddCascadingDeletes
         ');
 
         $db->exec('
-            ALTER TABLE deployment_steps
-            DROP CONSTRAINT IF EXISTS deployment_steps_tenant_id_fkey,
-            ADD CONSTRAINT deployment_steps_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+            ALTER TABLE migration_rollbacks
+            DROP CONSTRAINT IF EXISTS migration_rollbacks_tenant_id_fkey,
+            ADD CONSTRAINT migration_rollbacks_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
         ');
     }
 }
