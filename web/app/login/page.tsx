@@ -224,68 +224,72 @@ export default function LoginPage() {
 
           {/* 2FA FORM */}
           {requires2fa && (
-            <form onSubmit={handleTwoFactorSubmit} className="space-y-4">
-              {/* 2FA Error Alert */}
-              {twoFactorError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{twoFactorError}</AlertDescription>
-                </Alert>
-              )}
+            <>
+              {!backupCodeMode && (
+                <form onSubmit={handleTwoFactorSubmit} className="space-y-4">
+                  {/* 2FA Error Alert */}
+                  {twoFactorError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{twoFactorError}</AlertDescription>
+                    </Alert>
+                  )}
 
-              {/* 2FA Instructions */}
-              <p className="text-sm text-muted-foreground text-center">
-                Enter the 6-digit code from your authenticator app or a backup code
-              </p>
+                  {/* 2FA Instructions */}
+                  <p className="text-sm text-muted-foreground text-center">
+                    Enter the 6-digit code from your authenticator app or a backup code
+                  </p>
 
-              {/* 2FA Code Input */}
-              <div className="space-y-2">
-                <label htmlFor="twoFactorCode" className="text-sm font-medium">
-                  Authenticator Code
-                </label>
-                <Input
-                  ref={twoFactorInputRef}
-                  id="twoFactorCode"
-                  type="text"
-                  placeholder="000000"
-                  value={twoFactorCode}
-                  onChange={(e) => {
-                    const cleaned = e.target.value.replace(/\D/g, '').slice(0, 6);
-                    setTwoFactorCode(cleaned);
-                    if (twoFactorError) {
+                  {/* 2FA Code Input */}
+                  <div className="space-y-2">
+                    <label htmlFor="twoFactorCode" className="text-sm font-medium">
+                      Authenticator Code
+                    </label>
+                    <Input
+                      ref={twoFactorInputRef}
+                      id="twoFactorCode"
+                      type="text"
+                      placeholder="000000"
+                      value={twoFactorCode}
+                      onChange={(e) => {
+                        const cleaned = e.target.value.replace(/\D/g, '').slice(0, 6);
+                        setTwoFactorCode(cleaned);
+                        if (twoFactorError) {
+                          setTwoFactorError(null);
+                        }
+                      }}
+                      disabled={twoFactorLoading}
+                      maxLength={6}
+                      inputMode="numeric"
+                      className="text-center text-2xl tracking-widest font-mono"
+                    />
+                  </div>
+
+                  {/* Submit Button */}
+                  <Button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    disabled={twoFactorCode.length !== 6 || twoFactorLoading}
+                  >
+                    {twoFactorLoading ? 'Verifying...' : 'Verify'}
+                  </Button>
+
+                  {/* Back Button */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setRequires2fa(false);
+                      setTwoFactorCode('');
                       setTwoFactorError(null);
-                    }
-                  }}
-                  disabled={twoFactorLoading}
-                  maxLength={6}
-                  inputMode="numeric"
-                  className="text-center text-2xl tracking-widest font-mono"
-                />
-              </div>
-
-              {/* Submit Button */}
-              <Button
-                type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700"
-                disabled={twoFactorCode.length !== 6 || twoFactorLoading}
-              >
-                {twoFactorLoading ? 'Verifying...' : 'Verify'}
-              </Button>
-
-              {/* Back Button */}
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  setRequires2fa(false);
-                  setTwoFactorCode('');
-                  setTwoFactorError(null);
-                  emailInputRef.current?.focus();
-                }}
-                disabled={twoFactorLoading}
-              >
-                Back to Login
-              </Button>
+                      emailInputRef.current?.focus();
+                    }}
+                    disabled={twoFactorLoading}
+                  >
+                    Back to Login
+                  </Button>
+                </form>
+              )}
 
               {/* Recovery Link */}
               <p className="text-center text-sm mt-6">
@@ -302,7 +306,7 @@ export default function LoginPage() {
                   Can't access your authenticator? Use a recovery code instead
                 </button>
               </p>
-            </form>
+            </>
           )}
 
           {/* Demo Credentials - only show on login form */}
