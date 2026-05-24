@@ -145,7 +145,12 @@ $db = Database::connect();
 $router = new Router();
 
 // 3. Initialize JWT parser
-$jwtParser = new JwtParser($_ENV['JWT_SECRET'] ?? 'dev_secret');
+$appEnv = $_ENV['APP_ENV'] ?? 'production';
+if ($appEnv !== 'development' && empty($_ENV['JWT_SECRET'])) {
+    throw new \RuntimeException('JWT_SECRET environment variable must be set in production environments');
+}
+$jwtSecret = $_ENV['JWT_SECRET'] ?? 'dev_secret';
+$jwtParser = new JwtParser($jwtSecret);
 
 // 4. Initialize permission registry
 $permissionRegistry = new PermissionRegistry();

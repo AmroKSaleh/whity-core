@@ -24,6 +24,7 @@ services:
     ports:
       - "8000:80"
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DB_USER: ${DB_USER:-whity}
       DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
       DB_NAME: ${DB_NAME:-whity_core}
