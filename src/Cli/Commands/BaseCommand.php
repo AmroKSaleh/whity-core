@@ -55,7 +55,7 @@ abstract class BaseCommand
         $router = new Router();
         $jwtSecret = $_ENV['JWT_SECRET'] ?? null;
         if (empty($jwtSecret)) {
-            throw new \RuntimeException('JWT_SECRET environment variable is not set.');
+            throw new \RuntimeException('JWT_SECRET environment variable is not set. This is a critical security requirement.');
         }
         $jwtParser = new JwtParser($jwtSecret);
         $permissionRegistry = new PermissionRegistry();
