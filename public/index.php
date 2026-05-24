@@ -145,7 +145,11 @@ $db = Database::connect();
 $router = new Router();
 
 // 3. Initialize JWT parser
-$jwtParser = new JwtParser($_ENV['JWT_SECRET'] ?? 'dev_secret');
+$jwtSecret = $_ENV['JWT_SECRET'] ?? null;
+if (empty($jwtSecret)) {
+    throw new \RuntimeException('JWT_SECRET environment variable is not set. This is a critical security requirement.');
+}
+$jwtParser = new JwtParser($jwtSecret);
 
 // 4. Initialize permission registry
 $permissionRegistry = new PermissionRegistry();
