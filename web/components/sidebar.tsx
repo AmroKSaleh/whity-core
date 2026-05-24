@@ -16,6 +16,7 @@ import {
   IconLock,
   IconBuilding,
   IconBuildingCommunity,
+  IconSettings,
 } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 import type { IconProps } from '@tabler/icons-react';
@@ -26,6 +27,7 @@ const iconMap: Record<string, React.ComponentType<IconProps>> = {
   lock: IconLock,
   building: IconBuilding,
   'building-community': IconBuildingCommunity,
+  settings: IconSettings,
 };
 
 export function Sidebar() {

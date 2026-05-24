@@ -1,0 +1,104 @@
+- generic [active]:
+  - generic:
+    - button:
+      - img
+    - complementary:
+      - generic:
+        - generic:
+          - heading [level=1]: Whity
+          - paragraph: Admin
+      - navigation:
+        - generic:
+          - generic:
+            - link:
+              - /url: /settings
+              - button:
+                - img
+                - generic: "1"
+                - generic: Settings
+        - generic:
+          - generic:
+            - link:
+              - /url: /admin
+              - button:
+                - img
+                - generic: "1"
+                - generic: Dashboard
+            - link:
+              - /url: /admin/users
+              - button:
+                - img
+                - generic: "2"
+                - generic: Users
+            - link:
+              - /url: /admin/roles
+              - button:
+                - img
+                - generic: "3"
+                - generic: Roles
+            - link:
+              - /url: /admin/ous
+              - button:
+                - img
+                - generic: "4"
+                - generic: Organizational Units
+            - link:
+              - /url: /admin/tenants
+              - button:
+                - img
+                - generic: "5"
+                - generic: Tenants
+      - generic:
+        - generic:
+          - paragraph: Logged in as
+          - paragraph: admin@example.com
+        - button:
+          - img
+          - text: Logout
+    - main:
+      - generic:
+        - generic:
+          - generic:
+            - heading [level=1]: Settings
+            - paragraph: Manage your account and security preferences
+          - generic:
+            - generic:
+              - generic: Account Information
+              - generic: Your account details
+            - generic:
+              - generic:
+                - text: Email Address
+                - paragraph: admin@example.com
+              - generic:
+                - text: Role
+                - paragraph: admin
+          - generic:
+            - generic:
+              - generic: Security
+              - generic: Protect your account with two-factor authentication
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic: Not Enabled
+                  - paragraph: Two-Factor Authentication is not currently enabled
+                - generic:
+                  - button: Enable 2FA
+  - button "Open Next.js Dev Tools" [ref=e9] [cursor=pointer]:
+    - img [ref=e10]
+  - alert
+  - dialog "Enable Two-Factor Authentication" [ref=e83]:
+    - generic [ref=e84]:
+      - heading "Enable Two-Factor Authentication" [level=2] [ref=e85]
+      - paragraph [ref=e86]: Secure your account with two-factor authentication
+    - generic [ref=e98]:
+      - generic [ref=e99]:
+        - generic [ref=e100]: "Enter the 6-digit code from your authenticator app:"
+        - textbox "000000" [ref=e101]: "714318"
+      - alert [ref=e104]:
+        - generic [ref=e105]: Failed to verify code
+      - button "Verify" [ref=e103] [cursor=pointer]
+      - button "Back" [ref=e102] [cursor=pointer]
+    - button "Close" [ref=e96] [cursor=pointer]:
+      - img
+      - generic [ref=e97]: Close

@@ -116,4 +116,56 @@ class CookieManager
     {
         return $_COOKIE['refresh_token'] ?? null;
     }
+
+    /**
+     * Set temporary authentication token cookie
+     *
+     * Stores a temporary token used during 2FA login flow.
+     * Token has a short expiration (default: 5 minutes).
+     * Cookie path is /api to restrict to API endpoints.
+     *
+     * @param string $token JWT token value
+     * @param int $expiresIn Expiration time in seconds (default: 300 = 5 minutes)
+     * @return void
+     */
+    public static function setTempToken(string $token, int $expiresIn = 300): void
+    {
+        $cookieHeader = sprintf(
+            'temp_auth_token=%s; Max-Age=%d; Path=/api%s',
+            $token,
+            $expiresIn,
+            self::SECURE_FLAGS
+        );
+        header('Set-Cookie: ' . $cookieHeader, false);
+    }
+
+    /**
+     * Get temporary authentication token from cookies
+     *
+     * Retrieves the temporary token from the $_COOKIE superglobal.
+     * Used during 2FA login flow.
+     *
+     * @return ?string Temporary token value, or null if not set
+     */
+    public static function getTempToken(): ?string
+    {
+        return $_COOKIE['temp_auth_token'] ?? null;
+    }
+
+    /**
+     * Clear temporary authentication token cookie
+     *
+     * Removes the temporary token cookie by setting Max-Age to 0.
+     * Must use same Path as setTempToken.
+     *
+     * @return void
+     */
+    public static function clearTempToken(): void
+    {
+        $cookieHeader = sprintf(
+            'temp_auth_token=; Max-Age=0; Path=/api%s',
+            self::SECURE_FLAGS
+        );
+        header('Set-Cookie: ' . $cookieHeader, false);
+    }
 }

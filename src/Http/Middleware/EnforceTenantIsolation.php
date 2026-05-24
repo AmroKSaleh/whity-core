@@ -135,6 +135,7 @@ class EnforceTenantIsolation
         // Public routes that don't require JWT/tenant context
         $publicRoutes = [
             '/api/login',
+            '/api/login/2fa',
             '/api/me',
             '/api/auth/refresh',
             '/api/auth/logout',

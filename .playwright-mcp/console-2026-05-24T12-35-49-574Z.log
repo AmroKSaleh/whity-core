@@ -1,0 +1,339 @@
+[     122ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[     164ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[    2755ms] [ERROR] Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME @ otpauth://totp/Whity%3Aadmin%40example.com?issuer=Whity&secret=CJPIPOUM2OGQ5DXP5BR5II3QNRTGVK2UKBQJJTAKRD7FZTKJVDQPO4CEE2Q5CMGPLAWUHBJF2WLIYXFWMWA3RM3M2XJJMHO3OU6R46Q:0
+[    2784ms] [ERROR] Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME @ otpauth://totp/Whity%3Aadmin%40example.com?issuer=Whity&secret=YP7K3WFWAEKDQU3MDBXGJXUVDYGJM7FXG4EQ6P3LVEQSCH4OVE2FSM3DU5XLKFXJWM5CFXR6O6W7A7DXI4Y7SB5GJ7APLOH7A4QANLY:0
+[   18208ms] [ERROR] Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME @ otpauth://totp/Whity%3Aadmin%40example.com?issuer=Whity&secret=MVL4RFQJDJX4XOSUWWL2UC3YRCQY4X6V2NSLZZ3FKCE3WZE6VOSPXHVXH2DCWZW6AYMTABPH6M77TG7DDKJJDLHWQ7B6POLPRFKQ2LY:0
+[   18229ms] [ERROR] Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME @ otpauth://totp/Whity%3Aadmin%40example.com?issuer=Whity&secret=5JCRGGIWIH75FMG4DQ2R5BY7AVJA5YORCVLBXEWEDN4FXAP5R6A4CEBG3XE2DF2TN2JPQYPKWKN75EMM3NE6L3UAUOGWZEJ5AAE62MA:0
+[   49762ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[   49991ms] [LOG] [Fast Refresh] done in 329ms @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[   55111ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[   55137ms] [LOG] [Fast Refresh] done in 60ms @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[   58815ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
+[   59390ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-client] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[   59391ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-ssr] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[   59394ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/settings?_rsc=C5-c6Hcnn4qMj2Hh:0
+[   59536ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/settings?_rsc=C5-c6Hcnn4qMj2Hh:0
+[   59541ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/settings?_rsc=C5-c6Hcnn4qMj2Hh:0
+[   59612ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-client] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[   59613ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-ssr] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:3318
+[   59619ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3000/settings:0
+[   59707ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/node_modules_react-dom_0bruynb._.js:15305
+[   59736ms] Error: ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-client] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+
+    at <unknown> (Error: ./components/TwoFactorSettings.tsx:9:1)
+    at Object.getCompilationErrors (file:///home/ringo/Projects/whity-core/web/node_modules/next/dist/server/dev/hot-reloader-turbopack.js:1186:59)
+    at DevBundlerService.getCompilationError (file:///home/ringo/Projects/whity-core/web/node_modules/next/dist/server/lib/dev-bundler-service.js:44:55)
+    at DevServer.getCompilationError (file:///home/ringo/Projects/whity-core/web/node_modules/next/dist/server/dev/next-dev-server.js:720:42)
+    at DevServer.findPageComponents (file:///home/ringo/Projects/whity-core/web/node_modules/next/dist/server/dev/next-dev-server.js:690:43)
+    at async DevServer.renderErrorToResponseImpl (file:///home/ringo/Projects/whity-core/web/node_modules/next/dist/server/base-server.js:1753:26)
+[   59742ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1226
+[   59796ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-client] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   59797ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-ssr] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   59829ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-client] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   59830ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-ssr] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   59864ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-client] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   59864ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-ssr] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   59930ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1226
+[   60026ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-client] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   60026ms] [ERROR] ./components/TwoFactorSettings.tsx:9:1
+Export default doesn't exist in target module
+   7 | import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/com...
+   8 | import { IconCheck } from '@tabler/icons-react';
+>  9 | import QRCode from 'qrcode.react';
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  10 |
+  11 | interface TwoFactorStatus {
+  12 |   enabled: boolean;
+
+The export default was not found in module [project]/node_modules/qrcode.react/lib/esm/index.js [app-ssr] (ecmascript).
+Did you mean to import QRCodeCanvas?
+All exports of the module are statically known (It doesn't have dynamic exports). So it's known statically that the requested export doesn't exist.
+
+Import traces:
+  Client Component Browser:
+    ./components/TwoFactorSettings.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Client Component Browser]
+    ./app/(protected)/settings/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/TwoFactorSettings.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Client Component SSR]
+    ./app/(protected)/settings/page.tsx [Server Component] @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1945
+[   60041ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_0u_w_5s._.js:1226
