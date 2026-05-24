@@ -201,6 +201,13 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'group' => 'admin',
         'order' => 5,
     ];
+    $items[] = [
+        'id' => 'settings',
+        'label' => 'Settings',
+        'href' => '/settings',
+        'icon' => 'settings',
+        'order' => 100,
+    ];
     return ['items' => $items];
 });
 
