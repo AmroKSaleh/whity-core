@@ -117,10 +117,16 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
               <p className="text-sm text-gray-600 mb-2">
                 Can't scan? Enter this code manually:
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 max-w-sm">
                 <code
-                  className="bg-gray-100 p-2 rounded flex-1 min-w-0 overflow-hidden text-sm cursor-pointer hover:bg-gray-200 block whitespace-nowrap"
-                  style={{ textOverflow: 'ellipsis' }}
+                  className="bg-gray-100 p-2 rounded text-sm cursor-pointer hover:bg-gray-200 flex-shrink-0"
+                  style={{
+                    maxWidth: '150px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    display: 'inline-block'
+                  }}
                   title={secret}>
                   {secret}
                 </code>
