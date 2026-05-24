@@ -34,7 +34,7 @@ class RbacMiddlewareTest extends TestCase
         $request = new Request('GET', '/api/resource');
         $next = fn(Request $req) => new Response(200, 'Success');
 
-        $response = $this->middleware->handle($request, $next);
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(401, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
@@ -49,7 +49,7 @@ class RbacMiddlewareTest extends TestCase
         $request = new Request('GET', '/api/resource', ['Authorization' => 'InvalidFormat']);
         $next = fn(Request $req) => new Response(200, 'Success');
 
-        $response = $this->middleware->handle($request, $next);
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(401, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
@@ -64,7 +64,7 @@ class RbacMiddlewareTest extends TestCase
         $request = new Request('GET', '/api/resource', ['Authorization' => 'Bearer']);
         $next = fn(Request $req) => new Response(200, 'Success');
 
-        $response = $this->middleware->handle($request, $next);
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(401, $response->getStatusCode());
     }
@@ -81,7 +81,7 @@ class RbacMiddlewareTest extends TestCase
             ->with('invalid.token.here')
             ->willReturn(null);
 
-        $response = $this->middleware->handle($request, $next);
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(401, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
@@ -89,7 +89,7 @@ class RbacMiddlewareTest extends TestCase
     }
 
     /**
-     * Test valid token without role requirement passes
+     * Test valid token with role requirement passes
      */
     public function testValidTokenWithoutRoleRequirementPasses(): void
     {
@@ -106,7 +106,11 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $response = $this->middleware->handle($request, $next);
+        $this->mockRoleChecker->method('hasRole')
+            ->with(123, 'admin')
+            ->willReturn(true);
+
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame('Success', $response->getBody());
@@ -132,7 +136,7 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $response = $this->middleware->handle($request, $next);
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(401, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
@@ -259,7 +263,7 @@ class RbacMiddlewareTest extends TestCase
             ->with('expired.token.here')
             ->willReturn(null);
 
-        $response = $this->middleware->handle($request, $next);
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(401, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
@@ -293,7 +297,7 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $response = $this->middleware->handle($request, $next);
+        $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(200, $response->getStatusCode());
     }
