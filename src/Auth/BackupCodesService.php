@@ -16,14 +16,14 @@ use Whity\Database\Database;
  */
 class BackupCodesService
 {
-    private Database $db;
+    private mixed $db;
 
     /**
      * Constructor
      *
-     * @param Database $db Database connection
+     * @param Database|mixed $db Database connection (typically Database, but can be any object implementing query interface)
      */
-    public function __construct(Database $db)
+    public function __construct($db)
     {
         $this->db = $db;
     }

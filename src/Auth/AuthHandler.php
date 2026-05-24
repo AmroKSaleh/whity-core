@@ -8,6 +8,37 @@ use PDO;
 use PDOStatement;
 
 /**
+ * Simple adapter to make PDO compatible with Database interface
+ * Used internally for BackupCodesService instantiation
+ */
+class DatabaseQueryWrapper
+{
+    private PDO $pdo;
+
+    public function __construct(PDO $pdo)
+    {
+        $this->pdo = $pdo;
+    }
+
+    public function query(string $sql, array $params = []): PDOStatement
+    {
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute($params);
+        return $statement;
+    }
+
+    public function exec(string $sql): void
+    {
+        $this->pdo->exec($sql);
+    }
+
+    public function getPdo(): PDO
+    {
+        return $this->pdo;
+    }
+}
+
+/**
  * Authentication handler for login and token endpoints
  *
  * Handles login, token refresh, logout, and session validation endpoints.
@@ -19,6 +50,9 @@ class AuthHandler
     private PDO $db;
     private JwtParser $jwtParser;
     private TokenValidator $tokenValidator;
+    private ?TotpService $totpService = null;
+    private ?BackupCodesService $backupCodesService = null;
+    private ?object $databaseWrapper = null;
 
     /**
      * Constructor
@@ -26,12 +60,14 @@ class AuthHandler
      * @param PDO $db Database connection
      * @param JwtParser $jwtParser JWT parser for token creation
      * @param TokenValidator $tokenValidator Token validator for token validation (optional)
+     * @param object $databaseWrapper Optional Database wrapper for BackupCodesService (for testing)
      */
-    public function __construct(PDO $db, JwtParser $jwtParser, ?TokenValidator $tokenValidator = null)
+    public function __construct(PDO $db, JwtParser $jwtParser, ?TokenValidator $tokenValidator = null, ?object $databaseWrapper = null)
     {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
         $this->tokenValidator = $tokenValidator ?? new TokenValidator($jwtParser, $db);
+        $this->databaseWrapper = $databaseWrapper;
     }
 
     /**
@@ -61,9 +97,9 @@ class AuthHandler
         $email = $body['email'];
         $password = $body['password'];
 
-        // Query user by email (globally unique)
+        // Query user by email with 2FA fields (globally unique)
         $stmt = $this->db->prepare('
-            SELECT id, email, password, role_id, tenant_id
+            SELECT id, email, password, role_id, tenant_id, two_factor_enabled, two_factor_secret, two_factor_backup_codes_version
             FROM users
             WHERE email = ?
         ');
@@ -78,6 +114,24 @@ class AuthHandler
         // Verify password
         if (!password_verify($password, $user['password'])) {
             return Response::error('Invalid credentials', 401);
+        }
+
+        // Check if 2FA is enabled
+        if ($user['two_factor_enabled']) {
+            // Create temporary token (5 minutes) for 2FA verification
+            $tempToken = $this->jwtParser->create([
+                'user_id' => $user['id'],
+                'tenant_id' => $user['tenant_id'],
+                'email' => $user['email']
+            ], 300, 'temp'); // 5 minutes
+
+            // Set temporary token cookie
+            CookieManager::setTempToken($tempToken, 300);
+
+            // Return 202 Accepted with requires_2fa flag
+            return Response::json([
+                'requires_2fa' => true
+            ], 202);
         }
 
         // Get role name
@@ -231,5 +285,190 @@ class AuthHandler
         return Response::json([
             'status' => 'logged out'
         ], 200);
+    }
+
+    /**
+     * Handle POST /api/login/2fa - Validate 2FA code and complete login
+     *
+     * Processes the second step of two-factor authentication by validating
+     * a TOTP code or backup code provided by the user.
+     *
+     * Flow:
+     * 1. Get temporary token from cookie
+     * 2. Parse temp token to extract user_id
+     * 3. Fetch user's 2FA secret and backup codes version
+     * 4. Try TOTP validation first, then backup code validation
+     * 5. If either valid: call completeTwoFaLogin() to create access/refresh tokens
+     * 6. If both invalid: return 401
+     *
+     * @param Request $request HTTP request with 2FA code in JSON body
+     * @return Response User data on success (200) or error (401)
+     */
+    public function handle2fa(Request $request, array $params = []): Response
+    {
+        // Get temporary token from cookie
+        $tempToken = CookieManager::getTempToken();
+
+        if ($tempToken === null) {
+            return Response::error('Invalid or expired temporary token', 401);
+        }
+
+        // Parse temp token to extract user_id
+        $claims = $this->jwtParser->parse($tempToken);
+
+        if ($claims === null) {
+            return Response::error('Invalid or expired temporary token', 401);
+        }
+
+        // Extract user_id from claims
+        $userId = $claims['user_id'] ?? null;
+
+        if ($userId === null) {
+            return Response::error('Invalid temporary token', 401);
+        }
+
+        // Parse request body to get 2FA code
+        $body = json_decode($request->getBody(), true);
+
+        if (!isset($body['code']) || empty($body['code'])) {
+            return Response::error('2FA code is required', 401);
+        }
+
+        $code = $body['code'];
+
+        // Fetch user's 2FA secret and backup codes version
+        $stmt = $this->db->prepare('
+            SELECT id, email, role_id, tenant_id, two_factor_secret, two_factor_backup_codes_version
+            FROM users
+            WHERE id = ?
+        ');
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user) {
+            return Response::error('User not found', 401);
+        }
+
+        // Try TOTP validation first
+        $isValid = false;
+
+        if ($user['two_factor_secret']) {
+            try {
+                $totpService = $this->getTotpService();
+                if ($totpService->validateCode($user['two_factor_secret'], $code)) {
+                    $isValid = true;
+                }
+            } catch (\Exception) {
+                // Continue to backup code validation
+            }
+        }
+
+        // Try backup code validation if TOTP failed
+        if (!$isValid && $user['two_factor_backup_codes_version'] > 0) {
+            try {
+                $backupCodesService = $this->getBackupCodesService();
+                if ($backupCodesService->validateCode($userId, $code, $user['two_factor_backup_codes_version'])) {
+                    $isValid = true;
+                }
+            } catch (\Exception) {
+                // Both validations failed
+            }
+        }
+
+        if (!$isValid) {
+            return Response::error('Invalid 2FA code', 401);
+        }
+
+        // Both validations failed
+        return $this->completeTwoFaLogin($claims);
+    }
+
+    /**
+     * Complete 2FA login by creating access and refresh tokens
+     *
+     * Called after successful 2FA code validation. Creates access and refresh tokens,
+     * clears the temporary token cookie, and returns user data.
+     *
+     * @param array $claims Token claims from temporary token
+     * @return Response User data with tokens set in cookies (200)
+     */
+    private function completeTwoFaLogin(array $claims): Response
+    {
+        // Clear temporary token cookie
+        CookieManager::clearTempToken();
+
+        // Extract user info
+        $userId = $claims['user_id'];
+        $tenantId = $claims['tenant_id'];
+        $email = $claims['email'];
+
+        // Get role name
+        $roleStmt = $this->db->prepare('SELECT name FROM roles WHERE id = (SELECT role_id FROM users WHERE id = ?)');
+        $roleStmt->execute([$userId]);
+        $roleData = $roleStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$roleData) {
+            return Response::error('Role not found', 500);
+        }
+
+        $roleName = $roleData['name'];
+
+        // Create access token (15 minutes)
+        $accessToken = $this->jwtParser->create([
+            'user_id' => $userId,
+            'tenant_id' => $tenantId,
+            'email' => $email,
+            'role' => $roleName
+        ], 900, 'access'); // 15 minutes
+
+        // Create refresh token (7 days)
+        $refreshToken = $this->jwtParser->create([
+            'user_id' => $userId,
+            'tenant_id' => $tenantId,
+            'email' => $email,
+            'role' => $roleName
+        ], 604800, 'refresh'); // 7 days
+
+        // Set cookies
+        CookieManager::setAccessToken($accessToken, 900);
+        CookieManager::setRefreshToken($refreshToken, 604800);
+
+        // Return success response with user data
+        return Response::json([
+            'user' => [
+                'id' => $userId,
+                'email' => $email,
+                'role' => $roleName
+            ]
+        ], 200);
+    }
+
+    /**
+     * Get or instantiate TotpService
+     *
+     * @return TotpService
+     */
+    private function getTotpService(): TotpService
+    {
+        if ($this->totpService === null) {
+            $encryptionKey = $_ENV['ENCRYPTION_KEY'] ?? 'default-encryption-key';
+            $this->totpService = new TotpService($encryptionKey);
+        }
+        return $this->totpService;
+    }
+
+    /**
+     * Get or instantiate BackupCodesService
+     *
+     * @return BackupCodesService
+     */
+    private function getBackupCodesService(): BackupCodesService
+    {
+        if ($this->backupCodesService === null) {
+            // Use provided database wrapper (for testing) or create a new one from PDO
+            $dbWrapper = $this->databaseWrapper ?? new DatabaseQueryWrapper($this->db);
+            $this->backupCodesService = new BackupCodesService($dbWrapper);
+        }
+        return $this->backupCodesService;
     }
 }

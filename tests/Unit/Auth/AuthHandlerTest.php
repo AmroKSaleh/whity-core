@@ -391,4 +391,199 @@ class AuthHandlerTest extends TestCase
         unset($_COOKIE['refresh_token']);
         unset($_COOKIE['access_token']);
     }
+
+    /**
+     * Test login with 2FA enabled returns 202 with requires_2fa flag
+     */
+    public function testLoginWith2FaEnabledReturns202WithRequires2fa(): void
+    {
+        $hashedPassword = password_hash('password', PASSWORD_BCRYPT);
+
+        // Mock the user query statement with 2FA enabled
+        $mockUserStatement = $this->createMock(PDOStatement::class);
+        $mockUserStatement->method('fetch')->willReturn([
+            'id' => 2,
+            'tenant_id' => 1,
+            'email' => 'user2fa@whity.local',
+            'password' => $hashedPassword,
+            'role_id' => 2,
+            'two_factor_enabled' => true,
+            'two_factor_secret' => 'encrypted-secret-data',
+            'two_factor_backup_codes_version' => 1
+        ]);
+
+        // Mock the role query statement
+        $mockRoleStatement = $this->createMock(PDOStatement::class);
+        $mockRoleStatement->method('fetch')->willReturn(['name' => 'user']);
+
+        // Setup prepare to return different statements based on query
+        $this->mockDb->method('prepare')
+            ->willReturnOnConsecutiveCalls($mockUserStatement, $mockRoleStatement);
+
+        $requestBody = json_encode([
+            'email' => 'user2fa@whity.local',
+            'password' => 'password'
+        ]);
+
+        $request = new Request('POST', '/auth/login', [], $requestBody);
+        $response = $this->authHandler->handle($request);
+
+        // Should return 202 Accepted
+        $this->assertSame(202, $response->getStatusCode());
+
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertIsArray($responseData);
+        $this->assertArrayHasKey('requires_2fa', $responseData);
+        $this->assertSame(true, $responseData['requires_2fa']);
+        $this->assertArrayNotHasKey('user', $responseData);
+        $this->assertArrayNotHasKey('token', $responseData);
+    }
+
+    /**
+     * Test login with 2FA disabled returns 200 with user data
+     */
+    public function testLoginWith2FaDisabledReturns200WithTokens(): void
+    {
+        $hashedPassword = password_hash('password', PASSWORD_BCRYPT);
+
+        // Mock the user query statement with 2FA disabled
+        $mockUserStatement = $this->createMock(PDOStatement::class);
+        $mockUserStatement->method('fetch')->willReturn([
+            'id' => 3,
+            'tenant_id' => 1,
+            'email' => 'user-no2fa@whity.local',
+            'password' => $hashedPassword,
+            'role_id' => 2,
+            'two_factor_enabled' => false,
+            'two_factor_secret' => null,
+            'two_factor_backup_codes_version' => 0
+        ]);
+
+        // Mock the role query statement
+        $mockRoleStatement = $this->createMock(PDOStatement::class);
+        $mockRoleStatement->method('fetch')->willReturn(['name' => 'user']);
+
+        // Setup prepare to return different statements based on query
+        $this->mockDb->method('prepare')
+            ->willReturnOnConsecutiveCalls($mockUserStatement, $mockRoleStatement);
+
+        $requestBody = json_encode([
+            'email' => 'user-no2fa@whity.local',
+            'password' => 'password'
+        ]);
+
+        $request = new Request('POST', '/auth/login', [], $requestBody);
+        $response = $this->authHandler->handle($request);
+
+        // Should return 200 OK
+        $this->assertSame(200, $response->getStatusCode());
+
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertIsArray($responseData);
+        $this->assertArrayHasKey('user', $responseData);
+        $this->assertArrayNotHasKey('requires_2fa', $responseData);
+
+        // Verify user data in response
+        $user = $responseData['user'];
+        $this->assertSame(3, $user['id']);
+        $this->assertSame('user-no2fa@whity.local', $user['email']);
+        $this->assertSame('user', $user['role']);
+    }
+
+    /**
+     * Test handle2fa returns 401 without 2FA code
+     */
+    public function testHandle2faReturns401WithoutCode(): void
+    {
+        // Create a temporary token with user_id in claims
+        $tempToken = $this->jwtParser->create([
+            'user_id' => 2,
+            'tenant_id' => 1,
+            'email' => 'user2fa@whity.local',
+            'role' => 'user'
+        ], 300, 'temp');
+
+        // Set temp token in cookie
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        $requestBody = json_encode([]);
+        $request = new Request('POST', '/api/login/2fa', [], $requestBody);
+
+        $response = $this->authHandler->handle2fa($request);
+
+        // Should return 401 without code
+        $this->assertSame(401, $response->getStatusCode());
+
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertIsArray($responseData);
+        $this->assertArrayHasKey('error', $responseData);
+
+        // Clean up
+        unset($_COOKIE['temp_auth_token']);
+    }
+
+    /**
+     * Test handle2fa returns 401 with invalid code
+     */
+    public function testHandle2faReturns401WithInvalidCode(): void
+    {
+        // Create a temporary token
+        $tempToken = $this->jwtParser->create([
+            'user_id' => 2,
+            'tenant_id' => 1,
+            'email' => 'user2fa@whity.local',
+            'role' => 'user'
+        ], 300, 'temp');
+
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        // Mock user query
+        $mockUserStatement = $this->createMock(PDOStatement::class);
+        $mockUserStatement->method('fetch')->willReturn([
+            'id' => 2,
+            'tenant_id' => 1,
+            'email' => 'user2fa@whity.local',
+            'role_id' => 2,
+            'two_factor_secret' => 'encrypted-secret-data',
+            'two_factor_backup_codes_version' => 1
+        ]);
+
+        $this->mockDb->method('prepare')->willReturn($mockUserStatement);
+
+        $requestBody = json_encode(['code' => 'invalid']);
+        $request = new Request('POST', '/api/login/2fa', [], $requestBody);
+
+        $response = $this->authHandler->handle2fa($request);
+
+        // Should return 401 on invalid code
+        $this->assertSame(401, $response->getStatusCode());
+
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertIsArray($responseData);
+        $this->assertArrayHasKey('error', $responseData);
+
+        // Clean up
+        unset($_COOKIE['temp_auth_token']);
+    }
+
+    /**
+     * Test handle2fa returns 401 without temp token
+     */
+    public function testHandle2faReturns401WithoutTempToken(): void
+    {
+        // Clear temp token cookie
+        unset($_COOKIE['temp_auth_token']);
+
+        $requestBody = json_encode(['code' => '123456']);
+        $request = new Request('POST', '/api/login/2fa', [], $requestBody);
+
+        $response = $this->authHandler->handle2fa($request);
+
+        // Should return 401 without temp token
+        $this->assertSame(401, $response->getStatusCode());
+
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertIsArray($responseData);
+        $this->assertArrayHasKey('error', $responseData);
+    }
 }
