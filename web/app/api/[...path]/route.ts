@@ -51,8 +51,11 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
 
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       if (request.body) {
-        options.body = request.body;
-        options.duplex = 'half';
+        const bodyText = await request.text();
+        if (bodyText) {
+          options.body = bodyText;
+          options.duplex = 'half';
+        }
       }
     }
 
