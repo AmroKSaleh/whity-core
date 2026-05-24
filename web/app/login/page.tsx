@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [twoFactorLoading, setTwoFactorLoading] = useState(false);
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
+  const [backupCodeMode, setBackupCodeMode] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const twoFactorInputRef = useRef<HTMLInputElement>(null);
 
@@ -285,6 +286,22 @@ export default function LoginPage() {
               >
                 Back to Login
               </Button>
+
+              {/* Recovery Link */}
+              <p className="text-center text-sm mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBackupCodeMode(!backupCodeMode);
+                    setTwoFactorCode('');
+                    setTwoFactorError(null);
+                    // Focus will be handled in next task when recovery input exists
+                  }}
+                  className="text-blue-600 hover:text-blue-700 underline"
+                >
+                  Can't access your authenticator? Use a recovery code instead
+                </button>
+              </p>
             </form>
           )}
 
