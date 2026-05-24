@@ -178,8 +178,7 @@ class TwoFactorHandler
     /**
      * POST /api/auth/2fa/disable - Disable 2FA for user
      *
-     * Disables 2FA by setting two_factor_enabled = false.
-     * Backup codes are kept for reference but future logins won't require 2FA.
+     * Disables 2FA by setting two_factor_enabled = false and invalidating backup codes.
      *
      * @param Request $request The incoming request
      * @return Response JSON response confirming disable
@@ -198,13 +197,27 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
-            // Disable 2FA
+            // Get current version before disabling
             $stmt = $this->db->prepare('
+                SELECT two_factor_backup_codes_version
+                FROM users
+                WHERE id = ?
+            ');
+            $stmt->execute([$userId]);
+            $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+            if ($user && $user['two_factor_backup_codes_version'] > 0) {
+                // Invalidate all backup codes for this version
+                $this->backupCodesService->invalidateOldCodes($userId, $user['two_factor_backup_codes_version']);
+            }
+
+            // Disable 2FA
+            $updateStmt = $this->db->prepare('
                 UPDATE users
                 SET two_factor_enabled = false
                 WHERE id = ?
             ');
-            $stmt->execute([$userId]);
+            $updateStmt->execute([$userId]);
 
             return Response::json([
                 'message' => 'Two-factor authentication disabled'
@@ -313,9 +326,9 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
-            // Get user's 2FA status
+            // Get user's 2FA status and backup codes version
             $stmt = $this->db->prepare('
-                SELECT two_factor_enabled
+                SELECT two_factor_enabled, two_factor_backup_codes_version
                 FROM users
                 WHERE id = ?
             ');
@@ -326,8 +339,10 @@ class TwoFactorHandler
                 return Response::error('User not found', 404);
             }
 
-            // Get available backup code count
-            $codeCount = $this->backupCodesService->getAvailableCodeCount($userId);
+            // Get available backup code count for current version only
+            $codeCount = $user['two_factor_backup_codes_version'] > 0
+                ? $this->backupCodesService->getAvailableCodeCount($userId, $user['two_factor_backup_codes_version'])
+                : 0;
 
             return Response::json([
                 'enabled' => (bool) $user['two_factor_enabled'],

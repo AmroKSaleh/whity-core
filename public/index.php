@@ -235,12 +235,13 @@ $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage
 // 10. Register authentication handler
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
+$router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
 $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);
 $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], null);
 
 // 10b. Register 2FA handler
-$totpService = new TotpService($_ENV['JWT_SECRET'] ?? 'dev_secret');
+$totpService = new TotpService($_ENV['ENCRYPTION_KEY'] ?? 'dev_secret');
 $dbWrapper = new \Whity\Auth\DatabaseQueryWrapper($db->getPdo());
 $backupCodesService = new BackupCodesService($dbWrapper);
 $tokenValidator = new TokenValidator($jwtParser, $db->getPdo());

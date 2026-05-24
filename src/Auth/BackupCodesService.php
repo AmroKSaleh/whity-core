@@ -133,11 +133,8 @@ class BackupCodesService
     {
         $this->db->query(
             'UPDATE backup_codes SET used = true, used_at = NOW()
-             WHERE user_id = :user_id AND version = :version',
-            [
-                'user_id' => $userId,
-                'version' => $oldVersion
-            ]
+             WHERE user_id = ? AND version = ?',
+            [$userId, $oldVersion]
         );
     }
 
@@ -145,16 +142,25 @@ class BackupCodesService
      * Get the count of available (unused) backup codes for a user
      *
      * @param int $userId The user ID
-     * @return int Count of unused backup codes
+     * @param int $currentVersion The current backup codes version (optional, for filtering)
+     * @return int Count of unused backup codes for current version
      */
-    public function getAvailableCodeCount(int $userId): int
+    public function getAvailableCodeCount(int $userId, ?int $currentVersion = null): int
     {
         try {
-            $result = $this->db->query(
-                'SELECT COUNT(*) as count FROM backup_codes
-                 WHERE user_id = ? AND used = false',
-                [$userId]
-            );
+            if ($currentVersion !== null) {
+                $result = $this->db->query(
+                    'SELECT COUNT(*) as count FROM backup_codes
+                     WHERE user_id = ? AND used = false AND version = ?',
+                    [$userId, $currentVersion]
+                );
+            } else {
+                $result = $this->db->query(
+                    'SELECT COUNT(*) as count FROM backup_codes
+                     WHERE user_id = ? AND used = false',
+                    [$userId]
+                );
+            }
 
             $row = $result->fetch(\PDO::FETCH_ASSOC);
             return (int) ($row['count'] ?? 0);

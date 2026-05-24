@@ -115,9 +115,24 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
               )}
             </div>
             <div>
-              <p className="text-sm text-gray-600">
-                Can't scan? Enter this code manually: <code className="bg-gray-100 p-1 rounded">{secret}</code>
+              <p className="text-sm text-gray-600 mb-2">
+                Can't scan? Enter this code manually:
               </p>
+              <div className="flex items-center gap-2">
+                <code className="bg-gray-100 p-2 rounded flex-1 overflow-hidden text-sm truncate cursor-pointer hover:bg-gray-200"
+                      title={secret}>
+                  {secret}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(secret);
+                  }}
+                  className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm whitespace-nowrap"
+                >
+                  Copy
+                </button>
+              </div>
             </div>
             <Button
               onClick={() => setStep('verify')}
