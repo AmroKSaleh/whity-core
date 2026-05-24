@@ -426,4 +426,281 @@ describe('LoginPage - 2FA Flow', () => {
     // Verify fields are hidden (2FA form is shown)
     expect(screen.queryByPlaceholderText('Enter your email')).not.toBeInTheDocument();
   });
+
+  // Test 9: Recovery code link toggles recovery form
+  test('testRecoveryCodeLinkTogglesRecoveryForm', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      ok: false,
+    });
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeInTheDocument();
+    });
+
+    // Trigger 2FA form
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Enter the 6-digit code/i)).toBeInTheDocument();
+    });
+
+    // Click recovery code link
+    const recoveryLink = screen.getByRole('button', { name: /Can't access your authenticator/i });
+    fireEvent.click(recoveryLink);
+
+    // Recovery form should appear (check for recovery code input)
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('XXXXXXXX')).toBeInTheDocument();
+    });
+
+    // Authenticator form should be hidden
+    expect(screen.queryByText(/Enter the 6-digit code/i)).not.toBeInTheDocument();
+  });
+
+  // Test 10: Recovery code input accepts only alphanumeric, auto-uppercase, max 8 chars
+  test('testRecoveryCodeInputValidation', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      ok: false,
+    });
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeInTheDocument();
+    });
+
+    // Trigger 2FA form
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Enter the 6-digit code/i)).toBeInTheDocument();
+    });
+
+    // Click recovery code link
+    const recoveryLink = screen.getByRole('button', { name: /Can't access your authenticator/i });
+    fireEvent.click(recoveryLink);
+
+    // Type lowercase with special chars: abc-1234 should become ABC1234
+    const recoveryInput = await waitFor(() => {
+      return screen.getByPlaceholderText('XXXXXXXX') as HTMLInputElement;
+    });
+
+    fireEvent.change(recoveryInput, { target: { value: 'abc-1234' } });
+
+    // Should be uppercase and special chars removed
+    expect(recoveryInput.value).toBe('ABC1234');
+  });
+
+  // Test 11: Recovery code submit button disabled until 8 chars entered
+  test('testRecoveryCodeSubmitButtonDisabledUntil8Chars', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      ok: false,
+    });
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeInTheDocument();
+    });
+
+    // Trigger 2FA form
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Enter the 6-digit code/i)).toBeInTheDocument();
+    });
+
+    // Click recovery code link
+    const recoveryLink = screen.getByRole('button', { name: /Can't access your authenticator/i });
+    fireEvent.click(recoveryLink);
+
+    const verifyRecoveryButton = await waitFor(() => {
+      return screen.getByRole('button', { name: /Verify Recovery Code/i });
+    });
+
+    // Initially disabled
+    expect(verifyRecoveryButton).toBeDisabled();
+
+    // Type 7 chars - still disabled
+    const recoveryInput = screen.getByPlaceholderText('XXXXXXXX');
+    fireEvent.change(recoveryInput, { target: { value: 'ABC1234' } });
+    expect(verifyRecoveryButton).toBeDisabled();
+
+    // Type 8 chars - now enabled
+    fireEvent.change(recoveryInput, { target: { value: 'ABC12345' } });
+    expect(verifyRecoveryButton).not.toBeDisabled();
+  });
+
+  // Test 12: Back to Authenticator button returns to authenticator form
+  test('testBackToAuthenticatorButtonReturnsToAuthForm', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      ok: false,
+    });
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeInTheDocument();
+    });
+
+    // Trigger 2FA form
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Enter the 6-digit code/i)).toBeInTheDocument();
+    });
+
+    // Click recovery code link to switch to recovery form
+    const recoveryLink = screen.getByRole('button', { name: /Can't access your authenticator/i });
+    fireEvent.click(recoveryLink);
+
+    // Wait for recovery input to appear
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('XXXXXXXX')).toBeInTheDocument();
+    });
+
+    // Click back to authenticator button
+    const backButton = screen.getByRole('button', { name: /Back to Authenticator/i });
+    fireEvent.click(backButton);
+
+    // Authenticator form should reappear
+    await waitFor(() => {
+      expect(screen.getByText(/Enter the 6-digit code/i)).toBeInTheDocument();
+    });
+
+    // Recovery form should be hidden (input should not exist)
+    expect(screen.queryByPlaceholderText('XXXXXXXX')).not.toBeInTheDocument();
+  });
+
+  // Test 13: Invalid recovery code shows error
+  test('testInvalidRecoveryCodeShowsError', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      ok: false,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: 'Invalid recovery code' }),
+    });
+
+    render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeInTheDocument();
+    });
+
+    // Trigger 2FA form
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Enter the 6-digit code/i)).toBeInTheDocument();
+    });
+
+    // Click recovery code link
+    const recoveryLink = screen.getByRole('button', { name: /Can't access your authenticator/i });
+    fireEvent.click(recoveryLink);
+
+    // Wait for recovery input to appear
+    const recoveryInput = await waitFor(() => {
+      return screen.getByPlaceholderText('XXXXXXXX') as HTMLInputElement;
+    });
+
+    // Enter invalid recovery code
+    fireEvent.change(recoveryInput, { target: { value: 'INVALID1' } });
+
+    // Submit recovery form
+    const verifyRecoveryButton = screen.getByRole('button', { name: /Verify Recovery Code/i });
+    fireEvent.click(verifyRecoveryButton);
+
+    // Wait for error message
+    await waitFor(() => {
+      expect(screen.getByText(/Invalid recovery code/i)).toBeInTheDocument();
+    });
+
+    // Recovery form should still be visible (not switched back) - check input is still there
+    expect(screen.getByPlaceholderText('XXXXXXXX')).toBeInTheDocument();
+  });
 });
