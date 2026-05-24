@@ -143,12 +143,19 @@ class RolesApiHandler
 
             // Insert permissions if provided
             if (!empty($permissions)) {
-                $permStmt = $this->db->prepare('
-                    INSERT INTO role_permissions (role_id, permission_id, created_at)
-                    VALUES (?, ?, NOW())
-                ');
-                foreach ($permissions as $permissionId) {
-                    $permStmt->execute([$roleId, $permissionId]);
+                $chunks = array_chunk($permissions, 500);
+                foreach ($chunks as $chunk) {
+                    $placeholders = implode(', ', array_fill(0, count($chunk), '(?, ?, NOW())'));
+                    $sql = 'INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES ' . $placeholders;
+
+                    $params = [];
+                    foreach ($chunk as $permissionId) {
+                        $params[] = $roleId;
+                        $params[] = $permissionId;
+                    }
+
+                    $permStmt = $this->db->prepare($sql);
+                    $permStmt->execute($params);
                 }
             }
 
@@ -242,12 +249,19 @@ class RolesApiHandler
 
                 // Insert new permissions
                 if (!empty($body['permissions'])) {
-                    $permStmt = $this->db->prepare('
-                        INSERT INTO role_permissions (role_id, permission_id, created_at)
-                        VALUES (?, ?, NOW())
-                    ');
-                    foreach ($body['permissions'] as $permissionId) {
-                        $permStmt->execute([$id, $permissionId]);
+                    $chunks = array_chunk($body['permissions'], 500);
+                    foreach ($chunks as $chunk) {
+                        $placeholders = implode(', ', array_fill(0, count($chunk), '(?, ?, NOW())'));
+                        $sql = 'INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES ' . $placeholders;
+
+                        $params = [];
+                        foreach ($chunk as $permissionId) {
+                            $params[] = $id;
+                            $params[] = $permissionId;
+                        }
+
+                        $permStmt = $this->db->prepare($sql);
+                        $permStmt->execute($params);
                     }
                 }
             }
