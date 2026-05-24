@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { IconCheck } from '@tabler/icons-react';
+import QRCode from 'react-qr-code';
 
 interface TwoFactorStatus {
   enabled: boolean;
@@ -66,6 +67,9 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
     try {
       const response = await apiClient('/api/auth/2fa/confirm', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ code, secret }),
       });
 
@@ -86,7 +90,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Enable Two-Factor Authentication</DialogTitle>
           <DialogDescription>
@@ -99,11 +103,15 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
             <div>
               <p className="text-sm font-medium mb-2">Scan with your authenticator app:</p>
               {qrCodeUrl && (
-                <img
-                  src={qrCodeUrl}
-                  alt="QR Code"
-                  className="w-64 h-64 mx-auto border border-gray-200 rounded"
-                />
+                <div className="flex justify-center">
+                  <QRCode
+                    value={qrCodeUrl}
+                    size={200}
+                    level="H"
+                    includeMargin={true}
+                    className="border border-gray-200 rounded p-2"
+                  />
+                </div>
               )}
             </div>
             <div>

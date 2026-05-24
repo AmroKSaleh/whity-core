@@ -1,0 +1,81 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - button "Toggle sidebar" [ref=e13] [cursor=pointer]:
+      - img [ref=e14]
+    - complementary [ref=e15]:
+      - generic [ref=e17]:
+        - heading "Whity" [level=1] [ref=e18]
+        - paragraph [ref=e19]: Admin
+      - navigation [ref=e20]:
+        - link "1 Settings" [ref=e23] [cursor=pointer]:
+          - /url: /settings
+          - button "1 Settings" [ref=e24]:
+            - img
+            - generic [ref=e25]: "1"
+            - generic [ref=e26]: Settings
+        - generic [ref=e28]:
+          - link "1 Dashboard" [ref=e29] [cursor=pointer]:
+            - /url: /admin
+            - button "1 Dashboard" [ref=e30]:
+              - img
+              - generic [ref=e31]: "1"
+              - generic [ref=e32]: Dashboard
+          - link "2 Users" [ref=e33] [cursor=pointer]:
+            - /url: /admin/users
+            - button "2 Users" [ref=e34]:
+              - img
+              - generic [ref=e35]: "2"
+              - generic [ref=e36]: Users
+          - link "3 Roles" [ref=e37] [cursor=pointer]:
+            - /url: /admin/roles
+            - button "3 Roles" [ref=e38]:
+              - img
+              - generic [ref=e39]: "3"
+              - generic [ref=e40]: Roles
+          - link "4 Organizational Units" [ref=e41] [cursor=pointer]:
+            - /url: /admin/ous
+            - button "4 Organizational Units" [ref=e42]:
+              - img
+              - generic [ref=e43]: "4"
+              - generic [ref=e44]: Organizational Units
+          - link "5 Tenants" [ref=e45] [cursor=pointer]:
+            - /url: /admin/tenants
+            - button "5 Tenants" [ref=e46]:
+              - img
+              - generic [ref=e47]: "5"
+              - generic [ref=e48]: Tenants
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - paragraph [ref=e51]: Logged in as
+          - paragraph [ref=e52]: admin@example.com
+        - button "Logout" [ref=e53] [cursor=pointer]:
+          - img
+          - text: Logout
+    - main [ref=e54]:
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - heading "Settings" [level=1] [ref=e58]
+          - paragraph [ref=e59]: Manage your account and security preferences
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - generic [ref=e62]: Account Information
+            - generic [ref=e63]: Your account details
+          - generic [ref=e64]:
+            - generic [ref=e65]:
+              - text: Email Address
+              - paragraph [ref=e66]: admin@example.com
+            - generic [ref=e67]:
+              - text: Role
+              - paragraph [ref=e68]: admin
+        - generic [ref=e69]:
+          - generic [ref=e70]:
+            - generic [ref=e71]: Security
+            - generic [ref=e72]: Protect your account with two-factor authentication
+          - generic [ref=e74]:
+            - generic [ref=e75]:
+              - generic [ref=e77]: Not Enabled
+              - paragraph [ref=e78]: Two-Factor Authentication is not currently enabled
+            - button "Enable 2FA" [ref=e80] [cursor=pointer]
+  - button "Open Next.js Dev Tools" [ref=e9] [cursor=pointer]:
+    - img [ref=e10]
+  - alert [ref=e81]
