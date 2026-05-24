@@ -98,9 +98,17 @@ export default function LoginPage() {
   const handleTwoFactorSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (twoFactorCode.length !== 6) {
-      setTwoFactorError('Code must be exactly 6 digits');
-      return;
+    // Validate code length based on mode
+    if (backupCodeMode) {
+      if (twoFactorCode.length !== 8) {
+        setTwoFactorError('Recovery code must be exactly 8 characters');
+        return;
+      }
+    } else {
+      if (twoFactorCode.length !== 6) {
+        setTwoFactorError('Code must be exactly 6 digits');
+        return;
+      }
     }
 
     setTwoFactorLoading(true);
@@ -121,7 +129,8 @@ export default function LoginPage() {
         await refreshAuth();
         router.push('/dashboard');
       } else if (response.status === 401) {
-        setTwoFactorError('Invalid authenticator code. Please try again.');
+        const errorMsg = backupCodeMode ? 'Invalid recovery code. Please try again.' : 'Invalid authenticator code. Please try again.';
+        setTwoFactorError(errorMsg);
         setTwoFactorCode('');
         twoFactorInputRef.current?.focus();
       } else {
@@ -291,6 +300,74 @@ export default function LoginPage() {
                 </form>
               )}
 
+              {/* RECOVERY CODE FORM */}
+              {backupCodeMode && (
+                <form onSubmit={handleTwoFactorSubmit} className="space-y-4">
+                  {/* 2FA Error Alert */}
+                  {twoFactorError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{twoFactorError}</AlertDescription>
+                    </Alert>
+                  )}
+
+                  {/* Recovery Instructions Box */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
+                    <p className="text-sm text-slate-600">
+                      <strong>Recovery codes</strong> are 8-character codes you saved when setting up two-factor authentication. You have limited recovery codes remaining.
+                    </p>
+                  </div>
+
+                  {/* Recovery Code Input */}
+                  <div className="space-y-2">
+                    <label htmlFor="recoveryCode" className="text-sm font-medium">
+                      Recovery Code
+                    </label>
+                    <input
+                      id="recoveryCode"
+                      type="text"
+                      placeholder="XXXXXXXX"
+                      value={twoFactorCode}
+                      onChange={(e) => {
+                        const cleaned = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+                        setTwoFactorCode(cleaned);
+                        if (twoFactorError) {
+                          setTwoFactorError(null);
+                        }
+                      }}
+                      disabled={twoFactorLoading}
+                      maxLength={8}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono text-center text-lg tracking-wider"
+                    />
+                    <p className="text-xs text-slate-500">Format: 8 characters (e.g., ABC12345)</p>
+                  </div>
+
+                  {/* Verify Recovery Button */}
+                  <Button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={twoFactorCode.length !== 8 || twoFactorLoading}
+                  >
+                    {twoFactorLoading ? 'Verifying...' : 'Verify Recovery Code'}
+                  </Button>
+
+                  {/* Back to Authenticator Button */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setBackupCodeMode(false);
+                      setTwoFactorCode('');
+                      setTwoFactorError(null);
+                      // Focus will be handled in next task
+                    }}
+                    disabled={twoFactorLoading}
+                  >
+                    Back to Authenticator
+                  </Button>
+                </form>
+              )}
+
               {/* Recovery Link */}
               <p className="text-center text-sm mt-6">
                 <button
@@ -299,7 +376,6 @@ export default function LoginPage() {
                     setBackupCodeMode(!backupCodeMode);
                     setTwoFactorCode('');
                     setTwoFactorError(null);
-                    // Focus will be handled in next task when recovery input exists
                   }}
                   className="text-blue-600 hover:text-blue-700 underline"
                 >
@@ -309,16 +385,6 @@ export default function LoginPage() {
             </>
           )}
 
-          {/* Demo Credentials - only show on login form */}
-          {!requires2fa && (
-            <div className="mt-6 pt-6 border-t text-center text-sm text-muted-foreground">
-              <p className="font-medium mb-2">Demo Credentials</p>
-              <div className="space-y-1 text-xs">
-                <p>Email: <code className="bg-muted px-2 py-1 rounded">admin@whity.local</code></p>
-                <p>Password: <code className="bg-muted px-2 py-1 rounded">password</code></p>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>
