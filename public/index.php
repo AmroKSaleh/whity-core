@@ -103,9 +103,13 @@ use Whity\Api\MigrationsApiHandler;
 use Whity\Api\AdminApiHandler;
 use Whity\Api\OusApiHandler;
 use Whity\Api\NavigationApiHandler;
+use Whity\Api\TwoFactorHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Deployment\DeploymentManager;
+use Whity\Auth\TotpService;
+use Whity\Auth\BackupCodesService;
+use Whity\Auth\TokenValidator;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -227,6 +231,17 @@ $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
 $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);
 $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], null);
+
+// 10b. Register 2FA handler
+$totpService = new TotpService($_ENV['JWT_SECRET'] ?? 'dev_secret');
+$backupCodesService = new BackupCodesService($db->getPdo());
+$tokenValidator = new TokenValidator($jwtParser, $db->getPdo());
+$twoFactorHandler = new TwoFactorHandler($db->getPdo(), $totpService, $backupCodesService, $tokenValidator);
+$router->register('POST', '/api/auth/2fa/setup', [$twoFactorHandler, 'setup'], null);
+$router->register('POST', '/api/auth/2fa/confirm', [$twoFactorHandler, 'confirm'], null);
+$router->register('POST', '/api/auth/2fa/disable', [$twoFactorHandler, 'disable'], null);
+$router->register('POST', '/api/auth/2fa/regenerate-codes', [$twoFactorHandler, 'regenerateCodes'], null);
+$router->register('GET', '/api/auth/2fa/status', [$twoFactorHandler, 'status'], null);
 
 // 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
