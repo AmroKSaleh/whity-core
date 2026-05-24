@@ -241,7 +241,8 @@ $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], nu
 
 // 10b. Register 2FA handler
 $totpService = new TotpService($_ENV['JWT_SECRET'] ?? 'dev_secret');
-$backupCodesService = new BackupCodesService($db->getPdo());
+$dbWrapper = new \Whity\Auth\DatabaseQueryWrapper($db->getPdo());
+$backupCodesService = new BackupCodesService($dbWrapper);
 $tokenValidator = new TokenValidator($jwtParser, $db->getPdo());
 $twoFactorHandler = new TwoFactorHandler($db->getPdo(), $totpService, $backupCodesService, $tokenValidator);
 $router->register('POST', '/api/auth/2fa/setup', [$twoFactorHandler, 'setup'], null);

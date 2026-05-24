@@ -152,12 +152,12 @@ class BackupCodesService
         try {
             $result = $this->db->query(
                 'SELECT COUNT(*) as count FROM backup_codes
-                 WHERE user_id = :user_id AND used = false',
-                ['user_id' => $userId]
+                 WHERE user_id = ? AND used = false',
+                [$userId]
             );
 
-            $row = $result->fetch();
-            return (int) $row['count'];
+            $row = $result->fetch(\PDO::FETCH_ASSOC);
+            return (int) ($row['count'] ?? 0);
         } catch (\Exception $e) {
             return 0;
         }
