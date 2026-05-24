@@ -293,7 +293,10 @@ class TwoFactorFlowTest extends TestCase
     public function testStatusReturnsCorrectStatus(): void
     {
         $this->createAccessToken();
-        $mockPdo = $this->createMockPdo(['two_factor_enabled' => true]);
+        $mockPdo = $this->createMockPdo([
+            'two_factor_enabled' => true,
+            'two_factor_backup_codes_version' => 1
+        ]);
         $tokenValidator = new TokenValidator($this->jwtParser, $mockPdo);
 
         $backupCodesService = $this->createMock(BackupCodesService::class);

@@ -250,7 +250,7 @@ class BackupCodesServiceTest extends TestCase
         $this->mockDb->method('query')
             ->with(
                 'SELECT COUNT(*) as count FROM backup_codes
-                 WHERE user_id = ? AND used = false',
+                     WHERE user_id = ? AND used = false',
                 [$userId]
             )
             ->willReturn($mockCountStatement);
