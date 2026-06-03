@@ -122,7 +122,7 @@ class PluginLoader
             return;
         }
 
-        spl_autoload_register(function (string $class) {
+        spl_autoload_register(function (string $class): void {
             foreach (self::$psr4Mappings as $prefix => $baseDir) {
                 $len = strlen($prefix);
                 if (strncmp($prefix, $class, $len) === 0) {
@@ -130,11 +130,10 @@ class PluginLoader
                     $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
                     if (file_exists($file)) {
                         require_once $file;
-                        return true;
+                        return;
                     }
                 }
             }
-            return false;
         });
 
         self::$autoloaderRegistered = true;
@@ -366,10 +365,10 @@ class PluginLoader
         $relative = substr($realPath, strlen($realPluginDir));
         $relative = ltrim($relative, '/');
 
-        $parts = explode('/', $relative);
-        if (count($parts) === 0) {
+        if ($relative === '') {
             return null;
         }
+        $parts = explode('/', $relative);
 
         if (count($parts) === 1) {
             // File directly in the plugins directory (e.g. plugins/ExamplePlugin.php)
@@ -505,26 +504,6 @@ class PluginLoader
         }
     }
 
-    /**
-     * Extract class name from file path
-     *
-     * Converts file names like "AdminStats.php" to "AdminStats"
-     * and converts snake_case file names to PascalCase class names
-     *
-     * @param string $filePath File name (not full path)
-     * @return string Class name
-     */
-    private function extractClassName(string $filePath): string
-    {
-        // Remove .php extension
-        $nameWithoutExt = pathinfo($filePath, PATHINFO_FILENAME);
-
-        // Convert snake_case to PascalCase
-        $parts = explode('_', $nameWithoutExt);
-        $parts = array_map('ucfirst', $parts);
-
-        return implode('', $parts);
-    }
 
     /**
      * Load plugin manifest from cache file
