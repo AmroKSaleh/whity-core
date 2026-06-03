@@ -11,7 +11,7 @@ namespace Whity\Core;
 class Router
 {
     /**
-     * @var array<array{method: string, path: string, handler: callable, requiredRole: ?string}> Registered routes
+     * @var array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, namespacePrefix: ?string}> Registered routes
      */
     private array $routes = [];
 
@@ -27,16 +27,23 @@ class Router
      * @param string $path Route path (supports {param} syntax for path parameters)
      * @param callable $handler Route handler callback
      * @param string|null $requiredRole Optional required role for authorization
+     * @param string|null $namespacePrefix Optional plugin namespace prefix
      * @return void
      */
-    public function register(string $method, string $path, callable $handler, ?string $requiredRole = null): void
-    {
+    public function register(
+        string $method,
+        string $path,
+        callable $handler,
+        ?string $requiredRole = null,
+        ?string $namespacePrefix = null
+    ): void {
         $this->routes[] = [
             'method' => strtoupper($method),
             'path' => $path,
             'pattern' => $this->pathToPattern($path),
             'handler' => $handler,
             'requiredRole' => $requiredRole,
+            'namespacePrefix' => $namespacePrefix,
         ];
     }
 
@@ -46,7 +53,7 @@ class Router
      * Returns route information if a match is found, null otherwise.
      *
      * @param Request $request Request object
-     * @return array|null Array with 'handler', 'params', and 'requiredRole' if matched, null otherwise
+     * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, namespacePrefix: ?string}|null Array if matched, null otherwise
      */
     public function match(Request $request): ?array
     {
@@ -72,11 +79,22 @@ class Router
                     'handler' => $route['handler'],
                     'params' => $params,
                     'requiredRole' => $route['requiredRole'],
+                    'namespacePrefix' => $route['namespacePrefix'] ?? null,
                 ];
             }
         }
 
         return null;
+    }
+
+    /**
+     * Get all registered routes
+     *
+     * @return array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, namespacePrefix: ?string}>
+     */
+    public function getRoutes(): array
+    {
+        return $this->routes;
     }
 
     /**
@@ -121,6 +139,8 @@ class Router
             $path
         );
 
+        $pattern = is_string($pattern) ? $pattern : '';
+
         // Now escape the remaining special regex characters (but not our capture groups)
         // We do this by replacing our capture groups temporarily
         $placeholders = [];
@@ -133,6 +153,8 @@ class Router
             },
             $pattern
         );
+
+        $pattern = is_string($pattern) ? $pattern : '';
 
         // Escape regex special chars in the remaining path
         $pattern = preg_quote($pattern, '#');
