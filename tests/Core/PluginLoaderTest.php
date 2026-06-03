@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Core;
 
 use PHPUnit\Framework\TestCase;
@@ -46,19 +48,41 @@ use Whity\Core\Response;
 
 class TestAdminStatsForFileLoad implements PluginInterface
 {
-    public function getRoute(): string
+    public function getName(): string
     {
-        return '/api/admin/stats';
+        return 'TestAdminStatsForFileLoad';
     }
 
-    public function getMethod(): string
+    public function getVersion(): string
     {
-        return 'GET';
+        return '1.0.0';
     }
 
-    public function getRequiredRole(): ?string
+    public function getRoutes(): array
     {
-        return 'admin';
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/admin/stats',
+                'handler' => [$this, 'handle'],
+                'requiredRole' => 'admin',
+            ]
+        ];
+    }
+
+    public function getPermissions(): array
+    {
+        return [];
+    }
+
+    public function getHooks(): array
+    {
+        return [];
+    }
+
+    public function getMigrations(): array
+    {
+        return [];
     }
 
     public function handle(Request $request): Response
@@ -118,13 +142,107 @@ PHP;
     }
 
     /**
+     * Test loader logs a warning and skips class if it does not implement PluginInterface
+     */
+    public function testSkipsNonPluginClassWithWarning(): void
+    {
+        // Create a non-plugin class file
+        $nonPluginCode = <<<'PHP'
+<?php
+
+namespace Whity\Plugins;
+
+class InvalidPluginNotImplementingInterface
+{
+    public function doSomething()
+    {
+        return 'invalid';
+    }
+}
+PHP;
+
+        file_put_contents($this->tempDir . '/InvalidPluginNotImplementingInterface.php', $nonPluginCode);
+
+        // Mock Logger
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('warning')
+            ->with($this->stringContains('does not implement PluginInterface'));
+
+        // Load plugins with mocked logger
+        $loader = new PluginLoader($this->tempDir, $this->router, null, null, $logger);
+        $loader->load();
+
+        // Verify no plugins were registered
+        $this->assertCount(0, $loader->getPlugins());
+    }
+
+    /**
+     * Test registers permissions and hooks when loader runs
+     */
+    public function testRegistersPermissionsAndHooks(): void
+    {
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace Whity\Plugins;
+
+use Whity\Core\PluginInterface;
+use Whity\Core\Request;
+use Whity\Core\Response;
+
+class TestPermissionsAndHooksPlugin implements PluginInterface
+{
+    public function getName(): string { return 'TestPermissionsAndHooksPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    
+    public function getPermissions(): array {
+        return ['test.permission.one', 'test.permission.two'];
+    }
+    
+    public function getHooks(): array {
+        return [
+            'test.hook.event' => [$this, 'handleHook']
+        ];
+    }
+    
+    public function getMigrations(): array { return []; }
+    
+    public function handleHook(array $data, array $context): array {
+        $data['hook_called'] = true;
+        return $data;
+    }
+}
+PHP;
+
+        file_put_contents($this->tempDir . '/TestPermissionsAndHooksPlugin.php', $pluginCode);
+
+        // Mock/Instantiate dependencies
+        $permissionRegistry = new \Whity\Core\RBAC\PermissionRegistry();
+        $hookManager = new \Whity\Core\Hooks\HookManager();
+
+        // Load plugins
+        $loader = new PluginLoader($this->tempDir, $this->router, $permissionRegistry, $hookManager);
+        $loader->load();
+
+        // Verify permissions are registered
+        $this->assertTrue($permissionRegistry->permissionExists('test.permission.one'));
+        $this->assertTrue($permissionRegistry->permissionExists('test.permission.two'));
+
+        // Verify hooks are registered and callable
+        $listeners = $hookManager->getListeners('test.hook.event');
+        $this->assertNotEmpty($listeners);
+        
+        $result = $hookManager->dispatch('test.hook.event', ['initial' => 'value']);
+        $this->assertTrue($result['hook_called']);
+    }
+
+    /**
      * Test loads multiple plugins from directory
      */
     public function testLoadsMultiplePlugins(): void
     {
-        // Use unique identifier to avoid class redeclaration in tests
-        $uid = uniqid();
-
         // Create first plugin
         $plugin1Code = <<<'PHP'
 <?php
@@ -137,20 +255,22 @@ use Whity\Core\Response;
 
 class TestAdminStats1 implements PluginInterface
 {
-    public function getRoute(): string
+    public function getName(): string { return 'TestAdminStats1'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
     {
-        return '/api/admin/stats';
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/admin/stats',
+                'handler' => [$this, 'handle'],
+                'requiredRole' => 'admin',
+            ]
+        ];
     }
-
-    public function getMethod(): string
-    {
-        return 'GET';
-    }
-
-    public function getRequiredRole(): ?string
-    {
-        return 'admin';
-    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
 
     public function handle(Request $request): Response
     {
@@ -171,20 +291,22 @@ use Whity\Core\Response;
 
 class TestHealthCheck1 implements PluginInterface
 {
-    public function getRoute(): string
+    public function getName(): string { return 'TestHealthCheck1'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
     {
-        return '/health';
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/health',
+                'handler' => [$this, 'handle'],
+                'requiredRole' => null,
+            ]
+        ];
     }
-
-    public function getMethod(): string
-    {
-        return 'GET';
-    }
-
-    public function getRequiredRole(): ?string
-    {
-        return null;
-    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
 
     public function handle(Request $request): Response
     {
@@ -250,20 +372,22 @@ use Whity\Core\Response;
 
 class TestPlugin implements PluginInterface
 {
-    public function getRoute(): string
+    public function getName(): string { return 'TestPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
     {
-        return '/test';
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/test',
+                'handler' => [$this, 'handle'],
+                'requiredRole' => null,
+            ]
+        ];
     }
-
-    public function getMethod(): string
-    {
-        return 'POST';
-    }
-
-    public function getRequiredRole(): ?string
-    {
-        return null;
-    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
 
     public function handle(Request $request): Response
     {
@@ -323,3 +447,4 @@ PHP;
         rmdir($dir);
     }
 }
+

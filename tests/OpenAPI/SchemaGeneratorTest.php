@@ -81,9 +81,19 @@ class SchemaGeneratorTest extends TestCase
     private function createMockPlugin(string $route, string $method, ?string $requiredRole): PluginInterface
     {
         $mock = $this->createMock(PluginInterface::class);
-        $mock->method('getRoute')->willReturn($route);
-        $mock->method('getMethod')->willReturn($method);
-        $mock->method('getRequiredRole')->willReturn($requiredRole);
+        $mock->method('getName')->willReturn('MockPlugin');
+        $mock->method('getVersion')->willReturn('1.0.0');
+        $mock->method('getRoutes')->willReturn([
+            [
+                'method' => $method,
+                'path' => $route,
+                'handler' => function() {},
+                'requiredRole' => $requiredRole,
+            ]
+        ]);
+        $mock->method('getPermissions')->willReturn([]);
+        $mock->method('getHooks')->willReturn([]);
+        $mock->method('getMigrations')->willReturn([]);
 
         return $mock;
     }
