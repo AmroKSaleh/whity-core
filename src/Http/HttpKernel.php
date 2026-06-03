@@ -25,6 +25,12 @@ class HttpKernel
     private RbacMiddleware $rbacMiddleware;
     /** @var array<object> */
     private array $middleware = [];
+    /** @var array<array{callback:callable,args:array<mixed>}> */
+    private static array $shutdownFunctions = [];
+    /** @var array<string> */
+    private array $initialGlobals = [];
+    /** @var array<string> */
+    private array $coreClasses = [];
 
     /**
      * Constructor
@@ -36,6 +42,108 @@ class HttpKernel
     {
         $this->router = $router;
         $this->rbacMiddleware = $rbacMiddleware;
+    }
+
+    /**
+     * Register a shadowed shutdown function
+     */
+    public static function registerShutdownFunction(callable $callback, mixed ...$args): void
+    {
+        self::$shutdownFunctions[] = [
+            'callback' => $callback,
+            'args' => $args
+        ];
+    }
+
+    /**
+     * Execute and clear all shadowed shutdown functions
+     */
+    public static function executeShutdownFunctions(): void
+    {
+        $callbacks = self::$shutdownFunctions;
+        self::$shutdownFunctions = [];
+        foreach ($callbacks as $entry) {
+            try {
+                ($entry['callback'])(...$entry['args']);
+            } catch (\Throwable $e) {
+                error_log("Error in shutdown function: " . $e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * Initialize core classes scanning
+     */
+    private function initCoreClasses(): void
+    {
+        $coreDir = dirname(__DIR__) . '/Core';
+        if (!is_dir($coreDir)) {
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($coreDir, \FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                $relativePath = substr($file->getPathname(), strlen($coreDir) + 1);
+                $relativePath = str_replace('.php', '', $relativePath);
+                $subNamespace = str_replace(DIRECTORY_SEPARATOR, '\\', $relativePath);
+                $className = 'Whity\\Core\\' . $subNamespace;
+
+                if (class_exists($className)) {
+                    $this->coreClasses[] = $className;
+                }
+            }
+        }
+    }
+
+    /**
+     * Reset the request state between persistent worker cycles
+     */
+    private function resetRequestState(): void
+    {
+        // 1. Reset TenantContext
+        TenantContext::reset();
+
+        // 2. Execute namespaced shutdown functions
+        self::executeShutdownFunctions();
+
+        // 3. Reset static properties of core classes
+        foreach ($this->coreClasses as $className) {
+            $refClass = new \ReflectionClass($className);
+            if ($refClass->isInterface() || $refClass->isTrait()) {
+                continue;
+            }
+            $defaultProperties = $refClass->getDefaultProperties();
+            foreach ($refClass->getProperties(\ReflectionProperty::IS_STATIC) as $property) {
+                $property->setAccessible(true);
+                $name = $property->getName();
+                if (array_key_exists($name, $defaultProperties)) {
+                    $property->setValue(null, $defaultProperties[$name]);
+                }
+            }
+        }
+
+        // 4. Reset custom globals
+        foreach (array_keys($GLOBALS) as $key) {
+            if ($key !== 'GLOBALS' && !in_array($key, $this->initialGlobals, true)) {
+                unset($GLOBALS[$key]);
+            }
+        }
+
+        // 5. Reset standard superglobals
+        $_GET = [];
+        $_POST = [];
+        $_COOKIE = [];
+        $_FILES = [];
+        $_REQUEST = [];
+
+        // 6. Destroy session if active
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_destroy();
+        }
     }
 
     /**
@@ -74,6 +182,12 @@ class HttpKernel
      */
     public function handle(Request $request): Response
     {
+        // Initialize state isolation tracking on the first request
+        if (empty($this->initialGlobals)) {
+            $this->initialGlobals = array_keys($GLOBALS);
+            $this->initCoreClasses();
+        }
+
         try {
             // Build the middleware pipeline
             // Start with the core request handler that matches routes and applies RBAC
@@ -87,9 +201,8 @@ class HttpKernel
             // Execute the complete pipeline
             return $pipeline($request);
         } finally {
-            // Clean up tenant context after request completes
-            // This ensures tenant data doesn't bleed across requests in persistent workers
-            TenantContext::reset();
+            // Clean up request state after request completes
+            $this->resetRequestState();
         }
     }
 
