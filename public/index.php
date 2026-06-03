@@ -313,49 +313,131 @@ $router->register('DELETE', '/api/ous/{id}', [$ousHandler, 'delete'], 'admin');
 $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
 $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
 
-// Handle single request
-try {
-    // Create request from PHP superglobals
-    $request = Request::fromGlobals();
+// Handle requests (persistent worker mode or fallback single-request mode)
+$isWorker = function_exists('frankenphp_handle_request');
 
-    // Handle OPTIONS preflight requests for CORS
-    if ($request->getMethod() === 'OPTIONS') {
-        $response = new Response(204, '', [
-            'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Allow-Methods' => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
-        ]);
-        $response->send();
-        exit;
+if ($isWorker) {
+    // Dispatch boot hook
+    error_log("[FrankenPHP Worker] Booting...");
+    $hookManager->dispatch('worker.boot', []);
+
+    // Get max requests from env
+    $maxRequests = (int)($_ENV['MAX_REQUESTS'] ?? $_SERVER['MAX_REQUESTS'] ?? 0);
+
+    for ($nbRequests = 0; !$maxRequests || $nbRequests < $maxRequests; ++$nbRequests) {
+        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager) {
+            try {
+                // Dispatch request start hook
+                error_log("[FrankenPHP Worker] Request start");
+                $hookManager->dispatch('worker.request.start', []);
+
+                // Create request from PHP superglobals
+                $request = Request::fromGlobals();
+
+                // Handle OPTIONS preflight requests for CORS
+                if ($request->getMethod() === 'OPTIONS') {
+                    $response = new Response(204, '', [
+                        'Access-Control-Allow-Origin' => '*',
+                        'Access-Control-Allow-Methods' => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+                        'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
+                    ]);
+                    $response->send();
+                    return;
+                }
+
+                // Handle request through kernel
+                $response = $kernel->handle($request);
+
+                // Get current headers and add CORS
+                $headers = $response->getHeaders();
+                $headers['Access-Control-Allow-Origin'] = '*';
+                $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+                $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+
+                // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
+                $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
+
+                // Send response to client
+                $response->send();
+            } catch (\Throwable $e) {
+                // Handle any uncaught exceptions
+                try {
+                    $errorResponse = Response::error('Internal server error', 500);
+                    $errorHeaders = $errorResponse->getHeaders();
+                    $errorHeaders['Access-Control-Allow-Origin'] = '*';
+                    $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+                    $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+                    $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
+                    $errorResponse->send();
+                } catch (\Throwable $sendError) {
+                    // If send also fails, just log it
+                    error_log('Failed to send error response: ' . $sendError->getMessage());
+                }
+                error_log($e->getMessage() . "\n" . $e->getTraceAsString());
+            } finally {
+                // Dispatch request end hook
+                error_log("[FrankenPHP Worker] Request end");
+                $hookManager->dispatch('worker.request.end', []);
+                // Reset tenant context to prevent cross-request leakage
+                \Whity\Core\Tenant\TenantContext::reset();
+            }
+        });
+
+        // Force garbage collection to prevent memory bloat
+        gc_collect_cycles();
+
+        if (!$keepRunning) {
+            break;
+        }
     }
-
-    // Handle request through kernel
-    $response = $kernel->handle($request);
-
-    // Get current headers and add CORS
-    $headers = $response->getHeaders();
-    $headers['Access-Control-Allow-Origin'] = '*';
-    $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-    $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
-
-    // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
-    $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
-
-    // Send response to client
-    $response->send();
-} catch (\Throwable $e) {
-    // Handle any uncaught exceptions
+} else {
+    // Fallback mode: Handle single request
     try {
-        $errorResponse = Response::error('Internal server error', 500);
-        $errorHeaders = $errorResponse->getHeaders();
-        $errorHeaders['Access-Control-Allow-Origin'] = '*';
-        $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-        $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
-        $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
-        $errorResponse->send();
-    } catch (\Throwable $sendError) {
-        // If send also fails, just log it
-        error_log('Failed to send error response: ' . $sendError->getMessage());
+        // Create request from PHP superglobals
+        $request = Request::fromGlobals();
+
+        // Handle OPTIONS preflight requests for CORS
+        if ($request->getMethod() === 'OPTIONS') {
+            $response = new Response(204, '', [
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
+            ]);
+            $response->send();
+            exit;
+        }
+
+        // Handle request through kernel
+        $response = $kernel->handle($request);
+
+        // Get current headers and add CORS
+        $headers = $response->getHeaders();
+        $headers['Access-Control-Allow-Origin'] = '*';
+        $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+        $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+
+        // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
+        $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
+
+        // Send response to client
+        $response->send();
+    } catch (\Throwable $e) {
+        // Handle any uncaught exceptions
+        try {
+            $errorResponse = Response::error('Internal server error', 500);
+            $errorHeaders = $errorResponse->getHeaders();
+            $errorHeaders['Access-Control-Allow-Origin'] = '*';
+            $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+            $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+            $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
+            $errorResponse->send();
+        } catch (\Throwable $sendError) {
+            // If send also fails, just log it
+            error_log('Failed to send error response: ' . $sendError->getMessage());
+        }
+        error_log($e->getMessage() . "\n" . $e->getTraceAsString());
+    } finally {
+        \Whity\Core\Tenant\TenantContext::reset();
     }
-    error_log($e->getMessage() . "\n" . $e->getTraceAsString());
 }
+

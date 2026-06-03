@@ -141,13 +141,13 @@ class RevokedTokensCleanupCommandTest extends TestCase
         $this->assertStringContainsString('Cleaned 1 expired revocation entries', $output);
 
         // Verify only non-expired row remains
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti = ?');
+        $stmt = $db->prepare('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti = ?');
         $stmt->execute(['future_token_1']);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         $this->assertSame(1, (int)$result['count']);
 
         // Verify expired row is gone
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti = ?');
+        $stmt = $db->prepare('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti = ?');
         $stmt->execute(['expired_token_1']);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         $this->assertSame(0, (int)$result['count']);
@@ -315,7 +315,7 @@ class RevokedTokensCleanupCommandTest extends TestCase
         $this->assertSame(2, (int)$result['count']);
 
         // Verify the remaining rows are the future ones
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti IN (?, ?)');
+        $stmt = $db->prepare('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti IN (?, ?)');
         $stmt->execute(['future_1', 'future_2']);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         $this->assertSame(2, (int)$result['count']);

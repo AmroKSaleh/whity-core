@@ -34,8 +34,12 @@ services:
       CADDY_GLOBAL_OPTIONS: "auto_https off"
       SERVER_NAME: ":80"
       SERVER_ROOT: "public/"
+      FRANKENPHP_WORKERS: ${FRANKENPHP_WORKERS:-8}
+      FRANKENPHP_TIMEOUT: ${FRANKENPHP_TIMEOUT:-60s}
+      MAX_REQUESTS: ${MAX_REQUESTS:-500}
     volumes:
       - .:/app
+      - ./Caddyfile:/etc/frankenphp/Caddyfile
     depends_on:
       postgres:
         condition: service_healthy

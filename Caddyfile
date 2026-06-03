@@ -1,0 +1,24 @@
+{
+	# Caddy global options
+	skip_install_trust
+	{$CADDY_GLOBAL_OPTIONS}
+
+	frankenphp {
+		# Configure the persistent worker pool
+		worker /app/public/index.php {$FRANKENPHP_WORKERS:8}
+
+		# Max wait time in queue before 504 Gateway Timeout
+		max_wait_time {$FRANKENPHP_TIMEOUT:60s}
+	}
+}
+
+{$SERVER_NAME:localhost} {
+	# Set the webroot to the public/ directory
+	root * /app/{$SERVER_ROOT:public/}
+
+	# Enable compression
+	encode zstd gzip
+
+	# Execute PHP files and serve assets
+	php_server
+}
