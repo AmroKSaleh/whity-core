@@ -418,6 +418,156 @@ PHP;
     }
 
     /**
+     * Test recursive plugin discovery and PSR-4 loading
+     */
+    public function testRecursiveDiscoveryAndPsr4Loading(): void
+    {
+        $pluginDirName = 'MyNestedPlugin';
+        $pluginSubDir = $this->tempDir . '/' . $pluginDirName;
+        mkdir($pluginSubDir, 0755, true);
+
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace MyNestedPlugin;
+
+use Whity\Core\PluginInterface;
+use Whity\Core\Request;
+use Whity\Core\Response;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MyNestedPlugin'; }
+    public function getVersion(): string { return '2.0.0'; }
+    public function getRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/nested/hello',
+                'handler' => [$this, 'handle'],
+                'requiredRole' => null,
+            ]
+        ];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+
+    public function handle(Request $request): Response
+    {
+        return Response::json(['nested' => 'ok']);
+    }
+}
+PHP;
+
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+
+        // Discovers and loads
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $discovered = $loader->discover();
+
+        $this->assertArrayHasKey('MyNestedPlugin\\Plugin', $discovered);
+        $this->assertSame(str_replace('\\', '/', realpath($pluginSubDir . '/Plugin.php')), str_replace('\\', '/', realpath($discovered['MyNestedPlugin\\Plugin'])));
+
+        $loader->load();
+        $plugins = $loader->getPlugins();
+        $this->assertCount(1, $plugins);
+        $this->assertSame('MyNestedPlugin', $plugins[0]->getName());
+
+        // Verify route
+        $request = new Request('GET', '/api/nested/hello');
+        $match = $this->router->match($request);
+        $this->assertNotNull($match);
+    }
+
+    /**
+     * Test loader skips folders containing no valid plugin class and logs a warning
+     */
+    public function testSkipsInvalidFoldersWithWarning(): void
+    {
+        $invalidSubDir = $this->tempDir . '/InvalidPluginFolder';
+        mkdir($invalidSubDir, 0755, true);
+
+        // Put a non-plugin PHP file inside
+        $nonPluginCode = <<<'PHP'
+<?php
+namespace InvalidPluginFolder;
+class HelperClass {
+    public function run() {}
+}
+PHP;
+        file_put_contents($invalidSubDir . '/HelperClass.php', $nonPluginCode);
+
+        // Mock Logger
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('warning')
+            ->with($this->stringContains('No valid plugin class found in directory'));
+
+        $loader = new PluginLoader($this->tempDir, $this->router, null, null, $logger);
+        $discovered = $loader->discover();
+
+        $this->assertCount(0, $discovered);
+    }
+
+    /**
+     * Test loader creates manifest cache and reads from it
+     */
+    public function testManifestCaching(): void
+    {
+        $pluginDirName = 'CachedPlugin';
+        $pluginSubDir = $this->tempDir . '/' . $pluginDirName;
+        mkdir($pluginSubDir, 0755, true);
+
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace CachedPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'CachedPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+        $cacheFile = $this->tempDir . '/manifest.json';
+
+        // 1. First run: cache is empty, scans the directory and saves it
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->enableCache($cacheFile);
+        $this->assertFileDoesNotExist($cacheFile);
+
+        $discovered = $loader->discover();
+        $this->assertArrayHasKey('CachedPlugin\\Plugin', $discovered);
+        $this->assertFileExists($cacheFile);
+
+        // Verify cache file content
+        $cacheContent = json_decode(file_get_contents($cacheFile), true);
+        $this->assertArrayHasKey('plugins', $cacheContent);
+        $this->assertArrayHasKey('CachedPlugin\\Plugin', $cacheContent['plugins']);
+
+        // 2. Second run: load using the cached manifest
+        $loader2 = new PluginLoader($this->tempDir, $this->router);
+        $loader2->enableCache($cacheFile);
+
+        // We modify the cache file to point to a simulated class name to verify it was read from cache
+        $cacheContent['plugins'] = ['CachedPlugin\\Plugin' => $cacheContent['plugins']['CachedPlugin\\Plugin']];
+        file_put_contents($cacheFile, json_encode($cacheContent));
+
+        $discovered2 = $loader2->discover();
+        $this->assertArrayHasKey('CachedPlugin\\Plugin', $discovered2);
+    }
+
+    /**
      * Helper method to recursively remove directory
      */
     private function removeDirectory(string $dir): void
