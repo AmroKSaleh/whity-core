@@ -468,7 +468,10 @@ PHP;
         $discovered = $loader->discover();
 
         $this->assertArrayHasKey('MyNestedPlugin\\Plugin', $discovered);
-        $this->assertSame(str_replace('\\', '/', realpath($pluginSubDir . '/Plugin.php')), str_replace('\\', '/', realpath($discovered['MyNestedPlugin\\Plugin'])));
+        $this->assertSame(
+            str_replace('\\', '/', (string) realpath($pluginSubDir . '/Plugin.php')),
+            str_replace('\\', '/', (string) realpath($discovered['MyNestedPlugin\\Plugin']))
+        );
 
         $loader->load();
         $plugins = $loader->getPlugins();
@@ -551,7 +554,7 @@ PHP;
         $this->assertFileExists($cacheFile);
 
         // Verify cache file content
-        $cacheContent = json_decode(file_get_contents($cacheFile), true);
+        $cacheContent = json_decode((string) file_get_contents($cacheFile), true);
         $this->assertArrayHasKey('plugins', $cacheContent);
         $this->assertArrayHasKey('CachedPlugin\\Plugin', $cacheContent['plugins']);
 
@@ -565,6 +568,117 @@ PHP;
 
         $discovered2 = $loader2->discover();
         $this->assertArrayHasKey('CachedPlugin\\Plugin', $discovered2);
+    }
+
+    /**
+     * Test loader catches constructor errors in plugins, logs them, and continues loading
+     */
+    public function testReflectionLoadingWithConstructorError(): void
+    {
+        // 1. Create a plugin with constructor error
+        $badPluginCode = <<<'PHP'
+<?php
+namespace Whity\Plugins;
+use Whity\Core\PluginInterface;
+class BadPlugin implements PluginInterface
+{
+    public function __construct()
+    {
+        throw new \Exception("Constructor error in bad plugin");
+    }
+    public function getName(): string { return 'BadPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+
+        // 2. Create a good plugin
+        $goodPluginCode = <<<'PHP'
+<?php
+namespace Whity\Plugins;
+use Whity\Core\PluginInterface;
+class GoodPlugin implements PluginInterface
+{
+    public function getName(): string { return 'GoodPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+
+        file_put_contents($this->tempDir . '/BadPlugin.php', $badPluginCode);
+        file_put_contents($this->tempDir . '/GoodPlugin.php', $goodPluginCode);
+
+        // Mock Logger to expect an error log
+        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
+        $logger->expects($this->once())
+            ->method('error')
+            ->with($this->stringContains('Constructor error in bad plugin'));
+
+        $loader = new PluginLoader($this->tempDir, $this->router, null, null, $logger);
+        $loader->load();
+
+        // Check that GoodPlugin was loaded but BadPlugin was not
+        $plugins = $loader->getPlugins();
+        $this->assertCount(1, $plugins);
+        $this->assertSame('GoodPlugin', $plugins[0]->getName());
+    }
+
+    /**
+     * Test routes are registered in the Router with correct plugin namespace prefix
+     */
+    public function testRoutesRegisteredWithNamespacePrefix(): void
+    {
+        $pluginCode = <<<'PHP'
+<?php
+namespace MyPrefixPlugin;
+use Whity\Core\PluginInterface;
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MyPrefixPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/prefix/hello',
+                'handler' => [$this, 'handle'],
+                'requiredRole' => null,
+            ]
+        ];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+    public function handle($request) {}
+}
+PHP;
+
+        $pluginSubDir = $this->tempDir . '/MyPrefixPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        // Retrieve registered routes from the router and check namespace prefix
+        $routes = $this->router->getRoutes();
+        $this->assertNotEmpty($routes);
+
+        $matched = false;
+        foreach ($routes as $route) {
+            if ($route['path'] === '/api/prefix/hello') {
+                $this->assertSame('MyPrefixPlugin', $route['namespacePrefix']);
+                $matched = true;
+            }
+        }
+        $this->assertTrue($matched, 'Route should be registered with correct namespace prefix.');
     }
 
     /**

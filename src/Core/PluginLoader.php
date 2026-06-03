@@ -416,26 +416,42 @@ class PluginLoader
         try {
             $reflectionClass = new ReflectionClass($fqcn);
             if (!$reflectionClass->implementsInterface(PluginInterface::class)) {
+                $warningMsg = "Plugin class {$fqcn} does not implement PluginInterface.";
+                if ($this->logger !== null) {
+                    $this->logger->warning($warningMsg);
+                } else {
+                    error_log($warningMsg);
+                }
                 return;
             }
 
+            // Extract namespace prefix
+            $namespacePrefix = $reflectionClass->getNamespaceName();
+
             /** @var PluginInterface $plugin */
             $plugin = new $fqcn();
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $errorMsg = "Failed to load plugin {$fqcn}: " . $e->getMessage();
+            if ($this->logger !== null) {
+                $this->logger->error($errorMsg);
+            } else {
+                error_log($errorMsg);
+            }
             return;
         }
 
         // Register the plugin
-        $this->registerPlugin($plugin);
+        $this->registerPlugin($plugin, $namespacePrefix);
     }
 
     /**
      * Register a plugin with the core capabilities
      *
      * @param PluginInterface $plugin The plugin instance to register
+     * @param string $namespacePrefix The plugin namespace prefix
      * @return void
      */
-    private function registerPlugin(PluginInterface $plugin): void
+    private function registerPlugin(PluginInterface $plugin, string $namespacePrefix): void
     {
         // 1. Register routes with the router
         foreach ($plugin->getRoutes() as $route) {
@@ -449,7 +465,8 @@ class PluginLoader
                     $method,
                     $path,
                     $handler,
-                    $requiredRole
+                    $requiredRole,
+                    $namespacePrefix
                 );
             }
         }
