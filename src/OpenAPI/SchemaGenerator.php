@@ -56,34 +56,36 @@ class SchemaGenerator
         // Add paths from plugins
         $plugins = $this->pluginLoader->getPlugins();
         foreach ($plugins as $plugin) {
-            $path = $plugin->getRoute();
-            $method = $plugin->getMethod();
-            $requiredRole = $plugin->getRequiredRole();
+            foreach ($plugin->getRoutes() as $route) {
+                $path = $route['path'];
+                $method = $route['method'];
+                $requiredRole = $route['requiredRole'] ?? null;
 
-            $operation = [
-                'summary' => $this->generateSummary($method, $path),
-                'tags' => [$this->getTag($path)],
-                'responses' => [
-                    '200' => [
-                        'description' => 'Successful response',
+                $operation = [
+                    'summary' => $this->generateSummary($method, $path),
+                    'tags' => [$this->getTag($path)],
+                    'responses' => [
+                        '200' => [
+                            'description' => 'Successful response',
+                        ],
+                        '401' => [
+                            'description' => 'Unauthorized',
+                        ],
+                        '403' => [
+                            'description' => 'Forbidden',
+                        ],
                     ],
-                    '401' => [
-                        'description' => 'Unauthorized',
-                    ],
-                    '403' => [
-                        'description' => 'Forbidden',
-                    ],
-                ],
-            ];
-
-            // Add security requirement if role is required
-            if ($requiredRole !== null) {
-                $operation['security'] = [
-                    ['bearerAuth' => []],
                 ];
-            }
 
-            $builder->addPath($path, $method, $operation);
+                // Add security requirement if role is required
+                if ($requiredRole !== null) {
+                    $operation['security'] = [
+                        ['bearerAuth' => []],
+                    ];
+                }
+
+                $builder->addPath($path, $method, $operation);
+            }
         }
 
         return $builder->build();
