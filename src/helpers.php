@@ -31,3 +31,79 @@ function app(string $class)
 
     throw new \RuntimeException("Service '{$class}' not found in container");
 }
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Core;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Http;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Auth;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Api;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Database;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Cli;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Console;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Whity\Commands;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Tests\Http;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
+namespace Tests\Security;
+
+function register_shutdown_function(callable $callback, mixed ...$args): void
+{
+    \Whity\Http\HttpKernel::registerShutdownFunction($callback, ...$args);
+}
+
