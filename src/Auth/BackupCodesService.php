@@ -103,7 +103,7 @@ class BackupCodesService
             }
 
             // Verify the code matches the stored hash
-            if (!password_verify($code, $row['code'])) {
+            if (!isset($row['code']) || !password_verify($code, $row['code'])) {
                 return false;
             }
 

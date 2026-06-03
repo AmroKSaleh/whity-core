@@ -117,7 +117,7 @@ class AuthHandler
         }
 
         // Check if 2FA is enabled
-        if ($user['two_factor_enabled']) {
+        if (!empty($user['two_factor_enabled'])) {
             // Create temporary token (5 minutes) for 2FA verification
             $tempToken = $this->jwtParser->create([
                 'user_id' => $user['id'],
