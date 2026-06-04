@@ -7,40 +7,47 @@ namespace Tests\Api;
 use PDO;
 use PDOStatement;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\MockRequestFactory;
 use Whity\Api\RolesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Core\RBAC\PermissionRegistry;
 
 /**
- * Tests for RolesApiHandler.
+ * Unit tests for {@see RolesApiHandler} (WC-16, issue #9).
  *
- * Focuses on the WC-15 contract that mutating role/permission writes invalidate
- * the worker-level effective-permission cache so RBAC checks never go stale.
- * These tests run entirely against mocked PDO/Database seams and require no live
- * database.
+ * Covers the full CRUD surface, permission assignment via COLON-notation
+ * strings resolved to ids, tenant scoping through the tenant-scoped `user_roles`
+ * junction, the "cannot delete a role with active user assignments" guard, and
+ * the WC-15 contract that every mutating write invalidates the worker-level
+ * effective-permission cache. All tests run against mocked PDO/Database seams
+ * and require no live database (CI has no PostgreSQL).
  */
 class RolesApiHandlerTest extends TestCase
 {
+    private int $testTenantId = 1;
+
     protected function setUp(): void
     {
         RoleChecker::clearCache();
+        MockRequestFactory::setTestTenant($this->testTenantId);
     }
 
     protected function tearDown(): void
     {
         RoleChecker::clearCache();
+        TenantContext::reset();
     }
 
+    // ==================== WC-15 cache-invalidation helpers ====================
+
     /**
-     * Prime the worker-level cache for a role, then assert it is currently
-     * populated by checking a re-resolution serves from cache (no new queries).
-     *
-     * @return Database The mock Database used to seed the cache.
+     * Prime the worker-level cache for a role so a write can be proven to clear it.
      */
-    private function seedEffectivePermissionCache(int $roleId): Database
+    private function seedEffectivePermissionCache(int $roleId): void
     {
         $mockDb = $this->createMock(Database::class);
         $mockDb->method('query')->willReturnCallback(
@@ -62,14 +69,12 @@ class RolesApiHandlerTest extends TestCase
 
         $checker = new RoleChecker($mockDb, $this->createMock(PermissionRegistry::class));
         $checker->getEffectivePermissionsForRole($roleId);
-
-        return $mockDb;
     }
 
     /**
      * Whether the worker-level cache currently holds an entry for $roleId.
      *
-     * Re-resolves against a Database mock that fails the test if any query runs;
+     * Re-resolves against a Database mock that records whether any query runs;
      * a cache hit performs zero queries, a miss triggers one.
      */
     private function cacheHasEntry(int $roleId): bool
@@ -93,8 +98,8 @@ class RolesApiHandlerTest extends TestCase
     }
 
     /**
-     * Build a HookManager stub whose dispatch() echoes back the payload (the
-     * create() flow reads name/description/permissions from the returned array).
+     * HookManager stub whose dispatch() echoes back the payload (create()/update()
+     * read name/description/permissions from the returned array).
      */
     private function passthroughHookManager(): HookManager
     {
@@ -104,26 +109,124 @@ class RolesApiHandlerTest extends TestCase
         return $hooks;
     }
 
-    public function testCreateInvalidatesEffectivePermissionCache(): void
+    /**
+     * Build a PDOStatement mock for a single result row / row set.
+     *
+     * @param array<string, mixed>|false              $fetch    fetch() return value.
+     * @param array<int, array<string, mixed>>|null    $fetchAll fetchAll() return value.
+     */
+    private function statement(array|false $fetch = false, ?array $fetchAll = null): PDOStatement
     {
-        // Prime the cache so we can prove the write clears it.
-        $this->seedEffectivePermissionCache(4);
-        $this->assertTrue($this->cacheHasEntry(4), 'precondition: cache should be primed');
+        $stmt = $this->createMock(PDOStatement::class);
+        $stmt->method('execute')->willReturn(true);
+        $stmt->method('fetch')->willReturn($fetch);
+        $stmt->method('fetchAll')->willReturn($fetchAll ?? []);
+        return $stmt;
+    }
+
+    /**
+     * Request carrying an authenticated acting user (so user_roles linking runs).
+     */
+    private function authedRequest(string $method, string $path, ?array $body = null): Request
+    {
+        $request = new Request($method, $path, [], $body !== null ? (string)json_encode($body) : '');
+        $request->user = (object)['user_id' => 99, 'tenant_id' => $this->testTenantId];
+        return $request;
+    }
+
+    // ==================== CREATE ====================
+
+    /**
+     * AC1: POST creates the role and links the supplied colon-notation
+     * permissions through role_permissions after resolving them to ids.
+     */
+    public function testCreateLinksColonNotationPermissions(): void
+    {
+        $nameCheck = $this->statement(false);            // role name free
+        $insertRole = $this->statement();                // INSERT roles
+        $linkTenant = $this->statement();                // INSERT user_roles
+        $resolveIds = $this->statement(false, [          // SELECT permission ids
+            ['id' => 7], ['id' => 8],
+        ]);
+        $insertPerms = $this->statement();               // INSERT role_permissions
 
         $pdo = $this->createMock(PDO::class);
-        $checkStmt = $this->createMock(PDOStatement::class);
-        $checkStmt->method('execute')->willReturn(true);
-        $checkStmt->method('fetch')->willReturn(false); // role does not already exist
-        $insertStmt = $this->createMock(PDOStatement::class);
-        $insertStmt->method('execute')->willReturn(true);
-
-        $pdo->method('prepare')->willReturn($checkStmt, $insertStmt);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls(
+            $nameCheck,
+            $insertRole,
+            $linkTenant,
+            $resolveIds,
+            $insertPerms
+        );
         $pdo->method('lastInsertId')->willReturn('42');
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
-        $request = new Request('POST', '/api/roles', [], json_encode(['name' => 'managers']));
+        $request = $this->authedRequest('POST', '/api/roles', [
+            'name' => 'Editor',
+            'permissions' => ['posts:read', 'posts:write'],
+        ]);
 
         $response = $handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame(42, $data['id']);
+        $this->assertSame('Editor', $data['name']);
+        $this->assertSame(2, $data['permissionCount']);
+    }
+
+    public function testCreateWithoutNameReturns400(): void
+    {
+        $pdo = $this->createMock(PDO::class);
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+
+        $response = $handler->create($this->authedRequest('POST', '/api/roles', ['description' => 'x']));
+
+        $this->assertSame(400, $response->getStatusCode());
+    }
+
+    public function testCreateDuplicateNameReturns409(): void
+    {
+        $nameCheck = $this->statement(['id' => 5]); // name already taken
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturn($nameCheck);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'admin']));
+
+        $this->assertSame(409, $response->getStatusCode());
+    }
+
+    public function testCreateWithoutTenantContextReturns400(): void
+    {
+        TenantContext::reset(); // no tenant resolved
+
+        $pdo = $this->createMock(PDO::class);
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+
+        // Plain request (no acting user) and no tenant -> rejected before any write.
+        $request = new Request('POST', '/api/roles', [], (string)json_encode(['name' => 'X']));
+        $response = $handler->create($request);
+
+        $this->assertSame(400, $response->getStatusCode());
+    }
+
+    public function testCreateInvalidatesEffectivePermissionCache(): void
+    {
+        $this->seedEffectivePermissionCache(4);
+        $this->assertTrue($this->cacheHasEntry(4), 'precondition: cache should be primed');
+
+        $nameCheck = $this->statement(false);
+        $insertRole = $this->statement();
+        $linkTenant = $this->statement();
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($nameCheck, $insertRole, $linkTenant);
+        $pdo->method('lastInsertId')->willReturn('42');
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'managers']));
 
         $this->assertSame(201, $response->getStatusCode());
         $this->assertFalse(
@@ -132,38 +235,317 @@ class RolesApiHandlerTest extends TestCase
         );
     }
 
+    /**
+     * Resilience for frontend bug #99: when only `permissionIds` is supplied the
+     * handler falls back to it, but `permissions` remains authoritative.
+     */
+    public function testCreateFallsBackToPermissionIdsKeyWhenPermissionsAbsent(): void
+    {
+        $nameCheck = $this->statement(false);
+        $insertRole = $this->statement();
+        $linkTenant = $this->statement();
+        $resolveIds = $this->statement(false, [['id' => 7]]);
+        $insertPerms = $this->statement();
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls(
+            $nameCheck,
+            $insertRole,
+            $linkTenant,
+            $resolveIds,
+            $insertPerms
+        );
+        $pdo->method('lastInsertId')->willReturn('51');
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $request = $this->authedRequest('POST', '/api/roles', [
+            'name' => 'Viewer',
+            'permissionIds' => ['posts:read'],
+        ]);
+
+        $response = $handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(1, json_decode($response->getBody(), true)['data']['permissionCount']);
+    }
+
+    // ==================== LIST (tenant scoping) ====================
+
+    public function testListReturnsTenantScopedRoles(): void
+    {
+        $rows = [
+            ['id' => 1, 'name' => 'Custom Admin', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 3],
+        ];
+        $stmt = $this->statement(false, $rows);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturn($stmt);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->list(new Request('GET', '/api/roles'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertCount(1, $data);
+        $this->assertSame('Custom Admin', $data[0]['name']);
+        $this->assertSame(3, $data[0]['permissionCount']);
+        $this->assertArrayNotHasKey('permission_count', $data[0]);
+    }
+
+    /**
+     * AC2: a role belonging only to another tenant is not returned for this
+     * tenant (the tenant-scoped query yields no rows).
+     */
+    public function testListIsolatesRolesAcrossTenants(): void
+    {
+        // Tenant 2 has no user_roles links to Tenant 1's 'Custom Admin' role, so
+        // the scoped query returns an empty set.
+        $stmt = $this->statement(false, []);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturn($stmt);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->list(new Request('GET', '/api/roles'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame([], json_decode($response->getBody(), true)['data']);
+    }
+
+    public function testListAsSystemTenantSeesAllRoles(): void
+    {
+        MockRequestFactory::setTestTenant(0); // SYSTEM tenant
+
+        $rows = [
+            ['id' => 1, 'name' => 'Tenant A Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0],
+            ['id' => 2, 'name' => 'Tenant B Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0],
+        ];
+        $stmt = $this->statement(false, $rows);
+
+        $pdo = $this->createMock(PDO::class);
+        // SYSTEM path uses a query with no bound tenant parameter.
+        $pdo->expects($this->once())
+            ->method('prepare')
+            ->with($this->logicalNot($this->stringContains('user_roles')))
+            ->willReturn($stmt);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->list(new Request('GET', '/api/roles'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertCount(2, json_decode($response->getBody(), true)['data']);
+    }
+
+    // ==================== GET ====================
+
+    public function testGetReturnsRoleWithPermissions(): void
+    {
+        $visibility = $this->statement(['1' => 1]);       // role visible to tenant
+        $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '', 'parent_id' => null, 'created_at' => 'now']);
+        $perms = $this->statement(false, [['id' => 7, 'name' => 'posts:read', 'description' => null]]);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $perms);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->get(new Request('GET', '/api/roles/5'), ['id' => '5']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('Editor', $data['name']);
+        $this->assertCount(1, $data['permissions']);
+        $this->assertSame('posts:read', $data['permissions'][0]['name']);
+    }
+
+    /**
+     * AC2: fetching a role that belongs to another tenant returns 404, never the
+     * other tenant's data.
+     */
+    public function testGetRoleFromOtherTenantReturns404(): void
+    {
+        $visibility = $this->statement(false); // not visible to this tenant
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturn($visibility);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->get(new Request('GET', '/api/roles/999'), ['id' => '999']);
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    // ==================== UPDATE ====================
+
+    public function testUpdateReplacesPermissions(): void
+    {
+        $visibility = $this->statement(['1' => 1]);
+        $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '']);
+        $delPerms = $this->statement();
+        $resolveIds = $this->statement(false, [['id' => 9]]);
+        $insertPerms = $this->statement();
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls(
+            $visibility,
+            $roleRow,
+            $delPerms,
+            $resolveIds,
+            $insertPerms
+        );
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $request = new Request('PATCH', '/api/roles/5', [], (string)json_encode([
+            'permissions' => ['posts:delete'],
+        ]));
+        $response = $handler->update($request, ['id' => '5']);
+
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function testUpdateRoleFromOtherTenantReturns404(): void
+    {
+        $visibility = $this->statement(false);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturn($visibility);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $request = new Request('PATCH', '/api/roles/999', [], (string)json_encode(['name' => 'x']));
+        $response = $handler->update($request, ['id' => '999']);
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    public function testUpdateInvalidatesEffectivePermissionCache(): void
+    {
+        $this->seedEffectivePermissionCache(4);
+        $this->assertTrue($this->cacheHasEntry(4), 'precondition: cache should be primed');
+
+        $visibility = $this->statement(['1' => 1]);
+        $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '']);
+        $updateStmt = $this->statement();
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $roleRow, $updateStmt);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $request = new Request('PATCH', '/api/roles/5', [], (string)json_encode(['description' => 'changed']));
+        $response = $handler->update($request, ['id' => '5']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertFalse(
+            $this->cacheHasEntry(4),
+            'update() must invalidate the worker-level effective-permission cache'
+        );
+    }
+
+    // ==================== DELETE ====================
+
+    /**
+     * AC3: deleting a role that still has assigned users returns 409 with the
+     * exact documented message.
+     */
+    public function testDeleteRoleWithActiveUsersReturns409(): void
+    {
+        $visibility = $this->statement(['1' => 1]);
+        $userCount = $this->statement(['cnt' => 2]); // 2 users still assigned
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $userCount);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->delete(new Request('DELETE', '/api/roles/5'), ['id' => '5']);
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertSame(
+            'Cannot delete role with active user assignments',
+            json_decode($response->getBody(), true)['error']
+        );
+    }
+
+    public function testDeleteRoleFromOtherTenantReturns404(): void
+    {
+        $visibility = $this->statement(false);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturn($visibility);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->delete(new Request('DELETE', '/api/roles/999'), ['id' => '999']);
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    public function testDeleteSucceedsWhenNoUsersAssigned(): void
+    {
+        $visibility = $this->statement(['1' => 1]);
+        $userCount = $this->statement(['cnt' => 0]);
+        $delPerms = $this->statement();
+        $delAssign = $this->statement();
+        $delRole = $this->statement();
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls(
+            $visibility,
+            $userCount,
+            $delPerms,
+            $delAssign,
+            $delRole
+        );
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->delete(new Request('DELETE', '/api/roles/5'), ['id' => '5']);
+
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
     public function testDeleteInvalidatesEffectivePermissionCache(): void
     {
         $this->seedEffectivePermissionCache(4);
         $this->assertTrue($this->cacheHasEntry(4), 'precondition: cache should be primed');
 
+        $visibility = $this->statement(['1' => 1]);
+        $userCount = $this->statement(['cnt' => 0]);
+        $delPerms = $this->statement();
+        $delAssign = $this->statement();
+        $delRole = $this->statement();
+
         $pdo = $this->createMock(PDO::class);
-
-        $existsStmt = $this->createMock(PDOStatement::class);
-        $existsStmt->method('execute')->willReturn(true);
-        $existsStmt->method('fetch')->willReturn(['id' => 5]); // role exists
-
-        $inUseStmt = $this->createMock(PDOStatement::class);
-        $inUseStmt->method('execute')->willReturn(true);
-        $inUseStmt->method('fetch')->willReturn(['count' => 0]); // not in use
-
-        $delPermStmt = $this->createMock(PDOStatement::class);
-        $delPermStmt->method('execute')->willReturn(true);
-
-        $delRoleStmt = $this->createMock(PDOStatement::class);
-        $delRoleStmt->method('execute')->willReturn(true);
-
-        $pdo->method('prepare')->willReturn($existsStmt, $inUseStmt, $delPermStmt, $delRoleStmt);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls(
+            $visibility,
+            $userCount,
+            $delPerms,
+            $delAssign,
+            $delRole
+        );
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
-        $request = new Request('DELETE', '/api/roles/5');
-
-        $response = $handler->delete($request, ['id' => '5']);
+        $response = $handler->delete(new Request('DELETE', '/api/roles/5'), ['id' => '5']);
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertFalse(
             $this->cacheHasEntry(4),
             'delete() must invalidate the worker-level effective-permission cache'
         );
+    }
+
+    // ==================== getPermissions ====================
+
+    public function testGetPermissionsReturnsRolePermissions(): void
+    {
+        $visibility = $this->statement(['1' => 1]);
+        $perms = $this->statement(false, [
+            ['id' => 7, 'name' => 'posts:read', 'description' => null],
+            ['id' => 8, 'name' => 'posts:write', 'description' => null],
+        ]);
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($visibility, $perms);
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $response = $handler->getPermissions(new Request('GET', '/api/roles/5/permissions'), ['id' => '5']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertCount(2, json_decode($response->getBody(), true)['data']);
     }
 }

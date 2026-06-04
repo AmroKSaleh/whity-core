@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Api;
 
+use Psr\Log\LoggerInterface;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -12,38 +15,103 @@ use PDO;
 /**
  * Roles API Handler
  *
- * Handles CRUD operations for roles with permission management.
+ * Full CRUD for roles with permission assignment, scoped to the current tenant
+ * (WC-16, issue #9).
+ *
+ * Request contract
+ * ----------------
+ * Create and update accept the assigned permission list under the canonical key
+ * `permissions`, expressed as `resource:action` COLON-notation strings (e.g.
+ * `posts:read`). This is the authoritative key the Edit-role UI already uses;
+ * the Create-role modal currently sends `permissionIds` (frontend bug #99) and
+ * will be reconciled separately to this contract. Permission strings are
+ * resolved to their `permissions.id` before being linked through the
+ * `role_permissions` junction table (which references permissions by id).
+ *
+ * Tenant scoping
+ * --------------
+ * The `roles` table is global (it has no `tenant_id` column), so a role's tenant
+ * association is derived from the tenant-scoped `user_roles` junction table: a
+ * role belongs to a tenant when at least one assignment links it to that tenant.
+ * Newly created roles are linked to the current tenant via a `user_roles` seed
+ * row using the acting user so they are immediately visible to — and only to —
+ * that tenant. Every read/write is filtered by the resolved
+ * {@see TenantContext::getTenantId()}; the SYSTEM tenant (id 0) is the sole
+ * exception and sees every role across tenants. TenantContext is never bypassed.
+ *
+ * Cache coherence
+ * ---------------
+ * Mutating writes (create/update/delete) invalidate the worker-level
+ * effective-permission cache via {@see RoleChecker::clearCache()} (WC-15) so RBAC
+ * checks never go stale after a role or its permissions change.
  */
 class RolesApiHandler
 {
     private PDO $db;
     private HookManager $hookManager;
 
-    public function __construct(PDO $db, HookManager $hookManager)
+    /**
+     * Optional PSR-3 logger for structured audit/diagnostic logging. When null,
+     * no log output is emitted (keeps tests output-clean).
+     */
+    private ?LoggerInterface $logger;
+
+    /**
+     * Constructor.
+     *
+     * @param PDO                  $db          Database connection.
+     * @param HookManager          $hookManager Hook dispatcher for role lifecycle events.
+     * @param LoggerInterface|null $logger      Optional PSR-3 logger for structured logs.
+     */
+    public function __construct(PDO $db, HookManager $hookManager, ?LoggerInterface $logger = null)
     {
         $this->db = $db;
         $this->hookManager = $hookManager;
+        $this->logger = $logger;
     }
 
     /**
-     * GET /api/roles - List all roles
+     * GET /api/roles - List roles visible to the current tenant.
+     *
+     * @param Request $request The incoming request.
+     * @return Response JSON list of roles under the `data` key.
      */
     public function list(Request $request): Response
     {
         try {
-            $stmt = $this->db->prepare('
-                SELECT r.id, r.name, r.description, r.created_at,
-                       COUNT(rp.id) as permission_count
-                FROM roles r
-                LEFT JOIN role_permissions rp ON r.id = rp.role_id
-                GROUP BY r.id
-                ORDER BY r.created_at DESC
-            ');
-            $stmt->execute();
+            $tenantId = TenantContext::getTenantId();
+
+            // SYSTEM tenant (id 0) sees every role across all tenants.
+            if ($tenantId === 0) {
+                $stmt = $this->db->prepare('
+                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at,
+                           COUNT(rp.id) AS permission_count
+                    FROM roles r
+                    LEFT JOIN role_permissions rp ON r.id = rp.role_id
+                    GROUP BY r.id
+                    ORDER BY r.created_at DESC
+                ');
+                $stmt->execute();
+            } else {
+                // A role is visible to a tenant when at least one user_roles
+                // assignment links it to that tenant (tenant isolation).
+                $stmt = $this->db->prepare('
+                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at,
+                           COUNT(rp.id) AS permission_count
+                    FROM roles r
+                    INNER JOIN user_roles ur ON ur.role_id = r.id AND ur.tenant_id = ?
+                    LEFT JOIN role_permissions rp ON r.id = rp.role_id
+                    GROUP BY r.id
+                    ORDER BY r.created_at DESC
+                ');
+                $stmt->execute([$tenantId]);
+            }
+
+            /** @var array<int, array<string, mixed>> $roles */
             $roles = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Normalize keys to camelCase
-            $roles = array_map(function ($role) {
+            // Normalize permission_count to camelCase integer.
+            $roles = array_map(static function (array $role): array {
                 $role['permissionCount'] = (int)($role['permission_count'] ?? 0);
                 unset($role['permission_count']);
                 return $role;
@@ -56,7 +124,11 @@ class RolesApiHandler
     }
 
     /**
-     * GET /api/roles/{id} - Get a single role with permissions
+     * GET /api/roles/{id} - Get a single tenant-scoped role with its permissions.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON role with `permissions` under the `data` key.
      */
     public function get(Request $request, array $params): Response
     {
@@ -66,9 +138,14 @@ class RolesApiHandler
                 return Response::error('Role ID is required', 400);
             }
 
-            // Get role details
+            $tenantId = TenantContext::getTenantId();
+
+            if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
+                return Response::error('Role not found', 404);
+            }
+
             $stmt = $this->db->prepare('
-                SELECT id, name, description, created_at
+                SELECT id, name, description, parent_id, created_at
                 FROM roles
                 WHERE id = ?
             ');
@@ -79,18 +156,7 @@ class RolesApiHandler
                 return Response::error('Role not found', 404);
             }
 
-            // Get role permissions
-            $permStmt = $this->db->prepare('
-                SELECT p.id, p.name, p.description
-                FROM permissions p
-                JOIN role_permissions rp ON p.id = rp.permission_id
-                WHERE rp.role_id = ?
-                ORDER BY p.name
-            ');
-            $permStmt->execute([$id]);
-            $permissions = $permStmt->fetchAll(PDO::FETCH_ASSOC);
-
-            $role['permissions'] = $permissions;
+            $role['permissions'] = $this->fetchRolePermissions((int)$id);
 
             return Response::json(['data' => $role], 200);
         } catch (\Exception $e) {
@@ -99,92 +165,105 @@ class RolesApiHandler
     }
 
     /**
-     * POST /api/roles - Create a new role
+     * POST /api/roles - Create a new role scoped to the current tenant.
+     *
+     * Accepts `{name, description?, permissions?}` where `permissions` is a list
+     * of `resource:action` strings. The new role is linked to the current tenant
+     * via the `user_roles` junction so it is immediately visible only to that
+     * tenant.
+     *
+     * @param Request $request The incoming request.
+     * @return Response JSON created role under the `data` key (201) or an error.
      */
     public function create(Request $request): Response
     {
         try {
+            /** @var array<string, mixed>|null $body */
             $body = json_decode($request->getBody(), true);
 
-            if (empty($body['name'])) {
+            if (!is_array($body) || empty($body['name'])) {
                 return Response::error('Role name is required', 400);
             }
 
-            $name = $body['name'];
-            $description = $body['description'] ?? '';
-            $permissions = $body['permissions'] ?? [];
+            $tenantId = TenantContext::getTenantId();
+            if ($tenantId === null) {
+                return Response::error('Tenant context is required', 400);
+            }
 
-            // Check if role already exists
+            $name = (string)$body['name'];
+            $description = isset($body['description']) ? (string)$body['description'] : '';
+            /** @var array<int, string> $permissions */
+            $permissions = $this->extractPermissionList($body);
+
+            // Role names are globally unique at the database layer.
             $checkStmt = $this->db->prepare('SELECT id FROM roles WHERE name = ?');
             $checkStmt->execute([$name]);
             if ($checkStmt->fetch()) {
                 return Response::error('Role already exists', 409);
             }
 
-            // Dispatch filter hook before creating role
-            // Use injected hookManager
+            // Filter hook: allow plugins to adjust the role payload before write.
             $roleData = $this->hookManager->dispatch('role.creating', [
                 'name' => $name,
                 'description' => $description,
                 'permissions' => $permissions,
+                'tenant_id' => $tenantId,
             ]);
 
-            // Extract potentially modified data from hook response
-            $name = $roleData['name'];
-            $description = $roleData['description'];
-            $permissions = $roleData['permissions'];
+            $name = (string)$roleData['name'];
+            $description = (string)$roleData['description'];
+            /** @var array<int, string> $permissions */
+            $permissions = array_values($roleData['permissions']);
 
-            // Insert role
+            // Insert the role.
             $stmt = $this->db->prepare('
                 INSERT INTO roles (name, description, created_at)
                 VALUES (?, ?, NOW())
             ');
             $stmt->execute([$name, $description]);
-            $roleId = $this->db->lastInsertId();
+            $roleId = (int)$this->db->lastInsertId();
 
-            // Insert permissions if provided
-            if (!empty($permissions)) {
-                $chunks = array_chunk($permissions, 500);
-                foreach ($chunks as $chunk) {
-                    $placeholders = implode(', ', array_fill(0, count($chunk), '(?, ?, NOW())'));
-                    $sql = 'INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES ' . $placeholders;
+            // Link the role to the current tenant via user_roles using the acting
+            // user, so it is immediately visible to — and only to — this tenant.
+            $this->linkRoleToTenant($roleId, $tenantId, $this->actingUserId($request));
 
-                    $params = [];
-                    foreach ($chunk as $permissionId) {
-                        $params[] = $roleId;
-                        $params[] = $permissionId;
-                    }
+            // Resolve colon-notation permission strings to ids and link them.
+            $linkedCount = $this->assignPermissions($roleId, $permissions);
 
-                    $permStmt = $this->db->prepare($sql);
-                    $permStmt->execute($params);
-                }
-            }
-
-            // Dispatch synchronous hook after role is created
+            // Synchronous post-create hook.
             $this->hookManager->dispatch('role.created', [
-                'id' => (int)$roleId,
+                'id' => $roleId,
                 'name' => $name,
                 'description' => $description,
                 'permissions' => $permissions,
+                'tenant_id' => $tenantId,
             ]);
 
-            // Dispatch asynchronous hook for background tasks
+            // Asynchronous post-create hook for background tasks.
             $this->hookManager->dispatchAsync('role.created.async', [
-                'id' => (int)$roleId,
+                'id' => $roleId,
                 'name' => $name,
+                'tenant_id' => $tenantId,
             ]);
 
             // A new role with permissions changes the effective permission set;
             // invalidate the worker-level hierarchy cache so checks are fresh.
             RoleChecker::clearCache();
 
+            $this->log('info', 'Role created', [
+                'event' => 'roles.create',
+                'tenant_id' => $tenantId,
+                'role_id' => $roleId,
+                'permission_count' => $linkedCount,
+            ]);
+
             return Response::json([
                 'data' => [
-                    'id' => (int)$roleId,
+                    'id' => $roleId,
                     'name' => $name,
                     'description' => $description,
-                    'permissionCount' => count($permissions)
-                ]
+                    'permissionCount' => $linkedCount,
+                ],
             ], 201);
         } catch (\Exception $e) {
             return Response::error('Failed to create role: ' . $e->getMessage(), 500);
@@ -192,7 +271,15 @@ class RolesApiHandler
     }
 
     /**
-     * PATCH /api/roles/{id} - Update a role
+     * PATCH /api/roles/{id} - Update a tenant-scoped role.
+     *
+     * Accepts any of `{name?, description?, permissions?}`. When `permissions` is
+     * present its `resource:action` strings fully replace the role's existing
+     * permission grants.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON confirmation under the `data` key (200) or an error.
      */
     public function update(Request $request, array $params): Response
     {
@@ -202,9 +289,18 @@ class RolesApiHandler
                 return Response::error('Role ID is required', 400);
             }
 
-            $body = json_decode($request->getBody(), true);
+            $tenantId = TenantContext::getTenantId();
 
-            // Get current role
+            if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
+                return Response::error('Role not found', 404);
+            }
+
+            /** @var array<string, mixed>|null $body */
+            $body = json_decode($request->getBody(), true);
+            if (!is_array($body)) {
+                $body = [];
+            }
+
             $stmt = $this->db->prepare('SELECT * FROM roles WHERE id = ?');
             $stmt->execute([$id]);
             $role = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -213,16 +309,15 @@ class RolesApiHandler
                 return Response::error('Role not found', 404);
             }
 
-            // Dispatch filter hook before updating role
-            // Use injected hookManager
+            // Filter hook before update.
             $this->hookManager->dispatch('role.updating', [
                 'id' => (int)$id,
                 'changes' => $body,
+                'tenant_id' => $tenantId,
             ]);
 
-            // Update role fields
             $updates = [];
-            $params_array = [];
+            $updateParams = [];
 
             if (isset($body['name']) && $body['name'] !== $role['name']) {
                 $checkStmt = $this->db->prepare('SELECT id FROM roles WHERE name = ? AND id != ?');
@@ -231,55 +326,47 @@ class RolesApiHandler
                     return Response::error('Role name already exists', 409);
                 }
                 $updates[] = 'name = ?';
-                $params_array[] = $body['name'];
+                $updateParams[] = (string)$body['name'];
             }
 
             if (isset($body['description'])) {
                 $updates[] = 'description = ?';
-                $params_array[] = $body['description'];
+                $updateParams[] = (string)$body['description'];
             }
 
-            if (!empty($updates)) {
-                $params_array[] = $id;
+            if ($updates !== []) {
+                $updateParams[] = $id;
                 $sql = 'UPDATE roles SET ' . implode(', ', $updates) . ' WHERE id = ?';
                 $updateStmt = $this->db->prepare($sql);
-                $updateStmt->execute($params_array);
+                $updateStmt->execute($updateParams);
             }
 
-            // Update permissions if provided
-            if (isset($body['permissions'])) {
-                // Delete existing permissions
+            // Replace permissions when the canonical `permissions` key is present.
+            if (array_key_exists('permissions', $body) && is_array($body['permissions'])) {
                 $delStmt = $this->db->prepare('DELETE FROM role_permissions WHERE role_id = ?');
                 $delStmt->execute([$id]);
 
-                // Insert new permissions
-                if (!empty($body['permissions'])) {
-                    $chunks = array_chunk($body['permissions'], 500);
-                    foreach ($chunks as $chunk) {
-                        $placeholders = implode(', ', array_fill(0, count($chunk), '(?, ?, NOW())'));
-                        $sql = 'INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES ' . $placeholders;
-
-                        $params = [];
-                        foreach ($chunk as $permissionId) {
-                            $params[] = $id;
-                            $params[] = $permissionId;
-                        }
-
-                        $permStmt = $this->db->prepare($sql);
-                        $permStmt->execute($params);
-                    }
-                }
+                /** @var array<int, string> $permissions */
+                $permissions = array_values($body['permissions']);
+                $this->assignPermissions((int)$id, $permissions);
             }
 
-            // Dispatch synchronous hook after role is updated
+            // Synchronous post-update hook.
             $this->hookManager->dispatch('role.updated', [
                 'id' => (int)$id,
                 'changes' => $body,
+                'tenant_id' => $tenantId,
             ]);
 
             // Permission/hierarchy assignments may have changed; invalidate the
             // worker-level effective-permission cache so checks are not stale.
             RoleChecker::clearCache();
+
+            $this->log('info', 'Role updated', [
+                'event' => 'roles.update',
+                'tenant_id' => $tenantId,
+                'role_id' => (int)$id,
+            ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role updated']], 200);
         } catch (\Exception $e) {
@@ -288,7 +375,14 @@ class RolesApiHandler
     }
 
     /**
-     * DELETE /api/roles/{id} - Delete a role
+     * DELETE /api/roles/{id} - Delete a tenant-scoped role.
+     *
+     * A role with active user assignments cannot be deleted: the endpoint returns
+     * 409 `{error: 'Cannot delete role with active user assignments'}`.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON confirmation (200) or an error.
      */
     public function delete(Request $request, array $params): Response
     {
@@ -298,47 +392,55 @@ class RolesApiHandler
                 return Response::error('Role ID is required', 400);
             }
 
-            $stmt = $this->db->prepare('SELECT id FROM roles WHERE id = ?');
-            $stmt->execute([$id]);
-            if (!$stmt->fetch()) {
+            $tenantId = TenantContext::getTenantId();
+
+            if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
                 return Response::error('Role not found', 404);
             }
 
-            // Check if role is in use
-            $checkStmt = $this->db->prepare('SELECT COUNT(*) as count FROM users WHERE role_id = ?');
-            $checkStmt->execute([$id]);
-            $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
-            if ($result['count'] > 0) {
-                return Response::error('Cannot delete role in use by ' . $result['count'] . ' user(s)', 409);
+            // Reject deletion while users are still assigned this role. Scope the
+            // assignment count to the tenant (SYSTEM tenant counts across all).
+            if ($this->roleHasActiveUsers((int)$id, $tenantId)) {
+                return Response::error('Cannot delete role with active user assignments', 409);
             }
 
-            // Dispatch filter hook before deleting role
-            // Use injected hookManager
+            // Filter hook before delete.
             $this->hookManager->dispatch('role.deleting', [
                 'id' => (int)$id,
+                'tenant_id' => $tenantId,
             ]);
 
-            // Delete permissions first
+            // Remove permission grants, tenant assignments, then the role itself.
             $permStmt = $this->db->prepare('DELETE FROM role_permissions WHERE role_id = ?');
             $permStmt->execute([$id]);
 
-            // Delete role
+            $assignStmt = $this->db->prepare('DELETE FROM user_roles WHERE role_id = ?');
+            $assignStmt->execute([$id]);
+
             $deleteStmt = $this->db->prepare('DELETE FROM roles WHERE id = ?');
             $deleteStmt->execute([$id]);
 
-            // Dispatch synchronous hook after role is deleted
+            // Synchronous post-delete hook.
             $this->hookManager->dispatch('role.deleted', [
                 'id' => (int)$id,
+                'tenant_id' => $tenantId,
             ]);
 
-            // Dispatch asynchronous hook for background tasks
+            // Asynchronous post-delete hook for background tasks.
             $this->hookManager->dispatchAsync('role.deleted.async', [
                 'id' => (int)$id,
+                'tenant_id' => $tenantId,
             ]);
 
             // Removing a role alters the hierarchy and effective permission sets;
             // invalidate the worker-level cache so checks reflect the deletion.
             RoleChecker::clearCache();
+
+            $this->log('info', 'Role deleted', [
+                'event' => 'roles.delete',
+                'tenant_id' => $tenantId,
+                'role_id' => (int)$id,
+            ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role deleted']], 200);
         } catch (\Exception $e) {
@@ -347,7 +449,11 @@ class RolesApiHandler
     }
 
     /**
-     * GET /api/roles/{id}/permissions - Get permissions for a role
+     * GET /api/roles/{id}/permissions - Get the permissions assigned to a role.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON permission list under the `data` key.
      */
     public function getPermissions(Request $request, array $params): Response
     {
@@ -357,19 +463,287 @@ class RolesApiHandler
                 return Response::error('Role ID is required', 400);
             }
 
-            $stmt = $this->db->prepare('
-                SELECT p.id, p.name, p.description
-                FROM permissions p
-                JOIN role_permissions rp ON p.id = rp.permission_id
-                WHERE rp.role_id = ?
-                ORDER BY p.name
-            ');
-            $stmt->execute([$id]);
-            $permissions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $tenantId = TenantContext::getTenantId();
 
-            return Response::json(['data' => $permissions], 200);
+            if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
+                return Response::error('Role not found', 404);
+            }
+
+            return Response::json(['data' => $this->fetchRolePermissions((int)$id)], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to fetch role permissions: ' . $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Whether a role is visible to the given tenant.
+     *
+     * The SYSTEM tenant (id 0) sees every role. For any other tenant, a role is
+     * visible only when a `user_roles` assignment links it to that tenant.
+     *
+     * @param int      $roleId   The role id.
+     * @param int|null $tenantId The resolved tenant id (null when unresolved).
+     * @return bool True if the role is visible to the tenant.
+     */
+    private function roleVisibleToTenant(int $roleId, ?int $tenantId): bool
+    {
+        if ($tenantId === 0) {
+            $stmt = $this->db->prepare('SELECT id FROM roles WHERE id = ?');
+            $stmt->execute([$roleId]);
+            return $stmt->fetch() !== false;
+        }
+
+        if ($tenantId === null) {
+            return false;
+        }
+
+        $stmt = $this->db->prepare('
+            SELECT 1
+            FROM roles r
+            INNER JOIN user_roles ur ON ur.role_id = r.id AND ur.tenant_id = ?
+            WHERE r.id = ?
+            LIMIT 1
+        ');
+        $stmt->execute([$tenantId, $roleId]);
+        return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Whether the role still has users assigned to it.
+     *
+     * Counts both the legacy single-role column (`users.role_id`) and the
+     * many-to-many `user_roles` junction so a role in use through either path is
+     * protected. Scoped to the tenant; the SYSTEM tenant (id 0) counts globally.
+     *
+     * @param int      $roleId   The role id.
+     * @param int|null $tenantId The resolved tenant id.
+     * @return bool True if at least one user is assigned the role.
+     */
+    private function roleHasActiveUsers(int $roleId, ?int $tenantId): bool
+    {
+        if ($tenantId === 0 || $tenantId === null) {
+            $stmt = $this->db->prepare('
+                SELECT (
+                    (SELECT COUNT(*) FROM users WHERE role_id = ?)
+                    + (SELECT COUNT(*) FROM user_roles WHERE role_id = ?)
+                ) AS cnt
+            ');
+            $stmt->execute([$roleId, $roleId]);
+        } else {
+            $stmt = $this->db->prepare('
+                SELECT (
+                    (SELECT COUNT(*) FROM users WHERE role_id = ? AND tenant_id = ?)
+                    + (SELECT COUNT(*) FROM user_roles WHERE role_id = ? AND tenant_id = ?)
+                ) AS cnt
+            ');
+            $stmt->execute([$roleId, $tenantId, $roleId, $tenantId]);
+        }
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false && (int)($row['cnt'] ?? 0) > 0;
+    }
+
+    /**
+     * Fetch the permissions assigned to a role.
+     *
+     * @param int $roleId The role id.
+     * @return array<int, array<string, mixed>> Permission rows (id, name, description).
+     */
+    private function fetchRolePermissions(int $roleId): array
+    {
+        $stmt = $this->db->prepare('
+            SELECT p.id, p.name, p.description
+            FROM permissions p
+            INNER JOIN role_permissions rp ON p.id = rp.permission_id
+            WHERE rp.role_id = ?
+            ORDER BY p.name
+        ');
+        $stmt->execute([$roleId]);
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $rows;
+    }
+
+    /**
+     * Resolve `resource:action` permission strings to ids and link them to a role
+     * via the `role_permissions` junction table.
+     *
+     * Unknown permission strings (not present in the `permissions` catalogue) are
+     * skipped rather than fabricated, so a role can never reference a permission
+     * the system does not enforce. Returns the number of grants actually linked.
+     *
+     * @param int               $roleId      The role id.
+     * @param array<int, string> $permissions Permission strings (colon notation).
+     * @return int The number of permission grants linked.
+     */
+    private function assignPermissions(int $roleId, array $permissions): int
+    {
+        if ($permissions === []) {
+            return 0;
+        }
+
+        $ids = $this->resolvePermissionIds($permissions);
+        if ($ids === []) {
+            return 0;
+        }
+
+        $chunks = array_chunk($ids, 500);
+        foreach ($chunks as $chunk) {
+            $placeholders = implode(', ', array_fill(0, count($chunk), '(?, ?, NOW())'));
+            $sql = 'INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES ' . $placeholders;
+
+            $params = [];
+            foreach ($chunk as $permissionId) {
+                $params[] = $roleId;
+                $params[] = $permissionId;
+            }
+
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+        }
+
+        return count($ids);
+    }
+
+    /**
+     * Resolve a list of `resource:action` permission strings to their ids.
+     *
+     * Looks the strings up by `permissions.name`. Strings with no catalogue match
+     * are dropped. The result preserves uniqueness so a duplicated input string
+     * does not violate the `(role_id, permission_id)` uniqueness constraint.
+     *
+     * @param array<int, string> $permissions Permission strings (colon notation).
+     * @return array<int, int> Resolved permission ids.
+     */
+    private function resolvePermissionIds(array $permissions): array
+    {
+        $names = array_values(array_unique(array_map(static fn($p): string => (string)$p, $permissions)));
+        if ($names === []) {
+            return [];
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($names), '?'));
+        $stmt = $this->db->prepare(
+            'SELECT id FROM permissions WHERE name IN (' . $placeholders . ')'
+        );
+        $stmt->execute($names);
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $ids = [];
+        foreach ($rows as $row) {
+            if (isset($row['id'])) {
+                $ids[] = (int)$row['id'];
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Link a role to a tenant via the tenant-scoped `user_roles` junction so the
+     * role becomes visible to that tenant.
+     *
+     * Uses the acting user as the assignment subject. The insert is idempotent at
+     * the database layer through the `(user_id, role_id)` unique constraint; any
+     * duplicate-assignment failure is swallowed so role creation still succeeds.
+     *
+     * @param int      $roleId   The newly created role id.
+     * @param int      $tenantId The current tenant id.
+     * @param int|null $userId   The acting user id, or null when unknown.
+     * @return void
+     */
+    private function linkRoleToTenant(int $roleId, int $tenantId, ?int $userId): void
+    {
+        if ($userId === null) {
+            return;
+        }
+
+        try {
+            $stmt = $this->db->prepare('
+                INSERT INTO user_roles (tenant_id, user_id, role_id, created_at)
+                VALUES (?, ?, ?, NOW())
+            ');
+            $stmt->execute([$tenantId, $userId, $roleId]);
+        } catch (\PDOException $e) {
+            // A duplicate assignment is harmless; only re-raise unexpected errors.
+            if (
+                stripos($e->getMessage(), 'unique') === false
+                && stripos($e->getMessage(), 'constraint') === false
+                && stripos($e->getMessage(), 'duplicate') === false
+            ) {
+                throw $e;
+            }
+        }
+    }
+
+    /**
+     * Extract the canonical `permissions` list from a request body.
+     *
+     * The authoritative key is `permissions` (the Edit-role UI contract). For
+     * resilience against the known Create-role modal bug (#99) that sends
+     * `permissionIds`, that key is accepted as a fallback ONLY when `permissions`
+     * is absent. Each entry is coerced to a string (colon-notation permission).
+     *
+     * @param array<string, mixed> $body The decoded request body.
+     * @return array<int, string> The permission list.
+     */
+    private function extractPermissionList(array $body): array
+    {
+        $raw = null;
+        if (array_key_exists('permissions', $body) && is_array($body['permissions'])) {
+            $raw = $body['permissions'];
+        } elseif (array_key_exists('permissionIds', $body) && is_array($body['permissionIds'])) {
+            // Backwards-compatible fallback for frontend bug #99 only.
+            $raw = $body['permissionIds'];
+        }
+
+        if ($raw === null) {
+            return [];
+        }
+
+        return array_values(array_map(static fn($p): string => (string)$p, $raw));
+    }
+
+    /**
+     * Resolve the acting user id from the authenticated request, if present.
+     *
+     * The RBAC middleware attaches the decoded token to {@see Request::$user};
+     * the user id lives under the `user_id` claim.
+     *
+     * @param Request $request The incoming request.
+     * @return int|null The acting user id, or null when unauthenticated.
+     */
+    private function actingUserId(Request $request): ?int
+    {
+        $user = $request->user;
+        if ($user === null) {
+            return null;
+        }
+
+        if (isset($user->user_id) && is_numeric($user->user_id)) {
+            return (int)$user->user_id;
+        }
+
+        return null;
+    }
+
+    /**
+     * Emit a structured log record when a logger is configured.
+     *
+     * @param string               $level   PSR-3 log level method (e.g. `info`).
+     * @param string               $message The human-readable message.
+     * @param array<string, mixed> $context Structured context (includes tenant_id).
+     * @return void
+     */
+    private function log(string $level, string $message, array $context): void
+    {
+        if ($this->logger === null) {
+            return;
+        }
+
+        $this->logger->log($level, $message, $context);
     }
 }
