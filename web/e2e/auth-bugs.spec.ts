@@ -15,7 +15,7 @@ test.describe('Known app bugs (auth)', () => {
   // `useAuth().error`, which is only ever set by the auth-context `login()`
   // method — but handleSubmit never calls it. Result: invalid credentials
   // produce NO visible error message (verified empirically on the live app).
-  test.fixme('invalid login should show an error message to the user', async ({ page }) => {
+  test('invalid login should show an error message to the user', async ({ page }) => {
     const login = new LoginPage(page);
     await login.goto();
     await login.submit({ email: ADMIN.email, password: 'definitely-wrong-password' });
