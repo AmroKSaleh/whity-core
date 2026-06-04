@@ -21,22 +21,24 @@ if ($isCli && isset($argv[1])) {
     $envFile = dirname(__DIR__) . '/.env';
     if (file_exists($envFile)) {
         $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        foreach ($lines as $line) {
-            // Skip comments and empty lines
-            if (empty(trim($line)) || strpos(trim($line), '#') === 0) {
-                continue;
-            }
+        if ($lines !== false) {
+            foreach ($lines as $line) {
+                // Skip comments and empty lines
+                if (empty(trim($line)) || strpos(trim($line), '#') === 0) {
+                    continue;
+                }
 
-            // Parse KEY=VALUE format
-            if (strpos($line, '=') !== false) {
-                [$key, $value] = explode('=', $line, 2);
-                $key = trim($key);
-                $value = trim($value);
+                // Parse KEY=VALUE format
+                if (strpos($line, '=') !== false) {
+                    [$key, $value] = explode('=', $line, 2);
+                    $key = trim($key);
+                    $value = trim($value);
 
-                // Only set if not already in environment
-                if (!getenv($key) && !isset($_ENV[$key])) {
-                    $_ENV[$key] = $value;
-                    putenv("{$key}={$value}");
+                    // Only set if not already in environment
+                    if (!getenv($key) && !isset($_ENV[$key])) {
+                        $_ENV[$key] = $value;
+                        putenv("{$key}={$value}");
+                    }
                 }
             }
         }
@@ -115,22 +117,24 @@ use Whity\Auth\TokenValidator;
 $envFile = dirname(__DIR__) . '/.env';
 if (file_exists($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    foreach ($lines as $line) {
-        // Skip comments and empty lines
-        if (empty(trim($line)) || strpos(trim($line), '#') === 0) {
-            continue;
-        }
+    if ($lines !== false) {
+        foreach ($lines as $line) {
+            // Skip comments and empty lines
+            if (empty(trim($line)) || strpos(trim($line), '#') === 0) {
+                continue;
+            }
 
-        // Parse KEY=VALUE format
-        if (strpos($line, '=') !== false) {
-            [$key, $value] = explode('=', $line, 2);
-            $key = trim($key);
-            $value = trim($value);
+            // Parse KEY=VALUE format
+            if (strpos($line, '=') !== false) {
+                [$key, $value] = explode('=', $line, 2);
+                $key = trim($key);
+                $value = trim($value);
 
-            // Only set if not already in environment
-            if (!getenv($key) && !isset($_ENV[$key])) {
-                $_ENV[$key] = $value;
-                putenv("{$key}={$value}");
+                // Only set if not already in environment
+                if (!getenv($key) && !isset($_ENV[$key])) {
+                    $_ENV[$key] = $value;
+                    putenv("{$key}={$value}");
+                }
             }
         }
     }
@@ -161,7 +165,7 @@ $permissionRegistry = new PermissionRegistry();
 
 // 4b. Initialize hook manager and register in service container
 $hookManager = new HookManager();
-\Whity\register_service(HookManager::class, $hookManager);
+\Whity\register_service(HookManager::class, $hookManager); // @phpstan-ignore-line
 
 // Register core navigation items
 $hookManager->listen('navigation.register', function ($data, $context) {
@@ -385,6 +389,11 @@ if ($isWorker) {
 
         // Force garbage collection to prevent memory bloat
         gc_collect_cycles();
+
+        if ($kernel->hasExceededMemoryLimit()) {
+            error_log("[FrankenPHP Worker] Memory limit exceeded. Recycling worker gracefully.");
+            break;
+        }
 
         if (!$keepRunning) {
             break;

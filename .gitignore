@@ -16,3 +16,6 @@ docs/*
 !docs/wiki/
 .worktrees/
 .phpunit.cache/
+
+.claude/
+.playwright-mcp/
