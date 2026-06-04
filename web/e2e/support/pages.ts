@@ -112,7 +112,7 @@ export class LoginPage {
       .click();
   }
 
-  /** Enter an 8-char recovery code and click Verify Recovery Code. */
+  /** Enter a full XXXX-XXXX-XXXX recovery code and click Verify Recovery Code. */
   async submitRecoveryCode(code: string): Promise<void> {
     await this.recoveryCodeInput.fill(code);
     await this.page
