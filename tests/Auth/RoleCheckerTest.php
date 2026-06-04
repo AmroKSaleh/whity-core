@@ -131,54 +131,67 @@ class RoleCheckerTest extends TestCase
     }
 
     /**
-     * Test hasPermission returns true if user has permission
+     * Test hasPermission returns true when the user's role directly holds the
+     * permission, read through the real schema join (WC-54).
+     *
+     * The step-2 direct-grant probe reaches role_permissions via the user join
+     * and joins `permissions ON permission_id`, matched on `permissions.name` —
+     * there is no `role_permissions.permission_string` column. It keeps the
+     * historical `:userId` + `:permission` binding contract.
      */
     public function testHasPermissionReturnsTrueIfUserHasPermission(): void
     {
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(['permission_string' => 'users.read']);
-
         $this->mockRegistry->method('permissionExists')
-            ->with('users.read')
+            ->with('users:read')
             ->willReturn(true);
 
-        $this->mockDb->method('query')
-            ->with(
-                'SELECT 1 FROM role_permissions rp JOIN users u ON u.role_id = rp.role_id WHERE u.id = :userId AND rp.permission_string = :permission',
-                [':userId' => 1, ':permission' => 'users.read']
-            )
-            ->willReturn($mockStatement);
+        $this->mockDb->method('query')->willReturnCallback(
+            function (string $sql, array $params): PDOStatement {
+                $this->assertStringContainsString('SELECT 1 FROM role_permissions rp', $sql);
+                $this->assertStringContainsString('JOIN users u ON u.role_id = rp.role_id', $sql);
+                $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
+                $this->assertStringContainsString('p.name = :permission', $sql);
+                $this->assertStringNotContainsString('permission_string', $sql);
+                $this->assertSame([':userId' => 1, ':permission' => 'users:read'], $params);
+                return $this->statement(['1' => 1]);
+            }
+        );
 
-        $hasPermission = $this->roleChecker->hasPermission(1, 'users.read');
+        $hasPermission = $this->roleChecker->hasPermission(1, 'users:read');
 
         $this->assertTrue($hasPermission);
     }
 
     /**
-     * Test getPermissionsForUser returns all user permissions
+     * Test getPermissionsForUser returns all user permissions, read through the
+     * real schema join (WC-54): role_permissions -> permissions on permission_id,
+     * projecting `permissions.name` (not the non-existent `permission_string`).
      */
     public function testGetPermissionsForUserReturnsAllUserPermissions(): void
     {
         $mockStatement = $this->createMock(PDOStatement::class);
         $mockStatement->method('fetchAll')->willReturn([
-            ['permission_string' => 'users.read'],
-            ['permission_string' => 'users.create'],
-            ['permission_string' => 'roles.read'],
+            ['name' => 'users:read'],
+            ['name' => 'users:write'],
+            ['name' => 'roles:read'],
         ]);
 
-        $this->mockDb->method('query')
-            ->with(
-                'SELECT DISTINCT rp.permission_string FROM role_permissions rp JOIN users u ON u.role_id = rp.role_id WHERE u.id = :userId',
-                [':userId' => 1]
-            )
-            ->willReturn($mockStatement);
+        $this->mockDb->method('query')->willReturnCallback(
+            function (string $sql, array $params) use ($mockStatement): PDOStatement {
+                $this->assertStringContainsString('SELECT DISTINCT p.name', $sql);
+                $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
+                $this->assertStringNotContainsString('permission_string', $sql);
+                $this->assertSame([':userId' => 1], $params);
+                return $mockStatement;
+            }
+        );
 
         $permissions = $this->roleChecker->getPermissionsForUser(1);
 
         $this->assertCount(3, $permissions);
-        $this->assertContains('users.read', $permissions);
-        $this->assertContains('users.create', $permissions);
-        $this->assertContains('roles.read', $permissions);
+        $this->assertContains('users:read', $permissions);
+        $this->assertContains('users:write', $permissions);
+        $this->assertContains('roles:read', $permissions);
     }
 
     /**
@@ -234,6 +247,9 @@ class RoleCheckerTest extends TestCase
                 }
 
                 // per-role direct permissions (permissions JOIN role_permissions).
+                // The hierarchy walk projects `SELECT p.name FROM permissions p`,
+                // which the step-2 probe (`SELECT 1 FROM role_permissions rp ...`)
+                // does not match, so the two paths stay disambiguated.
                 if (str_contains($sql, 'FROM permissions p')) {
                     $roleId = $params[':roleId'];
                     $rows = array_map(
@@ -243,8 +259,9 @@ class RoleCheckerTest extends TestCase
                     return $this->statement(false, $rows);
                 }
 
-                // The legacy direct-grant probe in hasPermission: no direct match,
-                // forcing resolution down the hierarchy path.
+                // The step-2 direct-grant probe in hasPermission
+                // (`SELECT 1 FROM role_permissions rp JOIN permissions p ...`):
+                // no direct match, forcing resolution down the hierarchy path.
                 return $this->statement(false);
             }
         );
@@ -453,6 +470,10 @@ class RoleCheckerTest extends TestCase
     /**
      * hasPermission honours a direct grant without consulting the hierarchy,
      * preserving backward-compatible semantics for the RBAC middleware.
+     *
+     * The direct-grant probe now reads the real schema join (WC-54); a hit on it
+     * must short-circuit before any parent-chain (`SELECT parent_id FROM roles`)
+     * resolution.
      */
     public function testHasPermissionDirectGrantShortCircuits(): void
     {
@@ -460,11 +481,15 @@ class RoleCheckerTest extends TestCase
             ->with('users:read')->willReturn(true);
 
         $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql) : PDOStatement {
-                // The legacy direct-grant probe returns a hit.
-                if (str_contains($sql, 'rp.permission_string = :permission')) {
+            function (string $sql): PDOStatement {
+                // The direct-grant probe through the real join returns a hit and
+                // must short-circuit before any parent-chain resolution.
+                if (str_contains($sql, 'SELECT 1 FROM role_permissions rp')) {
+                    $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
+                    $this->assertStringNotContainsString('permission_string', $sql);
                     return $this->statement(['1' => 1]);
                 }
+
                 $this->fail('Direct grant should short-circuit before hierarchy resolution');
             }
         );
