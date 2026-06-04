@@ -1,447 +1,148 @@
 # Hook System
 
-Hooks allow plugins to listen for and react to system events. They provide a mediator/observer pattern for extending Whity Core without modifying the framework itself.
+Hooks let plugins (and the core) react to and modify events at key points, without modifying the framework. The implementation is a Mediator/Observer pattern in `HookManager` (`src/Core/Hooks/HookManager.php`). This page is grounded in the current source.
 
-## Overview
+Related: [Architecture](Architecture.md) · [PERMISSION_SYSTEM](PERMISSION_SYSTEM.md) · [TENANT_ISOLATION](TENANT_ISOLATION.md) · [Plugin-Development](Plugin-Development.md).
 
-The Hook System enables plugins to:
+## HookManager API
 
-- Listen for events at key points in the request lifecycle (before/after creating a user, deleting a role, etc.)
-- Modify data before it's persisted (validation filters, encryption, audit logging)
-- Queue background work when events occur (async event handlers)
-- React to system events across multiple plugins with predictable execution order
-
-Hooks are executed synchronously or asynchronously, in priority order, with automatic tenant context injection for security.
-
-## How Hooks Work
-
-### Synchronous vs Asynchronous
-
-**Synchronous Hooks** (Filters)
-
-Executed immediately during request processing. Data passed to each listener is returned and becomes input for the next listener. Used for:
-- Pre-save validation
-- Data transformation (encryption, normalization)
-- Audit logging during the request
-- Access control checks
+`HookManager` is an **instance** (not static). In `public/index.php` a single `HookManager` is created at worker boot and registered in the service container via `Whity\register_service(HookManager::class, $hookManager)`.
 
 ```php
-$data = HookManager::dispatch('user.creating', [
-    'email' => 'john@example.com',
-    'name' => 'John Doe'
+// Register a listener (lower priority number = runs earlier; default 10)
+public function listen(string $eventName, callable $callback, int $priority = 10): void
+
+// Synchronous filter chain: runs all listeners in priority order, threading the
+// returned array through each; returns the final data.
+public function dispatch(string $eventName, array $data): array
+
+// Asynchronous action: injects context and queues the payload for background work.
+public function dispatchAsync(string $eventName, array $payload): void
+
+// Remove a previously-registered listener (used by plugin hot-reload).
+public function removeListener(string $eventName, callable $callback): bool
+
+// Inspect registered listeners.
+public function getListeners(?string $eventName = null): array
+```
+
+## Synchronous vs asynchronous
+
+**Synchronous (`dispatch`)** — runs immediately in the request. Each listener receives `($data, $context)` and returns the (possibly modified) `$data`, which becomes the input to the next listener. If a listener returns a non-array, the data is left unchanged for that step. Use for validation, transformation, and synchronous side effects.
+
+```php
+$data = $hookManager->dispatch('role.creating', [
+    'name' => 'editor',
+    'description' => 'Content editors',
+    'tenant_id' => 7,
 ]);
-// Listeners can modify $data before user is created
+// Listeners may adjust $data before the role is written.
 ```
 
-**Asynchronous Hooks** (Actions)
-
-Queued for background processing, returns immediately. Used for:
-- Sending emails (user signup confirmations, notifications)
-- Integration with external services (webhooks, analytics)
-- Expensive operations (image processing, PDF generation)
-- Non-critical side effects
+**Asynchronous (`dispatchAsync`)** — injects context under `_context` and pushes the payload onto the `whity-core-async-hooks` queue (`Whity\Core\Queue\Queue::push(...)`), returning immediately. Use for emails, webhooks, and slow/non-critical side effects.
 
 ```php
-HookManager::dispatchAsync('user.created.async', [
-    'user_id' => 42,
-    'email' => 'john@example.com'
-]);
-// Returns immediately; queued for later processing
+$hookManager->dispatchAsync('role.created.async', ['id' => 12, 'tenant_id' => 7]);
 ```
 
-## Lifecycle: When Hooks Fire
+## Priority-based execution
 
-Common hook events in Whity Core:
-
-### User Lifecycle
-
-- `user.creating` - Before user inserted (sync) - Validate email, hash passwords
-- `user.created` - After user created (sync) - Log creation, update indexes
-- `user.created.async` - Queued async after user created - Send welcome email, webhook
-- `user.updating` - Before user updated (sync) - Validate new data
-- `user.updated` - After user updated (sync) - Update search indexes
-- `user.deleting` - Before user deleted (sync) - Check permissions, cascade deletes
-- `user.deleted` - After user deleted (sync) - Clean up related data
-- `user.deleted.async` - Queued async - Notify integrations of deletion
-
-### Role Lifecycle
-
-- `role.creating` - Before role inserted (sync)
-- `role.created` - After role created (sync)
-- `role.updating` - Before role updated (sync)
-- `role.updated` - After role updated (sync)
-- `role.deleting` - Before role deleted (sync) - Check for assigned users
-- `role.deleted` - After role deleted (sync)
-
-### Tenant Lifecycle
-
-- `tenant.creating` - Before tenant created (sync)
-- `tenant.created` - After tenant created (sync)
-- `tenant.updating` - Before tenant updated (sync)
-- `tenant.updated` - After tenant updated (sync)
-- `tenant.deleting` - Before tenant deleted (sync) - Check for users
-- `tenant.deleted` - After tenant deleted (sync)
-- `tenant.deleted.async` - Queued async - Archive tenant data, notify admins
-
-### Permission Lifecycle
-
-- `permission.registered` - When plugin registers permissions (sync) - Logging hook
-
-## Priority-Based Execution
-
-Listeners execute in priority order. Lower numbers execute first.
+Listeners run in ascending priority order (lower runs first); the default priority is `10`. Internally listeners are bucketed by priority and the buckets are `ksort`ed at dispatch time.
 
 ```php
-// Priority 5 (runs first)
-HookManager::listen('user.creating', function($data, $context) {
-    // Validate email format
-    return $data;
-}, 5);
-
-// Priority 10 (default, runs second)
-HookManager::listen('user.creating', function($data, $context) {
-    // Hash password
-    return $data;
-}, 10);
-
-// Priority 20 (runs last)
-HookManager::listen('user.creating', function($data, $context) {
-    // Audit log
-    return $data;
-}, 20);
+$hookManager->listen('role.creating', $validate, 5);   // runs first
+$hookManager->listen('role.creating', $transform, 10);  // default
+$hookManager->listen('role.creating', $audit, 20);      // runs last
 ```
 
-Use priority to control execution sequence:
-- Priority 0-5: Core framework validators
-- Priority 10: Default (use this if no preference)
-- Priority 20+: Side effects (logging, analytics)
+Suggested convention: `0–5` core validators, `10` default, `20+` side effects (logging, analytics).
 
-## Hook Payloads: What Data Is Passed
+## Context injection
 
-Hooks automatically inject context data alongside your payload:
+Every `dispatch`/`dispatchAsync` injects a context array built from the current request:
 
 ```php
-// Callback signature
-function ($data, $context) {
-    // $data: Your event payload
-    // $context: Automatic context injected by framework
-    return $data; // Modified or original data
-}
-
-// $context always contains:
 $context = [
-    'tenant_id' => 42,           // Current tenant (extracted from JWT)
-    'timestamp' => 1684334800,   // Unix timestamp when hook fired
+    'tenant_id' => TenantContext::getTenantId(), // current tenant (0 = system, null if unresolved)
+    'timestamp' => time(),
 ];
 ```
 
-### Important: Hook Payloads Are Scalar-Only
-
-Hook payloads must contain **only primitive values** (strings, integers, booleans, arrays):
+For sync hooks the context is the **second argument** to each listener; for async hooks it is merged into the payload under the `_context` key. Use `$context['tenant_id']` whenever a listener queries the database so its work stays within the current tenant (see [TENANT_ISOLATION](TENANT_ISOLATION.md)).
 
 ```php
-// GOOD: Scalar data only
-HookManager::dispatch('user.created', [
-    'user_id' => 42,
-    'email' => 'john@example.com',
-    'name' => 'John Doe'
-]);
-
-// BAD: Never pass model instances
-$user = User::find(42);
-HookManager::dispatch('user.created', [
-    'user' => $user  // WRONG! Objects can be mutated by plugins
-]);
-```
-
-**Why?** If you pass model instances, plugins could mutate them directly and escape the hook chain's control, breaking data integrity. Extracting scalars ensures plugins can't bypass the framework's safeguards.
-
-## Hook Context: Tenant Isolation
-
-Context is automatically injected and locked (read-only):
-
-```php
-HookManager::listen('user.creating', function($data, $context) {
-    // $context['tenant_id'] is guaranteed to match the request's tenant
-    // Cannot access other tenants, even if you try
-    
-    // Safe to use in queries:
-    $count = $db->query(
-        'SELECT COUNT(*) FROM users WHERE tenant_id = ?',
-        [$context['tenant_id']]
-    );
-    
-    return $data;
-}, 10);
-```
-
-The context is read-only and set by the framework before any plugin code runs. Plugins cannot:
-- Modify the tenant ID
-- Access data from other tenants
-- Escape the current tenant's isolation boundary
-
-## Registering Hook Listeners
-
-Plugins register listeners in their `onEnable()` method:
-
-```php
-<?php
-namespace Plugins\MyPlugin;
-
-use Whity\Core\PluginInterface;
-use Whity\Core\Hooks\HookManager;
-
-class Plugin implements PluginInterface
-{
-    public function onEnable(HookManager $hookManager): void
-    {
-        // Register sync listener: before user creation
-        $hookManager->listen('user.creating', function($data, $context) {
-            // Validate email doesn't already exist in this tenant
-            // Add audit log entry
-            return $data;
-        }, 5);
-        
-        // Register sync listener: after user creation
-        $hookManager->listen('user.created', function($data, $context) {
-            // Update search indexes
-            return $data;
-        }, 10);
-        
-        // Register async listener: async after user creation
-        $hookManager->listen('user.created.async', function($data, $context) {
-            // Send welcome email (no return value)
-            // This won't actually execute async yet (Phase 2)
-        }, 10);
-    }
-    
-    public function onDisable(): void
-    {
-        // Listeners are automatically cleared when plugin is disabled
-    }
-}
-```
-
-## Code Examples
-
-### Example 1: Audit Logging Plugin
-
-```php
-class AuditPlugin implements PluginInterface
-{
-    public function id(): string { return 'audit-logger'; }
-    public function name(): string { return 'Audit Logging'; }
-    public function version(): string { return '1.0.0'; }
-    
-    public function onEnable(HookManager $hookManager): void
-    {
-        // Log all user operations
-        foreach (['user.created', 'user.updated', 'user.deleted'] as $event) {
-            $hookManager->listen($event, function($data, $context) {
-                $log = [
-                    'tenant_id' => $context['tenant_id'],
-                    'timestamp' => $context['timestamp'],
-                    'event' => $event,
-                    'data' => $data
-                ];
-                file_put_contents(
-                    '/logs/audit.json',
-                    json_encode($log) . "\n",
-                    FILE_APPEND
-                );
-                return $data;
-            }, 20); // Low priority (runs last)
-        }
-    }
-}
-```
-
-### Example 2: Data Validation Plugin
-
-```php
-class ValidationPlugin implements PluginInterface
-{
-    public function id(): string { return 'validators'; }
-    public function onEnable(HookManager $hookManager): void
-    {
-        // Validate user email before creation
-        $hookManager->listen('user.creating', function($data, $context) {
-            if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-                throw new \InvalidArgumentException('Invalid email format');
-            }
-            
-            // Check email isn't already in use in this tenant
-            $existing = $db->query(
-                'SELECT id FROM users WHERE email = ? AND tenant_id = ?',
-                [$data['email'], $context['tenant_id']]
-            );
-            
-            if ($existing->fetch() !== false) {
-                throw new \InvalidArgumentException('Email already in use');
-            }
-            
-            return $data;
-        }, 5); // High priority (runs first)
-    }
-}
-```
-
-### Example 3: Password Hashing Plugin
-
-```php
-class PasswordHasherPlugin implements PluginInterface
-{
-    public function id(): string { return 'password-hasher'; }
-    public function onEnable(HookManager $hookManager): void
-    {
-        $hookManager->listen('user.creating', function($data, $context) {
-            if (isset($data['password'])) {
-                // Hash password before storage
-                $data['password'] = password_hash(
-                    $data['password'],
-                    PASSWORD_BCRYPT
-                );
-            }
-            return $data;
-        }, 8); // High priority
-    }
-}
-```
-
-## Best Practices
-
-### 1. Use Correct Hook for the Job
-
-- **Creating/Updating hooks**: For validation, transformation, pre-processing
-- **Created/Updated hooks**: For logging, indexing, synchronous side effects
-- **Async hooks**: For external integrations, emails, slow operations
-
-```php
-// RIGHT: Validation in .creating
-$hookManager->listen('user.creating', function($data, $context) {
-    if (strlen($data['password']) < 8) {
-        throw new \InvalidArgumentException('Password too short');
-    }
-    return $data;
-}, 5);
-
-// WRONG: Validation in .created.async
-// Async hooks don't block, user would be created with bad data
-```
-
-### 2. Return Data in Sync Hooks
-
-Always return the modified (or unmodified) data in synchronous hooks:
-
-```php
-// GOOD
-$hookManager->listen('user.creating', function($data, $context) {
-    $data['email'] = strtolower($data['email']);
-    return $data; // Chain to next listener
-}, 10);
-
-// BAD: Not returning data breaks the chain
-$hookManager->listen('user.creating', function($data, $context) {
-    $data['email'] = strtolower($data['email']);
-    // Missing return statement
-}, 10);
-```
-
-### 3. Use Context for Tenant Safety
-
-Always use `$context['tenant_id']` when scoping queries:
-
-```php
-// GOOD: Using context tenant
-$hookManager->listen('user.creating', function($data, $context) {
-    $exists = $db->query(
-        'SELECT id FROM users WHERE email = ? AND tenant_id = ?',
-        [$data['email'], $context['tenant_id']] // Always include tenant
-    );
-    return $data;
-}, 5);
-
-// DANGEROUS: Not scoping by tenant
-$hookManager->listen('user.creating', function($data, $context) {
-    $exists = $db->query(
-        'SELECT id FROM users WHERE email = ?', // Missing tenant filter!
-        [$data['email']]
-    );
+$hookManager->listen('user.creating', function (array $data, array $context): array {
+    // scope any lookups by the request's tenant
+    // ... $context['tenant_id'] ...
     return $data;
 }, 5);
 ```
 
-### 4. Handle Exceptions Gracefully
+## How plugins register hooks
 
-If a validation fails, throw an exception. The framework catches it and returns an error:
+Plugins declare hooks **declaratively** via `PluginInterface::getHooks()` (`src/Core/PluginInterface.php`) — there is **no** `onEnable(HookManager)` method. `getHooks()` returns a map of event name → subscription, where a subscription is:
+
+- a `callable` with signature `function (array $data, array $context): array`, or
+- an array `['callback' => callable, 'priority' => int]`, or
+- a list of either of the above.
 
 ```php
-$hookManager->listen('user.creating', function($data, $context) {
-    if (isset($data['age']) && $data['age'] < 18) {
-        throw new \InvalidArgumentException(
-            'Users must be 18 or older'
-        );
+final class AuditPlugin implements \Whity\Core\PluginInterface
+{
+    public function getName(): string { return 'audit-logger'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getMigrations(): array { return []; }
+
+    public function getHooks(): array
+    {
+        return [
+            'role.created' => [
+                'callback' => function (array $data, array $context): array {
+                    // record an audit entry; always return the (un)modified data
+                    return $data;
+                },
+                'priority' => 20,
+            ],
+        ];
     }
-    return $data;
-}, 5);
+}
 ```
 
-### 5. Keep Hooks Stateless
+`PluginLoader::registerCapabilities()` reads `getHooks()` and subscribes each callback through `HookManager::listen()` — but **wrapped in a per-plugin error boundary** (`wrapHookCallback()`). A throwing hook callback is caught and logged, the original `$data` is returned unchanged (so a bad listener can't corrupt the chain), and the failure is recorded against the plugin's lifecycle (after `MAX_CONSECUTIVE_ERRORS = 3` the plugin is taken out of service). The loader records the exact wrapped callbacks it registered so it can cleanly `removeListener()` them when the plugin is disabled, removed, or hot-reloaded. See [Plugin-Development](Plugin-Development.md) and the plugin lifecycle in [Architecture](Architecture.md#plugin-system).
 
-Never use static variables or object state in hooks:
+## Events fired by the core
 
-```php
-// GOOD: Stateless
-$hookManager->listen('user.created', function($data, $context) {
-    $count = $db->query('SELECT COUNT(*) FROM users')->fetch()['count'];
-    return $data;
-}, 10);
+These events are dispatched by the current core code (verify in source before relying on payload shapes):
 
-// BAD: Static state
-private static $callCount = 0;
-$hookManager->listen('user.created', function($data, $context) {
-    self::$callCount++; // WRONG! Persists across requests in workers
-    return $data;
-}, 10);
-```
+| Event | Where | Notes |
+| --- | --- | --- |
+| `worker.boot` | `public/index.php` | Once per worker, at boot (worker mode). |
+| `worker.request.start` | `public/index.php` | At the start of each request. |
+| `worker.request.end` | `public/index.php` | In the request `finally` block. |
+| `navigation.register` | `public/index.php` (core listener) + `NavigationApiHandler` | Filter chain that assembles navigation items; core registers Dashboard/Users/Roles/OUs/Tenants/Settings. |
+| `permission.registered` | `PermissionRegistry::storeAndDispatch()` | Fires on registration with `plugin_id`, `source`, `permissions`. |
+| `role.creating` / `role.created` | `RolesApiHandler::create()` | Filter before insert; sync notify after. |
+| `role.created.async` | `RolesApiHandler::create()` | Queued async after create. |
+| `role.updating` / `role.updated` | `RolesApiHandler::update()` | Filter before / notify after update. |
+| `role.deleting` / `role.deleted` | `RolesApiHandler::delete()` | Filter before / notify after delete. |
+| `role.deleted.async` | `RolesApiHandler::delete()` | Queued async after delete. |
 
-## Hook Events Reference
+`UsersApiHandler`, `TenantsApiHandler`, and `OusApiHandler` are also constructed with the `HookManager`, so check those handlers for the exact `user.*` / `tenant.*` / `ou.*` events they emit; treat any event not in the table above as something to confirm in source rather than assume.
 
-### Core Framework Hooks
+## Best practices
 
-| Event | Type | When | Data |
-|-------|------|------|------|
-| `user.creating` | sync | Before user INSERT | [email, name, password, role_id, tenant_id] |
-| `user.created` | sync | After user INSERT | [id, email, name, role_id, tenant_id] |
-| `user.created.async` | async | Queued after INSERT | [user_id, email, name] |
-| `user.updating` | sync | Before user UPDATE | [id, email, name, role_id] |
-| `user.updated` | sync | After user UPDATE | [id, email, name, role_id] |
-| `user.deleting` | sync | Before user DELETE | [id, email, name] |
-| `user.deleted` | sync | After user DELETE | [id, email, name] |
-| `user.deleted.async` | async | Queued after DELETE | [user_id, email] |
-| `role.creating` | sync | Before role INSERT | [name, description] |
-| `role.created` | sync | After role INSERT | [id, name, description] |
-| `role.updating` | sync | Before role UPDATE | [id, name, description] |
-| `role.updated` | sync | After role UPDATE | [id, name, description] |
-| `role.deleting` | sync | Before role DELETE | [id, name] |
-| `role.deleted` | sync | After role DELETE | [id, name] |
-| `tenant.creating` | sync | Before tenant INSERT | [name, slug] |
-| `tenant.created` | sync | After tenant INSERT | [id, name, slug] |
-| `tenant.updating` | sync | Before tenant UPDATE | [id, name, slug] |
-| `tenant.updated` | sync | After tenant UPDATE | [id, name, slug] |
-| `tenant.deleting` | sync | Before tenant DELETE | [id, name, slug] |
-| `tenant.deleted` | sync | After tenant DELETE | [id, name, slug] |
-| `tenant.deleted.async` | async | Queued after DELETE | [tenant_id, name] |
-| `permission.registered` | sync | When plugin registers | [plugin_id, permissions] |
+1. **Always return data from sync hooks** — a missing `return` breaks the filter chain for downstream listeners.
+2. **Scope by tenant** — use `$context['tenant_id']` in any query a listener runs.
+3. **Keep payloads scalar** — pass ids/strings, not live model objects, so listeners can't mutate shared object state and escape the chain.
+4. **No request state in statics** — workers persist; never accumulate per-request state in a static variable inside a listener.
+5. **Fail loudly in validators** — throwing in a sync `*.creating`/`*.updating` listener is fine; the plugin error boundary will catch a plugin listener's throw, log it, and leave the data unchanged (and count it toward the plugin's failure threshold).
 
 ## Summary
 
-- **Hooks** enable plugins to listen and react to system events
-- **Sync hooks** modify data; run before or after database operations
-- **Async hooks** queue background work; return immediately
-- **Priority** controls execution order (lower = earlier)
-- **Context** is automatically injected with tenant_id and timestamp
-- **Payloads** are scalar-only to prevent reference escape
-- **Listeners** are registered in `onEnable()` and cleared on `onDisable()`
-
-See [PERMISSION_SYSTEM.md](PERMISSION_SYSTEM.md) for how permissions work alongside hooks, and [CONTRIBUTING.md](../../CONTRIBUTING.md) for plugin development guidelines.
+- `HookManager` is an instance-based Mediator/Observer; `dispatch()` is a synchronous filter chain, `dispatchAsync()` queues background work.
+- Listeners run in ascending priority (default 10); every dispatch injects `{tenant_id, timestamp}` context.
+- Plugins declare hooks via `PluginInterface::getHooks()`; the loader subscribes them through `HookManager::listen()` inside a per-plugin error boundary and unsubscribes them on disable/reload via `removeListener()`.
+- Core fires worker lifecycle, navigation, permission-registration, and role lifecycle events; confirm `user.*`/`tenant.*`/`ou.*` payload shapes in their handlers.
+</content>

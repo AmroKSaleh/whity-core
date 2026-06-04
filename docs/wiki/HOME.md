@@ -7,17 +7,23 @@ Welcome to the Whity Core documentation.
 - **[Sprint 1 Setup Guide](Sprint-1-Setup.md)** — Local development setup for Sprint 1 MVP
 - **[Installation](Installation.md)** — Setup guide
 - **[Plugin Development](Plugin-Development.md)** — Build plugins
-- **[Architecture](Architecture.md)** — Design principles
+
+## System documentation
+
+- **[Architecture](Architecture.md)** — Full system guide: request lifecycle, plugins, RBAC, multi-tenancy, schema, deployment (start here).
+- **[Permission System](PERMISSION_SYSTEM.md)** — RBAC permissions, registry, role hierarchy, enforcement.
+- **[Tenant Isolation](TENANT_ISOLATION.md)** — Multi-tenancy, `TenantContext`, query scoping.
+- **[Hook System](HOOK_SYSTEM.md)** — Plugin event/extension mechanism.
 
 ## What is Whity Core?
 
-Whity Core is a white-labeled multi-tenant PHP framework for SaaS applications.
+Whity Core is a white-labeled multi-tenant PHP 8.4 framework for SaaS applications, served by FrankenPHP persistent workers over a shared PostgreSQL database.
 
 **Features:**
-- ✅ Multi-tenant (per-tenant SQLite)
-- ✅ Extensible plugins
-- ✅ Built-in RBAC security
-- ✅ Stateless FrankenPHP workers
+- ✅ Multi-tenant (shared PostgreSQL, tenant isolation via `tenant_id` + request-scoped context)
+- ✅ Extensible plugins (auto-discovery, hot-reload, lifecycle isolation)
+- ✅ Built-in RBAC security (`resource:action` permissions, role hierarchy)
+- ✅ FrankenPHP persistent workers
 - ✅ Production-ready
 
 ## Getting Started

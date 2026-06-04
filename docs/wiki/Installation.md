@@ -2,56 +2,56 @@
 
 ## Requirements
 
-- PHP 8.4+
+- PHP 8.4 (the platform target — see `Dockerfile`, pinned to `dunglas/frankenphp:1-php8.4`)
 - Composer
-- FrankenPHP or PHP-FPM with Swoole
-- SQLite 3.8+ (or PostgreSQL for production)
+- FrankenPHP (persistent worker mode)
+- PostgreSQL 15 (the only supported database; `Whity\Database\Database` builds a `pgsql:` DSN)
+- Docker + Docker Compose (recommended local setup)
 
-## Quick Start
+## Quick Start (Docker)
 
-### 1. Install via Composer
+The recommended way to run Whity Core locally is via Docker Compose, which starts PostgreSQL and the FrankenPHP app together.
 
-```bash
-composer require amroksaleh/whity-core:^1.0
-```
+### 1. Configure environment
 
-### 2. Create Configuration
+Copy `.env.example` to `.env` (if present) and set the database and secret values. The FrankenPHP service reads these (see `docker-compose.yml`):
 
-Create `tenant.toml`:
+- `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_HOST`, `DB_PORT`
+- `JWT_SECRET` — required outside `APP_ENV=development`
+- `ENCRYPTION_KEY` — required outside `APP_ENV=development` (AES-256-CBC key for stored TOTP 2FA secrets)
+- Optional pooling: `DB_CONNECT_TIMEOUT`, `DB_MAX_LIFETIME`, `DB_PING_INTERVAL`
+- Worker tuning: `FRANKENPHP_WORKERS`, `FRANKENPHP_TIMEOUT`, `MAX_REQUESTS`
 
-```toml
-[branding]
-app_name = "My SaaS"
-
-[database]
-url = "sqlite:tenant.db"
-pool_size = 10
-```
-
-### 3. Initialize Database
+### 2. Start the stack
 
 ```bash
-./vendor/bin/whity migrate
+docker compose up --build
 ```
 
-### 4. Load Plugins
+The app is served on `http://localhost:8000` (mapped from container port 80).
 
-Create plugins in `/plugins/{name}/Plugin.php` implementing `PluginInterface`.
+### 3. Run database migrations
 
-### 5. Bootstrap
+Migrations are run via the CLI entry point in `public/index.php`:
 
-```php
-<?php
-require 'vendor/autoload.php';
-$app = new \Whity\Core\Application('tenant.toml');
-echo $app->handle($request);
-```
-
-## Troubleshooting
-
-**"Package not found"** — Ensure whity-core is tagged on GitHub:
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+docker compose exec frankenphp php public/index.php migrate
 ```
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for more help.
+Other CLI commands: `seed`, `generate:openapi`, `revoked-tokens:cleanup`.
+
+### 4. Web UI (optional)
+
+The Next.js UI lives in `web/` and proxies `/api/*` to the backend. See `web/README.md`.
+
+### 5. Add plugins
+
+Create a plugin directory under `plugins/` containing a class that implements
+`Whity\Core\PluginInterface`. See [Plugin Development](Plugin-Development.md).
+
+## Learn the system
+
+- [Architecture](Architecture.md) — request lifecycle, plugins, RBAC, multi-tenancy, schema, deployment.
+- [Sprint 1 Setup Guide](Sprint-1-Setup.md) — detailed local development walkthrough.
+
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines.

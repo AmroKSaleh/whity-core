@@ -1,568 +1,164 @@
 # Tenant Isolation
 
-Whity implements strict multi-tenant isolation at the framework level. One tenant's data is completely inaccessible to other tenants, enforced by automatic query scoping and JWT-based context.
+Whity Core is multi-tenant: many tenants share one PostgreSQL database, and isolation is enforced **logically** by a `tenant_id` column on tenant-scoped tables plus a request-scoped tenant context — there is **no** per-tenant database. Isolation is enforced at three cooperating layers so a single missed check cannot leak data. This page is grounded in the current source.
 
-## Overview
+Related: [Architecture](Architecture.md) · [PERMISSION_SYSTEM](PERMISSION_SYSTEM.md) · [HOOK_SYSTEM](HOOK_SYSTEM.md).
 
-Multi-tenancy in Whity is built on a simple principle: **every request carries a tenant ID in the JWT, and all queries are automatically scoped to that tenant.**
+## The three layers
 
-This design prevents data leakage across tenants:
+| Layer | Where | What it does | File |
+| --- | --- | --- | --- |
+| HTTP | Middleware (runs first) | Resolves tenant from JWT; refuses cross-tenant requests before routing/DB. | `src/Http/Middleware/EnforceTenantIsolation.php` |
+| Context | Request-scoped static | Holds + locks the current tenant id for the request's lifetime. | `src/Core/Tenant/TenantContext.php` |
+| Query | Model/repository trait | Injects a `tenant_id` predicate / auto-populates it; fails closed when unresolved. | `src/Core/Database/ScopesToTenant.php` |
 
-- Users can only see their own tenant's data
-- API handlers don't need to manually filter by tenant
-- Queries are scoped at the framework level (impossible to accidentally leak data)
-- Tenant context is locked after authentication (plugins cannot escape)
+## TenantContext — the request-scoped holder
 
-## Architecture Overview
+`TenantContext` (`src/Core/Tenant/TenantContext.php`) holds the current request's tenant id in static state. Because FrankenPHP workers persist across requests, this static state is the framework's sanctioned exception to the "no request state in statics" rule — and it **must** be reset between requests (it is, by both the kernel and the worker loop).
 
-```
-User logs in with email/password
-    ↓
-Backend validates credentials
-    ↓
-Backend creates JWT with tenant_id in payload
-    ↓
-Frontend stores JWT in localStorage
-    ↓
-Frontend sends JWT with every API request
-    ↓
-EnforceTenantIsolation middleware receives request
-    ↓
-Middleware extracts tenant_id from JWT
-    ↓
-TenantContext::setTenantId($tenantId) - locks context
-    ↓
-All subsequent queries are scoped to this tenant
-    ↓
-API handler processes request (user can only see their tenant's data)
-    ↓
-TenantContext::reset() at end of request (cleanup for next request)
-```
+Tenant ids are **integers**. The special tenant id **0 is the system tenant** — a fully valid, settable value, distinct from the "unset" `null` state. Downstream code (e.g. cross-tenant authority checks) relies on `getTenantId() === 0`.
 
-## Tenant Context: Request Lifecycle
-
-### Setting Tenant Context
-
-The `EnforceTenantIsolation` middleware runs early in every request:
+### Resolving the tenant
 
 ```php
-<?php
-namespace Whity\Http\Middleware;
-
-use Whity\Core\Tenant\TenantContext;
-
-class EnforceTenantIsolation
-{
-    public function handle(Request $request, callable $next): Response
-    {
-        // Extract Authorization header
-        $authHeader = $request->getHeader('Authorization');
-        
-        // Parse JWT token
-        $payload = $this->jwtParser->parse($token);
-        
-        // Validate tenant_id exists in token
-        if (!isset($payload['tenant_id'])) {
-            return Response::error('Missing tenant_id in token', 401);
-        }
-        
-        // SET TENANT CONTEXT (locks it for request lifetime)
-        TenantContext::setTenantId($payload['tenant_id']);
-        
-        // Attach user data to request
-        $request->user = (object) $payload;
-        
-        // Call next handler (all subsequent code runs with tenant context set)
-        return $next($request);
-    }
-}
+public static function resolve(Request $request, JwtParser $jwtParser): int
 ```
 
-Key points:
-- Middleware runs before route handlers
-- Tenant ID is extracted from JWT payload (trusted source)
-- `TenantContext::setTenantId()` locks the context (cannot be changed)
-- If tenant_id is missing, request is rejected with 401 Unauthorized
+`resolve()` extracts the JWT (`Authorization: Bearer <token>`, falling back to the `access_token` cookie), validates it via `JwtParser`, reads the `tenant_id` claim, coerces a numeric claim to int, and **locks** the context. There is **no silent fallback** — every failure throws `TenantResolutionException`:
 
-### TenantContext: Locked and Read-Only
+- missing token,
+- invalid/expired token,
+- missing `tenant_id` claim,
+- a `tenant_id` claim that is not a valid integer.
 
-Once set, the tenant context is locked and cannot be changed:
+### Locking
+
+Once set (via `resolve()` or `setTenantId()`), the context is **locked**. A second `setTenantId()` throws `RuntimeException('TenantContext is locked and cannot be mutated')` until `reset()` is called. This prevents a handler or plugin from changing tenants mid-request and escaping the boundary.
 
 ```php
 TenantContext::setTenantId(42);
-TenantContext::setTenantId(99); // RuntimeException! Already locked
-
-// Plugin cannot escape:
-try {
-    TenantContext::setTenantId(99); // Attempting to access other tenant
-} catch (\RuntimeException $e) {
-    // Framework prevents the escape
-}
-
-// But plugins can read it:
-$tenantId = TenantContext::getTenantId(); // Returns 42 (safe, read-only)
+TenantContext::getTenantId();   // 42 (read is always allowed)
+TenantContext::setTenantId(99); // RuntimeException: locked
 ```
 
-This design prevents even buggy plugins from accessing other tenants.
+### System mode (the trusted bypass)
 
-### Cleanup Between Requests
+`setSystemMode(bool $enabled, string $actor, array $context = [])` toggles a tenant-scoping bypass for **trusted, non-request** contexts (migrations, admin CLI). It is **never derived from request input**, and every transition is audit-logged with the actor. `isSystemMode()` reports it. This is separate from "tenant id 0": both grant cross-tenant authority, but system mode is an explicit out-of-band switch.
 
-After the response is sent, the framework resets the context:
+### Reset between requests
 
-```php
-// In HttpKernel or request termination handler:
-finally {
-    TenantContext::reset(); // Clear tenant_id, unlock context
-}
+`reset()` clears the tenant id, the lock, and system mode. It is called in the `finally` block of `HttpKernel::handle()` (`resetRequestState()`) and again in the worker loop's `finally` in `public/index.php`, so no tenant or privilege state leaks into the next request on the same worker. (The injected audit logger is intentionally preserved across resets — it is process-scoped infrastructure, not request state.)
+
+## EnforceTenantIsolation — the HTTP layer
+
+`EnforceTenantIsolation` (`src/Http/Middleware/EnforceTenantIsolation.php`) is the first middleware in the pipeline (registered via `$kernel->use(...)` in `public/index.php`). It runs **before** routing, RBAC, and any database access.
+
+`handle(Request $request, callable $next)`:
+
+1. **Public routes** carry no tenant context and pass straight through: `/api/login`, `/api/login/2fa`, `/api/me`, `/api/auth/refresh`, `/api/auth/logout`, `/api/navigation`.
+2. Otherwise it delegates token → tenant extraction to `TenantContext::resolve()`. Any `TenantResolutionException` collapses to a generic `401 Authentication required` (internals never leak to the client).
+3. It re-parses the (now validated) token to expose the decoded payload as `Request::$user` for downstream handlers.
+4. It determines the tenant the request *addresses*, if any (`resolveResourceTenantId()`), in priority order:
+   - a `/api/tenants/{id}` path segment,
+   - a `tenant_id` query-string parameter,
+   - an `X-Tenant-Id` header.
+5. Decision:
+   - no addressed tenant → defer to the handler and the query-level layer (`next`),
+   - addressed tenant **equals** the caller's tenant → allow,
+   - addressed tenant **differs** → allow only if the caller has **cross-tenant authority** (tenant id 0 **or** `isSystemMode()`), in which case the bypass is **audit-logged**; otherwise refuse with `403 Access to the requested tenant is forbidden` *before any handler/DB work runs*.
+
+```mermaid
+flowchart TD
+    A["Request"] --> B{Public route?}
+    B -- yes --> Z["next() — no tenant context"]
+    B -- no --> C["TenantContext::resolve()"]
+    C -- throws --> E["401 Authentication required"]
+    C -- tenantId --> D["attach Request::user"]
+    D --> F{"Resource addresses a tenant?"}
+    F -- no --> Z2["next()"]
+    F -- yes --> G{"resourceTenant == callerTenant?"}
+    G -- yes --> Z3["next()"]
+    G -- no --> H{"Cross-tenant authority?<br/>(tenant 0 or system mode)"}
+    H -- yes --> I["audit log → next()"]
+    H -- no --> J["403 forbidden (before handler/DB)"]
 ```
 
-This is critical in FrankenPHP (persistent worker processes). Without cleanup, the next request could run with the previous request's tenant context.
+## ScopesToTenant — the query layer
+
+`ScopesToTenant` (`src/Core/Database/ScopesToTenant.php`) is a trait a model or repository `use`s to get automatic tenant filtering, so developers don't have to remember to filter every query.
 
 ```php
-// Request 1: Tenant 1
-TenantContext::setTenantId(1);
-// ... process request ...
-TenantContext::reset();
-
-// Request 2: Tenant 2 (different user in same worker)
-TenantContext::setTenantId(2); // Safe because context was reset
-// ... process request ...
-TenantContext::reset();
-```
-
-## Automatic Query Scoping: ScopesToTenant Trait
-
-The `ScopesToTenant` trait automatically injects tenant_id filtering into model operations:
-
-### How It Works
-
-Models that use `ScopesToTenant` are automatically scoped to the current tenant:
-
-```php
-<?php
-namespace Whity\Models;
-
-use Whity\Core\Database\ScopesToTenant;
-
-class User extends Model
+class UserRepository
 {
     use ScopesToTenant;
-    
-    // ... user model code ...
-}
 
-class Role extends Model
-{
-    use ScopesToTenant;
-    
-    // ... role model code ...
-}
-```
+    public function __construct(private \Whity\Database\Database $db) {}
 
-When you create or query records:
-
-```php
-// Creating a user (tenant_id auto-set)
-$user = new User();
-$user->name = 'John';
-$user->email = 'john@example.com';
-$user->setTenantIdBeforePersist(); // Sets user->tenant_id = TenantContext::getTenantId()
-$user->save();
-
-// Result: User is automatically scoped to current tenant (42)
-// SQL: INSERT INTO users (name, email, tenant_id) VALUES ('John', 'john@example.com', 42)
-```
-
-### setTenantIdBeforePersist()
-
-Call this before saving a record to automatically set its tenant_id:
-
-```php
-// GOOD: Automatic tenant scoping
-$user = new User();
-$user->name = 'John';
-$user->setTenantIdBeforePersist(); // Tenant ID auto-set from context
-$user->save();
-
-// AVOID: Manual tenant_id handling
-$user = new User();
-$user->name = 'John';
-$user->tenant_id = TenantContext::getTenantId(); // Manual, error-prone
-$user->save();
-```
-
-If TenantContext is not set (request outside tenant context), it throws:
-
-```php
-$user = new User();
-$user->setTenantIdBeforePersist();
-// RuntimeException: Cannot persist User without active TenantContext
-```
-
-This defensive check prevents data from being created without tenant association.
-
-### validateTenantBoundary()
-
-Before operating on a record, validate it belongs to the current tenant:
-
-```php
-$user = User::find($id); // Gets from DB
-$user->validateTenantBoundary(); // Ensures user belongs to current tenant
-
-// If validation fails:
-// RuntimeException: Tenant boundary violation: Record belongs to tenant 1, 
-//                   but current context is tenant 2
-```
-
-Use this in API handlers before modifying records:
-
-```php
-public function updateUser($request): Response
-{
-    $userId = $request->get('user_id');
-    
-    // Get user from DB
-    $user = User::find($userId);
-    if (!$user) {
-        return Response::error('User not found', 404);
-    }
-    
-    // Validate user belongs to current tenant
-    $user->validateTenantBoundary(); // Throws if cross-tenant access
-    
-    // Safe to update
-    $user->email = $request->get('email');
-    $user->save();
-    
-    return Response::json(['data' => $user]);
-}
-```
-
-## Automatic Scoping: ORM Integration (Future)
-
-In Phase 2, when moving to an ORM (Eloquent, Doctrine), the `ScopesToTenant` trait will register global query scopes:
-
-```php
-// Future Phase 2 implementation:
-class User extends Model
-{
-    use ScopesToTenant;
-    
-    protected static function bootScopesToTenant()
+    public function all(): array
     {
-        // Register global scope (Eloquent pattern)
-        static::addGlobalScope(new TenantScope);
-    }
-}
-
-// Result: All queries automatically filtered
-User::all(); // SELECT * FROM users WHERE tenant_id = 42
-User::find(1); // SELECT * FROM users WHERE id = 1 AND tenant_id = 42
-User::where('email', 'john@example.com')->first();
-// SELECT * FROM users WHERE email = 'john@example.com' AND tenant_id = 42
-```
-
-Currently, developers must call `setTenantIdBeforePersist()` and `validateTenantBoundary()` explicitly. With ORM integration, scoping happens automatically for all queries.
-
-## Query Safety: Ensuring Tenant Boundaries
-
-### Manual Queries (Raw SQL)
-
-If writing raw SQL, always include tenant filtering:
-
-```php
-// GOOD: Tenant-scoped query
-$sql = 'SELECT * FROM users WHERE email = ? AND tenant_id = ?';
-$result = $db->query($sql, [$email, TenantContext::getTenantId()]);
-
-// DANGEROUS: No tenant filtering
-$sql = 'SELECT * FROM users WHERE email = ?'; // User from any tenant!
-$result = $db->query($sql, [$email]);
-```
-
-### ORM Queries (Phase 2)
-
-With ORM integration, scoping is automatic:
-
-```php
-// Phase 2 (Eloquent):
-// Automatically adds WHERE tenant_id = $current during query building
-$user = User::where('email', $email)->first();
-
-// Equivalent to:
-// SELECT * FROM users WHERE email = ? AND tenant_id = ?
-```
-
-### Query Guard: Defensive Layer (Phase 2)
-
-In Phase 2, a query guard middleware can enforce tenant scoping:
-
-```php
-// Abstract: All queries (raw or ORM) are analyzed
-// If a query doesn't include tenant filtering, it's rejected
-$query->requiresTenant(); // Throws if tenant not in WHERE clause
-```
-
-## API Endpoints: Tenant Context in Practice
-
-### Example: Users API Handler
-
-```php
-<?php
-namespace Whity\Api;
-
-use Whity\Core\Tenant\TenantContext;
-
-class UsersApiHandler
-{
-    public function index($request): Response
-    {
-        // TenantContext is already set by middleware
-        $tenantId = TenantContext::getTenantId(); // 42
-        
-        // Query users for this tenant only
-        $sql = 'SELECT * FROM users WHERE tenant_id = ?';
-        $users = $this->db->query($sql, [$tenantId])->fetchAll();
-        
-        // Safe: User can only see their tenant's users
-        return Response::json(['data' => $users]);
-    }
-    
-    public function show($request): Response
-    {
-        $userId = $request->get('user_id');
-        $tenantId = TenantContext::getTenantId(); // 42
-        
-        // Query user for this tenant
-        $sql = 'SELECT * FROM users WHERE id = ? AND tenant_id = ?';
-        $user = $this->db->query($sql, [$userId, $tenantId])->fetch();
-        
-        if (!$user) {
-            return Response::error('User not found', 404);
-        }
-        
-        return Response::json(['data' => $user]);
-    }
-    
-    public function store($request): Response
-    {
-        // Create user in current tenant
-        $user = new User();
-        $user->name = $request->get('name');
-        $user->email = $request->get('email');
-        $user->setTenantIdBeforePersist(); // Auto-scoped to tenant 42
-        $user->save();
-        
-        return Response::json(['data' => $user], 201);
+        // With TenantContext set to N: SELECT * FROM users WHERE tenant_id = :whity_scope_tenant_id
+        return $this->tenantScopedQuery($this->db, 'SELECT * FROM users')->fetchAll();
     }
 }
 ```
 
-### Example: Roles API Handler
+`tenantScopedQuery()` / `applyTenantScope()` rewrite SQL according to a strict, fail-closed security model:
 
-Same pattern - all queries include tenant filtering:
+- **System mode ON** → the statement runs unchanged (trusted cross-tenant operation).
+- **System mode OFF, tenant unresolved (`null`)** → the query is **refused** with `TenantScopeException` (fail closed). Running unscoped would leak every tenant's rows, so it never guesses a default.
+- **System mode OFF, tenant resolved** → a `tenant_id` predicate is injected via a **bound parameter** (`:whity_scope_tenant_id`) — the tenant id is **never** string-interpolated into SQL.
 
-```php
-public function index($request): Response
-{
-    $tenantId = TenantContext::getTenantId();
-    
-    $sql = 'SELECT r.*, COUNT(u.id) as user_count 
-            FROM roles r 
-            LEFT JOIN users u ON u.role_id = r.id AND u.tenant_id = ?
-            WHERE r.tenant_id = ?
-            GROUP BY r.id';
-    
-    $roles = $this->db->query($sql, [$tenantId, $tenantId])->fetchAll();
-    
-    return Response::json(['data' => $roles]);
-}
+Statement handling (`statementType()`):
+
+- **SELECT / UPDATE / DELETE** → `injectWherePredicate()`. An existing `WHERE` is wrapped (`WHERE (<existing>) AND tenant_id = :param`) so operator precedence cannot weaken the filter; otherwise a `WHERE` is inserted before any trailing `GROUP BY/HAVING/ORDER BY/LIMIT/...`. Statements containing a **JOIN** or a **subquery** are refused (an unqualified `tenant_id` predicate would be ambiguous or under-scope them) — write those with an explicit, table-qualified predicate instead.
+- **INSERT** → `injectInsertTenant()`. For `INSERT INTO t (cols) VALUES (...)`, if the tenant column isn't already listed it is appended (column + bound param on every tuple). `INSERT ... SELECT`, columnless INSERTs, and `INSERT ... SET` are **refused** rather than silently mis-scoped.
+
+The trait also provides record-level helpers:
+
+- `setTenantIdBeforePersist()` — fills an unset `tenant_id` from the context before save; fails closed if unresolved (system mode leaves it null = system-owned).
+- `validateTenantBoundary()` — throws if a record's `tenant_id` differs from the current context (system mode bypasses).
+- `bootScopesToTenant()` — a no-op kept so reflection-driven model boot (the WC-7 loader) doesn't break; there is no global query-scope registry, so explicit `tenantScopedQuery()` is the active enforcement path.
+
+> Reality check on core handlers: most core API handlers (e.g. `UsersApiHandler`, `RolesApiHandler`) take a raw `PDO` and write explicit tenant-scoped SQL (e.g. `RolesApiHandler` filters roles by `roles.tenant_id`) rather than using this trait. The trait is the reusable enforcement primitive for model/repository code; the HTTP layer + explicit handler queries are what protect the core endpoints today.
+
+## The system tenant (id 0)
+
+Migration `011_create_system_tenant.php` provisions tenant id **0** ("System") and a `system@whity.local` admin user. A caller resolved to tenant 0 holds cross-tenant authority: `EnforceTenantIsolation` lets it cross tenant boundaries (audited), and `RolesApiHandler` lets it see and manage every tenant's roles. This is the same mechanism trusted tooling uses via `TenantContext::isSystemMode()` — there is no separate super-admin flag.
+
+## End-to-end flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Next.js UI
+    participant TI as EnforceTenantIsolation
+    participant TC as TenantContext
+    participant H as Handler
+    participant DB as PostgreSQL
+
+    User->>UI: login (email/password)
+    UI->>H: POST /api/login (public route)
+    H-->>UI: JWT with tenant_id claim (httpOnly cookie)
+    UI->>TI: GET /api/users (cookie/Bearer)
+    TI->>TC: resolve(request, jwtParser)
+    TC-->>TI: tenantId (locks context) or 401
+    TI->>TI: enforce resource tenant boundary (403 on mismatch)
+    TI->>H: next(request) — Request::user attached
+    H->>DB: SELECT ... WHERE tenant_id = :tenant
+    DB-->>H: rows for this tenant only
+    H-->>UI: Response
+    Note over TC: HttpKernel + worker loop call TenantContext::reset() in finally
 ```
 
-## Testing Tenant Isolation
+## Worker-level connection hygiene
 
-### Test 1: Queries Are Tenant-Scoped
-
-```php
-public function testUsersOnlySeeSelfTenantData()
-{
-    // Create two tenants
-    $tenant1 = Tenant::create(['name' => 'Acme Corp']);
-    $tenant2 = Tenant::create(['name' => 'Global Inc']);
-    
-    // Create users in each tenant
-    TenantContext::setTenantId($tenant1->id);
-    $user1 = User::create(['name' => 'Alice', 'email' => 'alice@acme.com']);
-    
-    TenantContext::setTenantId($tenant2->id);
-    $user2 = User::create(['name' => 'Bob', 'email' => 'bob@global.com']);
-    TenantContext::reset();
-    
-    // Tenant1 user cannot see Tenant2 user
-    TenantContext::setTenantId($tenant1->id);
-    $users = $db->query('SELECT * FROM users WHERE tenant_id = ?', [$tenant1->id])->fetchAll();
-    $this->assertCount(1, $users);
-    $this->assertEquals('alice@acme.com', $users[0]['email']);
-    
-    // Tenant2 user cannot see Tenant1 user
-    TenantContext::setTenantId($tenant2->id);
-    $users = $db->query('SELECT * FROM users WHERE tenant_id = ?', [$tenant2->id])->fetchAll();
-    $this->assertCount(1, $users);
-    $this->assertEquals('bob@global.com', $users[0]['email']);
-}
-```
-
-### Test 2: Cross-Tenant Access is Prevented
-
-```php
-public function testCrossTenantAccessThrows()
-{
-    $tenant1 = Tenant::create(['name' => 'Tenant 1']);
-    $tenant2 = Tenant::create(['name' => 'Tenant 2']);
-    
-    TenantContext::setTenantId($tenant1->id);
-    $user1 = User::create(['name' => 'Alice']);
-    
-    // Attempt to access user1 from tenant2 context
-    TenantContext::reset();
-    TenantContext::setTenantId($tenant2->id);
-    
-    $this->expectException(\RuntimeException::class);
-    $user1->validateTenantBoundary(); // User belongs to tenant 1, context is tenant 2
-}
-```
-
-### Test 3: Tenant Context is Locked
-
-```php
-public function testTenantContextIsLocked()
-{
-    TenantContext::setTenantId(1);
-    
-    $this->expectException(\RuntimeException::class);
-    $this->expectExceptionMessage('TenantContext is locked');
-    
-    TenantContext::setTenantId(2); // Attempt to change locked context
-}
-```
-
-### Test 4: Context Reset Works
-
-```php
-public function testContextResetBetweenRequests()
-{
-    // Request 1
-    TenantContext::setTenantId(1);
-    $this->assertEquals(1, TenantContext::getTenantId());
-    TenantContext::reset();
-    
-    // Request 2 (same worker process)
-    TenantContext::setTenantId(2); // Should work (context was reset)
-    $this->assertEquals(2, TenantContext::getTenantId());
-}
-```
-
-## Security Model: Guarantees Provided
-
-### Guarantee 1: One Tenant Per Request
-
-Every request has exactly one tenant context, extracted from JWT. A user can only access their own tenant's data.
-
-### Guarantee 2: Queries Are Scoped
-
-All queries in API handlers must include tenant filtering. Missing filters are caught during code review.
-
-### Guarantee 3: Context is Locked
-
-Plugins cannot escape the current tenant. Once set, context cannot be changed.
-
-### Guarantee 4: Cleanup Between Requests
-
-After each request completes, context is reset. Next request starts with clean context.
-
-### Guarantee 5: No Default Access
-
-If tenant context is not set, operations throw exceptions. You cannot accidentally access data without tenant association.
-
-## Common Mistakes
-
-### Mistake 1: Forgetting Tenant Filter in Query
-
-```php
-// WRONG: No tenant filter
-$user = $db->query('SELECT * FROM users WHERE id = ?', [$id])->fetch();
-
-// CORRECT: Always include tenant
-$user = $db->query(
-    'SELECT * FROM users WHERE id = ? AND tenant_id = ?',
-    [$id, TenantContext::getTenantId()]
-)->fetch();
-```
-
-### Mistake 2: Not Calling setTenantIdBeforePersist()
-
-```php
-// WRONG: Tenant is null
-$user = new User();
-$user->name = 'John';
-$user->save(); // tenant_id is null!
-
-// CORRECT: Set tenant before save
-$user = new User();
-$user->name = 'John';
-$user->setTenantIdBeforePersist(); // Auto-set to current tenant
-$user->save();
-```
-
-### Mistake 3: Validating tenant_id After Querying
-
-```php
-// WRONG: Query first, then check (inefficient)
-$user = $db->query('SELECT * FROM users WHERE id = ?', [$id])->fetch();
-if ($user['tenant_id'] !== TenantContext::getTenantId()) {
-    throw new SecurityException();
-}
-
-// CORRECT: Filter in query (efficient, safe)
-$user = $db->query(
-    'SELECT * FROM users WHERE id = ? AND tenant_id = ?',
-    [$id, TenantContext::getTenantId()]
-)->fetch();
-if (!$user) {
-    throw new NotFoundException();
-}
-```
-
-### Mistake 4: Static Variables in Handlers
-
-```php
-// WRONG: Static state persists across requests in FrankenPHP
-private static $userCache = [];
-
-public function handle($request): Response
-{
-    self::$userCache[$request->user->id] = $request->user; // User 1's data
-    // ...
-}
-
-// Request 2 from User 2 still sees User 1's cached data!
-
-// CORRECT: No static state
-public function handle($request): Response
-{
-    $user = $request->user; // Fresh every request
-    // ...
-}
-```
+Tenant safety also depends on the shared worker connection not carrying state between requests. `Database` (`src/Database/Database.php`) runs `resetSessionState()` between requests, which rolls back any dangling transaction and issues `DISCARD ALL` so temp tables, prepared plans, `SET` values, and advisory locks cannot bleed across tenants on the one connection a worker reuses. See [Architecture](Architecture.md#multi-tenancy) for connection pooling details.
 
 ## Summary
 
-- **TenantContext** holds the current request's tenant ID
-- **EnforceTenantIsolation middleware** extracts tenant from JWT and sets context
-- **Context is locked** after setting (plugins cannot escape)
-- **ScopesToTenant trait** simplifies tenant scoping in models
-- **All queries must include tenant filtering** (WHERE tenant_id = ?)
-- **Context is reset** between requests (FrankenPHP cleanup)
-- **No default access** without tenant context (defensive)
-
-See [HOOK_SYSTEM.md](HOOK_SYSTEM.md) for how hooks respect tenant context, and [PERMISSION_SYSTEM.md](PERMISSION_SYSTEM.md) for role-based access control within tenant boundaries.
+- One shared PostgreSQL DB; isolation is a `tenant_id` column + request-scoped context, **not** separate databases.
+- `TenantContext` resolves the tenant from the JWT, locks it, and is reset between requests (no silent fallback; tenant 0 = system).
+- `EnforceTenantIsolation` resolves + refuses cross-tenant requests at the HTTP layer before routing/DB; public routes bypass it.
+- `ScopesToTenant` injects a bound `tenant_id` predicate and fails closed when the tenant is unresolved; unsafe statement shapes are refused, not run unscoped.
+- The system tenant (id 0) and `isSystemMode()` are the audited cross-tenant bypass; `DISCARD ALL` keeps the shared worker connection clean between requests.
+</content>
