@@ -20,6 +20,56 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## End-to-End tests (Playwright)
+
+The `e2e/` suite drives the real admin UI against the live backend with
+Playwright (Chromium).
+
+### Prerequisites
+
+1. **Backend stack running** — FrankenPHP + PostgreSQL at `http://localhost:8000`
+   (docker compose project `whity-demo`). The frontend's `/api/*` calls are
+   proxied to it by the catch-all route handler at `app/api/[...path]/route.ts`.
+2. **Seeded accounts** (the suite uses these; override via env if needed):
+   - admin: `admin@example.com` / `admin123`
+   - regular user: `user@example.com` / `user123`
+   - The admin account **must have two-factor auth DISABLED** (the seed default).
+     If a login returns HTTP 202, clear it on the dev DB:
+     `docker exec whity_postgres psql -U whity -d whity_core -c "UPDATE users SET two_factor_enabled=false WHERE email='admin@example.com';"`
+3. **Browser binary** — install once: `npx playwright install chromium`.
+
+The frontend dev server is started automatically by Playwright on port **3010**
+(via the `webServer` block; `reuseExistingServer` is on, so an already-running
+instance is reused). It does not collide with a developer's own `next dev` on
+:3000. Override the port/base URL with `E2E_PORT` / `E2E_BASE_URL`.
+
+### Running
+
+```bash
+npm run test:e2e       # headless run of the full suite
+npm run test:e2e:ui    # interactive Playwright UI mode
+```
+
+### Shared-database discipline
+
+The dev database is shared. All test entities use unique suffixed names and are
+cleaned up via the API in `afterEach`. The suite never mutates or deletes the
+seeded accounts, the seeded `admin`/`user` roles, or tenants `0`/`1`. Runs are
+deterministic and re-runnable.
+
+### Known application bugs (tracked as `test.fixme`)
+
+A few flows hit real app bugs (not test issues); they are kept as `test.fixme`
+so they are visible without failing the suite:
+
+- Invalid login shows no error message (`app/login/page.tsx`).
+- Create Role drops selected permissions — the modal posts `permissionIds`
+  but the backend honours `permissions` (`app/(protected)/admin/roles/create-modal.tsx`).
+- Edit User modal does not pre-fill Name/Tenant (the users list API omits both).
+- OU delete via the UI errors because the `/api/*` proxy turns the backend's
+  HTTP 204 into a 500 (`app/api/[...path]/route.ts`); the backend delete itself
+  still succeeds.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
