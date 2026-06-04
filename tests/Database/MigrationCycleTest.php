@@ -247,7 +247,14 @@ final class MigrationCycleTest extends TestCase
         }
 
         try {
-            return Database::connect();
+            $db = Database::connect();
+            // Database::connect() is lazy since WC-21: no socket is opened until
+            // the first query. Force the connection open inside this guard so an
+            // unreachable server is detected here and skips the suite, instead of
+            // surfacing as a ConnectionException error in setUp()'s first query.
+            $db->forceConnect();
+
+            return $db;
         } catch (\Throwable $e) {
             $this->markTestSkipped('Database not reachable: ' . $e->getMessage());
         }
