@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Http;
 
 use Whity\Auth\JwtParser;
@@ -10,9 +12,16 @@ use Whity\Core\Response;
 /**
  * RBAC Middleware for enforcing role-based access control
  *
- * Validates JWT tokens from the Authorization header, parses their payload,
- * and checks user roles if required. Sets the user object on the request
- * for use by downstream handlers.
+ * Validates JWT tokens from the Authorization header (or `access_token` cookie),
+ * parses their payload, and enforces the role and/or permission required by the
+ * matched route before the downstream handler runs. On success the decoded JWT
+ * payload is attached to the request as {@see Request::$user} for use by handlers.
+ *
+ * Authorization decisions are always made against the authoritative server-side
+ * store via {@see RoleChecker}; role/permission claims that may be present in the
+ * JWT payload are NEVER trusted for access-control decisions (see issue #54). A
+ * route with neither a required role nor a required permission is treated as
+ * unprotected and any authenticated request passes through (fail-open).
  */
 class RbacMiddleware
 {
@@ -23,7 +32,7 @@ class RbacMiddleware
      * Constructor
      *
      * @param JwtParser $jwtParser JWT token parser
-     * @param RoleChecker $roleChecker Role verification service
+     * @param RoleChecker $roleChecker Role and permission verification service
      */
     public function __construct(JwtParser $jwtParser, RoleChecker $roleChecker)
     {
@@ -34,124 +43,128 @@ class RbacMiddleware
     /**
      * Handle request with RBAC validation
      *
-     * Extracts and validates JWT token from Authorization header, checks user role and/or permission if required,
-     * and attaches user data to the request object before passing to next handler.
+     * Extracts and validates the JWT from the Authorization header (or
+     * `access_token` cookie), enforces the required role and/or permission
+     * against the authoritative store, and attaches the decoded payload to the
+     * request before delegating to the next handler.
+     *
+     * When a required permission is supplied and the check fails, the 403
+     * response body includes the offending permission under the `required` key
+     * so clients can surface which capability they are missing.
      *
      * @param Request $request The incoming HTTP request
      * @param callable $next The next middleware/handler in the pipeline
      * @param ?string $requiredRole Optional role name to enforce authorization
-     * @param ?string $requiredPermission Optional permission string to enforce authorization
+     * @param ?string $requiredPermission Optional permission (resource:action) to enforce authorization
      * @return Response HTTP response
      */
-    public function handle(Request $request, callable $next, ?string $requiredRole = null, ?string $requiredPermission = null): Response
-    {
-        // If no role or permission required, skip RBAC validation
+    public function handle(
+        Request $request,
+        callable $next,
+        ?string $requiredRole = null,
+        ?string $requiredPermission = null
+    ): Response {
+        // Fail-open: routes with no role/permission requirement are unprotected.
         if ($requiredRole === null && $requiredPermission === null) {
             return $next($request);
         }
 
-        // Extract token from Authorization header or access_token cookie
-        $token = null;
-        $authHeader = $request->getHeader('Authorization');
-
-        if ($authHeader !== null && $this->isValidBearerFormat($authHeader)) {
-            // Extract token from "Bearer <token>" format
-            $token = $this->extractToken($authHeader);
-        } else {
-            // Try to get token from access_token cookie via Cookie header
-            $cookieHeader = $request->getHeader('Cookie');
-            if ($cookieHeader !== null) {
-                // Parse cookie header: "name1=value1; name2=value2"
-                $cookies = [];
-                foreach (explode(';', $cookieHeader) as $cookie) {
-                    $parts = explode('=', trim($cookie), 2);
-                    if (count($parts) === 2) {
-                        $cookies[$parts[0]] = $parts[1];
-                    }
-                }
-                $token = $cookies['access_token'] ?? null;
-            }
-        }
-
-        // Check if token is present
+        // Extract the bearer token from the Authorization header or cookie.
+        $token = $this->extractTokenFromRequest($request);
         if ($token === null) {
             return Response::error('Missing or invalid Authorization header', 401);
         }
 
-        // Parse and validate JWT
+        // Parse and validate the JWT (signature + expiry handled by the parser).
         $payload = $this->jwtParser->parse($token);
         if ($payload === null) {
             return Response::error('Invalid or expired token', 401);
         }
 
-        // Validate payload structure
-        if (!isset($payload['user_id'])) {
+        // The user identity must be present and well-typed.
+        $userId = $payload['user_id'] ?? null;
+        if (!is_int($userId)) {
             return Response::error('Invalid token payload', 401);
         }
 
-        // Check role or permission if required
-        if ($requiredRole !== null || $requiredPermission !== null) {
-            $userId = $payload['user_id'];
-
-            // Ensure user_id is an integer
-            if (!is_int($userId)) {
-                return Response::error('Invalid token payload', 401);
-            }
-
-            // Check if token includes a role (for system/CLI tokens)
-            if (isset($payload['role'])) {
-                $tokenRole = $payload['role'];
-                if ($requiredRole !== null && $tokenRole !== $requiredRole) {
-                    return Response::error('Insufficient permissions', 403);
-                }
-                // For token-based roles, skip permission check (CLI admin has all permissions)
-                if ($requiredPermission !== null && $tokenRole !== 'admin') {
-                    return Response::error('Insufficient permissions', 403);
-                }
-            } else {
-                // Check if user has required role
-                if ($requiredRole !== null) {
-                    if (!$this->roleChecker->hasRole($userId, $requiredRole)) {
-                        return Response::error('Insufficient permissions', 403);
-                    }
-                }
-
-                // Check if user has required permission
-                if ($requiredPermission !== null) {
-                    if (!$this->roleChecker->hasPermission($userId, $requiredPermission)) {
-                        return Response::error('Insufficient permissions', 403);
-                    }
-                }
-            }
+        // Enforce the required role against the authoritative store.
+        if ($requiredRole !== null && !$this->roleChecker->hasRole($userId, $requiredRole)) {
+            return $this->forbidden();
         }
 
-        // Attach user data to request
+        // Enforce the required permission against the authoritative store. The
+        // permission name is echoed back so clients know what they are missing.
+        if ($requiredPermission !== null && !$this->roleChecker->hasPermission($userId, $requiredPermission)) {
+            return $this->forbidden($requiredPermission);
+        }
+
+        // Attach the validated payload for downstream handlers.
         $request->user = (object) $payload;
 
-        // Call next handler
         return $next($request);
     }
 
     /**
-     * Check if Authorization header has valid Bearer format
+     * Build a structured 403 Forbidden response.
      *
-     * @param string $authHeader The Authorization header value
-     * @return bool True if format is "Bearer <token>", false otherwise
+     * When a permission caused the denial it is included under the `required`
+     * key so the caller can identify the missing capability. Internal details
+     * (user identity, role, query results) are never leaked.
+     *
+     * @param string|null $requiredPermission The permission that was missing, if any.
+     * @return Response The 403 JSON response.
+     */
+    private function forbidden(?string $requiredPermission = null): Response
+    {
+        $body = ['error' => 'Insufficient permissions'];
+        if ($requiredPermission !== null) {
+            $body['required'] = $requiredPermission;
+        }
+
+        return Response::json($body, 403);
+    }
+
+    /**
+     * Extract the bearer token from the request.
+     *
+     * Prefers the `Authorization: Bearer <token>` header and falls back to the
+     * `access_token` cookie when the header is absent or malformed.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return string|null The token string, or null when none is present.
+     */
+    private function extractTokenFromRequest(Request $request): ?string
+    {
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && $this->isValidBearerFormat($authHeader)) {
+            // Strip the "Bearer " prefix (7 characters).
+            return substr($authHeader, 7);
+        }
+
+        $cookieHeader = $request->getHeader('Cookie');
+        if ($cookieHeader === null) {
+            return null;
+        }
+
+        // Parse a cookie header of the form "name1=value1; name2=value2".
+        foreach (explode(';', $cookieHeader) as $cookie) {
+            $parts = explode('=', trim($cookie), 2);
+            if (count($parts) === 2 && $parts[0] === 'access_token') {
+                return $parts[1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if an Authorization header has the "Bearer <token>" format.
+     *
+     * @param string $authHeader The Authorization header value.
+     * @return bool True if the format is "Bearer <token>", false otherwise.
      */
     private function isValidBearerFormat(string $authHeader): bool
     {
         return preg_match('/^Bearer\s+\S+$/', $authHeader) === 1;
-    }
-
-    /**
-     * Extract token from "Bearer <token>" format
-     *
-     * @param string $authHeader The Authorization header value
-     * @return string The extracted token
-     */
-    private function extractToken(string $authHeader): string
-    {
-        // Remove "Bearer " prefix and return the token
-        return substr($authHeader, 7);
     }
 }

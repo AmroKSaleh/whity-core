@@ -1,4 +1,7 @@
-FROM dunglas/frankenphp:latest
+# Pinned to PHP 8.4 — the platform target (composer.json >=8.4, CI runs 8.4).
+# :latest drifted to PHP 8.5, whose new deprecations (e.g.
+# ReflectionProperty::setAccessible()) pollute every HTTP response in dev.
+FROM dunglas/frankenphp:1-php8.4
 
 # Install required packages for PostgreSQL extension
 RUN apt-get update && apt-get install -y \
