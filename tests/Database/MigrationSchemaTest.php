@@ -353,6 +353,148 @@ final class MigrationSchemaTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    /**
+     * Canonical dot -> colon mapping for every core permission the platform seeds.
+     *
+     * @return array<string, array{0:string,1:string}>
+     */
+    public static function permissionNotationProvider(): array
+    {
+        return [
+            'users:read' => ['users.read', 'users:read'],
+            'users:create' => ['users.create', 'users:create'],
+            'users:update' => ['users.update', 'users:update'],
+            'users:delete' => ['users.delete', 'users:delete'],
+            'roles:read' => ['roles.read', 'roles:read'],
+            'roles:create' => ['roles.create', 'roles:create'],
+            'roles:update' => ['roles.update', 'roles:update'],
+            'roles:delete' => ['roles.delete', 'roles:delete'],
+            'tenants:read' => ['tenants.read', 'tenants:read'],
+            'tenants:create' => ['tenants.create', 'tenants:create'],
+            'tenants:update' => ['tenants.update', 'tenants:update'],
+            'tenants:delete' => ['tenants.delete', 'tenants:delete'],
+            'ous:read' => ['ous.read', 'ous:read'],
+            'ous:create' => ['ous.create', 'ous:create'],
+            'ous:update' => ['ous.update', 'ous:update'],
+            'ous:delete' => ['ous.delete', 'ous:delete'],
+            'ous:assign' => ['ous.assign', 'ous:assign'],
+        ];
+    }
+
+    /**
+     * The seed migrations must define permissions in `resource:action` (colon)
+     * notation so a fresh database matches the RBAC registry (issue #55).
+     *
+     * @dataProvider permissionNotationProvider
+     */
+    public function testSeedMigrationsUseColonNotation(string $dotForm, string $colonForm): void
+    {
+        $seedSql = $this->readFile('002_create_permissions.php')
+            . $this->readFile('007_create_organizational_units.php')
+            . $this->readFile('010_assign_ou_permissions_to_roles.php');
+
+        // The dot-notation form must no longer appear as a quoted permission literal.
+        $this->assertStringNotContainsString(
+            "'{$dotForm}'",
+            $seedSql,
+            "Seed migrations must not seed the dot-notation permission '{$dotForm}'."
+        );
+    }
+
+    /**
+     * No seed migration may reference a core permission in dot notation. This is
+     * the broad guard backing the per-permission assertions above.
+     */
+    public function testNoSeedMigrationContainsDotNotationPermission(): void
+    {
+        foreach (['002_create_permissions.php', '007_create_organizational_units.php', '010_assign_ou_permissions_to_roles.php'] as $file) {
+            $sql = $this->readFile($file);
+            $this->assertDoesNotMatchRegularExpression(
+                "/'(users|roles|tenants|ous|permissions|plugins)\.(read|create|update|delete|assign|write|manage)'/",
+                $sql,
+                "{$file} still contains a dot-notation permission literal."
+            );
+        }
+    }
+
+    public function testNormalizationMigrationExistsAndIsReversible(): void
+    {
+        $file = '016_normalize_permission_notation.php';
+        $sql = $this->readFile($file);
+
+        // Both lifecycle methods are present.
+        $this->assertStringContainsString('public static function up', $sql);
+        $this->assertStringContainsString('public static function down', $sql);
+
+        // up() rewrites dot -> colon; down() rewrites colon -> dot. Both use a
+        // REPLACE() UPDATE so they are pure data normalisations.
+        $this->assertMatchesRegularExpression('/UPDATE\s+permissions/i', $sql);
+        $this->assertMatchesRegularExpression('/REPLACE\s*\(\s*name/i', $sql);
+
+        // The class must resolve via the runner's naming convention.
+        $className = $this->loadMigrationClass(self::$migrationDir . '/' . $file);
+        $this->assertSame('Database\\Migrations\\NormalizePermissionNotation', $className);
+    }
+
+    public function testNormalizationMigrationIsIdempotentlyScopedToKnownResources(): void
+    {
+        $sql = $this->readFile('016_normalize_permission_notation.php');
+
+        // It must constrain its UPDATE with a LIKE filter so already-normalised
+        // rows (and plugin permissions) are left untouched — the basis for both
+        // idempotency and avoiding collateral edits.
+        $this->assertMatchesRegularExpression('/LIKE\s+:pattern/i', $sql);
+
+        // Every core resource must be covered by the rewrite.
+        foreach (['users', 'roles', 'tenants', 'ous', 'permissions', 'plugins'] as $resource) {
+            $this->assertStringContainsString(
+                "'{$resource}'",
+                $sql,
+                "Normalisation migration must cover the '{$resource}' resource."
+            );
+        }
+    }
+
+    /**
+     * Proves the dot<->colon transform applied by the migration's REPLACE() is
+     * a correct, idempotent, and reversible round-trip for every core permission.
+     *
+     * This mirrors PostgreSQL's REPLACE(name, '<res>.', '<res>:') semantics in
+     * pure PHP so the mapping is verified without a live database.
+     *
+     * @dataProvider permissionNotationProvider
+     */
+    public function testDotColonTransformRoundTrips(string $dotForm, string $colonForm): void
+    {
+        $resources = ['users', 'roles', 'tenants', 'ous', 'permissions', 'plugins'];
+
+        $toColon = static function (string $value) use ($resources): string {
+            foreach ($resources as $resource) {
+                if (str_starts_with($value, $resource . '.')) {
+                    return str_replace($resource . '.', $resource . ':', $value);
+                }
+            }
+            return $value;
+        };
+        $toDot = static function (string $value) use ($resources): string {
+            foreach ($resources as $resource) {
+                if (str_starts_with($value, $resource . ':')) {
+                    return str_replace($resource . ':', $resource . '.', $value);
+                }
+            }
+            return $value;
+        };
+
+        // Forward: dot -> colon.
+        $this->assertSame($colonForm, $toColon($dotForm));
+        // Idempotent: applying forward to an already-colon value is a no-op.
+        $this->assertSame($colonForm, $toColon($colonForm));
+        // Reverse (down): colon -> dot restores the original.
+        $this->assertSame($dotForm, $toDot($colonForm));
+        // Idempotent reverse.
+        $this->assertSame($dotForm, $toDot($dotForm));
+    }
+
     public function testAllMigrationFilesDeclareTheMigrationsNamespace(): void
     {
         foreach (array_keys(self::migrationFileProvider()) as $fileName) {
