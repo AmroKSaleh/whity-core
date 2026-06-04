@@ -27,8 +27,8 @@ class PermissionsApiHandlerTest extends TestCase
     public function testListPermissionsReturns200(): void
     {
         $expectedPermissions = [
-            ['id' => 1, 'name' => 'users.read', 'description' => 'Read users'],
-            ['id' => 2, 'name' => 'users.create', 'description' => 'Create users']
+            ['id' => 1, 'name' => 'users:read', 'description' => 'Read users'],
+            ['id' => 2, 'name' => 'users:create', 'description' => 'Create users']
         ];
 
         $mockStatement = $this->createMock(PDOStatement::class);
