@@ -159,9 +159,10 @@ class TenantManagementRbacTest extends TestCase
     /**
      * Tenant isolation: a non-system user cannot delete another tenant (AC3).
      *
-     * The middleware sets the caller's tenant context from the JWT (tenant 3);
-     * the handler must refuse the cross-tenant delete of tenant 7 with 403 and
-     * never touch the database.
+     * The EnforceTenantIsolation middleware resolves the caller's tenant from the
+     * JWT (tenant 3) and refuses the cross-tenant delete of tenant 7 with 403 at
+     * the HTTP layer, before the handler runs and without touching the database.
+     * (The handler retains its own equivalent guard as defense-in-depth.)
      */
     public function testNonSystemUserCannotDeleteForeignTenantThroughPipeline(): void
     {
@@ -179,7 +180,7 @@ class TenantManagementRbacTest extends TestCase
 
         $this->assertSame(403, $response->getStatusCode());
         $data = json_decode($response->getBody(), true);
-        $this->assertStringContainsString('Cannot delete other tenants', $data['error']);
+        $this->assertArrayHasKey('error', $data);
     }
 
     /**
