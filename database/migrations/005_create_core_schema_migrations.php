@@ -30,6 +30,13 @@ class CreateCoreSchemaMigrations
 
     public static function down(Database $db): void
     {
-        $db->exec('DROP TABLE IF EXISTS core_schema_migrations CASCADE');
+        // Intentionally a no-op.
+        //
+        // The core_schema_migrations table is migration-tracking infrastructure
+        // that the migration runner itself depends on for the entire rollback
+        // sequence. Dropping it here would remove the tracking rows of every
+        // migration ordered before this one (001-004), leaving them impossible
+        // to roll back. The runner provisions this table independently, so its
+        // lifecycle is not tied to this migration's reversal.
     }
 }
