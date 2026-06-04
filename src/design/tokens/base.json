@@ -1,17 +1,22 @@
 {
   "name": "Whity Core Design Tokens",
-  "description": "Master design token definitions for web, mobile, and desktop platforms",
-  "version": "1.0.0",
+  "description": "Master design token definitions for web, mobile, and desktop platforms. This file is the single source of truth — run `npm run tokens:generate` to regenerate all platform outputs (web globals.css, tokens.json, tokens.dart).",
+  "version": "2.0.0",
   "platforms": {
     "web": {
       "type": "css-custom-properties",
-      "location": "../../web/app/globals.css",
-      "description": "CSS variables used by Tailwind CSS and shadcn-ui components"
+      "location": "../../../web/app/globals.css",
+      "description": "CSS variables used by Tailwind CSS v4 and shadcn-ui components. The :root / .dark / typography blocks are generated between AUTO-GENERATED sentinel markers."
     },
     "mobile": {
       "type": "dart-constants",
       "location": "./generated/tokens.dart",
       "description": "Dart constants for Flutter Material Design 3 integration"
+    },
+    "json": {
+      "type": "json",
+      "location": "./generated/tokens.json",
+      "description": "Flat JSON export for programmatic / white-label tooling consumption"
     }
   },
   "colors": {
@@ -22,7 +27,7 @@
       "card-foreground": "oklch(0.145 0 0)",
       "popover": "oklch(1 0 0)",
       "popover-foreground": "oklch(0.145 0 0)",
-      "primary": "oklch(0.205 0 0)",
+      "primary": "oklch(0.5 0.16 255)",
       "primary-foreground": "oklch(0.985 0 0)",
       "secondary": "oklch(0.97 0 0)",
       "secondary-foreground": "oklch(0.205 0 0)",
@@ -30,10 +35,33 @@
       "muted-foreground": "oklch(0.556 0 0)",
       "accent": "oklch(0.97 0 0)",
       "accent-foreground": "oklch(0.205 0 0)",
+      "brand": "oklch(0.5 0.16 255)",
+      "brand-foreground": "oklch(0.985 0 0)",
       "destructive": "oklch(0.577 0.245 27.325)",
+      "success": "oklch(0.52 0.15 150)",
+      "success-foreground": "oklch(0.985 0 0)",
+      "warning": "oklch(0.7 0.17 75)",
+      "warning-foreground": "oklch(0.205 0 0)",
+      "error": "oklch(0.55 0.2 27)",
+      "error-foreground": "oklch(0.985 0 0)",
+      "info": "oklch(0.52 0.15 240)",
+      "info-foreground": "oklch(0.985 0 0)",
       "border": "oklch(0.922 0 0)",
       "input": "oklch(0.922 0 0)",
-      "ring": "oklch(0.708 0 0)"
+      "ring": "oklch(0.5 0.16 255)",
+      "chart-1": "oklch(0.5 0.16 255)",
+      "chart-2": "oklch(0.556 0 0)",
+      "chart-3": "oklch(0.439 0 0)",
+      "chart-4": "oklch(0.371 0 0)",
+      "chart-5": "oklch(0.269 0 0)",
+      "sidebar": "oklch(0.985 0 0)",
+      "sidebar-foreground": "oklch(0.145 0 0)",
+      "sidebar-primary": "oklch(0.5 0.16 255)",
+      "sidebar-primary-foreground": "oklch(0.985 0 0)",
+      "sidebar-accent": "oklch(0.97 0 0)",
+      "sidebar-accent-foreground": "oklch(0.205 0 0)",
+      "sidebar-border": "oklch(0.922 0 0)",
+      "sidebar-ring": "oklch(0.5 0.16 255)"
     },
     "dark": {
       "background": "oklch(0.145 0 0)",
@@ -42,7 +70,7 @@
       "card-foreground": "oklch(0.985 0 0)",
       "popover": "oklch(0.205 0 0)",
       "popover-foreground": "oklch(0.985 0 0)",
-      "primary": "oklch(0.922 0 0)",
+      "primary": "oklch(0.7 0.15 255)",
       "primary-foreground": "oklch(0.205 0 0)",
       "secondary": "oklch(0.269 0 0)",
       "secondary-foreground": "oklch(0.985 0 0)",
@@ -50,25 +78,81 @@
       "muted-foreground": "oklch(0.708 0 0)",
       "accent": "oklch(0.269 0 0)",
       "accent-foreground": "oklch(0.985 0 0)",
+      "brand": "oklch(0.7 0.15 255)",
+      "brand-foreground": "oklch(0.205 0 0)",
       "destructive": "oklch(0.704 0.191 22.216)",
+      "success": "oklch(0.72 0.16 150)",
+      "success-foreground": "oklch(0.205 0 0)",
+      "warning": "oklch(0.82 0.16 80)",
+      "warning-foreground": "oklch(0.205 0 0)",
+      "error": "oklch(0.7 0.18 25)",
+      "error-foreground": "oklch(0.205 0 0)",
+      "info": "oklch(0.72 0.15 240)",
+      "info-foreground": "oklch(0.205 0 0)",
       "border": "oklch(1 0 0 / 10%)",
       "input": "oklch(1 0 0 / 15%)",
-      "ring": "oklch(0.556 0 0)"
-    },
-    "semantic": {
-      "success": "oklch(0.84 0.15 142.5)",
-      "warning": "oklch(0.84 0.18 70)",
-      "error": "oklch(0.63 0.26 29.2)",
-      "info": "oklch(0.68 0.19 231.6)"
+      "ring": "oklch(0.7 0.15 255)",
+      "chart-1": "oklch(0.7 0.15 255)",
+      "chart-2": "oklch(0.556 0 0)",
+      "chart-3": "oklch(0.708 0 0)",
+      "chart-4": "oklch(0.439 0 0)",
+      "chart-5": "oklch(0.371 0 0)",
+      "sidebar": "oklch(0.205 0 0)",
+      "sidebar-foreground": "oklch(0.985 0 0)",
+      "sidebar-primary": "oklch(0.7 0.15 255)",
+      "sidebar-primary-foreground": "oklch(0.205 0 0)",
+      "sidebar-accent": "oklch(0.269 0 0)",
+      "sidebar-accent-foreground": "oklch(0.985 0 0)",
+      "sidebar-border": "oklch(1 0 0 / 10%)",
+      "sidebar-ring": "oklch(0.7 0.15 255)"
     }
   },
   "typography": {
-    "font-sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    "font-mono": "'Geist Mono', monospace",
-    "font-heading": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    "fontFamily": {
+      "sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "mono": "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+      "heading": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    },
+    "fontFamilyDart": {
+      "sans": "Inter",
+      "mono": "Geist Mono",
+      "heading": "Inter"
+    },
+    "scaleRationale": "Modular type scale anchored at 1rem (16px) base, stepping on an approximate minor-third (~1.2) ratio. Sizes expressed in rem for web (respects user zoom / root font-size) and resolved to px for Dart/Flutter (logical pixels).",
+    "fontSize": {
+      "xs": { "rem": "0.75rem", "px": 12 },
+      "sm": { "rem": "0.875rem", "px": 14 },
+      "base": { "rem": "1rem", "px": 16 },
+      "lg": { "rem": "1.125rem", "px": 18 },
+      "xl": { "rem": "1.25rem", "px": 20 },
+      "2xl": { "rem": "1.5rem", "px": 24 },
+      "3xl": { "rem": "1.875rem", "px": 30 },
+      "4xl": { "rem": "2.25rem", "px": 36 }
+    },
+    "fontWeight": {
+      "normal": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    },
+    "lineHeight": {
+      "none": 1,
+      "tight": 1.25,
+      "snug": 1.375,
+      "normal": 1.5,
+      "relaxed": 1.625
+    },
+    "letterSpacing": {
+      "tighter": "-0.05em",
+      "tight": "-0.025em",
+      "normal": "0em",
+      "wide": "0.025em",
+      "wider": "0.05em"
+    }
   },
   "spacing": {
     "unit": "8px",
+    "description": "8px base grid. The 4px step is a half-unit for fine adjustments.",
     "scale": {
       "0": "0px",
       "1": "4px",
@@ -92,11 +176,19 @@
   "accessibility": {
     "contrastRatio": "WCAG AA+",
     "colorSpace": "OKLCH",
-    "description": "Perceptually uniform color space with verified accessibility compliance"
+    "description": "Perceptually uniform color space with verified accessibility compliance. The brand accent and all semantic colors are verified against their *-foreground pairs to meet WCAG AA (>=4.5:1) in both light and dark modes."
+  },
+  "brandAccent": {
+    "hue": 255,
+    "description": "Single restrained professional blue used for primary CTAs, links, active and focus states (drives primary, ring, sidebar-primary, chart-1). This is the white-label-overridable DEFAULT — tenants override --primary / --brand / --ring per docs/wiki/Theme-Customization.md. Light oklch(0.5 0.16 255) vs near-white foreground = 5.83:1; dark oklch(0.7 0.15 255) vs dark foreground = 6.68:1.",
+    "verifiedContrast": {
+      "lightOnForeground": 5.83,
+      "darkOnForeground": 6.68
+    }
   },
   "whiteLabelSupport": {
     "enabled": true,
     "approach": "CSS variable injection",
-    "description": "Tokens can be customized per tenant at runtime via CSS variable override"
+    "description": "Tokens can be customized per tenant at runtime via CSS variable override. The brand accent default (--primary / --brand / --ring) is intended to be overridden per tenant."
   }
 }
