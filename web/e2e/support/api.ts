@@ -54,11 +54,9 @@ export async function deleteUser(api: APIRequestContext, id: number): Promise<vo
 /**
  * Best-effort organizational-unit deletion by id.
  *
- * NOTE: the `/api/ous/{id}` DELETE endpoint returns HTTP 204 from the backend,
- * which the Next.js proxy route handler currently turns into a 500 (it builds
- * `new Response(body, { status: 204 })` with a non-null body — illegal per the
- * Fetch spec). The backend deletion still succeeds, so this cleanup is
- * effective even though the proxied call reports an error. See README/PR notes.
+ * The `/api/ous/{id}` DELETE endpoint returns HTTP 204 from the backend. The
+ * Next.js proxy now forwards null-body statuses (204/205/304) without a body
+ * (WC-101), so this resolves with a clean 204 rather than a proxy 500.
  */
 export async function deleteOu(api: APIRequestContext, id: number): Promise<void> {
   await api.delete(`/api/ous/${id}`).catch(() => undefined);
