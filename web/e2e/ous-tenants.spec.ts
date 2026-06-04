@@ -237,11 +237,18 @@ test.describe('Tenants (admin)', () => {
 
     const deleteDialog = page.getByRole('dialog');
     await expect(deleteDialog.getByRole('heading', { name: 'Delete Tenant' })).toBeVisible();
-    // NOTE: the modal's "this tenant has N associated users" warning does NOT
-    // render here because the list API returns the count as `usercount`
-    // (lowercase) while the modal reads `tenant.userCount` (camelCase) — a real
-    // minor data-mapping mismatch, captured as a data-testid/mapping follow-up
-    // in the PR rather than asserted on. The delete guard itself still works.
+
+    // WC-122: the modal's "this tenant has N associated users" warning now
+    // renders. The list API previously returned the count as `usercount` (the
+    // database folds the unquoted `userCount` SQL alias to lowercase) while the
+    // modal reads `tenant.userCount` (camelCase), so the warning never appeared.
+    // The handler now shapes the row to the camelCase public contract, so the
+    // occupied Default Tenant surfaces its associated-user count (>= 1: it is
+    // seeded with the admin user, so the delete guard below also rejects it).
+    await expect(
+      deleteDialog.getByText(/This tenant has \d+ associated users?\. Deleting it may impact those users\./)
+    ).toBeVisible();
+
     await deleteDialog.getByRole('button', { name: 'Delete Tenant' }).click();
 
     // Backend guard: tenant 1 is occupied (and is the caller's own tenant) so
