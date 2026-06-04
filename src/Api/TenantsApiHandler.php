@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Api;
 
+use Whity\Api\Exception\SystemTenantProtectedException;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
@@ -12,9 +15,23 @@ use PDO;
  * Tenants API Handler
  *
  * Handles CRUD operations for tenants with slug management.
+ *
+ * Authorization model:
+ * - System users (tenant_id=0) have administrative authority over the whole
+ *   multi-tenant platform and may update or delete any tenant.
+ * - Regular tenant users may only manage their own tenant.
+ * - The system tenant itself (id=0) is protected and can never be deleted.
  */
 class TenantsApiHandler
 {
+    /**
+     * The reserved identifier for the system tenant.
+     *
+     * The system tenant anchors platform-wide infrastructure and must never be
+     * deleted; system users (tenant_id=0) act with cross-tenant authority.
+     */
+    private const SYSTEM_TENANT_ID = 0;
+
     private PDO $db;
     private HookManager $hookManager;
 
@@ -22,6 +39,37 @@ class TenantsApiHandler
     {
         $this->db = $db;
         $this->hookManager = $hookManager;
+    }
+
+    /**
+     * Determine whether the current request is made by a system user.
+     *
+     * System users belong to the system tenant (tenant_id=0) and are granted
+     * cross-tenant administrative authority.
+     *
+     * @return bool True when the current tenant context is the system tenant.
+     */
+    private function isSystemUser(): bool
+    {
+        return TenantContext::getTenantId() === self::SYSTEM_TENANT_ID;
+    }
+
+    /**
+     * Authorize a write (update/delete) on the given tenant for the caller.
+     *
+     * System users may act on any tenant. Regular users may only act on their
+     * own tenant.
+     *
+     * @param int $targetTenantId The tenant being modified.
+     * @return bool True when the caller is authorized.
+     */
+    private function canManageTenant(int $targetTenantId): bool
+    {
+        if ($this->isSystemUser()) {
+            return true;
+        }
+
+        return $targetTenantId === TenantContext::getTenantId();
     }
 
     /**
@@ -158,20 +206,26 @@ class TenantsApiHandler
     {
         try {
             $id = $params['id'] ?? null;
-            if (!$id) {
+            if ($id === null || $id === '') {
                 return Response::error('Tenant ID is required', 400);
             }
+            $id = (int)$id;
 
-            $currentTenantId = TenantContext::getTenantId();
-            if ((int)$id !== $currentTenantId) {
+            // System users may manage any tenant; regular users only their own.
+            if (!$this->canManageTenant($id)) {
+                error_log(sprintf(
+                    '[tenants] denied update: tenant_id=%s target_tenant_id=%d',
+                    var_export(TenantContext::getTenantId(), true),
+                    $id
+                ));
                 return Response::error('Unauthorized: Cannot update other tenants', 403);
             }
 
             $body = json_decode($request->getBody(), true);
 
-            // Get current tenant
-            $stmt = $this->db->prepare('SELECT * FROM tenants WHERE id = ? AND id = ?');
-            $stmt->execute([$id, $currentTenantId]);
+            // Get target tenant
+            $stmt = $this->db->prepare('SELECT * FROM tenants WHERE id = ?');
+            $stmt->execute([$id]);
             $tenant = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$tenant) {
@@ -238,17 +292,30 @@ class TenantsApiHandler
     {
         try {
             $id = $params['id'] ?? null;
-            if (!$id) {
+            if ($id === null || $id === '') {
                 return Response::error('Tenant ID is required', 400);
             }
+            $id = (int)$id;
 
-            $currentTenantId = TenantContext::getTenantId();
-            if ((int)$id !== $currentTenantId) {
+            // Protect the system tenant: it anchors the platform and must never
+            // be deleted, regardless of who is asking. This guard runs before
+            // authorization so that even a system user cannot remove tenant 0.
+            if ($id === self::SYSTEM_TENANT_ID) {
+                throw SystemTenantProtectedException::forAction('delete');
+            }
+
+            // System users may delete any tenant; regular users only their own.
+            if (!$this->canManageTenant($id)) {
+                error_log(sprintf(
+                    '[tenants] denied delete: tenant_id=%s target_tenant_id=%d',
+                    var_export(TenantContext::getTenantId(), true),
+                    $id
+                ));
                 return Response::error('Unauthorized: Cannot delete other tenants', 403);
             }
 
-            $stmt = $this->db->prepare('SELECT id FROM tenants WHERE id = ? AND id = ?');
-            $stmt->execute([$id, $currentTenantId]);
+            $stmt = $this->db->prepare('SELECT id FROM tenants WHERE id = ?');
+            $stmt->execute([$id]);
             if (!$stmt->fetch()) {
                 return Response::error('Tenant not found', 404);
             }
@@ -281,6 +348,12 @@ class TenantsApiHandler
             ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant deleted']], 200);
+        } catch (SystemTenantProtectedException $e) {
+            error_log(sprintf(
+                '[tenants] blocked system tenant deletion: tenant_id=%s',
+                var_export(TenantContext::getTenantId(), true)
+            ));
+            return Response::error($e->getMessage(), 400);
         } catch (\Exception $e) {
             return Response::error('Failed to delete tenant: ' . $e->getMessage(), 500);
         }
