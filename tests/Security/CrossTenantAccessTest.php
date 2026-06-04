@@ -421,11 +421,25 @@ class CrossTenantAccessTest extends TestCase
         $mockUpdateStatement = $this->createMock(PDOStatement::class);
         $mockUpdateStatement->method('execute')->willReturn(true);
 
+        // Mock the post-update re-fetch: the handler now returns the updated user
+        // record (WC-113), so one extra prepared statement is consumed.
+        $mockRefetchStatement = $this->createMock(PDOStatement::class);
+        $mockRefetchStatement->method('execute')->willReturn(true);
+        $mockRefetchStatement->method('fetch')->willReturn([
+            'id' => self::USER_A_ID,
+            'email' => 'usera@example.com',
+            'password' => 'x',
+            'created_at' => '2026-01-01 00:00:00',
+            'tenant_id' => self::TENANT_A,
+            'role' => 'user',
+        ]);
+
         $this->mockDb->method('prepare')
             ->willReturnOnConsecutiveCalls(
                 $mockSelectStatement,
                 $mockOuCheckStatement,
-                $mockUpdateStatement
+                $mockUpdateStatement,
+                $mockRefetchStatement
             );
 
         // Attack: User A tries to assign themselves to Engineering OU

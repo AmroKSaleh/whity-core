@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use Psr\Log\LoggerInterface;
+use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
@@ -15,16 +17,54 @@ use PDO;
  *
  * Handles CRUD operations for users with full validation,
  * password hashing, and error handling.
+ *
+ * Editable fields on update (WC-113)
+ * ----------------------------------
+ * `PATCH /api/users/{id}` persists the genuinely editable columns of the `users`
+ * table: `email`, `password` and the user's primary `role` (the Edit User form
+ * binds `role` as a role NAME, which is resolved to a `roles.id` scoped to the
+ * tenant before being written to `users.role_id`). Two fields the form also
+ * submits are intentionally NOT persisted here:
+ *
+ *  - `name` is DERIVED from the email local-part — there is no `users.name`
+ *    column (see {@see self::toPublicUser()}) — so it is read-only and silently
+ *    ignored if sent.
+ *  - `tenantId` is intentionally out of scope: moving a user between tenants is a
+ *    security-sensitive operation that would breach tenant isolation, so this
+ *    endpoint never re-homes a user. A `tenantId` in the body is ignored.
+ *
+ * Tenant scoping mirrors the other admin handlers: a non-system tenant may edit
+ * ONLY its own users (a user outside the tenant is reported as 404); the SYSTEM
+ * tenant (id 0) may manage users across all tenants. A resolved role must be
+ * visible to the acting tenant (owned by it or a global/NULL-tenant role), so a
+ * tenant can never assign one of another tenant's private roles. TenantContext is
+ * never bypassed. After a role change the worker-level effective-permission cache
+ * is invalidated via {@see RoleChecker::clearCache()} (WC-15), mirroring
+ * {@see RolesApiHandler}, so RBAC checks never go stale on a role re-assignment.
  */
 class UsersApiHandler
 {
     private PDO $db;
     private HookManager $hookManager;
 
-    public function __construct(PDO $db, HookManager $hookManager)
+    /**
+     * Optional PSR-3 logger for structured audit/diagnostic logging. When null,
+     * no log output is emitted (keeps tests output-clean).
+     */
+    private ?LoggerInterface $logger;
+
+    /**
+     * Constructor.
+     *
+     * @param PDO                  $db          Database connection.
+     * @param HookManager          $hookManager Hook dispatcher for user lifecycle events.
+     * @param LoggerInterface|null $logger      Optional PSR-3 logger for structured logs.
+     */
+    public function __construct(PDO $db, HookManager $hookManager, ?LoggerInterface $logger = null)
     {
         $this->db = $db;
         $this->hookManager = $hookManager;
+        $this->logger = $logger;
     }
 
     /**
@@ -180,7 +220,21 @@ class UsersApiHandler
     }
 
     /**
-     * PATCH /api/users/{id} - Update a user
+     * PATCH /api/users/{id} - Update a user.
+     *
+     * Persists the editable fields the Edit User form offers: `email`, `password`
+     * and `role` (a role NAME resolved to a tenant-visible `roles.id`). `name` is
+     * derived/read-only and `tenantId` is out of scope; both are ignored if sent
+     * (see the class docblock). Tenant-scoped + ownership-checked: a non-system
+     * tenant may only edit its own users (else 404), the SYSTEM tenant (id 0) may
+     * edit across tenants, and an assigned role must be visible to the tenant. A
+     * real change returns the updated user via {@see self::toPublicUser()}; a true
+     * no-op still returns a sensible 200. A role change invalidates the
+     * effective-permission cache.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @return Response JSON updated user under the `data` key (200) or an error.
      */
     public function update(Request $request, array $params): Response
     {
@@ -191,27 +245,46 @@ class UsersApiHandler
             }
 
             $currentTenantId = TenantContext::getTenantId();
-            $body = json_decode($request->getBody(), true);
 
-            // Get user to update
-            $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?');
-            $stmt->execute([$id, $currentTenantId]);
+            /** @var array<string, mixed>|null $body */
+            $body = json_decode($request->getBody(), true);
+            if (!is_array($body)) {
+                $body = [];
+            }
+
+            // Tenant ownership: a non-system tenant may only see/edit its OWN
+            // users; the SYSTEM tenant (id 0) may manage users across all tenants.
+            // A user outside the caller's tenant is reported as 404 so tenant
+            // existence is never leaked, mirroring the other admin handlers.
+            if ($currentTenantId === 0) {
+                $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ?');
+                $stmt->execute([$id]);
+            } else {
+                $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?');
+                $stmt->execute([$id, $currentTenantId]);
+            }
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user) {
                 return Response::error('User not found', 404);
             }
 
-            // Prepare update fields
+            // The owning tenant of the target row scopes uniqueness/visibility
+            // checks below (relevant when the SYSTEM tenant edits another tenant's
+            // user: validate against THAT tenant, not tenant 0).
+            $ownerTenantId = (int)$user['tenant_id'];
+
+            // Prepare update fields.
             $updates = [];
             $params_array = [];
+            $roleChanged = false;
 
             if (isset($body['email']) && $body['email'] !== $user['email']) {
-                // Check if new email already exists
+                // Check if new email already exists within the owning tenant.
                 $checkStmt = $this->db->prepare(
                     'SELECT id FROM users WHERE email = ? AND tenant_id = ? AND id != ?'
                 );
-                $checkStmt->execute([$body['email'], $user['tenant_id'], $id]);
+                $checkStmt->execute([$body['email'], $ownerTenantId, $id]);
                 if ($checkStmt->fetch()) {
                     return Response::error('Email already exists for this tenant', 409);
                 }
@@ -227,20 +300,35 @@ class UsersApiHandler
                 $params_array[] = password_hash($body['password'], PASSWORD_BCRYPT);
             }
 
-            // CRITICAL: role_id cannot be changed via this endpoint - prevents privilege escalation
-            if (isset($body['role_id'])) {
-                return Response::error('Role changes are not allowed via this endpoint', 403);
+            // Role assignment. The form binds `role` as a role NAME; a numeric
+            // `role_id` is also accepted for API callers. The resolved role must
+            // be visible to the acting tenant (owned by it, a global/NULL-tenant
+            // role, or — for the SYSTEM tenant — any role) so a tenant can never
+            // assign another tenant's private role.
+            $roleRef = $body['role'] ?? $body['role_id'] ?? null;
+            if ($roleRef !== null && $roleRef !== '') {
+                $newRoleId = $this->resolveVisibleRoleId($roleRef, $currentTenantId, $ownerTenantId);
+                if ($newRoleId === null) {
+                    return Response::error('Role not found', 404);
+                }
+
+                if ($newRoleId !== (int)$user['role_id']) {
+                    $updates[] = 'role_id = ?';
+                    $params_array[] = $newRoleId;
+                    $roleChanged = true;
+                }
             }
 
-            // Support ou_id assignment with tenant validation
+            // Support ou_id assignment with tenant validation (scoped to the owning
+            // tenant so it stays correct under SYSTEM-tenant cross-tenant edits).
             if (isset($body['ou_id'])) {
                 $ouId = $body['ou_id'];
 
                 // NULL and 0 are valid (user in root)
                 if ($ouId !== null && $ouId !== 0 && $ouId !== '') {
-                    // SECURITY: ou_id must belong to current tenant
+                    // SECURITY: ou_id must belong to the user's owning tenant.
                     $stmtCheckOu = $this->db->prepare('SELECT id FROM organizational_units WHERE id = ? AND tenant_id = ?');
-                    $stmtCheckOu->execute([$ouId, $currentTenantId]);
+                    $stmtCheckOu->execute([$ouId, $ownerTenantId]);
                     if (!$stmtCheckOu->fetch()) {
                         return Response::error('OU does not belong to current tenant', 403);
                     }
@@ -253,8 +341,17 @@ class UsersApiHandler
                 }
             }
 
+            // A true no-op (nothing genuinely changed — e.g. only `name`/`tenantId`
+            // were sent, or the role matched the current one) still returns a
+            // sensible 200 carrying the unchanged record.
             if (empty($updates)) {
-                return Response::json(['data' => ['id' => (int)$id, 'message' => 'No updates provided']], 200);
+                $this->log('info', 'User update was a no-op', [
+                    'event' => 'users.update.noop',
+                    'tenant_id' => $currentTenantId,
+                    'user_id' => (int)$id,
+                ]);
+
+                return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);
             }
 
             $params_array[] = $id;
@@ -262,10 +359,132 @@ class UsersApiHandler
             $stmt = $this->db->prepare($sql);
             $stmt->execute($params_array);
 
-            return Response::json(['data' => ['id' => (int)$id, 'message' => 'User updated']], 200);
+            // A role re-assignment changes the user's effective permission set;
+            // invalidate the worker-level cache so RBAC checks are not stale.
+            if ($roleChanged) {
+                RoleChecker::clearCache();
+            }
+
+            $this->log('info', 'User updated', [
+                'event' => 'users.update',
+                'tenant_id' => $currentTenantId,
+                'user_id' => (int)$id,
+                'role_changed' => $roleChanged,
+            ]);
+
+            return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to update user: ' . $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Resolve a role reference (a role NAME from the Edit form, or a numeric
+     * `roles.id`) to a role id that is VISIBLE to the acting tenant.
+     *
+     * Visibility mirrors {@see RolesApiHandler}: a role is visible when it is
+     * OWNED by the acting tenant (`roles.tenant_id = currentTenant`) OR is a
+     * GLOBAL/system role (`roles.tenant_id IS NULL`, e.g. the seeded base roles).
+     * The SYSTEM tenant (id 0) may assign any role. This prevents a tenant from
+     * assigning another tenant's private role to a user.
+     *
+     * @param mixed    $roleRef        Role name string or numeric role id.
+     * @param int|null $actingTenantId The resolved acting tenant id (0 = SYSTEM).
+     * @param int      $ownerTenantId  The owning tenant of the target user.
+     * @return int|null The resolved, visible role id, or null when not found/visible.
+     */
+    private function resolveVisibleRoleId(mixed $roleRef, ?int $actingTenantId, int $ownerTenantId): ?int
+    {
+        // For a tenant-scoped acting context, a role owned by the user's OWNING
+        // tenant (relevant when the SYSTEM tenant edits another tenant's user) or a
+        // global role is visible. For a regular tenant editing its own user the
+        // owning tenant equals the acting tenant.
+        $isSystem = $actingTenantId === 0;
+        $scopeTenantId = $isSystem ? $ownerTenantId : $actingTenantId;
+
+        // Classify the reference: a plain integer / digit string is a role id,
+        // anything else is treated as a role name.
+        $byId = is_int($roleRef) || (is_string($roleRef) && $roleRef !== '' && ctype_digit($roleRef));
+
+        if ($byId) {
+            $column = 'id';
+            $value = (int)$roleRef;
+        } else {
+            $column = 'name';
+            $value = (string)$roleRef;
+        }
+
+        if ($isSystem) {
+            // SYSTEM tenant may assign any role regardless of ownership.
+            $stmt = $this->db->prepare("SELECT id FROM roles WHERE {$column} = ? LIMIT 1");
+            $stmt->execute([$value]);
+        } else {
+            // Owned-by-tenant OR global (NULL tenant) role only.
+            $stmt = $this->db->prepare(
+                "SELECT id FROM roles WHERE {$column} = ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT 1"
+            );
+            $stmt->execute([$value, $scopeTenantId]);
+        }
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || !isset($row['id'])) {
+            return null;
+        }
+
+        return (int)$row['id'];
+    }
+
+    /**
+     * Re-read a user by id and shape it into the public API contract.
+     *
+     * Joins roles so the returned `role` reflects any role change just persisted,
+     * and reuses {@see self::toPublicUser()} so the update response matches the
+     * shape the list endpoint and the Edit form consume.
+     *
+     * @param int $id The user id.
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, createdAt: string|null}
+     */
+    private function fetchPublicUser(int $id): array
+    {
+        $stmt = $this->db->prepare('
+            SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
+            FROM users u
+            JOIN roles r ON u.role_id = r.id
+            WHERE u.id = ?
+        ');
+        $stmt->execute([$id]);
+
+        /** @var array<string, mixed>|false $row */
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return [
+                'id' => $id,
+                'name' => '',
+                'email' => '',
+                'role' => '',
+                'tenantId' => 0,
+                'createdAt' => null,
+            ];
+        }
+
+        return $this->toPublicUser($row);
+    }
+
+    /**
+     * Emit a structured log record when a logger is configured.
+     *
+     * @param string               $level   PSR-3 log level method (e.g. `info`).
+     * @param string               $message The human-readable message.
+     * @param array<string, mixed> $context Structured context (includes tenant_id).
+     * @return void
+     */
+    private function log(string $level, string $message, array $context): void
+    {
+        if ($this->logger === null) {
+            return;
+        }
+
+        $this->logger->log($level, $message, $context);
     }
 
     /**
