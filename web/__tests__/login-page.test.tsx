@@ -468,14 +468,15 @@ describe('LoginPage - 2FA Flow', () => {
 
     // Recovery form should appear (check for recovery code input)
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('XXXXXXXX')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('XXXX-XXXX-XXXX')).toBeInTheDocument();
     });
 
     // Authenticator form should be hidden
     expect(screen.queryByText(/Enter the 6-digit code/i)).not.toBeInTheDocument();
   });
 
-  // Test 10: Recovery code input accepts only alphanumeric, auto-uppercase, max 8 chars
+  // Test 10: Recovery code input uppercases, drops invalid chars, and
+  // auto-formats to the issued XXXX-XXXX-XXXX backup-code shape (WC-120).
   test('testRecoveryCodeInputValidation', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: false,
@@ -514,19 +515,29 @@ describe('LoginPage - 2FA Flow', () => {
     const recoveryLink = screen.getByRole('button', { name: /Can't access your authenticator/i });
     fireEvent.click(recoveryLink);
 
-    // Type lowercase with special chars: abc-1234 should become ABC1234
+    // Lowercase + an invalid char are normalized; hyphens are re-inserted in
+    // groups of four so the value matches the issued XXXX-XXXX-XXXX format
+    // (here a partial code typed so far: abc1d*2 -> ABC1-D2).
     const recoveryInput = await waitFor(() => {
-      return screen.getByPlaceholderText('XXXXXXXX') as HTMLInputElement;
+      return screen.getByPlaceholderText('XXXX-XXXX-XXXX') as HTMLInputElement;
     });
 
-    fireEvent.change(recoveryInput, { target: { value: 'abc-1234' } });
+    fireEvent.change(recoveryInput, { target: { value: 'abc1d*2' } });
+    expect(recoveryInput.value).toBe('ABC1-D2');
 
-    // Should be uppercase and special chars removed
-    expect(recoveryInput.value).toBe('ABC1234');
+    // A full 12-char code pasted WITHOUT hyphens is accepted intact and
+    // formatted to the canonical 14-char hyphenated form (no truncation).
+    fireEvent.change(recoveryInput, { target: { value: 'A1B2C3D4E5F6' } });
+    expect(recoveryInput.value).toBe('A1B2-C3D4-E5F6');
+
+    // The same code pasted WITH hyphens normalizes to the identical value.
+    fireEvent.change(recoveryInput, { target: { value: 'a1b2-c3d4-e5f6' } });
+    expect(recoveryInput.value).toBe('A1B2-C3D4-E5F6');
   });
 
-  // Test 11: Recovery code submit button disabled until 8 chars entered
-  test('testRecoveryCodeSubmitButtonDisabledUntil8Chars', async () => {
+  // Test 11: Recovery code submit button disabled until a full backup code
+  // (XXXX-XXXX-XXXX, 14 chars) is entered (WC-120).
+  test('testRecoveryCodeSubmitButtonDisabledUntilFullCode', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: false,
       status: 401,
@@ -571,13 +582,14 @@ describe('LoginPage - 2FA Flow', () => {
     // Initially disabled
     expect(verifyRecoveryButton).toBeDisabled();
 
-    // Type 7 chars - still disabled
-    const recoveryInput = screen.getByPlaceholderText('XXXXXXXX');
-    fireEvent.change(recoveryInput, { target: { value: 'ABC1234' } });
+    // A partial code (fewer than 12 digits) is still disabled.
+    const recoveryInput = screen.getByPlaceholderText('XXXX-XXXX-XXXX');
+    fireEvent.change(recoveryInput, { target: { value: 'A1B2C3D4E5' } });
     expect(verifyRecoveryButton).toBeDisabled();
 
-    // Type 8 chars - now enabled
-    fireEvent.change(recoveryInput, { target: { value: 'ABC12345' } });
+    // A full 12-digit code (formatted to 14 chars) enables the button.
+    fireEvent.change(recoveryInput, { target: { value: 'A1B2C3D4E5F6' } });
+    expect((recoveryInput as HTMLInputElement).value).toBe('A1B2-C3D4-E5F6');
     expect(verifyRecoveryButton).not.toBeDisabled();
   });
 
@@ -622,7 +634,7 @@ describe('LoginPage - 2FA Flow', () => {
 
     // Wait for recovery input to appear
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('XXXXXXXX')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('XXXX-XXXX-XXXX')).toBeInTheDocument();
     });
 
     // Click back to authenticator button
@@ -635,7 +647,7 @@ describe('LoginPage - 2FA Flow', () => {
     });
 
     // Recovery form should be hidden (input should not exist)
-    expect(screen.queryByPlaceholderText('XXXXXXXX')).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('XXXX-XXXX-XXXX')).not.toBeInTheDocument();
   });
 
   // Test 13: Invalid recovery code shows error
@@ -685,11 +697,13 @@ describe('LoginPage - 2FA Flow', () => {
 
     // Wait for recovery input to appear
     const recoveryInput = await waitFor(() => {
-      return screen.getByPlaceholderText('XXXXXXXX') as HTMLInputElement;
+      return screen.getByPlaceholderText('XXXX-XXXX-XXXX') as HTMLInputElement;
     });
 
-    // Enter invalid recovery code
-    fireEvent.change(recoveryInput, { target: { value: 'INVALID1' } });
+    // Enter a full but invalid recovery code (well-formed 12-digit code so the
+    // button enables; the mocked backend rejects it with 401).
+    fireEvent.change(recoveryInput, { target: { value: 'BAD1BAD2BAD3' } });
+    expect(recoveryInput.value).toBe('BAD1-BAD2-BAD3');
 
     // Submit recovery form
     const verifyRecoveryButton = screen.getByRole('button', { name: /Verify Recovery Code/i });
@@ -701,6 +715,6 @@ describe('LoginPage - 2FA Flow', () => {
     });
 
     // Recovery form should still be visible (not switched back) - check input is still there
-    expect(screen.getByPlaceholderText('XXXXXXXX')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('XXXX-XXXX-XXXX')).toBeInTheDocument();
   });
 });
