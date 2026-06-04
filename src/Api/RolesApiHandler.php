@@ -2,6 +2,7 @@
 
 namespace Whity\Api;
 
+use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
@@ -173,6 +174,10 @@ class RolesApiHandler
                 'name' => $name,
             ]);
 
+            // A new role with permissions changes the effective permission set;
+            // invalidate the worker-level hierarchy cache so checks are fresh.
+            RoleChecker::clearCache();
+
             return Response::json([
                 'data' => [
                     'id' => (int)$roleId,
@@ -272,6 +277,10 @@ class RolesApiHandler
                 'changes' => $body,
             ]);
 
+            // Permission/hierarchy assignments may have changed; invalidate the
+            // worker-level effective-permission cache so checks are not stale.
+            RoleChecker::clearCache();
+
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role updated']], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to update role: ' . $e->getMessage(), 500);
@@ -326,6 +335,10 @@ class RolesApiHandler
             $this->hookManager->dispatchAsync('role.deleted.async', [
                 'id' => (int)$id,
             ]);
+
+            // Removing a role alters the hierarchy and effective permission sets;
+            // invalidate the worker-level cache so checks reflect the deletion.
+            RoleChecker::clearCache();
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role deleted']], 200);
         } catch (\Exception $e) {

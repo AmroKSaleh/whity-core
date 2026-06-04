@@ -49,6 +49,15 @@ class PermissionAssignmentTest extends TestCase
 
         // Create middleware with real services
         $this->rbacMiddleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
+
+        // The effective-permission cache is worker (static) scoped; reset it so
+        // resolved sets never leak between test cases.
+        RoleChecker::clearCache();
+    }
+
+    protected function tearDown(): void
+    {
+        RoleChecker::clearCache();
     }
 
     /**
@@ -138,18 +147,31 @@ class PermissionAssignmentTest extends TestCase
         // Step 1: Register permission in PermissionRegistry
         $this->permissionRegistry->registerPermissions('core-users', ['users.delete']);
 
-        // Step 2: Setup database mock to return NO permission assignment
-        // Simulate: SELECT 1 FROM role_permissions WHERE role_id=2 AND permission_string='users.delete'
-        // Returns false/empty because permission is not assigned to this role
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(false);
-
-        $this->mockDb->method('query')
-            ->with(
-                'SELECT 1 FROM role_permissions rp JOIN users u ON u.role_id = rp.role_id WHERE u.id = :userId AND rp.permission_string = :permission',
-                [':userId' => 2, ':permission' => 'users.delete']
-            )
-            ->willReturn($mockStatement);
+        // Step 2: Setup database mock to return NO permission assignment.
+        // The legacy direct-grant probe returns no match; RoleChecker then falls
+        // back to hierarchy resolution (WC-15), which must also find nothing for
+        // this role so the user remains correctly denied. We route by SQL so
+        // every query the resolver issues is satisfied without granting access.
+        $this->mockDb->method('query')->willReturnCallback(
+            function (string $sql): PDOStatement {
+                $statement = $this->createMock(PDOStatement::class);
+                if (str_contains($sql, 'SELECT role_id FROM users')) {
+                    // User has a role, but it grants nothing relevant.
+                    $statement->method('fetch')->willReturn(['role_id' => 2]);
+                    $statement->method('fetchAll')->willReturn([]);
+                } elseif (str_contains($sql, 'SELECT parent_id FROM roles')) {
+                    // Role is a hierarchy root: no parent to inherit from.
+                    $statement->method('fetch')->willReturn(['parent_id' => null]);
+                    $statement->method('fetchAll')->willReturn([]);
+                } else {
+                    // Legacy direct-grant probe and per-role permission lookups:
+                    // no matching grant.
+                    $statement->method('fetch')->willReturn(false);
+                    $statement->method('fetchAll')->willReturn([]);
+                }
+                return $statement;
+            }
+        );
 
         // Step 3: Create a valid JWT token for user with regular user role
         $token = $this->jwtParser->create([
