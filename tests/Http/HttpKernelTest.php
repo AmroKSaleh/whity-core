@@ -120,6 +120,95 @@ class HttpKernelTest extends TestCase
     }
 
     /**
+     * Test that a route declaring only a requiredPermission (no role) still passes
+     * through RBAC middleware, and the permission is forwarded as the 4th argument.
+     */
+    public function testForwardsRequiredPermissionToRbacMiddleware(): void
+    {
+        $rbacMiddlewareMock = $this->createMock(RbacMiddleware::class);
+        $kernel = new HttpKernel($this->router, $rbacMiddlewareMock);
+
+        $handler = static function (Request $request): Response {
+            return Response::json(['message' => 'permission-protected']);
+        };
+
+        // requiredRole = null (4th arg), namespacePrefix = null (5th arg),
+        // requiredPermission = 'plugins:manage' (6th arg).
+        $this->router->register('GET', '/api/plugins', $handler, null, null, 'plugins:manage');
+
+        $rbacMiddlewareMock
+            ->expects($this->once())
+            ->method('handle')
+            ->willReturnCallback(function (
+                Request $req,
+                callable $next,
+                ?string $role,
+                ?string $permission
+            ) {
+                // The kernel must forward the route's permission as the 4th arg,
+                // with no role required.
+                $this->assertNull($role);
+                $this->assertSame('plugins:manage', $permission);
+                return $next($req);
+            });
+
+        $request = new Request('GET', '/api/plugins');
+        $response = $kernel->handle($request);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertStringContainsString('permission-protected', $response->getBody());
+    }
+
+    /**
+     * Test that a route declaring both a role and a permission forwards both to
+     * the RBAC middleware.
+     */
+    public function testForwardsRoleAndPermissionToRbacMiddleware(): void
+    {
+        $rbacMiddlewareMock = $this->createMock(RbacMiddleware::class);
+        $kernel = new HttpKernel($this->router, $rbacMiddlewareMock);
+
+        $handler = static fn (Request $request): Response => Response::json(['ok' => true]);
+
+        $this->router->register('POST', '/api/widgets', $handler, 'admin', null, 'widgets:write');
+
+        $rbacMiddlewareMock
+            ->expects($this->once())
+            ->method('handle')
+            ->willReturnCallback(function (
+                Request $req,
+                callable $next,
+                ?string $role,
+                ?string $permission
+            ) {
+                $this->assertSame('admin', $role);
+                $this->assertSame('widgets:write', $permission);
+                return $next($req);
+            });
+
+        $response = $kernel->handle(new Request('POST', '/api/widgets'));
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * Test that a route with neither a role nor a permission bypasses RBAC
+     * entirely (the middleware's handle() is never invoked).
+     */
+    public function testRouteWithoutRoleOrPermissionBypassesRbac(): void
+    {
+        $rbacMiddlewareMock = $this->createMock(RbacMiddleware::class);
+        $kernel = new HttpKernel($this->router, $rbacMiddlewareMock);
+
+        $rbacMiddlewareMock->expects($this->never())->method('handle');
+
+        $handler = static fn (Request $request): Response => Response::json(['public' => true]);
+        $this->router->register('GET', '/api/health', $handler);
+
+        $response = $kernel->handle(new Request('GET', '/api/health'));
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    /**
      * Test handling multiple different routes
      */
     public function testHandlesMultipleDifferentRoutes(): void

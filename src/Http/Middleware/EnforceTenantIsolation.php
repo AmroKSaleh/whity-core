@@ -64,6 +64,10 @@ class EnforceTenantIsolation
         '/api/auth/refresh',
         '/api/auth/logout',
         '/api/navigation',
+        // Health monitoring (WC-4): unauthenticated liveness/readiness probe.
+        // Must stay reachable without a JWT or tenant context so external
+        // monitors can poll it even while auth/tenant subsystems are unhealthy.
+        '/api/health',
     ];
 
     private JwtParser $jwtParser;

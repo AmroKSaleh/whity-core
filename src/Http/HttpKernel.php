@@ -122,7 +122,9 @@ class HttpKernel
             }
             $defaultProperties = $refClass->getDefaultProperties();
             foreach ($refClass->getProperties(\ReflectionProperty::IS_STATIC) as $property) {
-                $property->setAccessible(true);
+                // Note: ReflectionProperty::setAccessible() is a no-op since PHP 8.1
+                // (all reflected properties are accessible) and emits a deprecation
+                // on PHP 8.5+, so it is intentionally omitted here.
                 $name = $property->getName();
                 if (array_key_exists($name, $defaultProperties)) {
                     $property->setValue(null, $defaultProperties[$name]);
@@ -258,18 +260,21 @@ class HttpKernel
                 return Response::error('Not Found', 404);
             }
 
-            // Extract handler, params, and requiredRole from match result
+            // Extract handler, params, and the role/permission requirements.
             $handler = $matchedRoute['handler'];
             $params = $matchedRoute['params'];
             $requiredRole = $matchedRoute['requiredRole'];
+            $requiredPermission = $matchedRoute['requiredPermission'] ?? null;
 
-            // If a role is required, apply RBAC middleware
-            if ($requiredRole !== null) {
+            // If the route declares a required role and/or permission, apply RBAC
+            // middleware. Both are forwarded so route-level permissions (WC-14)
+            // are actually enforced, not just roles.
+            if ($requiredRole !== null || $requiredPermission !== null) {
                 // Create a closure that wraps the handler, passing params
                 $next = fn(Request $req) => $handler($req, $params);
 
-                // Pass through RBAC middleware
-                return $this->rbacMiddleware->handle($request, $next, $requiredRole);
+                // Pass through RBAC middleware (role + permission).
+                return $this->rbacMiddleware->handle($request, $next, $requiredRole, $requiredPermission);
             }
 
             // Otherwise, call handler directly with params

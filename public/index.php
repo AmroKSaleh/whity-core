@@ -105,10 +105,14 @@ use Whity\Api\MigrationsApiHandler;
 use Whity\Api\AdminApiHandler;
 use Whity\Api\OusApiHandler;
 use Whity\Api\NavigationApiHandler;
+use Whity\Api\HealthApiHandler;
 use Whity\Api\TwoFactorHandler;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Deployment\DeploymentManager;
+use Whity\Core\Log\ErrorLogLogger;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Auth\TotpService;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
@@ -146,6 +150,19 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 // Require helpers
 require dirname(__DIR__) . '/src/helpers.php';
 
+// 0. Capture the worker boot timestamp (drives the health endpoint's uptime).
+//    A FrankenPHP worker survives across many requests, so this is the start of
+//    the worker process, not of any single request.
+$bootTimestamp = time();
+
+// 0b. Build the application PSR-3 logger (WC-18/WC-20 observability). A minimal
+//     error_log-backed logger is used so structured audit/observability records
+//     (tenant isolation bypass, plugin error boundaries) reach the container's
+//     stderr without adding a logging dependency. Wired into TenantContext below
+//     and the tenant isolation middleware.
+$logger = new ErrorLogLogger();
+TenantContext::setLogger($logger);
+
 // 1. Initialize database connection
 $db = Database::connect();
 
@@ -168,6 +185,10 @@ $totpService = new TotpService(TotpService::resolveEncryptionKey());
 
 // 4. Initialize permission registry
 $permissionRegistry = new PermissionRegistry();
+// Eagerly register the canonical core permission set (WC-13/PR #86). A lazy
+// fallback exists in the registry, but registering up front is cleaner and makes
+// the core catalogue available before the first request.
+$permissionRegistry->registerCorePermissions();
 
 // 4b. Initialize hook manager and register in service container
 $hookManager = new HookManager();
@@ -233,7 +254,8 @@ $roleChecker = new RoleChecker($db, $permissionRegistry);
 $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
 
 // 7. Initialize tenant isolation middleware
-$tenantIsolationMiddleware = new EnforceTenantIsolation($jwtParser);
+// Pass the PSR-3 logger (WC-20) so privileged cross-tenant bypasses are audited.
+$tenantIsolationMiddleware = new EnforceTenantIsolation($jwtParser, $logger);
 
 // 8. Initialize HTTP kernel and register middleware
 $kernel = new HttpKernel($router, $rbacMiddleware);
@@ -241,7 +263,16 @@ $kernel = new HttpKernel($router, $rbacMiddleware);
 $kernel->use($tenantIsolationMiddleware);
 
 // 9. Initialize plugin loader and load plugins
-$pluginLoader = new PluginLoader(__DIR__ . '/../plugins', $router);
+// Wire the permission registry, hook manager, and logger (WC-9/WC-13) so plugin
+// permissions/hooks register through core services and plugin error boundaries
+// log structured records via the application logger.
+$pluginLoader = new PluginLoader(
+    __DIR__ . '/../plugins',
+    $router,
+    $permissionRegistry,
+    $hookManager,
+    $logger
+);
 $pluginLoader->load();
 
 // 9b. Initialize deployment manager
@@ -296,16 +327,30 @@ $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'adm
 $navigationHandler = new NavigationApiHandler($hookManager);
 $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
 
+// Health monitoring endpoint (WC-4). Registered with NO required role and NO
+// required permission so it bypasses RBAC (fail-open), and it is listed as a
+// public route in EnforceTenantIsolation so it bypasses tenant resolution too —
+// the probe must answer without a JWT or tenant context. The handler is kept
+// dependency-light (only the DB wrapper) so health stays meaningful when other
+// subsystems are down. $bootTimestamp drives the reported worker uptime.
+$healthHandler = new HealthApiHandler($db, $bootTimestamp);
+$router->register('GET', '/api/health', [$healthHandler, 'handle']);
+
 $deploymentHandler = new DeploymentApiHandler($deploymentManager);
 $router->register('POST', '/api/deployments/apply', [$deploymentHandler, 'apply'], 'admin');
 $router->register('POST', '/api/deployments/rollback', [$deploymentHandler, 'rollback'], 'admin');
 $router->register('GET', '/api/deployments/status', [$deploymentHandler, 'status'], 'admin');
 
-$pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins');
-$router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], 'admin');
-$router->register('POST', '/api/plugins/{id}/enable', [$pluginsHandler, 'enable'], 'admin');
-$router->register('POST', '/api/plugins/{id}/disable', [$pluginsHandler, 'disable'], 'admin');
-$router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], 'admin');
+// Plugins admin API (WC-9/PR #88, WC-10/PR #104). Pass the live $pluginLoader so
+// list/enable/disable use the WC-9 lifecycle at runtime, and gate every route on
+// the plugins:manage permission (6th positional arg to Router::register; 4th arg
+// requiredRole stays null so RbacMiddleware enforces the permission).
+$pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins', $pluginLoader);
+$router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], null, null, CorePermissions::PLUGINS_MANAGE);
+$router->register('POST', '/api/plugins/{name}/enable', [$pluginsHandler, 'enable'], null, null, CorePermissions::PLUGINS_MANAGE);
+$router->register('POST', '/api/plugins/{name}/disable', [$pluginsHandler, 'disable'], null, null, CorePermissions::PLUGINS_MANAGE);
+$router->register('POST', '/api/plugins/{id}/re-enable', [$pluginsHandler, 'reEnable'], null, null, CorePermissions::PLUGINS_MANAGE);
+$router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], null, null, CorePermissions::PLUGINS_MANAGE);
 
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
 // Only allow read-only access to migration status via API
@@ -337,11 +382,18 @@ if ($isWorker) {
     $maxRequests = (int)($_ENV['MAX_REQUESTS'] ?? $_SERVER['MAX_REQUESTS'] ?? 0);
 
     for ($nbRequests = 0; !$maxRequests || $nbRequests < $maxRequests; ++$nbRequests) {
-        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager) {
+        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db) {
             try {
                 // Dispatch request start hook
                 error_log("[FrankenPHP Worker] Request start");
                 $hookManager->dispatch('worker.request.start', []);
+
+                // Plugin hot-reload (WC-8/PR #83): pick up plugins added, modified,
+                // or removed on disk since the last request without restarting the
+                // worker. This is a cheap no-op when the plugin tree is unchanged,
+                // and runs before the kernel handles the request so the new routes
+                // are live for this iteration.
+                $pluginLoader->reload();
 
                 // Create request from PHP superglobals
                 $request = Request::fromGlobals();
@@ -392,6 +444,12 @@ if ($isWorker) {
                 $hookManager->dispatch('worker.request.end', []);
                 // Reset tenant context to prevent cross-request leakage
                 \Whity\Core\Tenant\TenantContext::reset();
+                // DB session hygiene (WC-21/PR #84): after the response is sent,
+                // roll back any dangling transaction and DISCARD ALL session-local
+                // state on the shared worker connection so nothing request-specific
+                // (temp tables, SET LOCAL, prepared plans) leaks into the next
+                // request the worker serves. No-op when no connection is open.
+                $db->resetSessionState();
             }
         });
 
@@ -400,10 +458,17 @@ if ($isWorker) {
 
         if ($kernel->hasExceededMemoryLimit()) {
             error_log("[FrankenPHP Worker] Memory limit exceeded. Recycling worker gracefully.");
+            // Release the worker's database connection eagerly on the memory-recycle
+            // break path (WC-21/PR #84) so the dropped worker does not leave its
+            // backend lingering until process teardown.
+            $db->disconnect();
             break;
         }
 
         if (!$keepRunning) {
+            // Worker shutdown (FrankenPHP asked us to stop). Release the database
+            // connection eagerly, rolling back anything left open (WC-21/PR #84).
+            $db->disconnect();
             break;
         }
     }
