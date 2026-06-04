@@ -126,6 +126,141 @@ class PluginsApiHandlerTest extends TestCase
         $this->assertSame(503, $response->getStatusCode());
     }
 
+    public function testListReportsMetadataShapeWithStatusAndCounts(): void
+    {
+        $this->writeMetadataPlugin('MetaApiPlugin', '/api/metaapi/run');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader);
+        $response = $apiHandler->list(new Request('GET', '/api/plugins'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $this->assertIsArray($payload['data']);
+
+        $entry = null;
+        foreach ($payload['data'] as $plugin) {
+            if (($plugin['name'] ?? null) === 'MetaApiPlugin') {
+                $entry = $plugin;
+                break;
+            }
+        }
+
+        $this->assertNotNull($entry, 'Loaded plugin should be listed with metadata');
+        // AC #1 contract: name, version, status, routes_count, permissions_count.
+        $this->assertSame('MetaApiPlugin', $entry['name']);
+        $this->assertSame('4.2.0', $entry['version']);
+        $this->assertSame('active', $entry['status']);
+        $this->assertSame(1, $entry['routes_count']);
+        $this->assertSame(2, $entry['permissions_count']);
+    }
+
+    public function testDisableActivePluginUnregistersRoutesAndSetsDisabledStatus(): void
+    {
+        $this->writeMetadataPlugin('DisableApiPlugin', '/api/disableapi/run');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        // Route is live before disabling.
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/disableapi/run')));
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader);
+        $response = $apiHandler->disable(
+            new Request('POST', '/api/plugins/DisableApiPlugin/disable'),
+            ['name' => 'DisableApiPlugin']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $this->assertSame('disabled', $payload['data']['state']);
+
+        // AC #2: routes unregistered, lifecycle disabled.
+        $this->assertNull(
+            $this->router->match(new Request('GET', '/api/disableapi/run')),
+            'Disabled plugin route must no longer match'
+        );
+        $key = 'Whity\\Plugins\\DisableApiPlugin';
+        $this->assertSame(PluginState::Disabled, $loader->getLifecycle($key)?->getState());
+    }
+
+    public function testEnableReEnablesDisabledPluginViaLoader(): void
+    {
+        $this->writeMetadataPlugin('EnableApiPlugin', '/api/enableapi/run');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $key = 'Whity\\Plugins\\EnableApiPlugin';
+        $this->assertTrue($loader->disablePlugin($key));
+        $this->assertNull($this->router->match(new Request('GET', '/api/enableapi/run')));
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader);
+        $response = $apiHandler->enable(
+            new Request('POST', '/api/plugins/EnableApiPlugin/enable'),
+            ['name' => 'EnableApiPlugin']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(PluginState::Active, $loader->getLifecycle($key)?->getState());
+        $this->assertNotNull(
+            $this->router->match(new Request('GET', '/api/enableapi/run')),
+            'Re-enabled plugin route should be live again'
+        );
+    }
+
+    public function testDisableUnknownPluginViaLoaderReturns404(): void
+    {
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader);
+        $response = $apiHandler->disable(
+            new Request('POST', '/api/plugins/Ghost/disable'),
+            ['name' => 'Ghost']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    private function writeMetadataPlugin(string $class, string $path): void
+    {
+        $code = <<<PHP
+<?php
+
+namespace Whity\\Plugins;
+
+use Whity\\Core\\PluginInterface;
+use Whity\\Core\\Request;
+use Whity\\Core\\Response;
+
+class {$class} implements PluginInterface
+{
+    public function getName(): string { return '{$class}'; }
+    public function getVersion(): string { return '4.2.0'; }
+    public function getRoutes(): array
+    {
+        return [[
+            'method' => 'GET',
+            'path' => '{$path}',
+            'handler' => [\$this, 'handle'],
+            'requiredRole' => null,
+        ]];
+    }
+    public function getPermissions(): array { return ['{$class}:read', '{$class}:write']; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+    public function handle(Request \$request): Response
+    {
+        return Response::json(['ok' => true]);
+    }
+}
+PHP;
+        file_put_contents($this->tempDir . '/' . $class . '.php', $code);
+    }
+
     private function writeThrowingPlugin(string $class, string $path): void
     {
         $code = <<<PHP
