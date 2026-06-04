@@ -20,8 +20,8 @@ test.describe('Organizational Units (admin)', () => {
     if (createdOuName) {
       const id = await findOuIdByName(adminApi, createdOuName);
       if (id !== null) {
-        // Backend delete succeeds even though the proxied 204 is reported as a
-        // 500 by the route handler (see app-bug note below).
+        // Best-effort cleanup: the backend OU delete returns 204, which the
+        // proxy now forwards as a clean 204 (WC-101 fix).
         await deleteOu(adminApi, id);
       }
       createdOuName = null;
@@ -58,14 +58,14 @@ test.describe('Organizational Units (admin)', () => {
     await expect(page.getByRole('row', { name: new RegExp(createdOuName) })).toBeVisible();
   });
 
-  // KNOWN APP BUG (#2): the Next.js proxy route handler
-  // (app/api/[...path]/route.ts) builds `new Response(body, { status })` while
-  // forwarding the backend response. The OU DELETE endpoint returns HTTP 204
-  // No Content; constructing a Response with a (non-null) body and status 204
-  // throws "Invalid response status code 204", so the proxied call returns 500.
-  // The backend deletion DOES succeed, but the UI shows an error toast instead
-  // of "Organizational unit deleted successfully".
-  test.fixme('delete an organizational unit from the UI', async ({ adminPage, page }) => {
+  // WC-101: the Next.js proxy route handler (app/api/[...path]/route.ts)
+  // previously built `new Response(body, { status })` while forwarding the
+  // backend response. The OU DELETE endpoint returns HTTP 204 No Content;
+  // constructing a Response with a (non-null) body and status 204 threw
+  // "Invalid response status code 204", so the proxied call returned 500 and
+  // the UI showed an error toast. The proxy now forwards null-body statuses
+  // (204/205/304) without a body, so the delete reports success.
+  test('delete an organizational unit from the UI', async ({ adminPage, page }) => {
     createdOuName = `e2e-ou-del-${uniqueSuffix()}`;
 
     await adminPage.shell.clickNav('Organizational Units');
