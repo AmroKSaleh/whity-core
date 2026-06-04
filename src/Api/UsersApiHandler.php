@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Api;
 
 use Whity\Core\Request;
@@ -53,18 +55,46 @@ class UsersApiHandler
                 $stmt->execute([$tenantId]);
             }
 
-            $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            /** @var array<int, array<string, mixed>> $rows */
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Remove password from response
-            $users = array_map(function ($user) {
-                unset($user['password']);
-                return $user;
-            }, $users);
+            // Shape each row into the public contract: expose the fields the
+            // Edit User form binds (name, role, tenantId) plus createdAt, and
+            // never leak the password hash. tenant_id/created_at are aliased to
+            // camelCase so the frontend can consume the payload directly.
+            $users = array_map(fn (array $row): array => $this->toPublicUser($row), $rows);
 
             return Response::json(['data' => $users], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to fetch users: ' . $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Map a raw users row to the public API contract consumed by the web UI.
+     *
+     * The `users` table has no `name` column, so `name` is derived from the
+     * email local-part to give the Edit User form a non-empty value to pre-fill
+     * (its zod schema marks name required). Snake_case columns are aliased to
+     * the camelCase keys the frontend `User` type binds, and the password hash
+     * is never included.
+     *
+     * @param array<string, mixed> $row Raw row from the users SELECT.
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, createdAt: string|null}
+     */
+    private function toPublicUser(array $row): array
+    {
+        $email = (string)($row['email'] ?? '');
+        $localPart = strstr($email, '@', true);
+
+        return [
+            'id' => (int)($row['id'] ?? 0),
+            'name' => $localPart !== false && $localPart !== '' ? $localPart : $email,
+            'email' => $email,
+            'role' => (string)($row['role'] ?? ''),
+            'tenantId' => (int)($row['tenant_id'] ?? 0),
+            'createdAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
+        ];
     }
 
     /**
