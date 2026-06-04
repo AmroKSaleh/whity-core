@@ -928,6 +928,202 @@ PHP;
     }
 
     /**
+     * WC-10 AC #2: disabling an active plugin unregisters its routes (via WC-8's
+     * unregisterByNamespace) and transitions its lifecycle to 'disabled'.
+     */
+    public function testDisablePluginUnregistersRoutesAndHooksAndSetsDisabled(): void
+    {
+        $hookManager = new \Whity\Core\Hooks\HookManager();
+
+        $pluginSubDir = $this->tempDir . '/DisablablePlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace DisablablePlugin;
+
+use Whity\Core\PluginInterface;
+use Whity\Core\Request;
+use Whity\Core\Response;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'DisablablePlugin'; }
+    public function getVersion(): string { return '1.2.3'; }
+    public function getRoutes(): array
+    {
+        return [[
+            'method' => 'GET',
+            'path' => '/api/disablable/ping',
+            'handler' => [$this, 'handle'],
+            'requiredRole' => null,
+        ]];
+    }
+    public function getPermissions(): array { return ['disablable:do']; }
+    public function getHooks(): array
+    {
+        return ['disablable.event' => [$this, 'onEvent']];
+    }
+    public function getMigrations(): array { return []; }
+    public function handle(Request $request): Response { return Response::json(['ok' => true]); }
+    public function onEvent(array $data, array $context): array { $data['seen'] = true; return $data; }
+}
+PHP;
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+
+        $loader = new PluginLoader($this->tempDir, $this->router, null, $hookManager);
+        $loader->load();
+
+        $key = 'DisablablePlugin\\Plugin';
+
+        // Route + hook are live and the plugin is active.
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/disablable/ping')));
+        $this->assertNotEmpty($hookManager->getListeners('disablable.event'));
+        $this->assertSame(\Whity\Core\PluginState::Active, $loader->getLifecycle($key)?->getState());
+
+        // Disable the plugin at runtime.
+        $disabled = $loader->disablePlugin($key);
+        $this->assertTrue($disabled, 'disablePlugin() should report success for a known plugin');
+
+        // Routes are unregistered, hooks removed, lifecycle is disabled.
+        $this->assertNull(
+            $this->router->match(new Request('GET', '/api/disablable/ping')),
+            'Disabled plugin route should no longer match'
+        );
+        $this->assertEmpty(
+            $hookManager->getListeners('disablable.event'),
+            'Disabled plugin hooks should be unregistered'
+        );
+        $this->assertSame(\Whity\Core\PluginState::Disabled, $loader->getLifecycle($key)?->getState());
+    }
+
+    /**
+     * Disabling an unknown plugin reports failure without side effects.
+     */
+    public function testDisableUnknownPluginReturnsFalse(): void
+    {
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $this->assertFalse($loader->disablePlugin('Nope\\Missing'));
+    }
+
+    /**
+     * Re-enabling a previously disabled plugin restores its routes and hooks so
+     * it can serve traffic again, returning the lifecycle to 'active'.
+     */
+    public function testReEnableRestoresRoutesAndHooksAfterDisable(): void
+    {
+        $hookManager = new \Whity\Core\Hooks\HookManager();
+
+        $pluginSubDir = $this->tempDir . '/CyclePlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace CyclePlugin;
+
+use Whity\Core\PluginInterface;
+use Whity\Core\Request;
+use Whity\Core\Response;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'CyclePlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
+    {
+        return [[
+            'method' => 'GET',
+            'path' => '/api/cycle/ping',
+            'handler' => [$this, 'handle'],
+            'requiredRole' => null,
+        ]];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array
+    {
+        return ['cycle.event' => [$this, 'onEvent']];
+    }
+    public function getMigrations(): array { return []; }
+    public function handle(Request $request): Response { return Response::json(['ok' => true]); }
+    public function onEvent(array $data, array $context): array { $data['seen'] = true; return $data; }
+}
+PHP;
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+
+        $loader = new PluginLoader($this->tempDir, $this->router, null, $hookManager);
+        $loader->load();
+
+        $key = 'CyclePlugin\\Plugin';
+
+        $this->assertTrue($loader->disablePlugin($key));
+        $this->assertNull($this->router->match(new Request('GET', '/api/cycle/ping')));
+
+        $this->assertTrue($loader->reEnablePlugin($key));
+        $this->assertSame(\Whity\Core\PluginState::Active, $loader->getLifecycle($key)?->getState());
+        $this->assertNotNull(
+            $this->router->match(new Request('GET', '/api/cycle/ping')),
+            'Re-enabled plugin route should match again'
+        );
+        $this->assertNotEmpty(
+            $hookManager->getListeners('cycle.event'),
+            'Re-enabled plugin hooks should be restored'
+        );
+    }
+
+    /**
+     * WC-10 AC #1: per-plugin metadata exposes name, version, status, and the
+     * route/permission counts the admin API surfaces.
+     */
+    public function testGetPluginMetadataExposesVersionStatusAndCounts(): void
+    {
+        $pluginSubDir = $this->tempDir . '/MetaPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace MetaPlugin;
+
+use Whity\Core\PluginInterface;
+use Whity\Core\Request;
+use Whity\Core\Response;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MetaPlugin'; }
+    public function getVersion(): string { return '3.1.4'; }
+    public function getRoutes(): array
+    {
+        return [
+            ['method' => 'GET', 'path' => '/api/meta/a', 'handler' => [$this, 'handle'], 'requiredRole' => null],
+            ['method' => 'POST', 'path' => '/api/meta/b', 'handler' => [$this, 'handle'], 'requiredRole' => null],
+        ];
+    }
+    public function getPermissions(): array { return ['meta:read', 'meta:write', 'meta:delete']; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+    public function handle(Request $request): Response { return Response::json(['ok' => true]); }
+}
+PHP;
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $metadata = $loader->getPluginMetadata();
+        $this->assertCount(1, $metadata);
+
+        $meta = $metadata[0];
+        $this->assertSame('MetaPlugin\\Plugin', $meta['id']);
+        $this->assertSame('MetaPlugin', $meta['name']);
+        $this->assertSame('3.1.4', $meta['version']);
+        $this->assertSame('active', $meta['status']);
+        $this->assertSame(2, $meta['routes_count']);
+        $this->assertSame(3, $meta['permissions_count']);
+    }
+
+    /**
      * Helper method to recursively remove directory
      */
     private function removeDirectory(string $dir): void
