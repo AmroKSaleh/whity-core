@@ -29,17 +29,36 @@ use PDO;
  * linked through the `role_permissions` junction table (which references
  * permissions by id). Unknown ids/names are dropped, never fabricated (WC-110).
  *
- * Tenant scoping
- * --------------
- * The `roles` table carries a nullable `tenant_id` column (migration 018): a
- * role belongs to the tenant that created it. Newly created roles are stamped
- * with the current tenant id and every read/write is filtered by the resolved
- * {@see TenantContext::getTenantId()} against `roles.tenant_id`; the SYSTEM
- * tenant (id 0) is the sole exception and sees every role across tenants.
- * TenantContext is never bypassed. (Before WC-110 a role's tenant was inferred
- * from a `user_roles` seed row for the acting user, which made API-created roles
- * undeletable because the deletion guard counted that very seed assignment; that
- * hack has been removed in favour of the explicit owning column.)
+ * Tenant scoping (NULL tenant_id = GLOBAL/system role)
+ * -----------------------------------------------------
+ * The `roles` table carries a nullable `tenant_id` column (migration 018) whose
+ * value defines ownership and visibility:
+ *
+ *  - `tenant_id IS NULL` is a GLOBAL/system role visible to ALL tenants. The
+ *    seeded base roles (`admin` id 1, `user` id 2) are global: every tenant
+ *    needs them, so they belong to everyone, not to any single tenant.
+ *  - A non-NULL `tenant_id` is a tenant-OWNED custom role, isolated to the
+ *    tenant that created it.
+ *
+ * Read (list, get, fetch permissions, visibility): a non-system tenant sees its
+ * OWN roles (`tenant_id = currentTenant`) PLUS global roles (`tenant_id IS
+ * NULL`) — i.e. `WHERE (r.tenant_id = ? OR r.tenant_id IS NULL)`. The SYSTEM
+ * tenant (id 0) sees every role across all tenants.
+ *
+ * Write (update, delete): a non-system tenant may modify/delete only its OWN
+ * roles (`tenant_id = currentTenant`); it must NOT mutate a global (NULL) base
+ * role — that is treated as not-visible-for-write and returns 404, consistent
+ * with cross-tenant writes. Only the SYSTEM tenant (id 0) may modify/delete
+ * global roles. Tenant isolation still holds: tenant A can neither see nor
+ * modify tenant B's owned roles.
+ *
+ * Create: new roles are stamped with the current tenant id (owned) so they stay
+ * isolated; a SYSTEM-tenant create stamps tenant_id 0. Newly created roles are
+ * stamped via the resolved {@see TenantContext::getTenantId()}. TenantContext is
+ * never bypassed. (Before WC-110 a role's tenant was inferred from a `user_roles`
+ * seed row for the acting user, which made API-created roles undeletable because
+ * the deletion guard counted that very seed assignment; that hack has been
+ * removed in favour of the explicit owning column.)
  *
  * Cache coherence
  * ---------------
@@ -95,14 +114,17 @@ class RolesApiHandler
                 ');
                 $stmt->execute();
             } else {
-                // A role is visible to a tenant when it is owned by that tenant
-                // (roles.tenant_id), enforcing tenant isolation (WC-110).
+                // A role is visible to a tenant when it is OWNED by that tenant
+                // (roles.tenant_id = currentTenant) OR is a GLOBAL/system role
+                // (roles.tenant_id IS NULL, e.g. the seeded base roles), which
+                // belongs to every tenant. Tenant-owned roles stay isolated to
+                // their owner (WC-110).
                 $stmt = $this->db->prepare('
                     SELECT r.id, r.name, r.description, r.parent_id, r.created_at,
                            COUNT(rp.id) AS permission_count
                     FROM roles r
                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
-                    WHERE r.tenant_id = ?
+                    WHERE (r.tenant_id = ? OR r.tenant_id IS NULL)
                     GROUP BY r.id
                     ORDER BY r.created_at DESC
                 ');
@@ -126,7 +148,10 @@ class RolesApiHandler
     }
 
     /**
-     * GET /api/roles/{id} - Get a single tenant-scoped role with its permissions.
+     * GET /api/roles/{id} - Get a single role visible to the current tenant.
+     *
+     * Visible means owned by the current tenant OR global (NULL tenant_id); the
+     * SYSTEM tenant sees all roles (WC-110).
      *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
@@ -275,7 +300,9 @@ class RolesApiHandler
      *
      * Accepts any of `{name?, description?, permissions?}`. When `permissions` is
      * present its entries (numeric ids and/or `resource:action` names) fully
-     * replace the role's existing permission grants.
+     * replace the role's existing permission grants. A non-system tenant may
+     * update only its OWN roles; global (NULL-tenant) base roles return 404 for a
+     * tenant and are manageable only by the SYSTEM tenant (WC-110).
      *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
@@ -291,7 +318,9 @@ class RolesApiHandler
 
             $tenantId = TenantContext::getTenantId();
 
-            if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
+            // Write: only the OWNING tenant (or SYSTEM) may update a role; a
+            // global (NULL) base role is not mutable by a tenant (WC-110).
+            if (!$this->roleManageableByTenant((int)$id, $tenantId)) {
                 return Response::error('Role not found', 404);
             }
 
@@ -378,7 +407,10 @@ class RolesApiHandler
      * DELETE /api/roles/{id} - Delete a tenant-scoped role.
      *
      * A role with active user assignments cannot be deleted: the endpoint returns
-     * 409 `{error: 'Cannot delete role with active user assignments'}`.
+     * 409 `{error: 'Cannot delete role with active user assignments'}`. A
+     * non-system tenant may delete only its OWN roles; global (NULL-tenant) base
+     * roles return 404 for a tenant and are deletable only by the SYSTEM tenant
+     * (WC-110).
      *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
@@ -394,7 +426,9 @@ class RolesApiHandler
 
             $tenantId = TenantContext::getTenantId();
 
-            if (!$this->roleVisibleToTenant((int)$id, $tenantId)) {
+            // Write: only the OWNING tenant (or SYSTEM) may delete a role; a
+            // global (NULL) base role is not deletable by a tenant (WC-110).
+            if (!$this->roleManageableByTenant((int)$id, $tenantId)) {
                 return Response::error('Role not found', 404);
             }
 
@@ -476,14 +510,16 @@ class RolesApiHandler
     }
 
     /**
-     * Whether a role is visible to the given tenant.
+     * Whether a role is READ-visible to the given tenant.
      *
      * The SYSTEM tenant (id 0) sees every role. For any other tenant, a role is
-     * visible only when it is owned by that tenant (`roles.tenant_id`) (WC-110).
+     * visible when it is OWNED by that tenant (`roles.tenant_id = currentTenant`)
+     * OR is a GLOBAL/system role (`roles.tenant_id IS NULL`), which belongs to
+     * every tenant (WC-110). Used by read endpoints (get, getPermissions).
      *
      * @param int      $roleId   The role id.
      * @param int|null $tenantId The resolved tenant id (null when unresolved).
-     * @return bool True if the role is visible to the tenant.
+     * @return bool True if the role is read-visible to the tenant.
      */
     private function roleVisibleToTenant(int $roleId, ?int $tenantId): bool
     {
@@ -497,6 +533,43 @@ class RolesApiHandler
             return false;
         }
 
+        $stmt = $this->db->prepare('
+            SELECT 1
+            FROM roles r
+            WHERE r.id = ? AND (r.tenant_id = ? OR r.tenant_id IS NULL)
+            LIMIT 1
+        ');
+        $stmt->execute([$roleId, $tenantId]);
+        return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Whether a role is WRITE-manageable (update/delete) by the given tenant.
+     *
+     * Stricter than {@see self::roleVisibleToTenant()}: a non-system tenant may
+     * mutate ONLY its OWN roles (`roles.tenant_id = currentTenant`). It must NOT
+     * be able to modify or delete a GLOBAL (NULL-tenant) base role — only the
+     * SYSTEM tenant (id 0) may manage global roles (WC-110). A non-manageable
+     * role is reported as 404 by callers, consistent with cross-tenant writes.
+     *
+     * @param int      $roleId   The role id.
+     * @param int|null $tenantId The resolved tenant id (null when unresolved).
+     * @return bool True if the tenant may update/delete the role.
+     */
+    private function roleManageableByTenant(int $roleId, ?int $tenantId): bool
+    {
+        if ($tenantId === 0) {
+            // SYSTEM tenant may manage any role, including global (NULL) roles.
+            $stmt = $this->db->prepare('SELECT id FROM roles WHERE id = ?');
+            $stmt->execute([$roleId]);
+            return $stmt->fetch() !== false;
+        }
+
+        if ($tenantId === null) {
+            return false;
+        }
+
+        // Strict ownership: global (NULL) roles are NOT manageable by a tenant.
         $stmt = $this->db->prepare('
             SELECT 1
             FROM roles r

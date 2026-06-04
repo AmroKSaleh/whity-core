@@ -30,6 +30,14 @@ use Whity\Core\Tenant\TenantContext;
  * INSERT/SELECT/DELETE semantics are exercised. SQLite is used because CI has no
  * live PostgreSQL; the shared `:name` placeholder grammar and a registered
  * `NOW()` UDF make the handler's statements run unmodified.
+ *
+ * A later WC-110 regression is also covered here: migration 018 leaves the
+ * seeded base roles (`admin`, `user`) with `tenant_id IS NULL`, and the strict
+ * `WHERE tenant_id = ?` scoping introduced on this branch then hid those base
+ * roles from every non-system tenant — emptying the Roles page. The
+ * NULL-tenant-as-GLOBAL cases below assert a tenant sees global roles plus its
+ * own (read) while never being able to mutate a global base role (write), and
+ * fail on the pre-change strict scoping.
  */
 final class RolesApiHandlerRealEngineTest extends TestCase
 {
@@ -240,6 +248,154 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $this->assertContains('TenantAScoped', $names);
     }
 
+    // ============ WC-110 global-role regression: NULL tenant_id = global ============
+
+    public function testGlobalRoleIsListedForRegularTenantAlongsideOwnRoles(): void
+    {
+        // Seeded base roles are global (NULL tenant_id) — the production state
+        // after migration 018 with NO backfill. They must be visible to EVERY
+        // tenant. This assertion FAILS on the pre-change strict `WHERE tenant_id = ?`.
+        $this->seedGlobalRole(1, 'admin');
+        $this->seedGlobalRole(2, 'user');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'TenantOneCustom']));
+
+        $list = json_decode($handler->list(new Request('GET', '/api/roles'))->getBody(), true)['data'];
+        $names = array_column($list, 'name');
+
+        $this->assertContains('admin', $names, 'Global base role must be visible to tenant 1.');
+        $this->assertContains('user', $names, 'Global base role must be visible to tenant 1.');
+        $this->assertContains('TenantOneCustom', $names, "Tenant's own role must also be visible.");
+    }
+
+    public function testGlobalRoleIsGettableByRegularTenant(): void
+    {
+        $this->seedGlobalRole(1, 'admin');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $response = $handler->get(new Request('GET', '/api/roles/1'), ['id' => '1']);
+
+        $this->assertSame(200, $response->getStatusCode(), 'A global role must be gettable by any tenant.');
+        $this->assertSame('admin', json_decode($response->getBody(), true)['data']['name']);
+    }
+
+    public function testRegularTenantCannotUpdateGlobalRole(): void
+    {
+        $this->seedGlobalRole(1, 'admin');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/roles/1', ['description' => 'hijacked']),
+            ['id' => '1']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A tenant must not update a global base role.');
+        // The role is untouched.
+        $this->assertNotSame(
+            'hijacked',
+            $this->pdo->query('SELECT description FROM roles WHERE id = 1')->fetchColumn()
+        );
+    }
+
+    public function testRegularTenantCannotDeleteGlobalRole(): void
+    {
+        $this->seedGlobalRole(1, 'admin');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $response = $handler->delete(new Request('DELETE', '/api/roles/1'), ['id' => '1']);
+
+        $this->assertSame(404, $response->getStatusCode(), 'A tenant must not delete a global base role.');
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM roles WHERE id = 1')->fetchColumn(),
+            'The global role must survive a tenant delete attempt.'
+        );
+    }
+
+    public function testRegularTenantCanDeleteOwnRoleButNotGlobalOne(): void
+    {
+        $this->seedGlobalRole(1, 'admin');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        // Its own freshly-created role IS deletable.
+        $created = json_decode(
+            $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'OwnRole']))->getBody(),
+            true
+        )['data'];
+        $ownId = (int) $created['id'];
+
+        $deleteOwn = $handler->delete(new Request('DELETE', '/api/roles/' . $ownId), ['id' => (string) $ownId]);
+        $this->assertSame(200, $deleteOwn->getStatusCode(), "A tenant must be able to delete its own role.");
+
+        // The global role is NOT.
+        $deleteGlobal = $handler->delete(new Request('DELETE', '/api/roles/1'), ['id' => '1']);
+        $this->assertSame(404, $deleteGlobal->getStatusCode());
+    }
+
+    public function testSystemTenantCanManageGlobalAndEveryTenantRole(): void
+    {
+        $this->seedGlobalRole(1, 'admin');
+
+        // Tenant 1 owns a custom role.
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $tenantRole = json_decode(
+            $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'TenantOwned']))->getBody(),
+            true
+        )['data'];
+        $tenantRoleId = (int) $tenantRole['id'];
+
+        // SYSTEM tenant sees both the global and the tenant-owned role.
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(0);
+        $list = json_decode($handler->list(new Request('GET', '/api/roles'))->getBody(), true)['data'];
+        $names = array_column($list, 'name');
+        $this->assertContains('admin', $names);
+        $this->assertContains('TenantOwned', $names);
+
+        // SYSTEM can update the GLOBAL role.
+        $updateGlobal = $handler->update(
+            $this->authedRequest('PATCH', '/api/roles/1', ['description' => 'system-edited']),
+            ['id' => '1']
+        );
+        $this->assertSame(200, $updateGlobal->getStatusCode(), 'SYSTEM may manage a global role.');
+
+        // SYSTEM can delete the tenant-owned role.
+        $deleteTenant = $handler->delete(
+            new Request('DELETE', '/api/roles/' . $tenantRoleId),
+            ['id' => (string) $tenantRoleId]
+        );
+        $this->assertSame(200, $deleteTenant->getStatusCode(), 'SYSTEM may manage any tenant role.');
+    }
+
+    public function testTenantBStillCannotSeeTenantAOwnedRoleEvenWithGlobalRolesPresent(): void
+    {
+        // A global role is present, but tenant isolation for OWNED roles still holds.
+        $this->seedGlobalRole(1, 'admin');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'TenantAPrivate']));
+
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(2);
+        $list = json_decode($handler->list(new Request('GET', '/api/roles'))->getBody(), true)['data'];
+        $names = array_column($list, 'name');
+
+        $this->assertContains('admin', $names, 'Global role visible to tenant B.');
+        $this->assertNotContains('TenantAPrivate', $names, "Tenant B must not see tenant A's owned role.");
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): RolesApiHandler
@@ -261,6 +417,19 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $request = new Request($method, $path, [], $body !== null ? (string) json_encode($body) : '');
         $request->user = (object) ['user_id' => 99, 'tenant_id' => 1];
         return $request;
+    }
+
+    /**
+     * Seed a GLOBAL/system role (NULL tenant_id) — the production state of the
+     * seeded base roles after migration 018 with no backfill.
+     */
+    private function seedGlobalRole(int $id, string $name): void
+    {
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO roles (id, name, description, tenant_id, created_at)
+             VALUES (?, ?, '', NULL, datetime('now'))"
+        );
+        $stmt->execute([$id, $name]);
     }
 
     /**
