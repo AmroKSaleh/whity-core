@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace Whity\Core;
 
 use ReflectionClass;
-use ReflectionException;
+use Throwable;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Tenant\TenantContext;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -47,6 +48,71 @@ class PluginLoader
      * @var array<PluginInterface> Registered plugins
      */
     private array $plugins = [];
+
+    /**
+     * Registration bookkeeping per plugin, keyed by the plugin's original FQCN.
+     *
+     * Tracks what each plugin registered so it can be cleanly unregistered when
+     * its file is modified or removed during a hot reload, or administratively
+     * disabled via the admin API. The plugin instance is retained so a disabled
+     * plugin can be re-registered (re-enabled) without re-reading it from disk.
+     *
+     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>}>
+     */
+    private array $registeredPlugins = [];
+
+    /**
+     * Plugin keys (original FQCNs) whose routes/hooks were torn down by an
+     * administrative {@see disablePlugin()} call.
+     *
+     * Distinguishes an administratively disabled plugin (capabilities removed and
+     * needing re-registration on re-enable) from an auto-failed plugin (whose
+     * capabilities remain registered, short-circuited by the error boundary).
+     *
+     * @var array<string, true>
+     */
+    private array $administrativelyDisabled = [];
+
+    /**
+     * Per-plugin lifecycle state machines, keyed by the plugin's original FQCN.
+     *
+     * Extends (does not duplicate) the registeredPlugins bookkeeping: while
+     * registeredPlugins tracks what each plugin registered so it can be cleanly
+     * unregistered, this tracks each plugin's runtime health (state + error
+     * counters) so the error boundary can fail a misbehaving plugin and the
+     * admin API can report and re-enable it. Worker-level state by design.
+     *
+     * @var array<string, PluginLifecycle>
+     */
+    private array $lifecycles = [];
+
+    /**
+     * Content hash of the source most recently registered for each plugin FQCN.
+     *
+     * Survives unregister cycles because it reflects what is actually compiled
+     * into this PHP process. Used to detect when a plugin file's contents
+     * changed between reloads so the new code can be re-evaluated under a fresh
+     * versioned namespace.
+     *
+     * @var array<string, string>
+     */
+    private array $loadedContentHashes = [];
+
+    /**
+     * Snapshot of the plugin-tree fingerprint captured at the last load/reload.
+     *
+     * Maps each plugin PHP file path to a "mtime:size" signature. Comparing this
+     * against a freshly computed fingerprint tells us whether anything on disk
+     * changed since the worker last loaded plugins.
+     *
+     * @var array<string, string>
+     */
+    private array $fingerprint = [];
+
+    /**
+     * @var bool Whether plugins have been loaded at least once in this process
+     */
+    private bool $loaded = false;
 
     /**
      * @var string|null Cache file path for the manifest
@@ -171,6 +237,9 @@ class PluginLoader
     /**
      * Load and register plugins from the plugin directory
      *
+     * Records the current plugin-tree fingerprint so that subsequent reload()
+     * calls can cheaply detect whether anything changed on disk.
+     *
      * @return void
      */
     public function load(): void
@@ -179,6 +248,134 @@ class PluginLoader
         foreach ($discovered as $fqcn => $filePath) {
             $this->loadPluginClass($fqcn, $filePath);
         }
+
+        $this->fingerprint = $this->computeFingerprint();
+        $this->loaded = true;
+    }
+
+    /**
+     * Reload plugins if the plugin directory changed since the last load
+     *
+     * Designed for FrankenPHP persistent workers: a single PluginLoader instance
+     * survives across many requests, so this method is called at the start of a
+     * request to pick up plugins that were added, modified, or removed on disk
+     * without restarting the worker.
+     *
+     * Behaviour:
+     *  - Added plugins are discovered and registered.
+     *  - Removed plugins have their routes and hooks unregistered.
+     *  - Modified plugins are re-registered from their updated source. Because a
+     *    PHP class cannot be redefined within a live process, modified classes
+     *    are re-evaluated under a content-versioned namespace so the new code
+     *    actually runs (see loadPluginClass()).
+     *
+     * @return bool True if a change was detected and applied, false if nothing changed
+     */
+    public function reload(): bool
+    {
+        if (!$this->loaded) {
+            $this->load();
+            return true;
+        }
+
+        $current = $this->computeFingerprint();
+
+        if ($current === $this->fingerprint) {
+            return false;
+        }
+
+        // The set of plugin files changed. Drop the stale manifest cache so the
+        // next discover() performs a full filesystem scan instead of trusting
+        // outdated FQCN -> path mappings.
+        $this->clearCache();
+
+        // Unregister everything currently loaded, then rebuild from disk. This
+        // uniformly handles additions, modifications, and removals.
+        $this->unregisterAll();
+
+        $discovered = $this->discover();
+        foreach ($discovered as $fqcn => $filePath) {
+            $this->loadPluginClass($fqcn, $filePath);
+        }
+
+        $this->fingerprint = $current;
+
+        return true;
+    }
+
+    /**
+     * Get a freshly computed fingerprint of the plugin tree on disk
+     *
+     * The fingerprint maps each plugin PHP file currently on disk to a
+     * "mtime:size" signature. Callers can compare successive fingerprints to
+     * decide whether a reload is warranted.
+     *
+     * @return array<string, string>
+     */
+    public function getFingerprint(): array
+    {
+        return $this->computeFingerprint();
+    }
+
+    /**
+     * Compute a fingerprint of every PHP file under the plugin directory
+     *
+     * @return array<string, string> Map of file path => "mtime:size" signature
+     */
+    private function computeFingerprint(): array
+    {
+        if (!is_dir($this->pluginDir)) {
+            return [];
+        }
+
+        $fingerprint = [];
+        try {
+            $directory = new \RecursiveDirectoryIterator(
+                $this->pluginDir,
+                \RecursiveDirectoryIterator::SKIP_DOTS
+            );
+            $iterator = new \RecursiveIteratorIterator($directory);
+            foreach ($iterator as $fileInfo) {
+                if ($fileInfo->isFile() && $fileInfo->getExtension() === 'php') {
+                    $path = str_replace('\\', '/', (string) $fileInfo->getRealPath());
+                    $fingerprint[$path] = $fileInfo->getMTime() . ':' . $fileInfo->getSize();
+                }
+            }
+        } catch (\Throwable) {
+            // Treat an unreadable tree as empty rather than crashing the request.
+            return [];
+        }
+
+        ksort($fingerprint);
+
+        return $fingerprint;
+    }
+
+    /**
+     * Unregister all currently loaded plugins (routes, hooks, instances)
+     *
+     * @return void
+     */
+    private function unregisterAll(): void
+    {
+        foreach ($this->registeredPlugins as $info) {
+            $this->router->unregisterByNamespace($info['namespacePrefix']);
+
+            if ($this->hookManager !== null) {
+                foreach ($info['hooks'] as $hook) {
+                    $this->hookManager->removeListener($hook['event'], $hook['callback']);
+                }
+            }
+        }
+
+        $this->registeredPlugins = [];
+        $this->plugins = [];
+        $this->administrativelyDisabled = [];
+
+        // Reset lifecycle state machines. A reload re-registers every plugin
+        // from disk, so each plugin (including a previously failed one whose
+        // file changed) gets a fresh lifecycle and a clean error counter.
+        $this->lifecycles = [];
     }
 
     /**
@@ -396,7 +593,167 @@ class PluginLoader
     }
 
     /**
+     * Get the lifecycle state machine for a plugin, keyed by its original FQCN.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return PluginLifecycle|null The lifecycle, or null if the plugin is unknown.
+     */
+    public function getLifecycle(string $pluginKey): ?PluginLifecycle
+    {
+        return $this->lifecycles[$pluginKey] ?? null;
+    }
+
+    /**
+     * Get all plugin lifecycle state machines, keyed by original FQCN.
+     *
+     * @return array<string, PluginLifecycle>
+     */
+    public function getLifecycles(): array
+    {
+        return $this->lifecycles;
+    }
+
+    /**
+     * Get a serialisable status snapshot of every loaded plugin.
+     *
+     * Intended for the admin plugins API. Each entry exposes the plugin's
+     * lifecycle state, consecutive-error count, and last error details.
+     *
+     * @return array<int, array{id: string, name: string, state: string, consecutive_errors: int, last_error: array{message: string, type: string, trace: string, at: int}|null}>
+     */
+    public function getPluginStatuses(): array
+    {
+        $statuses = [];
+        foreach ($this->lifecycles as $lifecycle) {
+            $statuses[] = $lifecycle->toArray();
+        }
+
+        return $statuses;
+    }
+
+    /**
+     * Get admin-facing metadata for every registered plugin.
+     *
+     * Combines each plugin's static descriptor (name, version, declared route
+     * and permission counts) with its live lifecycle status, producing the shape
+     * the plugins admin API lists. Plugins keep their bookkeeping (and therefore
+     * appear here) even while administratively disabled, so the status reflects
+     * the current lifecycle state rather than disappearing from the listing.
+     *
+     * @return array<int, array{id: string, name: string, version: string, status: string, routes_count: int, permissions_count: int}>
+     */
+    public function getPluginMetadata(): array
+    {
+        $metadata = [];
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            $plugin = $info['plugin'];
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+
+            $metadata[] = [
+                'id' => $pluginKey,
+                'name' => $plugin->getName(),
+                'version' => $plugin->getVersion(),
+                'status' => $lifecycle?->getState()->value ?? PluginState::Loaded->value,
+                'routes_count' => count($plugin->getRoutes()),
+                'permissions_count' => count($plugin->getPermissions()),
+            ];
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * Manually re-enable a failed or administratively disabled plugin.
+     *
+     * Returns the plugin to the active state with a clean error counter so it can
+     * serve requests again. When the plugin had been administratively disabled
+     * via {@see disablePlugin()} (its routes and hooks unregistered), those
+     * capabilities are re-registered from the retained instance so it serves
+     * traffic again. Used by the admin plugins API.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return bool True if the plugin existed and was re-enabled, false if unknown.
+     */
+    public function reEnablePlugin(string $pluginKey): bool
+    {
+        $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+        if ($lifecycle === null) {
+            return false;
+        }
+
+        // A plugin disabled via disablePlugin() had its routes and hooks
+        // unregistered but its bookkeeping retains the instance. Re-register its
+        // capabilities so it can serve traffic once active again. Auto-failed
+        // plugins keep their capabilities registered (short-circuited by the
+        // error boundary) and so must not be re-registered.
+        $info = $this->registeredPlugins[$pluginKey] ?? null;
+        $reRegister = isset($this->administrativelyDisabled[$pluginKey]) && $info !== null;
+
+        $lifecycle->reEnable();
+
+        if ($reRegister && $info !== null) {
+            $registeredHooks = $this->registerCapabilities(
+                $info['plugin'],
+                $info['namespacePrefix'],
+                $pluginKey
+            );
+            $this->registeredPlugins[$pluginKey]['hooks'] = $registeredHooks;
+            unset($this->administrativelyDisabled[$pluginKey]);
+        }
+
+        return true;
+    }
+
+    /**
+     * Administratively disable an active (or failed) plugin at runtime.
+     *
+     * Transitions the plugin's lifecycle to {@see PluginState::Disabled} and
+     * removes its registered capabilities: routes are dropped from the router via
+     * {@see Router::unregisterByNamespace()} (WC-8) and hook subscriptions are
+     * removed from the hook manager. The plugin instance and namespace prefix are
+     * retained in bookkeeping so {@see reEnablePlugin()} can restore it without a
+     * disk reload. Worker-level state by design.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return bool True if the plugin existed and was disabled, false if unknown.
+     */
+    public function disablePlugin(string $pluginKey): bool
+    {
+        $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+        $info = $this->registeredPlugins[$pluginKey] ?? null;
+        if ($lifecycle === null || $info === null) {
+            return false;
+        }
+
+        // Drop the plugin's routes and hook subscriptions so it stops serving.
+        $this->router->unregisterByNamespace($info['namespacePrefix']);
+
+        if ($this->hookManager !== null) {
+            foreach ($info['hooks'] as $hook) {
+                $this->hookManager->removeListener($hook['event'], $hook['callback']);
+            }
+        }
+
+        // Hooks are now unregistered; clear the recorded subscriptions so a later
+        // re-enable does not attempt to remove stale callbacks. Mark the plugin
+        // as administratively disabled so re-enable knows to re-register it.
+        $this->registeredPlugins[$pluginKey]['hooks'] = [];
+        $this->administrativelyDisabled[$pluginKey] = true;
+
+        $lifecycle->disable();
+
+        return true;
+    }
+
+    /**
      * Load a single plugin class and register it
+     *
+     * When the same plugin file has already been required earlier in this
+     * process with DIFFERENT contents (a hot-reload of a modified plugin), the
+     * original class is already locked into memory and cannot be redefined.
+     * In that case the source is re-evaluated under a content-versioned
+     * namespace so the updated code actually runs. Brand-new plugins are loaded
+     * directly. See the class docblock / PR notes for the tradeoff.
      *
      * @param string $fqcn Fully qualified class name of the plugin
      * @param string $filePath File path of the plugin
@@ -404,17 +761,14 @@ class PluginLoader
      */
     private function loadPluginClass(string $fqcn, string $filePath): void
     {
-        // Require the file
-        require_once $filePath;
-
-        // Check if class exists
-        if (!class_exists($fqcn)) {
+        $effectiveFqcn = $this->materializeClass($fqcn, $filePath);
+        if ($effectiveFqcn === null) {
             return;
         }
 
         // Use reflection to validate and get instance
         try {
-            $reflectionClass = new ReflectionClass($fqcn);
+            $reflectionClass = new ReflectionClass($effectiveFqcn);
             if (!$reflectionClass->implementsInterface(PluginInterface::class)) {
                 $warningMsg = "Plugin class {$fqcn} does not implement PluginInterface.";
                 if ($this->logger !== null) {
@@ -429,7 +783,7 @@ class PluginLoader
             $namespacePrefix = $reflectionClass->getNamespaceName();
 
             /** @var PluginInterface $plugin */
-            $plugin = new $fqcn();
+            $plugin = new $effectiveFqcn();
         } catch (\Throwable $e) {
             $errorMsg = "Failed to load plugin {$fqcn}: " . $e->getMessage();
             if ($this->logger !== null) {
@@ -440,8 +794,124 @@ class PluginLoader
             return;
         }
 
-        // Register the plugin
-        $this->registerPlugin($plugin, $namespacePrefix);
+        // Register the plugin under its original FQCN identity
+        $this->registerPlugin($plugin, $namespacePrefix, $fqcn);
+    }
+
+    /**
+     * Ensure the plugin class is defined and return the concrete FQCN to use
+     *
+     * Returns the original FQCN when the file can simply be required, or a
+     * versioned FQCN when the file was modified after an earlier version was
+     * already loaded in this process. Returns null when no usable class exists.
+     *
+     * @param string $fqcn Original fully qualified class name
+     * @param string $filePath Plugin file path
+     * @return string|null FQCN to instantiate, or null on failure
+     */
+    private function materializeClass(string $fqcn, string $filePath): ?string
+    {
+        $source = @file_get_contents($filePath);
+
+        // If we cannot read the source, fall back to a plain require.
+        if ($source === false) {
+            require_once $filePath;
+            return class_exists($fqcn) ? $fqcn : null;
+        }
+
+        $contentHash = substr(hash('xxh128', $source), 0, 12);
+        $previousHash = $this->loadedContentHashes[$fqcn] ?? null;
+
+        // First time this loader registers this class in the process: require
+        // the file as-is. (discover() may already have required it, but no prior
+        // version has been registered, so the original definition is correct.)
+        if ($previousHash === null) {
+            require_once $filePath;
+            if (!class_exists($fqcn)) {
+                return null;
+            }
+            $this->loadedContentHashes[$fqcn] = $contentHash;
+            return $fqcn;
+        }
+
+        // Previously registered with identical content: reuse the live class.
+        if ($previousHash === $contentHash) {
+            return $fqcn;
+        }
+
+        // Content changed since the last registration. The original class is
+        // locked into memory, so re-evaluate the source under a fresh,
+        // content-addressed namespace so the updated code runs.
+        $namespacePos = strrpos($fqcn, '\\');
+        $namespace = $namespacePos === false ? '' : substr($fqcn, 0, $namespacePos);
+        $shortName = $namespacePos === false ? $fqcn : substr($fqcn, $namespacePos + 1);
+
+        $versionedNamespace = ($namespace === '' ? '' : $namespace . '\\')
+            . '_Whity_Reload_' . $contentHash;
+        $versionedFqcn = $versionedNamespace . '\\' . $shortName;
+
+        // Re-evaluating identical content would just reuse the same versioned
+        // class, so short-circuit once it exists (e.g. reverting to a prior
+        // version whose namespace was already materialized).
+        if (class_exists($versionedFqcn, false)) {
+            $this->loadedContentHashes[$fqcn] = $contentHash;
+            return $versionedFqcn;
+        }
+
+        // Rewrite the namespace declaration so the class can be redefined under
+        // a fresh, content-addressed namespace and the updated code runs.
+        $rewritten = $this->rewriteNamespace($source, $namespace, $versionedNamespace);
+        if ($rewritten === null) {
+            // Could not safely rewrite: keep the already-loaded definition.
+            return $fqcn;
+        }
+
+        try {
+            eval('?>' . $rewritten);
+        } catch (\Throwable $e) {
+            $errorMsg = "Failed to hot-reload plugin {$fqcn}: " . $e->getMessage();
+            if ($this->logger !== null) {
+                $this->logger->error($errorMsg);
+            } else {
+                error_log($errorMsg);
+            }
+            return class_exists($fqcn) ? $fqcn : null;
+        }
+
+        if (class_exists($versionedFqcn, false)) {
+            $this->loadedContentHashes[$fqcn] = $contentHash;
+            return $versionedFqcn;
+        }
+
+        return class_exists($fqcn) ? $fqcn : null;
+    }
+
+    /**
+     * Rewrite the top-level namespace declaration of a plugin's source
+     *
+     * @param string $source Original PHP source
+     * @param string $oldNamespace The namespace currently declared (may be empty)
+     * @param string $newNamespace The replacement namespace
+     * @return string|null Rewritten source, or null if it could not be rewritten safely
+     */
+    private function rewriteNamespace(string $source, string $oldNamespace, string $newNamespace): ?string
+    {
+        if ($oldNamespace === '') {
+            // Rewriting global-namespace plugins would require injecting a
+            // namespace wrapper around use-statements; not supported.
+            return null;
+        }
+
+        $pattern = '/\bnamespace\s+' . preg_quote($oldNamespace, '/') . '\s*;/';
+        $replacement = 'namespace ' . $newNamespace . ';';
+
+        $rewritten = preg_replace($pattern, $replacement, $source, 1, $count);
+
+        if ($rewritten === null || $count !== 1) {
+            return null;
+        }
+
+        return $rewritten;
     }
 
     /**
@@ -449,11 +919,55 @@ class PluginLoader
      *
      * @param PluginInterface $plugin The plugin instance to register
      * @param string $namespacePrefix The plugin namespace prefix
+     * @param string $pluginKey Stable identity (original FQCN) for bookkeeping
      * @return void
      */
-    private function registerPlugin(PluginInterface $plugin, string $namespacePrefix): void
-    {
-        // 1. Register routes with the router
+    private function registerPlugin(
+        PluginInterface $plugin,
+        string $namespacePrefix,
+        string $pluginKey
+    ): void {
+        // Establish the plugin's lifecycle: discovered -> loaded. It becomes
+        // active once its capabilities are registered below.
+        $lifecycle = new PluginLifecycle($pluginKey, $plugin->getName());
+        $lifecycle->markLoaded();
+        $this->lifecycles[$pluginKey] = $lifecycle;
+
+        $registeredHooks = $this->registerCapabilities($plugin, $namespacePrefix, $pluginKey);
+
+        // Store the plugin instance and its registration bookkeeping
+        $this->plugins[] = $plugin;
+        $this->registeredPlugins[$pluginKey] = [
+            'plugin' => $plugin,
+            'namespacePrefix' => $namespacePrefix,
+            'hooks' => $registeredHooks,
+        ];
+
+        // The plugin is now fully registered and ready to serve.
+        $lifecycle->markActive();
+    }
+
+    /**
+     * Register a plugin's routes, permissions, and hooks with the core services.
+     *
+     * Shared by initial registration and by re-enable, so a plugin that was
+     * administratively disabled (its routes/hooks removed) can be brought back
+     * online without re-reading or re-instantiating it from disk. Returns the
+     * hook subscriptions actually registered so the caller can record them for
+     * later unsubscription.
+     *
+     * @param PluginInterface $plugin The plugin instance to register.
+     * @param string $namespacePrefix The plugin namespace prefix.
+     * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
+     * @return array<array{event: string, callback: callable}> Registered hook subscriptions.
+     */
+    private function registerCapabilities(
+        PluginInterface $plugin,
+        string $namespacePrefix,
+        string $pluginKey
+    ): array {
+        // 1. Register routes with the router, each wrapped in an error boundary
+        //    so a throwing handler cannot crash the host or other plugins.
         foreach ($plugin->getRoutes() as $route) {
             $method = $route['method'];
             $path = $route['path'];
@@ -464,7 +978,7 @@ class PluginLoader
                 $this->router->register(
                     $method,
                     $path,
-                    $handler,
+                    $this->wrapHandler($pluginKey, $handler),
                     $requiredRole,
                     $namespacePrefix
                 );
@@ -476,49 +990,185 @@ class PluginLoader
             $this->permissionRegistry->registerPermissions($plugin->getName(), $plugin->getPermissions());
         }
 
-        // 3. Register hooks with the hook manager
+        // 3. Register hooks with the hook manager, tracking each subscription so
+        //    it can be unsubscribed on a later reload/removal/disable. Hook
+        //    callbacks are wrapped in the same error boundary as route handlers.
+        $registeredHooks = [];
         if ($this->hookManager !== null) {
             foreach ($plugin->getHooks() as $eventName => $hookData) {
-                $this->registerHook($eventName, $hookData);
+                foreach ($this->registerHook($pluginKey, $eventName, $hookData) as $callback) {
+                    $registeredHooks[] = ['event' => $eventName, 'callback' => $callback];
+                }
             }
         }
 
-        // Store the plugin instance
-        $this->plugins[] = $plugin;
+        return $registeredHooks;
+    }
+
+    /**
+     * Wrap a plugin route handler in a per-plugin error boundary.
+     *
+     * The returned closure has the same calling convention the kernel uses
+     * (Request, params) so it can be registered transparently in place of the
+     * raw handler. It:
+     *  - short-circuits with a safe 503 when the plugin is already failed;
+     *  - catches any Throwable, logs it (structured, with stack trace and
+     *    tenant_id), records the error against the plugin's lifecycle, and
+     *    returns a safe 500 without leaking the exception to the client;
+     *  - resets the consecutive-error counter on a successful invocation.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @param callable $handler The raw plugin route handler.
+     * @return callable(Request, array<string, string>): Response
+     */
+    private function wrapHandler(string $pluginKey, callable $handler): callable
+    {
+        return function (Request $request, array $params = []) use ($pluginKey, $handler): Response {
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+
+            if ($lifecycle !== null && $lifecycle->isFailed()) {
+                return Response::error('Plugin temporarily unavailable', 503);
+            }
+
+            try {
+                $result = $handler($request, $params);
+
+                // A plugin that does not return a Response is misbehaving; treat
+                // it as a failure rather than letting a bad value escape.
+                if (!$result instanceof Response) {
+                    throw new \UnexpectedValueException(
+                        'Plugin handler did not return a Response instance'
+                    );
+                }
+
+                $lifecycle?->recordSuccess();
+
+                return $result;
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'route handler');
+                return Response::error('Internal plugin error', 500);
+            }
+        };
+    }
+
+    /**
+     * Wrap a plugin hook callback in a per-plugin error boundary.
+     *
+     * A throwing hook callback is isolated so the surrounding dispatch loop
+     * continues. On error the original data is returned unchanged so the failing
+     * listener cannot corrupt the pipeline.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @param callable $callback The raw hook callback.
+     * @return callable(array<mixed>, array<mixed>): array<mixed>
+     */
+    private function wrapHookCallback(string $pluginKey, callable $callback): callable
+    {
+        return function (array $data, array $context = []) use ($pluginKey, $callback): array {
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+
+            if ($lifecycle !== null && $lifecycle->isFailed()) {
+                return $data;
+            }
+
+            try {
+                $result = $callback($data, $context);
+                $lifecycle?->recordSuccess();
+                return is_array($result) ? $result : $data;
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'hook callback');
+                return $data;
+            }
+        };
+    }
+
+    /**
+     * Log and record a Throwable raised by a plugin invocation.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @param Throwable $e The throwable raised by the plugin.
+     * @param string $boundary Human-readable description of the boundary that caught it.
+     * @return void
+     */
+    private function handlePluginThrowable(string $pluginKey, Throwable $e, string $boundary): void
+    {
+        $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+        $lifecycle?->recordError($e);
+
+        $context = [
+            'plugin' => $pluginKey,
+            'boundary' => $boundary,
+            'tenant_id' => TenantContext::getTenantId(),
+            'exception' => $e::class,
+            'trace' => $e->getTraceAsString(),
+            'consecutive_errors' => $lifecycle?->getConsecutiveErrors() ?? 0,
+            'state' => $lifecycle?->getState()->value,
+        ];
+
+        $message = sprintf(
+            'Plugin "%s" threw in %s: %s',
+            $pluginKey,
+            $boundary,
+            $e->getMessage()
+        );
+
+        if ($this->logger !== null) {
+            $this->logger->error($message, $context);
+        } else {
+            error_log($message . ' ' . $e->getTraceAsString());
+        }
     }
 
     /**
      * Helper to register a hook subscription
      *
+     * Each plugin callback is wrapped in a per-plugin error boundary before being
+     * handed to the HookManager. The returned callables are the wrapped versions,
+     * so the registration bookkeeping records exactly what was subscribed and can
+     * unsubscribe it cleanly on a later reload/removal.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN)
      * @param string $eventName Event name
      * @param mixed $hookData Callback or structured configuration
-     * @return void
+     * @return array<callable> The callbacks that were registered
      */
-    private function registerHook(string $eventName, mixed $hookData): void
+    private function registerHook(string $pluginKey, string $eventName, mixed $hookData): array
     {
         if ($this->hookManager === null) {
-            return;
+            return [];
         }
 
+        $registered = [];
+
         if (is_callable($hookData)) {
-            $this->hookManager->listen($eventName, $hookData);
+            $wrapped = $this->wrapHookCallback($pluginKey, $hookData);
+            $this->hookManager->listen($eventName, $wrapped);
+            $registered[] = $wrapped;
         } elseif (is_array($hookData)) {
             // Check if it is a single structured subscription with a callback
             if (isset($hookData['callback']) && is_callable($hookData['callback'])) {
                 $priority = $hookData['priority'] ?? 10;
-                $this->hookManager->listen($eventName, $hookData['callback'], $priority);
+                $wrapped = $this->wrapHookCallback($pluginKey, $hookData['callback']);
+                $this->hookManager->listen($eventName, $wrapped, $priority);
+                $registered[] = $wrapped;
             } else {
                 // Check if it is a list of callbacks/subscriptions
                 foreach ($hookData as $sub) {
                     if (is_array($sub) && isset($sub['callback']) && is_callable($sub['callback'])) {
                         $priority = $sub['priority'] ?? 10;
-                        $this->hookManager->listen($eventName, $sub['callback'], $priority);
+                        $wrapped = $this->wrapHookCallback($pluginKey, $sub['callback']);
+                        $this->hookManager->listen($eventName, $wrapped, $priority);
+                        $registered[] = $wrapped;
                     } elseif (is_callable($sub)) {
-                        $this->hookManager->listen($eventName, $sub);
+                        $wrapped = $this->wrapHookCallback($pluginKey, $sub);
+                        $this->hookManager->listen($eventName, $wrapped);
+                        $registered[] = $wrapped;
                     }
                 }
             }
         }
+
+        return $registered;
     }
 
 

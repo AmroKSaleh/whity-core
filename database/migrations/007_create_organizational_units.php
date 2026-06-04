@@ -40,13 +40,14 @@ class CreateOrganizationalUnits
         $db->exec('CREATE INDEX IF NOT EXISTS idx_ou_tenant_id ON organizational_units(tenant_id)');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_ou_parent_id ON organizational_units(parent_id)');
 
-        // Insert OU management permissions (idempotent with ON CONFLICT)
+        // Insert OU management permissions (idempotent with ON CONFLICT) using
+        // the `resource:action` notation mandated by the RBAC model (issue #55).
         $permissions = [
-            'ous.read' => 'Read organizational units',
-            'ous.create' => 'Create organizational units',
-            'ous.update' => 'Update organizational units',
-            'ous.delete' => 'Delete organizational units',
-            'ous.assign' => 'Assign roles to organizational units',
+            'ous:read' => 'Read organizational units',
+            'ous:create' => 'Create organizational units',
+            'ous:update' => 'Update organizational units',
+            'ous:delete' => 'Delete organizational units',
+            'ous:assign' => 'Assign roles to organizational units',
         ];
 
         foreach ($permissions as $name => $description) {

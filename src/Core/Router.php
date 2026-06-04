@@ -11,7 +11,7 @@ namespace Whity\Core;
 class Router
 {
     /**
-     * @var array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, namespacePrefix: ?string}> Registered routes
+     * @var array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string}> Registered routes
      */
     private array $routes = [];
 
@@ -28,6 +28,7 @@ class Router
      * @param callable $handler Route handler callback
      * @param string|null $requiredRole Optional required role for authorization
      * @param string|null $namespacePrefix Optional plugin namespace prefix
+     * @param string|null $requiredPermission Optional required permission (resource:action) for authorization
      * @return void
      */
     public function register(
@@ -35,7 +36,8 @@ class Router
         string $path,
         callable $handler,
         ?string $requiredRole = null,
-        ?string $namespacePrefix = null
+        ?string $namespacePrefix = null,
+        ?string $requiredPermission = null
     ): void {
         $this->routes[] = [
             'method' => strtoupper($method),
@@ -43,6 +45,7 @@ class Router
             'pattern' => $this->pathToPattern($path),
             'handler' => $handler,
             'requiredRole' => $requiredRole,
+            'requiredPermission' => $requiredPermission,
             'namespacePrefix' => $namespacePrefix,
         ];
     }
@@ -53,7 +56,7 @@ class Router
      * Returns route information if a match is found, null otherwise.
      *
      * @param Request $request Request object
-     * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, namespacePrefix: ?string}|null Array if matched, null otherwise
+     * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string}|null Array if matched, null otherwise
      */
     public function match(Request $request): ?array
     {
@@ -79,6 +82,7 @@ class Router
                     'handler' => $route['handler'],
                     'params' => $params,
                     'requiredRole' => $route['requiredRole'],
+                    'requiredPermission' => $route['requiredPermission'] ?? null,
                     'namespacePrefix' => $route['namespacePrefix'] ?? null,
                 ];
             }
@@ -90,11 +94,33 @@ class Router
     /**
      * Get all registered routes
      *
-     * @return array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, namespacePrefix: ?string}>
+     * @return array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string}>
      */
     public function getRoutes(): array
     {
         return $this->routes;
+    }
+
+    /**
+     * Remove every route registered under the given plugin namespace prefix
+     *
+     * Used by the plugin hot-reload mechanism to drop routes belonging to a
+     * plugin that has been modified or removed from disk before its updated
+     * definition is registered again.
+     *
+     * @param string $namespacePrefix The plugin namespace prefix to remove
+     * @return int Number of routes removed
+     */
+    public function unregisterByNamespace(string $namespacePrefix): int
+    {
+        $before = count($this->routes);
+
+        $this->routes = array_values(array_filter(
+            $this->routes,
+            static fn(array $route): bool => ($route['namespacePrefix'] ?? null) !== $namespacePrefix
+        ));
+
+        return $before - count($this->routes);
     }
 
     /**

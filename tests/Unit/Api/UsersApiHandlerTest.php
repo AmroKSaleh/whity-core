@@ -48,6 +48,26 @@ class UsersApiHandlerTest extends TestCase
         TestFixtureBuilder::resetCounters();
     }
 
+    /**
+     * Build the PDOStatement mock for the post-update re-fetch the handler runs
+     * to return the updated user record (WC-113). The shape mirrors the
+     * users+roles JOIN the list/update endpoints consume.
+     */
+    private function refetchStatement(int $userId): PDOStatement
+    {
+        $stmt = $this->createMock(PDOStatement::class);
+        $stmt->method('execute')->willReturn(true);
+        $stmt->method('fetch')->willReturn([
+            'id' => $userId,
+            'email' => "user{$userId}@example.com",
+            'password' => 'x',
+            'created_at' => '2026-01-01 00:00:00',
+            'tenant_id' => $this->testTenantId,
+            'role' => 'user',
+        ]);
+        return $stmt;
+    }
+
     // ==================== HAPPY PATH TESTS ====================
 
     /**
@@ -74,8 +94,25 @@ class UsersApiHandlerTest extends TestCase
         $mockUpdateStatement = $this->createMock(PDOStatement::class);
         $mockUpdateStatement->method('execute')->willReturn(true);
 
+        // Mock the post-update re-fetch (handler returns the updated user, WC-113).
+        $mockRefetchStatement = $this->createMock(PDOStatement::class);
+        $mockRefetchStatement->method('execute')->willReturn(true);
+        $mockRefetchStatement->method('fetch')->willReturn([
+            'id' => $userId,
+            'email' => "user{$userId}@example.com",
+            'password' => 'x',
+            'created_at' => '2026-01-01 00:00:00',
+            'tenant_id' => $this->testTenantId,
+            'role' => 'user',
+        ]);
+
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockOuCheckStatement, $mockUpdateStatement);
+            ->willReturnOnConsecutiveCalls(
+                $mockSelectStatement,
+                $mockOuCheckStatement,
+                $mockUpdateStatement,
+                $mockRefetchStatement
+            );
 
         $body = json_encode(['ou_id' => $ouId]);
 
@@ -106,8 +143,11 @@ class UsersApiHandlerTest extends TestCase
         $mockUpdateStatement = $this->createMock(PDOStatement::class);
         $mockUpdateStatement->method('execute')->willReturn(true);
 
+        // Mock the post-update re-fetch (handler returns the updated user, WC-113).
+        $mockRefetchStatement = $this->refetchStatement($userId);
+
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockUpdateStatement);
+            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockUpdateStatement, $mockRefetchStatement);
 
         $body = json_encode(['ou_id' => 0]);
 
@@ -136,7 +176,11 @@ class UsersApiHandlerTest extends TestCase
         $mockUpdateStatement->method('execute')->willReturn(true);
 
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockUpdateStatement);
+            ->willReturnOnConsecutiveCalls(
+                $mockSelectStatement,
+                $mockUpdateStatement,
+                $this->refetchStatement($userId)
+            );
 
         $body = json_encode(['ou_id' => null]);
 
@@ -165,7 +209,12 @@ class UsersApiHandlerTest extends TestCase
         $mockUpdateStatement->method('execute')->willReturn(true);
 
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockSelectStatement, $mockUpdateStatement);
+            ->willReturnOnConsecutiveCalls(
+                $mockSelectStatement,
+                $mockSelectStatement,
+                $mockUpdateStatement,
+                $this->refetchStatement($userId)
+            );
 
         $body = json_encode(['email' => 'new@example.com']);
 
@@ -240,31 +289,92 @@ class UsersApiHandlerTest extends TestCase
     // ==================== VALIDATION TESTS ====================
 
     /**
-     * Test updating user with role_id blocked returns 403
+     * Test updating a user's role by NAME resolves the role and persists it
+     * (WC-113). The Edit User form binds `role` as a role NAME; the handler must
+     * resolve it to a tenant-visible roles.id and write users.role_id. (The
+     * authoritative persistence proof is the real-engine SQLite test; this mocked
+     * variant pins the request/response contract.)
      */
-    public function testUpdateUserWithRoleIdBlockReturns403(): void
+    public function testUpdateUserRoleByNameResolvesAndPersists(): void
     {
         $userId = 5;
-        $userData = TestFixtureBuilder::user($userId, $this->testTenantId, 2);
+        $userData = TestFixtureBuilder::user($userId, $this->testTenantId, 2); // currently role_id 2
 
-        // Mock SELECT user query
+        // SELECT user.
         $mockSelectStatement = $this->createMock(PDOStatement::class);
         $mockSelectStatement->method('execute')->willReturn(true);
-        $mockSelectStatement->method('fetch')
-            ->willReturn($userData);
+        $mockSelectStatement->method('fetch')->willReturn($userData);
+
+        // Resolve role NAME -> id (visible to tenant). 'moderator' resolves to 3.
+        $mockRoleResolveStatement = $this->createMock(PDOStatement::class);
+        $mockRoleResolveStatement->method('execute')->willReturn(true);
+        $mockRoleResolveStatement->method('fetch')->willReturn(['id' => 3]);
+
+        // UPDATE.
+        $mockUpdateStatement = $this->createMock(PDOStatement::class);
+        $mockUpdateStatement->method('execute')->willReturn(true);
+
+        // Re-fetch returns the updated user with the new role name.
+        $mockRefetchStatement = $this->createMock(PDOStatement::class);
+        $mockRefetchStatement->method('execute')->willReturn(true);
+        $mockRefetchStatement->method('fetch')->willReturn([
+            'id' => $userId,
+            'email' => "user{$userId}@example.com",
+            'password' => 'x',
+            'created_at' => '2026-01-01 00:00:00',
+            'tenant_id' => $this->testTenantId,
+            'role' => 'moderator',
+        ]);
 
         $this->mockDb->method('prepare')
-            ->willReturn($mockSelectStatement);
+            ->willReturnOnConsecutiveCalls(
+                $mockSelectStatement,
+                $mockRoleResolveStatement,
+                $mockUpdateStatement,
+                $mockRefetchStatement
+            );
 
-        $body = json_encode(['role_id' => 3]); // Attempt privilege escalation
+        $body = json_encode(['role' => 'moderator']);
 
         $request = new Request('PATCH', '/api/users/' . $userId, [], $body);
         $response = $this->handler->update($request, ['id' => $userId]);
 
-        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(200, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertArrayHasKey('data', $responseData);
+        $this->assertSame('moderator', $responseData['data']['role']);
+    }
+
+    /**
+     * A role NAME that is not visible to the tenant is rejected with 404 (the
+     * resolution SELECT finds nothing), so a tenant cannot assign an unknown or
+     * another tenant's private role (WC-113).
+     */
+    public function testUpdateUserWithUnresolvableRoleReturns404(): void
+    {
+        $userId = 5;
+        $userData = TestFixtureBuilder::user($userId, $this->testTenantId, 2);
+
+        $mockSelectStatement = $this->createMock(PDOStatement::class);
+        $mockSelectStatement->method('execute')->willReturn(true);
+        $mockSelectStatement->method('fetch')->willReturn($userData);
+
+        // Role resolution finds no visible role.
+        $mockRoleResolveStatement = $this->createMock(PDOStatement::class);
+        $mockRoleResolveStatement->method('execute')->willReturn(true);
+        $mockRoleResolveStatement->method('fetch')->willReturn(false);
+
+        $this->mockDb->method('prepare')
+            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockRoleResolveStatement);
+
+        $body = json_encode(['role' => 'ghost-role']);
+
+        $request = new Request('PATCH', '/api/users/' . $userId, [], $body);
+        $response = $this->handler->update($request, ['id' => $userId]);
+
+        $this->assertSame(404, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
         $this->assertArrayHasKey('error', $responseData);
-        $this->assertStringContainsString('Role changes are not allowed', $responseData['error']);
     }
 
     /**

@@ -111,6 +111,50 @@ class RouterTest extends TestCase
     }
 
     /**
+     * Test that routes default to no required permission
+     */
+    public function testRouteDefaultsToNoRequiredPermission(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/api/users', $handler);
+
+        $match = $this->router->match(new Request('GET', '/api/users'));
+
+        $this->assertNotNull($match);
+        $this->assertNull($match['requiredPermission']);
+    }
+
+    /**
+     * Test registering a route with a required permission (resource:action)
+     */
+    public function testRegisterRouteWithRequiredPermission(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/api/users', $handler, null, null, 'users:read');
+
+        $match = $this->router->match(new Request('GET', '/api/users'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('users:read', $match['requiredPermission']);
+        $this->assertNull($match['requiredRole']);
+    }
+
+    /**
+     * Test that role and permission metadata coexist on a route
+     */
+    public function testRouteCarriesBothRoleAndPermission(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('POST', '/api/users', $handler, 'admin', null, 'users:write');
+
+        $match = $this->router->match(new Request('POST', '/api/users'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('admin', $match['requiredRole']);
+        $this->assertSame('users:write', $match['requiredPermission']);
+    }
+
+    /**
      * Test middleware addition
      */
     public function testAddMiddleware(): void
@@ -171,5 +215,40 @@ class RouterTest extends TestCase
 
         $this->assertNotNull($match);
         $this->assertSame($handler2, $match['handler']);
+    }
+
+    /**
+     * Test that routes can be removed by their plugin namespace prefix
+     */
+    public function testUnregisterByNamespace(): void
+    {
+        $coreHandler = static fn() => 'core';
+        $pluginHandler = static fn() => 'plugin';
+
+        $this->router->register('GET', '/api/core', $coreHandler);
+        $this->router->register('GET', '/api/plugin', $pluginHandler, null, 'MyPlugin');
+
+        // Both routes match initially
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/core')));
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/plugin')));
+
+        // Removing the plugin namespace drops only its route
+        $removed = $this->router->unregisterByNamespace('MyPlugin');
+        $this->assertSame(1, $removed);
+
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/core')));
+        $this->assertNull($this->router->match(new Request('GET', '/api/plugin')));
+    }
+
+    /**
+     * Test that unregistering an unknown namespace removes nothing
+     */
+    public function testUnregisterByUnknownNamespaceRemovesNothing(): void
+    {
+        $this->router->register('GET', '/api/core', static fn() => 'core');
+
+        $removed = $this->router->unregisterByNamespace('DoesNotExist');
+        $this->assertSame(0, $removed);
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/core')));
     }
 }

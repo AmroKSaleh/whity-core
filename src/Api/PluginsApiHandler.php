@@ -1,34 +1,68 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Api;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\PluginLoader;
-use Whity\Core\Router;
 
 /**
  * Plugins API Handler
  *
- * Handles plugin discovery, enabling, and disabling.
+ * Handles plugin discovery, enabling, and disabling at the filesystem level, and
+ * - when a PluginLoader is wired in - exposes per-plugin lifecycle state plus a
+ * manual re-enable action for plugins that have been auto-disabled after
+ * repeated failures.
  */
 class PluginsApiHandler
 {
     private string $pluginDir;
 
-    public function __construct(string $pluginDir)
+    /**
+     * Optional in-memory plugin loader used to read/mutate lifecycle state.
+     *
+     * Filesystem operations (enable/disable by renaming files) work without it,
+     * but lifecycle reporting and re-enable require the live loader instance.
+     */
+    private ?PluginLoader $pluginLoader;
+
+    /**
+     * @param string $pluginDir Directory containing plugin files.
+     * @param PluginLoader|null $pluginLoader Optional live loader for lifecycle state.
+     */
+    public function __construct(string $pluginDir, ?PluginLoader $pluginLoader = null)
     {
         $this->pluginDir = $pluginDir;
+        $this->pluginLoader = $pluginLoader;
     }
 
     /**
      * GET /api/plugins - List all plugins
+     *
+     * Each entry carries the AC #1 contract fields: name, version, status (from
+     * the WC-9 lifecycle), routes_count, and permissions_count. The filesystem
+     * id/enabled/file fields and the lifecycle error details are also included
+     * for backward compatibility. When a loader is available, loaded plugins are
+     * enriched with their live metadata and lifecycle state; without a loader the
+     * handler falls back to a plain filesystem listing.
+     *
+     * @param Request $request The incoming request.
+     * @return Response
      */
     public function list(Request $request): Response
     {
         try {
+            $lifecycleByName = $this->lifecycleStatusByName();
+            $metadataByName = $this->metadataByName();
+
             $plugins = [];
             $files = scandir($this->pluginDir);
+
+            if ($files === false) {
+                $files = [];
+            }
 
             foreach ($files as $file) {
                 if ($file === '.' || $file === '..' || $file === '.gitkeep') {
@@ -38,33 +72,377 @@ class PluginsApiHandler
                 $path = $this->pluginDir . '/' . $file;
                 $extension = pathinfo($file, PATHINFO_EXTENSION);
 
-                if ($extension === 'php' || (strpos($file, '.php.disabled') !== false)) {
+                if (is_dir($path) || $extension === 'php' || (strpos($file, '.php.disabled') !== false)) {
                     $id = str_replace(['.php.disabled', '.php'], '', $file);
-                    $enabled = $extension === 'php';
+                    $enabled = !is_dir($path) ? $extension === 'php' : true;
 
-                    $plugins[] = [
+                    $entry = [
                         'id' => $id,
-                        'name' => $id, // Use ID as name for now
+                        'name' => $id,
                         'enabled' => $enabled,
-                        'file' => $file
+                        'file' => $file,
+                    ];
+
+                    $entry += $this->matchLifecycle($id, $lifecycleByName);
+                    $entry += $this->matchMetadata($id, $metadataByName);
+                    $entry += $this->defaultMetadata($enabled);
+                    $plugins[] = $entry;
+                }
+            }
+
+            // Surface any loaded plugins that have no on-disk file entry matched
+            // above (e.g. nested plugins whose folder name differs from the id).
+            foreach ($this->loaderMetadata() as $meta) {
+                if (!$this->metadataAlreadyListed($meta, $plugins)) {
+                    $plugins[] = [
+                        'id' => $meta['id'],
+                        'name' => $meta['name'],
+                        'enabled' => $meta['status'] !== 'disabled',
+                        'file' => null,
+                        'version' => $meta['version'],
+                        'status' => $meta['status'],
+                        'routes_count' => $meta['routes_count'],
+                        'permissions_count' => $meta['permissions_count'],
                     ];
                 }
             }
 
             return Response::json(['data' => $plugins], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return Response::error('Failed to list plugins: ' . $e->getMessage(), 500);
         }
     }
 
     /**
-     * POST /api/plugins/{id}/enable - Enable a plugin
+     * POST /api/plugins/{name}/enable - Enable (or re-enable) a plugin
+     *
+     * When a loader is wired and the identifier resolves to a loaded plugin, the
+     * plugin is re-enabled at runtime (WC-9 re-enable path): its lifecycle
+     * returns to active and any routes/hooks torn down by a prior disable are
+     * re-registered. Otherwise the handler falls back to the filesystem rename
+     * that enables a `.php.disabled` plugin file on disk.
+     *
+     * @param Request $request The incoming request.
+     * @param array<string, string> $params Route parameters (accepts 'name' or 'id').
+     * @return Response
      */
     public function enable(Request $request, array $params): Response
     {
-        $id = $params['id'] ?? null;
-        if (!$id) return Response::error('Plugin ID required', 400);
+        $identifier = $this->identifier($params);
+        if ($identifier === null) {
+            return Response::error('Plugin identifier required', 400);
+        }
 
+        // Prefer the live loader: re-enable a runtime-disabled/failed plugin.
+        if ($this->pluginLoader !== null) {
+            $key = $this->resolvePluginKey($identifier);
+            if ($key !== null) {
+                $this->pluginLoader->reEnablePlugin($key);
+                $lifecycle = $this->pluginLoader->getLifecycle($key);
+
+                return Response::json([
+                    'data' => [
+                        'message' => "Plugin {$identifier} enabled",
+                        'state' => $lifecycle?->getState()->value,
+                    ],
+                ], 200);
+            }
+        }
+
+        return $this->enableOnDisk($identifier);
+    }
+
+    /**
+     * POST /api/plugins/{name}/disable - Disable a plugin
+     *
+     * When a loader is wired and the identifier resolves to a loaded plugin, the
+     * plugin is disabled at runtime: its routes are unregistered (WC-8's
+     * {@see \Whity\Core\Router::unregisterByNamespace()}), its hooks are removed,
+     * and its lifecycle transitions to 'disabled'. Otherwise the handler falls
+     * back to renaming the plugin file on disk to `.php.disabled`.
+     *
+     * @param Request $request The incoming request.
+     * @param array<string, string> $params Route parameters (accepts 'name' or 'id').
+     * @return Response
+     */
+    public function disable(Request $request, array $params): Response
+    {
+        $identifier = $this->identifier($params);
+        if ($identifier === null) {
+            return Response::error('Plugin identifier required', 400);
+        }
+
+        // Prefer the live loader: tear down the plugin's runtime capabilities.
+        if ($this->pluginLoader !== null) {
+            $key = $this->resolvePluginKey($identifier);
+            if ($key !== null) {
+                if (!$this->pluginLoader->disablePlugin($key)) {
+                    return Response::error('Plugin not found', 404);
+                }
+
+                $lifecycle = $this->pluginLoader->getLifecycle($key);
+
+                return Response::json([
+                    'data' => [
+                        'message' => "Plugin {$identifier} disabled",
+                        'state' => $lifecycle?->getState()->value,
+                    ],
+                ], 200);
+            }
+
+            // A loader is present but the plugin is not loaded in-memory; only
+            // fall through to the filesystem path when a matching file exists.
+            if (!$this->hasPluginFile($identifier)) {
+                return Response::error('Plugin not found', 404);
+            }
+        }
+
+        return $this->disableOnDisk($identifier);
+    }
+
+    /**
+     * POST /api/plugins/{id}/re-enable - Clear the failed state of a plugin
+     *
+     * Returns an auto-disabled (failed) or administratively disabled plugin to
+     * the active state with a clean error counter, so it may serve requests
+     * again. Identity is the plugin's runtime key (its original FQCN).
+     *
+     * @param Request $request The incoming request.
+     * @param array<string, string> $params Route parameters (expects 'id').
+     * @return Response
+     */
+    public function reEnable(Request $request, array $params): Response
+    {
+        $id = $params['id'] ?? null;
+        if ($id === null || $id === '') {
+            return Response::error('Plugin ID required', 400);
+        }
+
+        if ($this->pluginLoader === null) {
+            return Response::error('Plugin lifecycle management is unavailable', 503);
+        }
+
+        if (!$this->pluginLoader->reEnablePlugin($id)) {
+            return Response::error('Plugin not found', 404);
+        }
+
+        $lifecycle = $this->pluginLoader->getLifecycle($id);
+
+        return Response::json([
+            'data' => [
+                'message' => "Plugin {$id} re-enabled",
+                'state' => $lifecycle?->getState()->value,
+            ],
+        ], 200);
+    }
+
+    /**
+     * POST /api/plugins/reload - Reload plugins (just a success message for now as they hotload)
+     *
+     * @param Request $request The incoming request.
+     * @return Response
+     */
+    public function reload(Request $request): Response
+    {
+        return Response::json(['data' => ['message' => 'Plugins reloaded']], 200);
+    }
+
+    /**
+     * Get lifecycle status snapshots from the loader, if available.
+     *
+     * @return array<int, array{id: string, name: string, state: string, consecutive_errors: int, last_error: array{message: string, type: string, trace: string, at: int}|null}>
+     */
+    private function loaderStatuses(): array
+    {
+        if ($this->pluginLoader === null) {
+            return [];
+        }
+
+        return $this->pluginLoader->getPluginStatuses();
+    }
+
+    /**
+     * Index loader statuses by plugin name for matching against on-disk files.
+     *
+     * @return array<string, array{id: string, name: string, state: string, consecutive_errors: int, last_error: array{message: string, type: string, trace: string, at: int}|null}>
+     */
+    private function lifecycleStatusByName(): array
+    {
+        $byName = [];
+        foreach ($this->loaderStatuses() as $status) {
+            $byName[$status['name']] = $status;
+        }
+
+        return $byName;
+    }
+
+    /**
+     * Resolve the lifecycle fields for a filesystem-listed plugin id.
+     *
+     * @param string $id The filesystem-derived plugin id.
+     * @param array<string, array{id: string, name: string, state: string, consecutive_errors: int, last_error: array{message: string, type: string, trace: string, at: int}|null}> $byName
+     * @return array{state?: string, consecutive_errors?: int, last_error?: array{message: string, type: string, trace: string, at: int}|null, lifecycle_id?: string}
+     */
+    private function matchLifecycle(string $id, array $byName): array
+    {
+        $status = $byName[$id] ?? null;
+        if ($status === null) {
+            return [];
+        }
+
+        return [
+            'state' => $status['state'],
+            'consecutive_errors' => $status['consecutive_errors'],
+            'last_error' => $status['last_error'],
+            'lifecycle_id' => $status['id'],
+        ];
+    }
+
+    /**
+     * Get admin-facing plugin metadata from the loader, if available.
+     *
+     * @return array<int, array{id: string, name: string, version: string, status: string, routes_count: int, permissions_count: int}>
+     */
+    private function loaderMetadata(): array
+    {
+        if ($this->pluginLoader === null) {
+            return [];
+        }
+
+        return $this->pluginLoader->getPluginMetadata();
+    }
+
+    /**
+     * Index loader metadata by plugin name for matching against on-disk files.
+     *
+     * @return array<string, array{id: string, name: string, version: string, status: string, routes_count: int, permissions_count: int}>
+     */
+    private function metadataByName(): array
+    {
+        $byName = [];
+        foreach ($this->loaderMetadata() as $meta) {
+            $byName[$meta['name']] = $meta;
+        }
+
+        return $byName;
+    }
+
+    /**
+     * Resolve the AC #1 metadata fields for a filesystem-listed plugin id.
+     *
+     * @param string $id The filesystem-derived plugin id.
+     * @param array<string, array{id: string, name: string, version: string, status: string, routes_count: int, permissions_count: int}> $byName
+     * @return array{version?: string, status?: string, routes_count?: int, permissions_count?: int}
+     */
+    private function matchMetadata(string $id, array $byName): array
+    {
+        $meta = $byName[$id] ?? null;
+        if ($meta === null) {
+            return [];
+        }
+
+        return [
+            'version' => $meta['version'],
+            'status' => $meta['status'],
+            'routes_count' => $meta['routes_count'],
+            'permissions_count' => $meta['permissions_count'],
+        ];
+    }
+
+    /**
+     * Default metadata for plugins with no live loader information.
+     *
+     * The `+=` merge in {@see list()} means these only fill gaps left by
+     * {@see matchMetadata()}/{@see matchLifecycle()}, so a loaded plugin's real
+     * values always win. Status defaults to the on-disk enabled/disabled flag.
+     *
+     * @param bool $enabled Whether the plugin file is enabled on disk.
+     * @return array{version: string|null, status: string, routes_count: int|null, permissions_count: int|null}
+     */
+    private function defaultMetadata(bool $enabled): array
+    {
+        return [
+            'version' => null,
+            'status' => $enabled ? 'enabled' : 'disabled',
+            'routes_count' => null,
+            'permissions_count' => null,
+        ];
+    }
+
+    /**
+     * Determine whether loader metadata was already represented in the listing.
+     *
+     * @param array{id: string, name: string, version: string, status: string, routes_count: int, permissions_count: int} $meta
+     * @param array<int, array<string, mixed>> $plugins
+     * @return bool
+     */
+    private function metadataAlreadyListed(array $meta, array $plugins): bool
+    {
+        foreach ($plugins as $plugin) {
+            if (($plugin['name'] ?? null) === $meta['name']) {
+                return true;
+            }
+            if (($plugin['name'] ?? null) === $meta['id']) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Extract the plugin identifier from route params, accepting 'name' or 'id'.
+     *
+     * @param array<string, string> $params Route parameters.
+     * @return string|null The identifier, or null when absent/empty.
+     */
+    private function identifier(array $params): ?string
+    {
+        $identifier = $params['name'] ?? $params['id'] ?? null;
+
+        return ($identifier === null || $identifier === '') ? null : $identifier;
+    }
+
+    /**
+     * Resolve a human name or FQCN identifier to a loaded plugin's stable key.
+     *
+     * Matches first by the plugin's runtime key (original FQCN), then by its
+     * human-readable name, so admin routes may use either.
+     *
+     * @param string $identifier The name or FQCN supplied by the caller.
+     * @return string|null The plugin's stable key, or null if it is not loaded.
+     */
+    private function resolvePluginKey(string $identifier): ?string
+    {
+        foreach ($this->loaderMetadata() as $meta) {
+            if ($meta['id'] === $identifier || $meta['name'] === $identifier) {
+                return $meta['id'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether an enabled or disabled plugin file exists on disk for the id.
+     *
+     * @param string $id The filesystem-derived plugin id.
+     * @return bool
+     */
+    private function hasPluginFile(string $id): bool
+    {
+        return file_exists($this->pluginDir . '/' . $id . '.php')
+            || file_exists($this->pluginDir . '/' . $id . '.php.disabled');
+    }
+
+    /**
+     * Enable a plugin by renaming its `.php.disabled` file back to `.php`.
+     *
+     * @param string $id The filesystem-derived plugin id.
+     * @return Response
+     */
+    private function enableOnDisk(string $id): Response
+    {
         $disabledPath = $this->pluginDir . '/' . $id . '.php.disabled';
         $enabledPath = $this->pluginDir . '/' . $id . '.php';
 
@@ -84,13 +462,13 @@ class PluginsApiHandler
     }
 
     /**
-     * POST /api/plugins/{id}/disable - Disable a plugin
+     * Disable a plugin by renaming its `.php` file to `.php.disabled`.
+     *
+     * @param string $id The filesystem-derived plugin id.
+     * @return Response
      */
-    public function disable(Request $request, array $params): Response
+    private function disableOnDisk(string $id): Response
     {
-        $id = $params['id'] ?? null;
-        if (!$id) return Response::error('Plugin ID required', 400);
-
         $enabledPath = $this->pluginDir . '/' . $id . '.php';
         $disabledPath = $this->pluginDir . '/' . $id . '.php.disabled';
 
@@ -107,13 +485,5 @@ class PluginsApiHandler
         }
 
         return Response::error('Failed to disable plugin', 500);
-    }
-
-    /**
-     * POST /api/plugins/reload - Reload plugins (just a success message for now as they hotload)
-     */
-    public function reload(Request $request): Response
-    {
-        return Response::json(['data' => ['message' => 'Plugins reloaded']], 200);
     }
 }

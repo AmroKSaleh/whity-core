@@ -30,7 +30,23 @@ services:
       DB_NAME: ${DB_NAME:-whity_core}
       DB_HOST: postgres
       DB_PORT: ${DB_PORT:-5432}
+      # Connection pooling for persistent FrankenPHP workers (WC-21).
+      # DB_CONNECT_TIMEOUT: seconds to wait when (re)opening a PostgreSQL socket.
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5}
+      # DB_MAX_LIFETIME: seconds before a worker recycles its connection. Kept
+      # well below typical server idle timeouts so connections are refreshed
+      # before the server can drop them. Default 30 minutes.
+      DB_MAX_LIFETIME: ${DB_MAX_LIFETIME:-1800}
+      # DB_PING_INTERVAL: minimum seconds between "SELECT 1" health checks before
+      # a query. Throttles liveness checks so a hot worker is not pinged on every
+      # request while still catching connections that died while the worker idled.
+      DB_PING_INTERVAL: ${DB_PING_INTERVAL:-5}
       JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      # ENCRYPTION_KEY: secret used to AES-256-CBC encrypt stored TOTP 2FA secrets (WC-95).
+      # MUST be identical across setup/confirm and login so encrypt/decrypt use the same key.
+      # The dev default below is for local use only; outside APP_ENV=development the app fails fast
+      # if this is unset/empty (mirroring JWT_SECRET). Override in production with a strong secret.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
       CADDY_GLOBAL_OPTIONS: "auto_https off"
       SERVER_NAME: ":80"
       SERVER_ROOT: "public/"

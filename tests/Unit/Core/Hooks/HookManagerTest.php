@@ -162,4 +162,46 @@ class HookManagerTest extends TestCase
         $this->assertIsArray($listeners);
         $this->assertEmpty($listeners);
     }
+
+    public function testRemoveListenerRemovesMatchingCallback(): void
+    {
+        $callbackA = static fn(array $data, array $context): array => $data;
+        $callbackB = static fn(array $data, array $context): array => $data;
+
+        $this->hookManager->listen('event.x', $callbackA);
+        $this->hookManager->listen('event.x', $callbackB);
+
+        $removed = $this->hookManager->removeListener('event.x', $callbackA);
+        $this->assertTrue($removed);
+
+        // The event still has callbackB, but the empty priority bucket was cleaned up
+        $listeners = $this->hookManager->getListeners('event.x');
+        $flattened = [];
+        foreach ($listeners as $callbacks) {
+            foreach ($callbacks as $callback) {
+                $flattened[] = $callback;
+            }
+        }
+        $this->assertCount(1, $flattened);
+        $this->assertSame($callbackB, $flattened[0]);
+    }
+
+    public function testRemoveListenerPrunesEmptyEvent(): void
+    {
+        $callback = static fn(array $data, array $context): array => $data;
+        $this->hookManager->listen('event.y', $callback, 5);
+
+        $this->assertTrue($this->hookManager->removeListener('event.y', $callback));
+
+        // Removing the only listener leaves no trace of the event
+        $this->assertEmpty($this->hookManager->getListeners('event.y'));
+        $this->assertArrayNotHasKey('event.y', $this->hookManager->getListeners());
+    }
+
+    public function testRemoveListenerReturnsFalseWhenNotFound(): void
+    {
+        $callback = static fn(array $data, array $context): array => $data;
+
+        $this->assertFalse($this->hookManager->removeListener('event.z', $callback));
+    }
 }

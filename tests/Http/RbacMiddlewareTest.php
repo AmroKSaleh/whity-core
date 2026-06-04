@@ -272,6 +272,9 @@ class RbacMiddlewareTest extends TestCase
 
     /**
      * Test user object is set on request with full payload
+     *
+     * Authorization is always decided against the authoritative store
+     * (RoleChecker), never the JWT role claim, so hasRole must be stubbed.
      */
     public function testUserObjectSetOnRequest(): void
     {
@@ -297,9 +300,105 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
+        $this->mockRoleChecker->method('hasRole')
+            ->with(456, 'admin')
+            ->willReturn(true);
+
         $response = $this->middleware->handle($request, $next, 'admin');
 
         $this->assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * Test that a JWT role claim does NOT grant access (issue #54).
+     *
+     * The previous implementation trusted a `role` claim in the token and
+     * skipped the authoritative permission check. The corrected middleware
+     * ignores the claim entirely and denies access when the authoritative
+     * store reports the user lacks the permission.
+     */
+    public function testTokenRoleClaimDoesNotBypassPermissionCheck(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = [
+            'user_id' => 99,
+            'email' => 'attacker@example.com',
+            'role' => 'admin', // forged/elevated claim must be ignored
+        ];
+
+        $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$validToken}"]);
+        $handlerCalled = false;
+        $next = function (Request $req) use (&$handlerCalled) {
+            $handlerCalled = true;
+            return new Response(200, 'Success');
+        };
+
+        $this->mockJwtParser->method('parse')
+            ->with($validToken)
+            ->willReturn($payload);
+
+        // Authoritative store: user does NOT have the permission.
+        $this->mockRoleChecker->method('hasPermission')
+            ->with(99, 'users:read')
+            ->willReturn(false);
+
+        $response = $this->middleware->handle($request, $next, null, 'users:read');
+
+        $this->assertFalse($handlerCalled, 'Handler must not run when the authoritative check fails');
+        $this->assertSame(403, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame('Insufficient permissions', $responseData['error']);
+        $this->assertSame('users:read', $responseData['required']);
+    }
+
+    /**
+     * Test that the 403 permission-denied body includes the `required` field.
+     */
+    public function testPermissionDeniedIncludesRequiredField(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = ['user_id' => 7, 'email' => 'user@example.com'];
+
+        $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$validToken}"]);
+        $next = fn(Request $req) => new Response(200, 'Success');
+
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+        $this->mockRoleChecker->method('hasPermission')
+            ->with(7, 'users:read')
+            ->willReturn(false);
+
+        $response = $this->middleware->handle($request, $next, null, 'users:read');
+
+        $this->assertSame(403, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame(
+            ['error' => 'Insufficient permissions', 'required' => 'users:read'],
+            $responseData
+        );
+    }
+
+    /**
+     * Test that a role-only denial does NOT leak a `required` permission field.
+     */
+    public function testRoleDeniedDoesNotIncludeRequiredField(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = ['user_id' => 8, 'email' => 'user@example.com'];
+
+        $request = new Request('GET', '/api/admin', ['Authorization' => "Bearer {$validToken}"]);
+        $next = fn(Request $req) => new Response(200, 'Success');
+
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+        $this->mockRoleChecker->method('hasRole')
+            ->with(8, 'admin')
+            ->willReturn(false);
+
+        $response = $this->middleware->handle($request, $next, 'admin');
+
+        $this->assertSame(403, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame('Insufficient permissions', $responseData['error']);
+        $this->assertArrayNotHasKey('required', $responseData);
     }
 
     /**
@@ -359,6 +458,7 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
         $this->assertSame('Insufficient permissions', $responseData['error']);
+        $this->assertSame('delete:users', $responseData['required']);
     }
 
     /**

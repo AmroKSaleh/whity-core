@@ -11,9 +11,10 @@ node_modules/
 dist/
 build/
 
-# Docs: only wiki should be committed
+# Docs: only wiki and ADRs should be committed
 docs/*
 !docs/wiki/
+!docs/adr/
 .worktrees/
 .phpunit.cache/
 

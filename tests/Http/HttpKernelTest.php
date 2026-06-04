@@ -310,7 +310,10 @@ class HttpKernelTest extends TestCase
             'email' => 'user@example.com'
         ];
 
-        $jwtParser->expects($this->once())
+        // The middleware delegates tenant resolution to TenantContext::resolve()
+        // (which parses the token) and re-derives the decoded payload to expose it
+        // as Request::$user, so the parser may be invoked more than once.
+        $jwtParser->expects($this->atLeastOnce())
             ->method('parse')
             ->with($validToken)
             ->willReturn($payload);
@@ -345,10 +348,12 @@ class HttpKernelTest extends TestCase
         $request = new Request('GET', '/test');
         $response = $kernel->handle($request);
 
-        // Verify 401 response
+        // Verify 401 response. The middleware collapses every resolution failure
+        // (missing/invalid token, missing/invalid tenant claim) to a single
+        // client-safe message so request internals are never leaked.
         $this->assertSame(401, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
-        $this->assertSame('Missing or invalid Authorization header', $responseData['error']);
+        $this->assertSame('Authentication required', $responseData['error']);
     }
 
     /**

@@ -8,12 +8,36 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
+/**
+ * Backup/recovery codes are issued by BackupCodesService in the exact form
+ * XXXX-XXXX-XXXX: 12 uppercase alphanumeric characters (A-Z, 0-9) grouped in
+ * threes by hyphens (14 chars total), and the backend validates the FULL string
+ * via password_verify. The full length of an unhyphenated code is 12 chars; the
+ * hyphenated, ready-to-submit length is 14.
+ */
+const BACKUP_CODE_DIGITS = 12;
+const BACKUP_CODE_LENGTH = 14;
+
+/**
+ * Normalize free-form user input into the canonical XXXX-XXXX-XXXX backup-code
+ * form so the value submitted to the backend matches the issued code exactly.
+ * Accepts input pasted with or without hyphens (and lowercase) and never
+ * truncates a complete code: strip to A-Z/0-9, cap at 12 characters, then
+ * re-insert the group hyphens.
+ */
+function formatBackupCode(raw: string): string {
+  const chars = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, BACKUP_CODE_DIGITS);
+  const groups = chars.match(/.{1,4}/g) ?? [];
+  return groups.join('-');
+}
+
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthenticated, login, isLoading, error, refreshAuth } = useAuth();
+  const { isAuthenticated, isLoading, refreshAuth } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [requires2fa, setRequires2fa] = useState(false);
@@ -60,6 +84,7 @@ export default function LoginPage() {
     }
 
     setIsSubmitting(true);
+    setLoginError(null);
     try {
       // Check for 2FA requirement first
       const response = await fetch('/api/login', {
@@ -87,10 +112,15 @@ export default function LoginPage() {
         router.push('/dashboard');
       } else {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Login failed');
+        const message =
+          response.status === 401
+            ? 'Invalid credentials'
+            : errorData.message || 'Login failed';
+        throw new Error(message);
       }
     } catch (err) {
-      // Error is handled by displaying below
+      const message = err instanceof Error ? err.message : 'Login failed';
+      setLoginError(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -101,8 +131,8 @@ export default function LoginPage() {
 
     // Validate code length based on mode
     if (backupCodeMode) {
-      if (twoFactorCode.length !== 8) {
-        setTwoFactorError('Recovery code must be exactly 8 characters');
+      if (twoFactorCode.length !== BACKUP_CODE_LENGTH) {
+        setTwoFactorError('Recovery code must be in the format XXXX-XXXX-XXXX');
         return;
       }
     } else {
@@ -166,9 +196,9 @@ export default function LoginPage() {
           {!requires2fa && (
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
-              {error && (
+              {loginError && (
                 <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription>{loginError}</AlertDescription>
                 </Alert>
               )}
 
@@ -187,6 +217,9 @@ export default function LoginPage() {
                     setEmail(e.target.value);
                     if (fieldErrors.email) {
                       setFieldErrors({ ...fieldErrors, email: undefined });
+                    }
+                    if (loginError) {
+                      setLoginError(null);
                     }
                   }}
                   disabled={isFormDisabled}
@@ -211,6 +244,9 @@ export default function LoginPage() {
                     setPassword(e.target.value);
                     if (fieldErrors.password) {
                       setFieldErrors({ ...fieldErrors, password: undefined });
+                    }
+                    if (loginError) {
+                      setLoginError(null);
                     }
                   }}
                   disabled={isFormDisabled}
@@ -314,7 +350,7 @@ export default function LoginPage() {
                   {/* Recovery Instructions Box */}
                   <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
                     <p className="text-sm text-slate-600">
-                      <strong>Recovery codes</strong> are 8-character codes you saved when setting up two-factor authentication. You have limited recovery codes remaining.
+                      <strong>Recovery codes</strong> are the XXXX-XXXX-XXXX codes you saved when setting up two-factor authentication. Enter one exactly as it was issued.
                     </p>
                   </div>
 
@@ -327,27 +363,26 @@ export default function LoginPage() {
                       ref={recoveryCodeInputRef}
                       id="recoveryCode"
                       type="text"
-                      placeholder="XXXXXXXX"
+                      placeholder="XXXX-XXXX-XXXX"
                       value={twoFactorCode}
                       onChange={(e) => {
-                        const cleaned = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-                        setTwoFactorCode(cleaned);
+                        setTwoFactorCode(formatBackupCode(e.target.value));
                         if (twoFactorError) {
                           setTwoFactorError(null);
                         }
                       }}
                       disabled={twoFactorLoading}
-                      maxLength={8}
+                      maxLength={BACKUP_CODE_LENGTH}
                       className="text-center text-lg tracking-wider font-mono"
                     />
-                    <p className="text-xs text-slate-500">Format: 8 characters (e.g., ABC12345)</p>
+                    <p className="text-xs text-slate-500">Format: XXXX-XXXX-XXXX (e.g., A1B2-C3D4-E5F6)</p>
                   </div>
 
                   {/* Verify Recovery Button */}
                   <Button
                     type="submit"
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                    disabled={twoFactorCode.length !== 8 || twoFactorLoading}
+                    disabled={twoFactorCode.length !== BACKUP_CODE_LENGTH || twoFactorLoading}
                   >
                     {twoFactorLoading ? 'Verifying...' : 'Verify Recovery Code'}
                   </Button>

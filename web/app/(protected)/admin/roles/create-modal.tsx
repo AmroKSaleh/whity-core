@@ -96,7 +96,7 @@ export function CreateRoleModal({
         body: JSON.stringify({
           name: data.name,
           description: data.description,
-          permissionIds: data.permissionIds,
+          permissions: data.permissionIds,
         }),
       });
 

@@ -106,6 +106,50 @@ class HookManager
     }
 
     /**
+     * Remove a previously registered listener for an event
+     *
+     * Compares callbacks by identity. Used by the plugin hot-reload mechanism to
+     * unsubscribe hooks belonging to a plugin that has been removed or is about
+     * to be re-registered with updated code. Empty priority buckets and events
+     * are pruned so that getListeners() reflects the removal.
+     *
+     * @param string $eventName The event the listener was registered for
+     * @param callable $callback The exact callback to remove
+     * @return bool True if a listener was removed, false otherwise
+     */
+    public function removeListener(string $eventName, callable $callback): bool
+    {
+        if (!isset($this->listeners[$eventName])) {
+            return false;
+        }
+
+        $removed = false;
+
+        foreach ($this->listeners[$eventName] as $priority => $callbacks) {
+            foreach ($callbacks as $index => $registered) {
+                if ($registered === $callback) {
+                    unset($this->listeners[$eventName][$priority][$index]);
+                    $removed = true;
+                }
+            }
+
+            if (empty($this->listeners[$eventName][$priority])) {
+                unset($this->listeners[$eventName][$priority]);
+            } else {
+                $this->listeners[$eventName][$priority] = array_values(
+                    $this->listeners[$eventName][$priority]
+                );
+            }
+        }
+
+        if (empty($this->listeners[$eventName])) {
+            unset($this->listeners[$eventName]);
+        }
+
+        return $removed;
+    }
+
+    /**
      * Get listeners for an event or all events
      *
      * @param string|null $eventName The event name, or null for all events

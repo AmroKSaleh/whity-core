@@ -1,36 +1,55 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Core\RBAC;
 
 use Whity\Core\Hooks\HookManager;
 
 /**
- * PermissionRegistry holds all permissions registered by plugins
+ * PermissionRegistry is the centralized catalogue of every permission known to
+ * the platform, collected from both the core system and loaded plugins.
  *
- * Maintains an in-memory registry of permissions by plugin ID. Plugins are the
- * single source of truth - when a plugin is deleted, its permissions instantly
- * disappear from the system. This ensures no database drift or stale permissions.
+ * Permissions follow a `resource:action` naming pattern (e.g. `users:read`,
+ * `roles:manage`, `plugins:manage`) and are tagged with their source: the
+ * literal `core` for built-in permissions, or the plugin name for plugin
+ * permissions.
+ *
+ * Core permissions are registered lazily on first read so that the RBAC layer
+ * can validate them even when no explicit bootstrap wiring runs (issue #55).
+ * Plugins remain the single source of truth for their own permissions: when a
+ * plugin is unloaded its permissions instantly disappear, preventing stale
+ * permissions or database drift.
+ *
+ * This registry holds worker-level state only. It is safe to share across
+ * requests on FrankenPHP persistent workers because it never stores anything
+ * request-specific.
  */
 class PermissionRegistry
 {
     /**
-     * Permissions organized by plugin ID
+     * Permissions organized by source (plugin ID or {@see CorePermissions::SOURCE}).
      *
-     * Structure: ['plugin_id' => ['permission1', 'permission2']]
+     * Structure: ['source' => ['permission1', 'permission2']]
      *
-     * @var array<string, array<string>> Permissions keyed by plugin ID
+     * @var array<string, array<int, string>> Permissions keyed by source.
      */
-    protected array $pluginPermissions = [];
+    protected array $permissionsBySource = [];
 
     /**
-     * Optional HookManager for dispatching events
+     * Whether the core permission set has already been registered.
+     */
+    private bool $coreRegistered = false;
+
+    /**
+     * Optional HookManager for dispatching events.
      */
     private ?HookManager $hookManager = null;
 
     /**
-     * Constructor
+     * Constructor.
      *
-     * @param HookManager|null $hookManager Optional HookManager instance
+     * @param HookManager|null $hookManager Optional HookManager instance.
      */
     public function __construct(?HookManager $hookManager = null)
     {
@@ -38,40 +57,77 @@ class PermissionRegistry
     }
 
     /**
-     * Register permissions for a plugin
+     * Register a set of permissions under a given source.
      *
-     * Stores the permissions in the in-memory registry. If HookManager is set,
-     * dispatches a 'permission.registered' hook for monitoring/logging.
+     * This is the preferred registration entry point. Every permission is
+     * validated against the `resource:action` pattern before being stored.
      *
-     * @param string $pluginId The plugin ID
-     * @param array<string> $permissions Array of permission strings
+     * @param string $source The permission source (`core` or a plugin name).
+     * @param array<int, string> $permissions Array of `resource:action` strings.
+     * @return void
+     *
+     * @throws InvalidPermissionException If any permission is malformed.
+     */
+    public function register(string $source, array $permissions): void
+    {
+        foreach ($permissions as $permission) {
+            if (!self::isValidPermission($permission)) {
+                throw InvalidPermissionException::forPermission($permission);
+            }
+        }
+
+        $this->storeAndDispatch($source, array_values($permissions));
+    }
+
+    /**
+     * Register permissions for a plugin.
+     *
+     * Backward-compatible entry point used by {@see \Whity\Core\PluginLoader}.
+     * Unlike {@see register()}, this method does not enforce the
+     * `resource:action` pattern, preserving the behaviour relied upon by
+     * existing callers and tests.
+     *
+     * @param string $pluginId The plugin ID.
+     * @param array<int, string> $permissions Array of permission strings.
      * @return void
      */
     public function registerPermissions(string $pluginId, array $permissions): void
     {
-        $this->pluginPermissions[$pluginId] = $permissions;
-
-        // Dispatch hook if HookManager is available
-        if ($this->hookManager !== null) {
-            $this->hookManager->dispatch('permission.registered', [
-                'plugin_id' => $pluginId,
-                'permissions' => $permissions,
-            ]);
-        }
+        $this->storeAndDispatch($pluginId, array_values($permissions));
     }
 
     /**
-     * Check if a permission exists in the registry
+     * Register the canonical core permission set (issue #55).
      *
-     * Loops through all plugins' permissions and checks if the given permission
-     * is registered using strict type comparison.
+     * Idempotent: repeated calls leave the `core` source unchanged. This method
+     * is bootstrap-safe and may be called from anywhere (CLI bootstrap, HTTP
+     * kernel, or implicitly via the first registry read).
      *
-     * @param string $permission The permission to check
-     * @return bool True if permission exists, false otherwise
+     * @return void
      */
-    public function permissionExists(string $permission): bool
+    public function registerCorePermissions(): void
     {
-        foreach ($this->pluginPermissions as $permissions) {
+        if ($this->coreRegistered) {
+            return;
+        }
+
+        // Mark as registered first so the storeAndDispatch hook cannot recurse
+        // back into lazy core registration.
+        $this->coreRegistered = true;
+        $this->storeAndDispatch(CorePermissions::SOURCE, CorePermissions::all());
+    }
+
+    /**
+     * Check whether a permission exists in the registry (any source).
+     *
+     * @param string $permission The permission to check.
+     * @return bool True if the permission is registered, false otherwise.
+     */
+    public function exists(string $permission): bool
+    {
+        $this->ensureCoreRegistered();
+
+        foreach ($this->permissionsBySource as $permissions) {
             if (in_array($permission, $permissions, true)) {
                 return true;
             }
@@ -81,33 +137,146 @@ class PermissionRegistry
     }
 
     /**
-     * Get permissions for a specific plugin
+     * Check if a permission exists in the registry.
      *
-     * @param string $pluginId The plugin ID
-     * @return array<string> The permissions array for this plugin, or empty array if not registered
+     * Backward-compatible alias of {@see exists()}.
+     *
+     * @param string $permission The permission to check.
+     * @return bool True if permission exists, false otherwise.
+     */
+    public function permissionExists(string $permission): bool
+    {
+        return $this->exists($permission);
+    }
+
+    /**
+     * Get every registered permission mapped to its source.
+     *
+     * @return array<string, string> Map of `permission => source`.
+     */
+    public function getAll(): array
+    {
+        $this->ensureCoreRegistered();
+
+        $all = [];
+        foreach ($this->permissionsBySource as $source => $permissions) {
+            foreach ($permissions as $permission) {
+                $all[$permission] = $source;
+            }
+        }
+
+        return $all;
+    }
+
+    /**
+     * Get the permissions registered under a specific source.
+     *
+     * @param string $source The source (`core` or a plugin name).
+     * @return array<int, string> The permissions for this source, or an empty array.
+     */
+    public function getBySource(string $source): array
+    {
+        $this->ensureCoreRegistered();
+
+        return $this->permissionsBySource[$source] ?? [];
+    }
+
+    /**
+     * Get permissions for a specific plugin.
+     *
+     * Backward-compatible accessor scoped to plugin sources; the `core` source
+     * is intentionally excluded so legacy plugin-oriented callers are unaffected.
+     *
+     * @param string $pluginId The plugin ID.
+     * @return array<int, string> The permissions for this plugin, or an empty array.
      */
     public function getPluginPermissions(string $pluginId): array
     {
-        return $this->pluginPermissions[$pluginId] ?? [];
+        if ($pluginId === CorePermissions::SOURCE) {
+            return [];
+        }
+
+        return $this->permissionsBySource[$pluginId] ?? [];
     }
 
     /**
-     * Get all active permissions from all registered plugins
+     * Get all active permissions from registered plugins, keyed by plugin ID.
      *
-     * @return array<string, array<string>> Permissions keyed by plugin ID
+     * Backward-compatible accessor; the `core` source is excluded so the shape
+     * matches the historical plugin-only contract.
+     *
+     * @return array<string, array<int, string>> Permissions keyed by plugin ID.
      */
     public function getAllActivePermissions(): array
     {
-        return $this->pluginPermissions;
+        $plugins = $this->permissionsBySource;
+        unset($plugins[CorePermissions::SOURCE]);
+
+        return $plugins;
     }
 
     /**
-     * Get list of all registered plugin IDs
+     * Get the list of registered plugin IDs.
      *
-     * @return array<string> Array of plugin IDs
+     * Backward-compatible accessor; the `core` source is excluded.
+     *
+     * @return array<int, string> Array of plugin IDs.
      */
     public function getRegisteredPlugins(): array
     {
-        return array_keys($this->pluginPermissions);
+        $plugins = $this->permissionsBySource;
+        unset($plugins[CorePermissions::SOURCE]);
+
+        return array_keys($plugins);
+    }
+
+    /**
+     * Store permissions for a source and dispatch the registration hook.
+     *
+     * @param string $source The permission source.
+     * @param array<int, string> $permissions The permissions to store.
+     * @return void
+     */
+    private function storeAndDispatch(string $source, array $permissions): void
+    {
+        // Explicitly registering the core source means the caller is supplying
+        // the core permission set, so lazy auto-population must not later clobber
+        // or duplicate it (issue #55).
+        if ($source === CorePermissions::SOURCE) {
+            $this->coreRegistered = true;
+        }
+
+        $this->permissionsBySource[$source] = $permissions;
+
+        if ($this->hookManager !== null) {
+            $this->hookManager->dispatch('permission.registered', [
+                'plugin_id' => $source,
+                'source' => $source,
+                'permissions' => $permissions,
+            ]);
+        }
+    }
+
+    /**
+     * Lazily register the core permission set on first read (issue #55).
+     *
+     * @return void
+     */
+    private function ensureCoreRegistered(): void
+    {
+        if (!$this->coreRegistered) {
+            $this->registerCorePermissions();
+        }
+    }
+
+    /**
+     * Validate that a permission string matches the `resource:action` pattern.
+     *
+     * @param string $permission The permission string to validate.
+     * @return bool True if the permission is well-formed.
+     */
+    private static function isValidPermission(string $permission): bool
+    {
+        return preg_match('/^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$/', $permission) === 1;
     }
 }

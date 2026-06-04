@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Noto_Sans } from "next/font/google";
+import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/lib/auth-context";
@@ -7,12 +7,9 @@ import { ToastProvider } from "@/lib/toast-context";
 import { NavigationProvider } from "@/lib/navigation-context";
 import { ToastContainer } from "@/components/ui/toast-container";
 
-const notoSans = Noto_Sans({subsets:['latin'],variable:'--font-sans'});
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+// Design-token font families (see src/design/tokens/base.json):
+// Inter drives --font-sans / --font-heading, Geist Mono drives --font-mono.
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -32,7 +29,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", notoSans.variable)}
+      className={cn("h-full", "antialiased", inter.variable, geistMono.variable, "font-sans")}
     >
       <body className="min-h-full flex flex-col">
         <AuthProvider>
