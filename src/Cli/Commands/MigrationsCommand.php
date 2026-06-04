@@ -92,6 +92,13 @@ class MigrationsCommand
     private function run(): int
     {
         try {
+            // Ensure the migration tracking table exists BEFORE running any
+            // migration. Without this, the earliest migrations (which run before
+            // the table-creating migration) execute successfully but their
+            // tracking rows are silently dropped, breaking idempotency and
+            // preventing them from ever being rolled back.
+            $this->ensureMigrationTable();
+
             $executed = $this->getExecutedMigrations();
             $files = $this->getMigrationFiles();
             $count = 0;
@@ -185,6 +192,27 @@ class MigrationsCommand
     }
 
     /**
+     * Ensure the core_schema_migrations tracking table exists.
+     *
+     * This is created idempotently (IF NOT EXISTS) before any migration runs
+     * so that every migration — including those ordered before the migration
+     * that would otherwise create this table — is correctly recorded. Migration
+     * 005 also creates this table with the same definition, so running it later
+     * is a harmless no-op.
+     */
+    private function ensureMigrationTable(): void
+    {
+        $this->db->exec('
+            CREATE TABLE IF NOT EXISTS core_schema_migrations (
+                id SERIAL PRIMARY KEY,
+                migration_name VARCHAR(255) NOT NULL UNIQUE,
+                executed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                execution_time_ms INTEGER
+            )
+        ');
+    }
+
+    /**
      * Get list of migration files from directory
      */
     private function getMigrationFiles(): array
@@ -222,11 +250,13 @@ class MigrationsCommand
         if ($direction === 'up') {
             $className::up($this->db);
 
-            // Record the migration
+            // Record the migration. ON CONFLICT keeps recording idempotent so a
+            // migration that has already been tracked is never duplicated.
             try {
                 $stmt = $this->db->getPdo()->prepare('
                     INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
                     VALUES (?, NOW(), ?)
+                    ON CONFLICT (migration_name) DO NOTHING
                 ');
                 $stmt->execute([$name, (int)((microtime(true) - $start) * 1000)]);
             } catch (\PDOException $e) {
