@@ -9,8 +9,10 @@ import { deleteUser, findUserIdByEmail } from './support/api';
  * delete flow operates exclusively on a fresh, uniquely-named user that is
  * removed in afterEach via the API.
  *
- * NOTE: the users list API returns no `name` field, so the table's "Name"
- * column renders "-" and rows are identified by email instead.
+ * NOTE: the users list API derives `name` from the email local-part (there is
+ * no users.name column) and exposes a camelCase `tenantId` (WC-100), so the
+ * table's "Name" column and the Edit dialog pre-fill from the same payload.
+ * Rows are still located by email for stability.
  */
 test.describe('Users (admin)', () => {
   let createdEmail: string | null = null;
@@ -62,14 +64,8 @@ test.describe('Users (admin)', () => {
     await page.getByRole('menuitem', { name: 'Edit' }).click();
     const editDialog = page.getByRole('dialog');
     await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
-    // NOTE (app bug #3): the edit modal does NOT pre-fill Name / Tenant because
-    // the users LIST API returns neither `name` nor `tenantId` (it returns
-    // `tenant_id`). Both are required by the form's zod schema, so they must be
-    // re-entered for the PATCH to validate. We do that here to exercise the
-    // edit happy-path; the missing pre-fill is asserted separately in the
-    // known-bug spec below.
-    await editDialog.getByLabel('Name').fill(`E2E User ${suffix} edited`);
-    await editDialog.getByLabel('Tenant').fill('1');
+    // WC-100: Name and Tenant are pre-filled from the list payload, so only the
+    // field we intend to change (role) needs touching; Save still validates.
     await editDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'Moderator' }).click();
     await editDialog.getByRole('button', { name: 'Save Changes' }).click();
@@ -90,7 +86,7 @@ test.describe('Users (admin)', () => {
   });
 });
 
-test.describe('Known app bugs (users)', () => {
+test.describe('Edit User pre-fill (WC-100)', () => {
   let createdEmail: string | null = null;
 
   test.afterEach(async ({ adminApi }) => {
@@ -103,18 +99,21 @@ test.describe('Known app bugs (users)', () => {
     }
   });
 
-  // BUG #3: the Edit User modal pre-fills from the row object, but the users
-  // LIST API (`GET /api/users`) returns neither `name` nor `tenantId` (it
-  // returns `tenant_id`). The page's `User` type expects `name`/`tenantId`, so
-  // both are `undefined`; the edit form leaves Name and Tenant blank. Because
-  // the zod schema marks both required, an unmodified Save fails validation
-  // ("Invalid input: expected string, received undefined") — i.e. you cannot
-  // edit a user without re-typing fields that should have been pre-filled.
-  test.fixme('edit modal should pre-fill the current name and tenant', async ({
+  // WC-100: the Edit User modal pre-fills from the row object sourced by the
+  // users LIST API (`GET /api/users`). The payload now carries `name` (derived
+  // from the email local-part, since there is no users.name column) and a
+  // camelCase `tenantId`, so the form's required Name and Tenant fields are
+  // populated. A user can then change a single field and Save without having to
+  // re-type the others — previously both rendered blank and Save failed the
+  // zod required-field validation.
+  test('edit modal pre-fills name + tenant and saves after one change', async ({
     adminPage,
     page,
   }) => {
-    createdEmail = `e2e-user-prefill-${uniqueSuffix()}@example.com`;
+    const suffix = uniqueSuffix();
+    // The probe's email local-part is what the API surfaces as `name`.
+    const localPart = `e2e-user-prefill-${suffix}`;
+    createdEmail = `${localPart}@example.com`;
 
     await adminPage.shell.clickNav('Users');
     await page.waitForURL('**/admin/users');
@@ -131,12 +130,22 @@ test.describe('Known app bugs (users)', () => {
     await expect(page.getByText('User created successfully')).toBeVisible();
 
     const row = page.getByRole('row', { name: new RegExp(createdEmail) });
+    await expect(row).toBeVisible();
     await row.getByRole('button').click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
     const editDialog = page.getByRole('dialog');
+    await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
 
-    // Expected once fixed: the name we created with is shown again.
-    await expect(editDialog.getByLabel('Name')).toHaveValue('Prefill Probe');
+    // The pre-fill: Name (derived from the email local-part) and Tenant are
+    // populated from the list payload — no manual re-entry needed.
+    await expect(editDialog.getByLabel('Name')).toHaveValue(localPart);
     await expect(editDialog.getByLabel('Tenant')).toHaveValue('1');
+
+    // Change exactly one field (role) and Save: it must succeed because the
+    // other required fields were pre-filled.
+    await editDialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: 'Moderator' }).click();
+    await editDialog.getByRole('button', { name: 'Save Changes' }).click();
+    await expect(page.getByText('User updated successfully')).toBeVisible();
   });
 });

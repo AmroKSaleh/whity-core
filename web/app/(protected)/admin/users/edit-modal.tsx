@@ -58,22 +58,24 @@ export function EditUserModal({
   const { addToast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Build the form values from the (now-complete) user record. `tenantId` is a
+  // number on the API contract; guard against a missing value so we never emit
+  // the literal string "undefined"/"null", which would silently pass the
+  // required-field check while submitting garbage.
+  const toFormValues = (u: User): EditUserFormData => ({
+    name: u.name ?? '',
+    role: u.role ?? '',
+    tenantId: u.tenantId != null ? String(u.tenantId) : '',
+  });
+
   const form = useForm<EditUserFormData>({
     resolver: zodResolver(editUserSchema),
-    defaultValues: {
-      name: user.name || '',
-      role: user.role || '',
-      tenantId: String(user.tenantId) || '',
-    },
+    defaultValues: toFormValues(user),
   });
 
   useEffect(() => {
     if (isOpen && user) {
-      form.reset({
-        name: user.name,
-        role: user.role,
-        tenantId: String(user.tenantId),
-      });
+      form.reset(toFormValues(user));
     }
   }, [isOpen, user, form]);
 
