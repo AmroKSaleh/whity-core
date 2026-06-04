@@ -38,20 +38,21 @@ class CreatePermissions
         $db->exec('CREATE INDEX IF NOT EXISTS idx_role_permissions_role_id ON role_permissions(role_id)');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_role_permissions_permission_id ON role_permissions(permission_id)');
 
-        // Insert default permissions
+        // Insert default permissions using the `resource:action` notation
+        // mandated by the RBAC permission model (see CorePermissions / issue #55).
         $permissions = [
-            'users.read' => 'Read users',
-            'users.create' => 'Create users',
-            'users.update' => 'Update users',
-            'users.delete' => 'Delete users',
-            'roles.read' => 'Read roles',
-            'roles.create' => 'Create roles',
-            'roles.update' => 'Update roles',
-            'roles.delete' => 'Delete roles',
-            'tenants.read' => 'Read tenants',
-            'tenants.create' => 'Create tenants',
-            'tenants.update' => 'Update tenants',
-            'tenants.delete' => 'Delete tenants',
+            'users:read' => 'Read users',
+            'users:create' => 'Create users',
+            'users:update' => 'Update users',
+            'users:delete' => 'Delete users',
+            'roles:read' => 'Read roles',
+            'roles:create' => 'Create roles',
+            'roles:update' => 'Update roles',
+            'roles:delete' => 'Delete roles',
+            'tenants:read' => 'Read tenants',
+            'tenants:create' => 'Create tenants',
+            'tenants:update' => 'Update tenants',
+            'tenants:delete' => 'Delete tenants',
         ];
 
         foreach ($permissions as $name => $description) {

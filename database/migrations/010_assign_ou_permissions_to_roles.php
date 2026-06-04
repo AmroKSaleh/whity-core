@@ -24,13 +24,13 @@ class AssignOuPermissionsToRoles
         $userRole = $userRoleStmt->fetch();
         $userRoleId = $userRole['id'] ?? 2;
 
-        // Get OU permission IDs
+        // Get OU permission IDs (resource:action notation; see issue #55)
         $ouPermissions = [
-            'ous.read' => 'ous.read',
-            'ous.create' => 'ous.create',
-            'ous.update' => 'ous.update',
-            'ous.delete' => 'ous.delete',
-            'ous.assign' => 'ous.assign',
+            'ous:read' => 'ous:read',
+            'ous:create' => 'ous:create',
+            'ous:update' => 'ous:update',
+            'ous:delete' => 'ous:delete',
+            'ous:assign' => 'ous:assign',
         ];
 
         $permissionIds = [];
@@ -51,10 +51,10 @@ class AssignOuPermissionsToRoles
         }
 
         // Assign only read permission to user role
-        if (isset($permissionIds['ous.read'])) {
+        if (isset($permissionIds['ous:read'])) {
             $db->query(
                 'INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (:role_id, :permission_id, NOW()) ON CONFLICT (role_id, permission_id) DO NOTHING',
-                [':role_id' => $userRoleId, ':permission_id' => $permissionIds['ous.read']]
+                [':role_id' => $userRoleId, ':permission_id' => $permissionIds['ous:read']]
             );
         }
     }
@@ -70,8 +70,8 @@ class AssignOuPermissionsToRoles
         $userRole = $userRoleStmt->fetch();
         $userRoleId = $userRole['id'] ?? 2;
 
-        // Get OU permission IDs
-        $ouPermissions = ['ous.read', 'ous.create', 'ous.update', 'ous.delete', 'ous.assign'];
+        // Get OU permission IDs (resource:action notation; see issue #55)
+        $ouPermissions = ['ous:read', 'ous:create', 'ous:update', 'ous:delete', 'ous:assign'];
 
         foreach ($ouPermissions as $name) {
             $stmt = $db->query('SELECT id FROM permissions WHERE name = :name', [':name' => $name]);

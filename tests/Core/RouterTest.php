@@ -111,6 +111,50 @@ class RouterTest extends TestCase
     }
 
     /**
+     * Test that routes default to no required permission
+     */
+    public function testRouteDefaultsToNoRequiredPermission(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/api/users', $handler);
+
+        $match = $this->router->match(new Request('GET', '/api/users'));
+
+        $this->assertNotNull($match);
+        $this->assertNull($match['requiredPermission']);
+    }
+
+    /**
+     * Test registering a route with a required permission (resource:action)
+     */
+    public function testRegisterRouteWithRequiredPermission(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('GET', '/api/users', $handler, null, null, 'users:read');
+
+        $match = $this->router->match(new Request('GET', '/api/users'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('users:read', $match['requiredPermission']);
+        $this->assertNull($match['requiredRole']);
+    }
+
+    /**
+     * Test that role and permission metadata coexist on a route
+     */
+    public function testRouteCarriesBothRoleAndPermission(): void
+    {
+        $handler = static fn() => 'response';
+        $this->router->register('POST', '/api/users', $handler, 'admin', null, 'users:write');
+
+        $match = $this->router->match(new Request('POST', '/api/users'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('admin', $match['requiredRole']);
+        $this->assertSame('users:write', $match['requiredPermission']);
+    }
+
+    /**
      * Test middleware addition
      */
     public function testAddMiddleware(): void
