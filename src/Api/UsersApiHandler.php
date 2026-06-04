@@ -18,6 +18,18 @@ use PDO;
  * Handles CRUD operations for users with full validation,
  * password hashing, and error handling.
  *
+ * Role assignment on create (WC-121)
+ * ----------------------------------
+ * `POST /api/users` resolves the submitted role the SAME way the update path
+ * does: the Create User form binds the chosen role as a role NAME (e.g. `admin`)
+ * and the handler resolves it to a tenant-visible `roles.id` via
+ * {@see self::resolveVisibleRoleId()} (a numeric `role_id` is still accepted for
+ * API callers). Previously create read only `role_id` and defaulted to the `user`
+ * role, silently dropping the chosen role NAME; now a user created as "admin" is
+ * actually created as admin. A supplied-but-unresolvable role is rejected with
+ * 404 (matching update); when no role is supplied the user defaults to the global
+ * `user` role. The created user is returned via {@see self::toPublicUser()}.
+ *
  * Editable fields on update (WC-113)
  * ----------------------------------
  * `PATCH /api/users/{id}` persists the genuinely editable columns of the `users`
@@ -138,12 +150,32 @@ class UsersApiHandler
     }
 
     /**
-     * POST /api/users - Create a new user
+     * POST /api/users - Create a new user.
+     *
+     * The Create User form binds the chosen role as a role NAME (e.g. `admin`),
+     * exactly like the Edit form (WC-113); a numeric `role_id` is also accepted
+     * for API callers. The submitted role is resolved to a `roles.id` VISIBLE to
+     * the acting tenant via {@see self::resolveVisibleRoleId()} — the same helper
+     * the update path uses — so a user created as "admin" is actually created as
+     * admin (WC-121, the prior behaviour silently dropped the name and defaulted
+     * to `user`). A role that is supplied but cannot be resolved (unknown name, or
+     * another tenant's private role) is rejected with 404, matching update; when
+     * NO role is supplied the user defaults to the global `user` role.
+     *
+     * The created user is returned via {@see self::toPublicUser()} so the response
+     * carries the same shape (`id`/`name`/`email`/`role`/`tenantId`/`createdAt`,
+     * never the password hash) as the list and update endpoints (WC-100/113).
+     *
+     * @param Request $request The incoming request.
+     * @return Response JSON created user under the `data` key (201) or an error.
      */
     public function create(Request $request): Response
     {
         try {
             $body = json_decode($request->getBody(), true);
+            if (!is_array($body)) {
+                $body = [];
+            }
 
             // Validation
             if (empty($body['email']) || empty($body['password'])) {
@@ -158,11 +190,28 @@ class UsersApiHandler
                 return Response::error('Invalid email format', 400);
             }
 
-            $name = $body['name'] ?? '';
             $email = $body['email'];
-            $password = password_hash($body['password'], PASSWORD_BCRYPT);
-            $roleId = $body['role_id'] ?? 2; // Default to 'user' role
             $tenantId = TenantContext::getTenantId();
+
+            // Resolve the submitted role. The form sends `role` as a NAME; a
+            // numeric `role_id` is also accepted. When neither is supplied the
+            // user defaults to the global `user` role (matching the historical
+            // default, but resolved rather than hard-coded so the id is always
+            // valid). A supplied-but-unresolvable role is a 404, mirroring the
+            // update path, so the dropdown can never silently downgrade an
+            // unknown/foreign role to `user`.
+            $roleRef = $body['role'] ?? $body['role_id'] ?? null;
+            $roleId = $this->resolveVisibleRoleId($roleRef, $tenantId, $tenantId);
+            if ($roleRef !== null && $roleRef !== '' && $roleId === null) {
+                return Response::error('Role not found', 404);
+            }
+            if ($roleId === null) {
+                // No role supplied: fall back to the global `user` role.
+                $roleId = $this->resolveVisibleRoleId('user', $tenantId, $tenantId);
+                if ($roleId === null) {
+                    return Response::error('Default role not found', 500);
+                }
+            }
 
             // Check if email already exists
             $checkStmt = $this->db->prepare('SELECT id FROM users WHERE email = ? AND tenant_id = ?');
@@ -180,7 +229,7 @@ class UsersApiHandler
 
             // Extract potentially modified data from hook response
             $email = $userData['email'];
-            $roleId = $userData['role_id'];
+            $roleId = (int)$userData['role_id'];
             $password = password_hash($userData['password'], PASSWORD_BCRYPT);
 
             // Insert new user
@@ -190,30 +239,30 @@ class UsersApiHandler
             ');
             $stmt->execute([$email, $password, $roleId, $tenantId]);
 
-            $userId = $this->db->lastInsertId();
+            $userId = (int)$this->db->lastInsertId();
 
             // Dispatch synchronous hook after user is created
             $this->hookManager->dispatch('user.created', [
-                'id' => (int)$userId,
+                'id' => $userId,
                 'email' => $email,
-                'role_id' => (int)$roleId,
+                'role_id' => $roleId,
                 'tenant_id' => (int)$tenantId
             ]);
 
             // Dispatch asynchronous hook for background tasks
             $this->hookManager->dispatchAsync('user.created.async', [
-                'id' => (int)$userId,
+                'id' => $userId,
                 'email' => $email,
             ]);
 
-            return Response::json([
-                'data' => [
-                    'id' => (int)$userId,
-                    'email' => $email,
-                    'role_id' => (int)$roleId,
-                    'tenant_id' => (int)$tenantId
-                ]
-            ], 201);
+            $this->log('info', 'User created', [
+                'event' => 'users.create',
+                'tenant_id' => $tenantId,
+                'user_id' => $userId,
+                'role_id' => $roleId,
+            ]);
+
+            return Response::json(['data' => $this->fetchPublicUser($userId)], 201);
         } catch (\Exception $e) {
             return Response::error('Failed to create user: ' . $e->getMessage(), 500);
         }

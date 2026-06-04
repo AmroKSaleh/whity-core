@@ -31,6 +31,7 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useRoleOptions } from './use-role-options';
 
 const createUserSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -56,6 +57,9 @@ export function CreateUserModal({
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Role dropdown options come from the live tenant-visible role list, so only
+  // roles that actually exist (and resolve server-side) are offered (WC-121).
+  const { roleOptions, isLoadingRoles } = useRoleOptions(isOpen);
 
   const form = useForm<CreateUserFormData>({
     resolver: zodResolver(createUserSchema),
@@ -173,13 +177,19 @@ export function CreateUserModal({
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a role" />
+                        <SelectValue
+                          placeholder={
+                            isLoadingRoles ? 'Loading roles…' : 'Select a role'
+                          }
+                        />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="moderator">Moderator</SelectItem>
+                      {roleOptions.map((role) => (
+                        <SelectItem key={role.value} value={role.value}>
+                          {role.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />
