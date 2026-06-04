@@ -49,6 +49,44 @@ class PluginLoader
     private array $plugins = [];
 
     /**
+     * Registration bookkeeping per plugin, keyed by the plugin's original FQCN.
+     *
+     * Tracks what each plugin registered so it can be cleanly unregistered when
+     * its file is modified or removed during a hot reload.
+     *
+     * @var array<string, array{namespacePrefix: string, hooks: array<array{event: string, callback: callable}>}>
+     */
+    private array $registeredPlugins = [];
+
+    /**
+     * Content hash of the source most recently registered for each plugin FQCN.
+     *
+     * Survives unregister cycles because it reflects what is actually compiled
+     * into this PHP process. Used to detect when a plugin file's contents
+     * changed between reloads so the new code can be re-evaluated under a fresh
+     * versioned namespace.
+     *
+     * @var array<string, string>
+     */
+    private array $loadedContentHashes = [];
+
+    /**
+     * Snapshot of the plugin-tree fingerprint captured at the last load/reload.
+     *
+     * Maps each plugin PHP file path to a "mtime:size" signature. Comparing this
+     * against a freshly computed fingerprint tells us whether anything on disk
+     * changed since the worker last loaded plugins.
+     *
+     * @var array<string, string>
+     */
+    private array $fingerprint = [];
+
+    /**
+     * @var bool Whether plugins have been loaded at least once in this process
+     */
+    private bool $loaded = false;
+
+    /**
      * @var string|null Cache file path for the manifest
      */
     private ?string $cacheFile = null;
@@ -171,6 +209,9 @@ class PluginLoader
     /**
      * Load and register plugins from the plugin directory
      *
+     * Records the current plugin-tree fingerprint so that subsequent reload()
+     * calls can cheaply detect whether anything changed on disk.
+     *
      * @return void
      */
     public function load(): void
@@ -179,6 +220,128 @@ class PluginLoader
         foreach ($discovered as $fqcn => $filePath) {
             $this->loadPluginClass($fqcn, $filePath);
         }
+
+        $this->fingerprint = $this->computeFingerprint();
+        $this->loaded = true;
+    }
+
+    /**
+     * Reload plugins if the plugin directory changed since the last load
+     *
+     * Designed for FrankenPHP persistent workers: a single PluginLoader instance
+     * survives across many requests, so this method is called at the start of a
+     * request to pick up plugins that were added, modified, or removed on disk
+     * without restarting the worker.
+     *
+     * Behaviour:
+     *  - Added plugins are discovered and registered.
+     *  - Removed plugins have their routes and hooks unregistered.
+     *  - Modified plugins are re-registered from their updated source. Because a
+     *    PHP class cannot be redefined within a live process, modified classes
+     *    are re-evaluated under a content-versioned namespace so the new code
+     *    actually runs (see loadPluginClass()).
+     *
+     * @return bool True if a change was detected and applied, false if nothing changed
+     */
+    public function reload(): bool
+    {
+        if (!$this->loaded) {
+            $this->load();
+            return true;
+        }
+
+        $current = $this->computeFingerprint();
+
+        if ($current === $this->fingerprint) {
+            return false;
+        }
+
+        // The set of plugin files changed. Drop the stale manifest cache so the
+        // next discover() performs a full filesystem scan instead of trusting
+        // outdated FQCN -> path mappings.
+        $this->clearCache();
+
+        // Unregister everything currently loaded, then rebuild from disk. This
+        // uniformly handles additions, modifications, and removals.
+        $this->unregisterAll();
+
+        $discovered = $this->discover();
+        foreach ($discovered as $fqcn => $filePath) {
+            $this->loadPluginClass($fqcn, $filePath);
+        }
+
+        $this->fingerprint = $current;
+
+        return true;
+    }
+
+    /**
+     * Get a freshly computed fingerprint of the plugin tree on disk
+     *
+     * The fingerprint maps each plugin PHP file currently on disk to a
+     * "mtime:size" signature. Callers can compare successive fingerprints to
+     * decide whether a reload is warranted.
+     *
+     * @return array<string, string>
+     */
+    public function getFingerprint(): array
+    {
+        return $this->computeFingerprint();
+    }
+
+    /**
+     * Compute a fingerprint of every PHP file under the plugin directory
+     *
+     * @return array<string, string> Map of file path => "mtime:size" signature
+     */
+    private function computeFingerprint(): array
+    {
+        if (!is_dir($this->pluginDir)) {
+            return [];
+        }
+
+        $fingerprint = [];
+        try {
+            $directory = new \RecursiveDirectoryIterator(
+                $this->pluginDir,
+                \RecursiveDirectoryIterator::SKIP_DOTS
+            );
+            $iterator = new \RecursiveIteratorIterator($directory);
+            foreach ($iterator as $fileInfo) {
+                if ($fileInfo->isFile() && $fileInfo->getExtension() === 'php') {
+                    $path = str_replace('\\', '/', (string) $fileInfo->getRealPath());
+                    $fingerprint[$path] = $fileInfo->getMTime() . ':' . $fileInfo->getSize();
+                }
+            }
+        } catch (\Throwable) {
+            // Treat an unreadable tree as empty rather than crashing the request.
+            return [];
+        }
+
+        ksort($fingerprint);
+
+        return $fingerprint;
+    }
+
+    /**
+     * Unregister all currently loaded plugins (routes, hooks, instances)
+     *
+     * @return void
+     */
+    private function unregisterAll(): void
+    {
+        foreach ($this->registeredPlugins as $info) {
+            $this->router->unregisterByNamespace($info['namespacePrefix']);
+
+            if ($this->hookManager !== null) {
+                foreach ($info['hooks'] as $hook) {
+                    $this->hookManager->removeListener($hook['event'], $hook['callback']);
+                }
+            }
+        }
+
+        $this->registeredPlugins = [];
+        $this->plugins = [];
     }
 
     /**
@@ -398,23 +561,27 @@ class PluginLoader
     /**
      * Load a single plugin class and register it
      *
+     * When the same plugin file has already been required earlier in this
+     * process with DIFFERENT contents (a hot-reload of a modified plugin), the
+     * original class is already locked into memory and cannot be redefined.
+     * In that case the source is re-evaluated under a content-versioned
+     * namespace so the updated code actually runs. Brand-new plugins are loaded
+     * directly. See the class docblock / PR notes for the tradeoff.
+     *
      * @param string $fqcn Fully qualified class name of the plugin
      * @param string $filePath File path of the plugin
      * @return void
      */
     private function loadPluginClass(string $fqcn, string $filePath): void
     {
-        // Require the file
-        require_once $filePath;
-
-        // Check if class exists
-        if (!class_exists($fqcn)) {
+        $effectiveFqcn = $this->materializeClass($fqcn, $filePath);
+        if ($effectiveFqcn === null) {
             return;
         }
 
         // Use reflection to validate and get instance
         try {
-            $reflectionClass = new ReflectionClass($fqcn);
+            $reflectionClass = new ReflectionClass($effectiveFqcn);
             if (!$reflectionClass->implementsInterface(PluginInterface::class)) {
                 $warningMsg = "Plugin class {$fqcn} does not implement PluginInterface.";
                 if ($this->logger !== null) {
@@ -429,7 +596,7 @@ class PluginLoader
             $namespacePrefix = $reflectionClass->getNamespaceName();
 
             /** @var PluginInterface $plugin */
-            $plugin = new $fqcn();
+            $plugin = new $effectiveFqcn();
         } catch (\Throwable $e) {
             $errorMsg = "Failed to load plugin {$fqcn}: " . $e->getMessage();
             if ($this->logger !== null) {
@@ -440,8 +607,124 @@ class PluginLoader
             return;
         }
 
-        // Register the plugin
-        $this->registerPlugin($plugin, $namespacePrefix);
+        // Register the plugin under its original FQCN identity
+        $this->registerPlugin($plugin, $namespacePrefix, $fqcn);
+    }
+
+    /**
+     * Ensure the plugin class is defined and return the concrete FQCN to use
+     *
+     * Returns the original FQCN when the file can simply be required, or a
+     * versioned FQCN when the file was modified after an earlier version was
+     * already loaded in this process. Returns null when no usable class exists.
+     *
+     * @param string $fqcn Original fully qualified class name
+     * @param string $filePath Plugin file path
+     * @return string|null FQCN to instantiate, or null on failure
+     */
+    private function materializeClass(string $fqcn, string $filePath): ?string
+    {
+        $source = @file_get_contents($filePath);
+
+        // If we cannot read the source, fall back to a plain require.
+        if ($source === false) {
+            require_once $filePath;
+            return class_exists($fqcn) ? $fqcn : null;
+        }
+
+        $contentHash = substr(hash('xxh128', $source), 0, 12);
+        $previousHash = $this->loadedContentHashes[$fqcn] ?? null;
+
+        // First time this loader registers this class in the process: require
+        // the file as-is. (discover() may already have required it, but no prior
+        // version has been registered, so the original definition is correct.)
+        if ($previousHash === null) {
+            require_once $filePath;
+            if (!class_exists($fqcn)) {
+                return null;
+            }
+            $this->loadedContentHashes[$fqcn] = $contentHash;
+            return $fqcn;
+        }
+
+        // Previously registered with identical content: reuse the live class.
+        if ($previousHash === $contentHash) {
+            return $fqcn;
+        }
+
+        // Content changed since the last registration. The original class is
+        // locked into memory, so re-evaluate the source under a fresh,
+        // content-addressed namespace so the updated code runs.
+        $namespacePos = strrpos($fqcn, '\\');
+        $namespace = $namespacePos === false ? '' : substr($fqcn, 0, $namespacePos);
+        $shortName = $namespacePos === false ? $fqcn : substr($fqcn, $namespacePos + 1);
+
+        $versionedNamespace = ($namespace === '' ? '' : $namespace . '\\')
+            . '_Whity_Reload_' . $contentHash;
+        $versionedFqcn = $versionedNamespace . '\\' . $shortName;
+
+        // Re-evaluating identical content would just reuse the same versioned
+        // class, so short-circuit once it exists (e.g. reverting to a prior
+        // version whose namespace was already materialized).
+        if (class_exists($versionedFqcn, false)) {
+            $this->loadedContentHashes[$fqcn] = $contentHash;
+            return $versionedFqcn;
+        }
+
+        // Rewrite the namespace declaration so the class can be redefined under
+        // a fresh, content-addressed namespace and the updated code runs.
+        $rewritten = $this->rewriteNamespace($source, $namespace, $versionedNamespace);
+        if ($rewritten === null) {
+            // Could not safely rewrite: keep the already-loaded definition.
+            return $fqcn;
+        }
+
+        try {
+            eval('?>' . $rewritten);
+        } catch (\Throwable $e) {
+            $errorMsg = "Failed to hot-reload plugin {$fqcn}: " . $e->getMessage();
+            if ($this->logger !== null) {
+                $this->logger->error($errorMsg);
+            } else {
+                error_log($errorMsg);
+            }
+            return class_exists($fqcn) ? $fqcn : null;
+        }
+
+        if (class_exists($versionedFqcn, false)) {
+            $this->loadedContentHashes[$fqcn] = $contentHash;
+            return $versionedFqcn;
+        }
+
+        return class_exists($fqcn) ? $fqcn : null;
+    }
+
+    /**
+     * Rewrite the top-level namespace declaration of a plugin's source
+     *
+     * @param string $source Original PHP source
+     * @param string $oldNamespace The namespace currently declared (may be empty)
+     * @param string $newNamespace The replacement namespace
+     * @return string|null Rewritten source, or null if it could not be rewritten safely
+     */
+    private function rewriteNamespace(string $source, string $oldNamespace, string $newNamespace): ?string
+    {
+        if ($oldNamespace === '') {
+            // Rewriting global-namespace plugins would require injecting a
+            // namespace wrapper around use-statements; not supported.
+            return null;
+        }
+
+        $pattern = '/\bnamespace\s+' . preg_quote($oldNamespace, '/') . '\s*;/';
+        $replacement = 'namespace ' . $newNamespace . ';';
+
+        $rewritten = preg_replace($pattern, $replacement, $source, 1, $count);
+
+        if ($rewritten === null || $count !== 1) {
+            return null;
+        }
+
+        return $rewritten;
     }
 
     /**
@@ -449,10 +732,14 @@ class PluginLoader
      *
      * @param PluginInterface $plugin The plugin instance to register
      * @param string $namespacePrefix The plugin namespace prefix
+     * @param string $pluginKey Stable identity (original FQCN) for bookkeeping
      * @return void
      */
-    private function registerPlugin(PluginInterface $plugin, string $namespacePrefix): void
-    {
+    private function registerPlugin(
+        PluginInterface $plugin,
+        string $namespacePrefix,
+        string $pluginKey
+    ): void {
         // 1. Register routes with the router
         foreach ($plugin->getRoutes() as $route) {
             $method = $route['method'];
@@ -476,15 +763,23 @@ class PluginLoader
             $this->permissionRegistry->registerPermissions($plugin->getName(), $plugin->getPermissions());
         }
 
-        // 3. Register hooks with the hook manager
+        // 3. Register hooks with the hook manager, tracking each subscription so
+        //    it can be unsubscribed on a later reload/removal.
+        $registeredHooks = [];
         if ($this->hookManager !== null) {
             foreach ($plugin->getHooks() as $eventName => $hookData) {
-                $this->registerHook($eventName, $hookData);
+                foreach ($this->registerHook($eventName, $hookData) as $callback) {
+                    $registeredHooks[] = ['event' => $eventName, 'callback' => $callback];
+                }
             }
         }
 
-        // Store the plugin instance
+        // Store the plugin instance and its registration bookkeeping
         $this->plugins[] = $plugin;
+        $this->registeredPlugins[$pluginKey] = [
+            'namespacePrefix' => $namespacePrefix,
+            'hooks' => $registeredHooks,
+        ];
     }
 
     /**
@@ -492,33 +787,41 @@ class PluginLoader
      *
      * @param string $eventName Event name
      * @param mixed $hookData Callback or structured configuration
-     * @return void
+     * @return array<callable> The callbacks that were registered
      */
-    private function registerHook(string $eventName, mixed $hookData): void
+    private function registerHook(string $eventName, mixed $hookData): array
     {
         if ($this->hookManager === null) {
-            return;
+            return [];
         }
+
+        $registered = [];
 
         if (is_callable($hookData)) {
             $this->hookManager->listen($eventName, $hookData);
+            $registered[] = $hookData;
         } elseif (is_array($hookData)) {
             // Check if it is a single structured subscription with a callback
             if (isset($hookData['callback']) && is_callable($hookData['callback'])) {
                 $priority = $hookData['priority'] ?? 10;
                 $this->hookManager->listen($eventName, $hookData['callback'], $priority);
+                $registered[] = $hookData['callback'];
             } else {
                 // Check if it is a list of callbacks/subscriptions
                 foreach ($hookData as $sub) {
                     if (is_array($sub) && isset($sub['callback']) && is_callable($sub['callback'])) {
                         $priority = $sub['priority'] ?? 10;
                         $this->hookManager->listen($eventName, $sub['callback'], $priority);
+                        $registered[] = $sub['callback'];
                     } elseif (is_callable($sub)) {
                         $this->hookManager->listen($eventName, $sub);
+                        $registered[] = $sub;
                     }
                 }
             }
         }
+
+        return $registered;
     }
 
 

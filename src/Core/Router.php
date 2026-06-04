@@ -98,6 +98,28 @@ class Router
     }
 
     /**
+     * Remove every route registered under the given plugin namespace prefix
+     *
+     * Used by the plugin hot-reload mechanism to drop routes belonging to a
+     * plugin that has been modified or removed from disk before its updated
+     * definition is registered again.
+     *
+     * @param string $namespacePrefix The plugin namespace prefix to remove
+     * @return int Number of routes removed
+     */
+    public function unregisterByNamespace(string $namespacePrefix): int
+    {
+        $before = count($this->routes);
+
+        $this->routes = array_values(array_filter(
+            $this->routes,
+            static fn(array $route): bool => ($route['namespacePrefix'] ?? null) !== $namespacePrefix
+        ));
+
+        return $before - count($this->routes);
+    }
+
+    /**
      * Add a middleware to the middleware stack
      *
      * @param callable $middleware Middleware callable
