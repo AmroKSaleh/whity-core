@@ -41,6 +41,7 @@ export function PermissionCheckbox({
   return (
     <div className="relative w-full">
       <Button
+        type="button"
         variant="outline"
         onClick={() => setIsOpen(!isOpen)}
         className="w-full justify-between text-left font-normal"
@@ -61,6 +62,7 @@ export function PermissionCheckbox({
           <div className="max-h-64 overflow-y-auto">
             <div className="sticky top-0 border-b bg-white dark:bg-slate-900 p-2">
               <button
+                type="button"
                 onClick={handleSelectAll}
                 className="w-full text-left px-2 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
               >

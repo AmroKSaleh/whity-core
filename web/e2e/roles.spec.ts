@@ -82,15 +82,14 @@ test.describe('Roles CRUD (admin)', () => {
     await expect(panel.getByText(/ous:read/)).toBeVisible();
   });
 
-  // KNOWN APP BUG (#4): the Create Role modal posts the selected permissions
-  // under the key `permissionIds`, but the backend `POST /api/roles` only
-  // honours the key `permissions` (verified: posting `permissions:[1]` assigns
-  // it, `permissionIds:[1]` does not; the Edit modal correctly uses
-  // `permissions`). So permissions chosen at create time are silently dropped —
-  // the role is created with ZERO permissions despite the UI showing
-  // "1 permission selected". The role still gets created, so create/list/delete
-  // is unaffected; only the assign-at-create persistence is broken.
-  test.fixme('assign a permission while creating a role', async ({
+  // WC-99 regression guard: the Create Role modal must POST the selected
+  // permissions under the canonical key `permissions` (the same key the Edit
+  // modal uses), not `permissionIds`. Verified: `POST /api/roles` honours
+  // `permissions` and assigns the grant, whereas `permissionIds` was silently
+  // dropped, creating the role with ZERO permissions despite the UI showing
+  // "1 permission selected". This test selects one permission at create time
+  // and asserts it is actually persisted on the new role.
+  test('assign a permission while creating a role', async ({
     adminPage,
     page,
     adminApi,
@@ -109,24 +108,25 @@ test.describe('Roles CRUD (admin)', () => {
 
     // The permissions selector is a collapsed dropdown whose label changes from
     // "Select permissions..." to "N permissions selected"; match either state
-    // so the same stable locator works before and after selection. The whole
-    // widget remounts from react-hook-form state on each change, so the
-    // toggle/checkbox can detach mid-action — open it with a forced click.
+    // so the same stable locator works before and after selection. The toggle
+    // is type="button" (WC-99), so opening it must NOT submit the form.
     const permsToggle = dialog
       .getByRole('button')
       .filter({ hasText: /permission/i });
-    await permsToggle.click({ force: true });
+    await permsToggle.click();
 
-    // Each permission is a <label> wrapping a controlled checkbox + its name.
-    // Click the label (fires the checkbox onChange); a forced click avoids the
-    // remount-induced instability and the controlled-state re-read pitfall.
+    // Each permission is a <label> wrapping a controlled checkbox + its name;
+    // clicking it fires the checkbox onChange and updates form state.
     const usersReadLabel = dialog.locator('label', { hasText: 'users:read' });
     await expect(usersReadLabel).toBeVisible();
-    await usersReadLabel.click({ force: true });
+    await usersReadLabel.click();
     await expect(permsToggle).toHaveText(/1 permission selected/);
 
-    // Submit directly (force, in case the open dropdown overlays the footer).
-    await dialog.getByRole('button', { name: 'Create Role' }).click({ force: true });
+    // Close the dropdown so its panel no longer overlays the footer, then
+    // submit. The role must be created only by this explicit submit — never by
+    // toggling the permissions dropdown (the WC-99 premature-submit bug).
+    await permsToggle.click();
+    await dialog.getByRole('button', { name: 'Create Role' }).click();
     await expect(page.getByText('Role created successfully')).toBeVisible();
 
     // The new role should appear in the table...
