@@ -67,4 +67,34 @@ test.describe('Sidebar navigation (admin)', () => {
     await page.waitForURL('**/admin/stats');
     await expect(page.getByRole('heading', { name: 'System Statistics' })).toBeVisible();
   });
+
+  test('sidebar collapses and expands via the header toggle', async ({ adminPage }) => {
+    const shell = adminPage.shell;
+    // Expanded by default: brand heading + "Logged in as" footer are visible.
+    await expect(shell.brandHeading).toBeVisible();
+    await expect(shell.sidebar.getByText('Logged in as')).toBeVisible();
+
+    // Collapse: the "Whity" heading and the footer email block are hidden, but
+    // the nav links remain reachable (icon-only mode).
+    await shell.collapseToggle.click();
+    await expect(shell.brandHeading).toBeHidden();
+    await expect(shell.sidebar.getByText('Logged in as')).toBeHidden();
+    await expect(shell.collapseToggle).toBeVisible();
+
+    // Expand again: brand + footer return.
+    await shell.collapseToggle.click();
+    await expect(shell.brandHeading).toBeVisible();
+    await expect(shell.sidebar.getByText('Logged in as')).toBeVisible();
+  });
+
+  test('footer shows "logged in as" the admin and the logout button works', async ({
+    adminPage,
+    page,
+  }) => {
+    await adminPage.shell.expectLoggedInAs('admin@example.com');
+    await expect(adminPage.shell.logoutButton).toBeVisible();
+    await adminPage.shell.logout();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  });
 });

@@ -18,14 +18,30 @@ export class LoginPage {
   }
 
   async goto(): Promise<void> {
+    // The login form is disabled while the auth context resolves its initial
+    // /api/me check (`isLoading`), and the inputs flap between disabled/enabled
+    // across those renders. A disabled click is a silent no-op (no /api/login
+    // ever fires), so we must interact only AFTER that check settles. Race the
+    // navigation against the /api/me response to get a deterministic settle
+    // point, then assert the form is interactable.
+    const mePromise = this.page
+      .waitForResponse((res) => res.url().includes('/api/me'), { timeout: 15_000 })
+      .catch(() => null);
     await this.page.goto('/login');
     await expect(this.emailInput).toBeVisible();
+    await mePromise;
+    await expect(this.signInButton).toBeEnabled();
+    await expect(this.emailInput).toBeEditable();
   }
 
   /** Fill and submit the login form without asserting the outcome. */
   async submit(creds: Credentials): Promise<void> {
+    // Re-assert enabled immediately before each interaction: the auth context
+    // can briefly toggle isLoading, disabling the inputs mid-flow.
+    await expect(this.emailInput).toBeEditable();
     await this.emailInput.fill(creds.email);
     await this.passwordInput.fill(creds.password);
+    await expect(this.signInButton).toBeEnabled();
     await this.signInButton.click();
   }
 
@@ -51,6 +67,58 @@ export class LoginPage {
       this.page.getByRole('heading', { name: 'Welcome back!' })
     ).toBeVisible();
   }
+
+  // --- 2FA login challenge ---------------------------------------------------
+
+  /** The 2FA challenge heading text that appears once /api/login returns 202. */
+  get twoFactorHeading(): Locator {
+    return this.page.getByText('Enter your authenticator code');
+  }
+
+  /** The authenticator-code input shown after a 202 challenge. */
+  get twoFactorCodeInput(): Locator {
+    return this.page.locator('#twoFactorCode');
+  }
+
+  /** The recovery-code input shown after switching to backup-code mode. */
+  get recoveryCodeInput(): Locator {
+    return this.page.locator('#recoveryCode');
+  }
+
+  /**
+   * Submit credentials and assert the app enters the 2FA challenge (202),
+   * without completing it. Use when the account under test has 2FA enabled.
+   */
+  async submitExpecting2fa(creds: Credentials): Promise<void> {
+    const loginResponse = this.page.waitForResponse(
+      (res) => res.url().includes('/api/login') && res.request().method() === 'POST'
+    );
+    await this.submit(creds);
+    const res = await loginResponse;
+    expect(res.status(), 'login with 2FA should return 202 (challenge)').toBe(202);
+    await expect(this.twoFactorHeading).toBeVisible();
+  }
+
+  /** Enter a 6-digit authenticator code and click Verify. */
+  async submitTwoFactorCode(code: string): Promise<void> {
+    await this.twoFactorCodeInput.fill(code);
+    await this.page.getByRole('button', { name: 'Verify', exact: true }).click();
+  }
+
+  /** Switch the challenge form to recovery-code mode. */
+  async useRecoveryCode(): Promise<void> {
+    await this.page
+      .getByRole('button', { name: /Use a recovery code instead/ })
+      .click();
+  }
+
+  /** Enter an 8-char recovery code and click Verify Recovery Code. */
+  async submitRecoveryCode(code: string): Promise<void> {
+    await this.recoveryCodeInput.fill(code);
+    await this.page
+      .getByRole('button', { name: 'Verify Recovery Code' })
+      .click();
+  }
 }
 
 /**
@@ -74,6 +142,18 @@ export class AppShell {
     return this.sidebar.getByRole('link', { name: new RegExp(`\\b${escapeRegExp(label)}$`) });
   }
 
+  /** The desktop collapse/expand toggle in the sidebar header (title attr). */
+  get collapseToggle(): Locator {
+    return this.sidebar.getByRole('button', {
+      name: /Collapse sidebar|Expand sidebar/,
+    });
+  }
+
+  /** The "Whity" brand heading, hidden when the sidebar is collapsed. */
+  get brandHeading(): Locator {
+    return this.sidebar.getByRole('heading', { name: 'Whity' });
+  }
+
   async expectLoggedInAs(email: string): Promise<void> {
     await expect(this.sidebar.getByText('Logged in as')).toBeVisible();
     await expect(this.sidebar.getByText(email, { exact: true })).toBeVisible();
@@ -86,6 +166,58 @@ export class AppShell {
   async logout(): Promise<void> {
     await this.logoutButton.click();
     await this.page.waitForURL('**/login');
+  }
+}
+
+/**
+ * Page object for the Settings page Security section, which hosts the
+ * TwoFactorSettings component (status panel + enable wizard + regenerate /
+ * disable controls). The wizard and the destructive confirms are driven via
+ * window.confirm (a native dialog), so callers must pre-accept it on the page.
+ */
+export class SettingsPage {
+  readonly page: Page;
+
+  constructor(page: Page) {
+    this.page = page;
+  }
+
+  async goto(): Promise<void> {
+    await this.page.goto('/settings');
+    await expect(this.page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  }
+
+  /** The 2FA status chip — "Enabled" (green) or "Not Enabled". */
+  statusChip(state: 'Enabled' | 'Not Enabled'): Locator {
+    return this.page.getByText(state, { exact: true });
+  }
+
+  get enableButton(): Locator {
+    return this.page.getByRole('button', { name: 'Enable 2FA' });
+  }
+
+  get disableButton(): Locator {
+    return this.page.getByRole('button', { name: /Disable 2FA/ });
+  }
+
+  get regenerateButton(): Locator {
+    return this.page.getByRole('button', { name: /Regenerate Backup Codes/ });
+  }
+
+  /** The 2FA setup wizard dialog (Enable Two-Factor Authentication). */
+  get wizard(): Locator {
+    return this.page.getByRole('dialog');
+  }
+
+  /**
+   * The base32 secret rendered in the wizard's "enter this code manually"
+   * <code> element. Returned trimmed so it can be fed to computeTotp().
+   */
+  async readWizardSecret(): Promise<string> {
+    const code = this.wizard.locator('code').first();
+    await expect(code).toBeVisible();
+    const text = await code.innerText();
+    return text.trim();
   }
 }
 

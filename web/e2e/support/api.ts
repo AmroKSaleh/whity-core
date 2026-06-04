@@ -115,6 +115,59 @@ export async function findUserIdByEmail(
 }
 
 /**
+ * Assign a user to a role by NAME through PATCH /api/users/{id}. The backend
+ * resolves the role name to a tenant-visible role id (WC-113). Used to set up
+ * the "role has active user assignments" 409 scenario without going through the
+ * UI. Best-effort.
+ */
+export async function assignUserRole(
+  api: APIRequestContext,
+  userId: number,
+  roleName: string
+): Promise<void> {
+  await api
+    .patch(`/api/users/${userId}`, { data: { role: roleName } })
+    .catch(() => undefined);
+}
+
+/** Read the current account's 2FA status ({ enabled, backup_codes_available }). */
+export async function getTwoFactorStatus(
+  api: APIRequestContext
+): Promise<{ enabled: boolean; backup_codes_available: number }> {
+  const res = await api.get('/api/auth/2fa/status');
+  if (!res.ok()) return { enabled: false, backup_codes_available: 0 };
+  return (await res.json()) as { enabled: boolean; backup_codes_available: number };
+}
+
+/**
+ * Enable 2FA for the CURRENT account through the real backend setup+confirm
+ * flow and return the base32 secret + the freshly issued backup codes.
+ *
+ * Used to deterministically arrange the "2FA is enabled" precondition for the
+ * login-challenge specs WITHOUT depending on a prior UI test's shared state
+ * (which is fragile under retries). The caller supplies the just-computed TOTP
+ * code for the secret (computed via support/totp.ts against the same OTPHP the
+ * server uses). Idempotent-ish: if 2FA is already enabled, setup returns 400 and
+ * this throws, so callers should reset first.
+ */
+export async function enableTwoFactor(
+  api: APIRequestContext,
+  computeCode: (secret: string) => Promise<string>
+): Promise<{ secret: string; backupCodes: string[] }> {
+  const setupRes = await api.post('/api/auth/2fa/setup');
+  expect(setupRes.status(), '2FA setup should return 200').toBe(200);
+  const setup = (await setupRes.json()) as { secret: string };
+  const code = await computeCode(setup.secret);
+
+  const confirmRes = await api.post('/api/auth/2fa/confirm', {
+    data: { code, secret: setup.secret },
+  });
+  expect(confirmRes.status(), '2FA confirm should return 200').toBe(200);
+  const confirm = (await confirmRes.json()) as { backup_codes: string[] };
+  return { secret: setup.secret, backupCodes: confirm.backup_codes };
+}
+
+/**
  * Read the auth cookies from a browser page's context so an APIRequestContext
  * can be derived from an already-logged-in UI session when convenient.
  */

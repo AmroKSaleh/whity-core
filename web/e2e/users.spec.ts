@@ -218,3 +218,122 @@ test.describe('Edit User pre-fill (WC-100)', () => {
     await expect(updatedRow.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
   });
 });
+
+/**
+ * Create User form: client-side validation and dialog lifecycle.
+ *
+ * The create form is zod-validated (name required, valid email, password >= 8,
+ * role + tenant required). These tests assert the field-level errors surface
+ * and that no user is created, so they never touch the database.
+ */
+test.describe('Create User validation + dialog (admin)', () => {
+  test('shows validation errors and does not submit when fields are empty/invalid', async ({
+    adminPage,
+    page,
+  }) => {
+    await adminPage.shell.clickNav('Users');
+    await page.waitForURL('**/admin/users');
+
+    await page.getByRole('button', { name: 'Create User' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Create New User')).toBeVisible();
+
+    // Submit fully empty: name/email/password/role/tenant errors appear.
+    await dialog.getByRole('button', { name: 'Create User' }).click();
+    await expect(dialog.getByText('Name is required')).toBeVisible();
+    await expect(dialog.getByText('Invalid email address')).toBeVisible();
+    await expect(dialog.getByText('Password must be at least 8 characters')).toBeVisible();
+
+    // Now provide an invalid email + too-short password; those specific errors
+    // remain while the name error clears.
+    await dialog.getByLabel('Name').fill('Validation Probe');
+    await dialog.getByLabel('Email').fill('not-an-email');
+    await dialog.getByLabel('Password').fill('short');
+    await dialog.getByRole('button', { name: 'Create User' }).click();
+    await expect(dialog.getByText('Invalid email address')).toBeVisible();
+    await expect(dialog.getByText('Password must be at least 8 characters')).toBeVisible();
+    await expect(dialog.getByText('Name is required')).toHaveCount(0);
+
+    // Nothing was created.
+    await expect(page.getByText('User created successfully')).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test('create dialog closes on Escape without creating a user', async ({
+    adminPage,
+    page,
+  }) => {
+    await adminPage.shell.clickNav('Users');
+    await page.waitForURL('**/admin/users');
+
+    await page.getByRole('button', { name: 'Create User' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Create New User')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
+});
+
+/**
+ * KNOWN APP BUG (documented as a fixme, not papered over).
+ *
+ * The Edit User (and Create User) role dropdown offers a third option,
+ * "Moderator" (value "moderator"), that has NO backing role in the demo seed.
+ * Since the backend now validates/resolves the role NAME on PATCH (WC-113),
+ * selecting Moderator and saving fails with 404 "Role not found" and the UI
+ * shows a "Role not found" error toast instead of succeeding.
+ *
+ * This is a real product bug: the dropdown advertises a role that cannot be
+ * assigned. The fix is to either seed a `moderator` role or remove the option
+ * from create-modal.tsx / edit-modal.tsx. Until then this expectation (that
+ * selecting Moderator succeeds) cannot pass, so it is a fixme.
+ */
+test.describe('Users edit — Moderator option (known bug)', () => {
+  let createdEmail: string | null = null;
+
+  test.afterEach(async ({ adminApi }) => {
+    if (createdEmail) {
+      const id = await findUserIdByEmail(adminApi, createdEmail);
+      if (id !== null) await deleteUser(adminApi, id);
+      createdEmail = null;
+    }
+  });
+
+  test.fixme(
+    'selecting the "Moderator" role on edit should persist (no backing role in seed)',
+    async ({ adminPage, page }) => {
+      const suffix = uniqueSuffix();
+      createdEmail = `e2e-moderator-${suffix}@example.com`;
+
+      await adminPage.shell.clickNav('Users');
+      await page.waitForURL('**/admin/users');
+
+      await page.getByRole('button', { name: 'Create User' }).click();
+      const createDialog = page.getByRole('dialog');
+      await createDialog.getByLabel('Name').fill(`Moderator Probe ${suffix}`);
+      await createDialog.getByLabel('Email').fill(createdEmail);
+      await createDialog.getByLabel('Password').fill('e2e-password-123');
+      await createDialog.getByRole('combobox').click();
+      await page.getByRole('option', { name: 'User' }).click();
+      await createDialog.getByLabel('Tenant').fill('1');
+      await createDialog.getByRole('button', { name: 'Create User' }).click();
+      await expect(page.getByText('User created successfully')).toBeVisible();
+
+      const row = page.getByRole('row', { name: new RegExp(createdEmail) });
+      await row.getByRole('button').click();
+      await page.getByRole('menuitem', { name: 'Edit' }).click();
+      const editDialog = page.getByRole('dialog');
+      await editDialog.getByRole('combobox').click();
+      await page.getByRole('option', { name: 'Moderator' }).click();
+      await editDialog.getByRole('button', { name: 'Save Changes' }).click();
+
+      // Expected once a `moderator` role is seeded (or the option removed):
+      await expect(page.getByText('User updated successfully')).toBeVisible();
+      const updatedRow = page.getByRole('row', { name: new RegExp(createdEmail) });
+      await expect(
+        updatedRow.getByRole('cell', { name: 'moderator', exact: true })
+      ).toBeVisible();
+    }
+  );
+});
