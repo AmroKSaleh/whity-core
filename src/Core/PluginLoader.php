@@ -53,11 +53,25 @@ class PluginLoader
      * Registration bookkeeping per plugin, keyed by the plugin's original FQCN.
      *
      * Tracks what each plugin registered so it can be cleanly unregistered when
-     * its file is modified or removed during a hot reload.
+     * its file is modified or removed during a hot reload, or administratively
+     * disabled via the admin API. The plugin instance is retained so a disabled
+     * plugin can be re-registered (re-enabled) without re-reading it from disk.
      *
-     * @var array<string, array{namespacePrefix: string, hooks: array<array{event: string, callback: callable}>}>
+     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>}>
      */
     private array $registeredPlugins = [];
+
+    /**
+     * Plugin keys (original FQCNs) whose routes/hooks were torn down by an
+     * administrative {@see disablePlugin()} call.
+     *
+     * Distinguishes an administratively disabled plugin (capabilities removed and
+     * needing re-registration on re-enable) from an auto-failed plugin (whose
+     * capabilities remain registered, short-circuited by the error boundary).
+     *
+     * @var array<string, true>
+     */
+    private array $administrativelyDisabled = [];
 
     /**
      * Per-plugin lifecycle state machines, keyed by the plugin's original FQCN.
@@ -356,6 +370,7 @@ class PluginLoader
 
         $this->registeredPlugins = [];
         $this->plugins = [];
+        $this->administrativelyDisabled = [];
 
         // Reset lifecycle state machines. A reload re-registers every plugin
         // from disk, so each plugin (including a previously failed one whose
@@ -617,10 +632,44 @@ class PluginLoader
     }
 
     /**
-     * Manually re-enable a failed (or disabled) plugin.
+     * Get admin-facing metadata for every registered plugin.
+     *
+     * Combines each plugin's static descriptor (name, version, declared route
+     * and permission counts) with its live lifecycle status, producing the shape
+     * the plugins admin API lists. Plugins keep their bookkeeping (and therefore
+     * appear here) even while administratively disabled, so the status reflects
+     * the current lifecycle state rather than disappearing from the listing.
+     *
+     * @return array<int, array{id: string, name: string, version: string, status: string, routes_count: int, permissions_count: int}>
+     */
+    public function getPluginMetadata(): array
+    {
+        $metadata = [];
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            $plugin = $info['plugin'];
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+
+            $metadata[] = [
+                'id' => $pluginKey,
+                'name' => $plugin->getName(),
+                'version' => $plugin->getVersion(),
+                'status' => $lifecycle?->getState()->value ?? PluginState::Loaded->value,
+                'routes_count' => count($plugin->getRoutes()),
+                'permissions_count' => count($plugin->getPermissions()),
+            ];
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * Manually re-enable a failed or administratively disabled plugin.
      *
      * Returns the plugin to the active state with a clean error counter so it can
-     * serve requests again. Used by the admin plugins API.
+     * serve requests again. When the plugin had been administratively disabled
+     * via {@see disablePlugin()} (its routes and hooks unregistered), those
+     * capabilities are re-registered from the retained instance so it serves
+     * traffic again. Used by the admin plugins API.
      *
      * @param string $pluginKey The plugin's stable identity (original FQCN).
      * @return bool True if the plugin existed and was re-enabled, false if unknown.
@@ -632,7 +681,66 @@ class PluginLoader
             return false;
         }
 
+        // A plugin disabled via disablePlugin() had its routes and hooks
+        // unregistered but its bookkeeping retains the instance. Re-register its
+        // capabilities so it can serve traffic once active again. Auto-failed
+        // plugins keep their capabilities registered (short-circuited by the
+        // error boundary) and so must not be re-registered.
+        $info = $this->registeredPlugins[$pluginKey] ?? null;
+        $reRegister = isset($this->administrativelyDisabled[$pluginKey]) && $info !== null;
+
         $lifecycle->reEnable();
+
+        if ($reRegister && $info !== null) {
+            $registeredHooks = $this->registerCapabilities(
+                $info['plugin'],
+                $info['namespacePrefix'],
+                $pluginKey
+            );
+            $this->registeredPlugins[$pluginKey]['hooks'] = $registeredHooks;
+            unset($this->administrativelyDisabled[$pluginKey]);
+        }
+
+        return true;
+    }
+
+    /**
+     * Administratively disable an active (or failed) plugin at runtime.
+     *
+     * Transitions the plugin's lifecycle to {@see PluginState::Disabled} and
+     * removes its registered capabilities: routes are dropped from the router via
+     * {@see Router::unregisterByNamespace()} (WC-8) and hook subscriptions are
+     * removed from the hook manager. The plugin instance and namespace prefix are
+     * retained in bookkeeping so {@see reEnablePlugin()} can restore it without a
+     * disk reload. Worker-level state by design.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return bool True if the plugin existed and was disabled, false if unknown.
+     */
+    public function disablePlugin(string $pluginKey): bool
+    {
+        $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+        $info = $this->registeredPlugins[$pluginKey] ?? null;
+        if ($lifecycle === null || $info === null) {
+            return false;
+        }
+
+        // Drop the plugin's routes and hook subscriptions so it stops serving.
+        $this->router->unregisterByNamespace($info['namespacePrefix']);
+
+        if ($this->hookManager !== null) {
+            foreach ($info['hooks'] as $hook) {
+                $this->hookManager->removeListener($hook['event'], $hook['callback']);
+            }
+        }
+
+        // Hooks are now unregistered; clear the recorded subscriptions so a later
+        // re-enable does not attempt to remove stale callbacks. Mark the plugin
+        // as administratively disabled so re-enable knows to re-register it.
+        $this->registeredPlugins[$pluginKey]['hooks'] = [];
+        $this->administrativelyDisabled[$pluginKey] = true;
+
+        $lifecycle->disable();
 
         return true;
     }
@@ -825,6 +933,39 @@ class PluginLoader
         $lifecycle->markLoaded();
         $this->lifecycles[$pluginKey] = $lifecycle;
 
+        $registeredHooks = $this->registerCapabilities($plugin, $namespacePrefix, $pluginKey);
+
+        // Store the plugin instance and its registration bookkeeping
+        $this->plugins[] = $plugin;
+        $this->registeredPlugins[$pluginKey] = [
+            'plugin' => $plugin,
+            'namespacePrefix' => $namespacePrefix,
+            'hooks' => $registeredHooks,
+        ];
+
+        // The plugin is now fully registered and ready to serve.
+        $lifecycle->markActive();
+    }
+
+    /**
+     * Register a plugin's routes, permissions, and hooks with the core services.
+     *
+     * Shared by initial registration and by re-enable, so a plugin that was
+     * administratively disabled (its routes/hooks removed) can be brought back
+     * online without re-reading or re-instantiating it from disk. Returns the
+     * hook subscriptions actually registered so the caller can record them for
+     * later unsubscription.
+     *
+     * @param PluginInterface $plugin The plugin instance to register.
+     * @param string $namespacePrefix The plugin namespace prefix.
+     * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
+     * @return array<array{event: string, callback: callable}> Registered hook subscriptions.
+     */
+    private function registerCapabilities(
+        PluginInterface $plugin,
+        string $namespacePrefix,
+        string $pluginKey
+    ): array {
         // 1. Register routes with the router, each wrapped in an error boundary
         //    so a throwing handler cannot crash the host or other plugins.
         foreach ($plugin->getRoutes() as $route) {
@@ -850,8 +991,8 @@ class PluginLoader
         }
 
         // 3. Register hooks with the hook manager, tracking each subscription so
-        //    it can be unsubscribed on a later reload/removal. Hook callbacks are
-        //    wrapped in the same error boundary as route handlers.
+        //    it can be unsubscribed on a later reload/removal/disable. Hook
+        //    callbacks are wrapped in the same error boundary as route handlers.
         $registeredHooks = [];
         if ($this->hookManager !== null) {
             foreach ($plugin->getHooks() as $eventName => $hookData) {
@@ -861,15 +1002,7 @@ class PluginLoader
             }
         }
 
-        // Store the plugin instance and its registration bookkeeping
-        $this->plugins[] = $plugin;
-        $this->registeredPlugins[$pluginKey] = [
-            'namespacePrefix' => $namespacePrefix,
-            'hooks' => $registeredHooks,
-        ];
-
-        // The plugin is now fully registered and ready to serve.
-        $lifecycle->markActive();
+        return $registeredHooks;
     }
 
     /**
