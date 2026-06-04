@@ -17,14 +17,16 @@ use Whity\Database\Database;
 use Whity\Core\RBAC\PermissionRegistry;
 
 /**
- * Unit tests for {@see RolesApiHandler} (WC-16, issue #9).
+ * Unit tests for {@see RolesApiHandler} (WC-16, issue #9; WC-110).
  *
- * Covers the full CRUD surface, permission assignment via COLON-notation
- * strings resolved to ids, tenant scoping through the tenant-scoped `user_roles`
- * junction, the "cannot delete a role with active user assignments" guard, and
- * the WC-15 contract that every mutating write invalidates the worker-level
- * effective-permission cache. All tests run against mocked PDO/Database seams
- * and require no live database (CI has no PostgreSQL).
+ * Covers the full CRUD surface, permission assignment from numeric ids and/or
+ * colon-notation name strings resolved to ids (WC-110), tenant scoping by the
+ * owning `roles.tenant_id` column (WC-110), the "cannot delete a role with
+ * active user assignments" guard, and the WC-15 contract that every mutating
+ * write invalidates the worker-level effective-permission cache. All tests here
+ * run against mocked PDO/Database seams; the WC-110 defects (numeric ids dropped,
+ * created roles undeletable) are additionally covered against a real SQL engine
+ * in {@see RolesApiHandlerRealEngineTest}, since mocked PDO masked both.
  */
 class RolesApiHandlerTest extends TestCase
 {
@@ -143,19 +145,21 @@ class RolesApiHandlerTest extends TestCase
     public function testCreateLinksColonNotationPermissions(): void
     {
         $nameCheck = $this->statement(false);            // role name free
-        $insertRole = $this->statement();                // INSERT roles
-        $linkTenant = $this->statement();                // INSERT user_roles
-        $resolveIds = $this->statement(false, [          // SELECT permission ids
-            ['id' => 7], ['id' => 8],
+        $insertRole = $this->statement();                // INSERT roles (with tenant_id)
+        $resolveByName = $this->statement(false, [       // SELECT id, name FROM permissions WHERE name IN
+            ['id' => 7, 'name' => 'posts:read'],
+            ['id' => 8, 'name' => 'posts:write'],
         ]);
         $insertPerms = $this->statement();               // INSERT role_permissions
 
         $pdo = $this->createMock(PDO::class);
+        // WC-110: no acting-user user_roles seed insert anymore; the role is
+        // tenant-stamped on the INSERT itself. Colon-notation names resolve via a
+        // single name lookup (no numeric-id pass).
         $pdo->method('prepare')->willReturnOnConsecutiveCalls(
             $nameCheck,
             $insertRole,
-            $linkTenant,
-            $resolveIds,
+            $resolveByName,
             $insertPerms
         );
         $pdo->method('lastInsertId')->willReturn('42');
@@ -173,6 +177,41 @@ class RolesApiHandlerTest extends TestCase
         $this->assertSame(42, $data['id']);
         $this->assertSame('Editor', $data['name']);
         $this->assertSame(2, $data['permissionCount']);
+    }
+
+    /**
+     * WC-110 (mocked): POST with numeric permission ids validates them against
+     * the catalogue and links the matching ids (the web UI sends ids). The real
+     * SQL semantics are exercised in RolesApiHandlerRealEngineTest.
+     */
+    public function testCreateLinksNumericPermissionIds(): void
+    {
+        $nameCheck = $this->statement(false);            // role name free
+        $insertRole = $this->statement();                // INSERT roles (with tenant_id)
+        $validateIds = $this->statement(false, [         // SELECT id FROM permissions WHERE id IN
+            ['id' => 7], ['id' => 8],
+        ]);
+        $insertPerms = $this->statement();               // INSERT role_permissions
+
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls(
+            $nameCheck,
+            $insertRole,
+            $validateIds,
+            $insertPerms
+        );
+        $pdo->method('lastInsertId')->willReturn('43');
+
+        $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
+        $request = $this->authedRequest('POST', '/api/roles', [
+            'name' => 'Editor',
+            'permissions' => [7, 8],
+        ]);
+
+        $response = $handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(2, json_decode($response->getBody(), true)['data']['permissionCount']);
     }
 
     public function testCreateWithoutNameReturns400(): void
@@ -219,10 +258,11 @@ class RolesApiHandlerTest extends TestCase
 
         $nameCheck = $this->statement(false);
         $insertRole = $this->statement();
-        $linkTenant = $this->statement();
 
+        // WC-110: create no longer seeds a user_roles row; the role is
+        // tenant-stamped on the INSERT (and this role carries no permissions).
         $pdo = $this->createMock(PDO::class);
-        $pdo->method('prepare')->willReturnOnConsecutiveCalls($nameCheck, $insertRole, $linkTenant);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($nameCheck, $insertRole);
         $pdo->method('lastInsertId')->willReturn('42');
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
@@ -243,16 +283,14 @@ class RolesApiHandlerTest extends TestCase
     {
         $nameCheck = $this->statement(false);
         $insertRole = $this->statement();
-        $linkTenant = $this->statement();
-        $resolveIds = $this->statement(false, [['id' => 7]]);
+        $resolveByName = $this->statement(false, [['id' => 7, 'name' => 'posts:read']]);
         $insertPerms = $this->statement();
 
         $pdo = $this->createMock(PDO::class);
         $pdo->method('prepare')->willReturnOnConsecutiveCalls(
             $nameCheck,
             $insertRole,
-            $linkTenant,
-            $resolveIds,
+            $resolveByName,
             $insertPerms
         );
         $pdo->method('lastInsertId')->willReturn('51');
@@ -381,7 +419,7 @@ class RolesApiHandlerTest extends TestCase
         $visibility = $this->statement(['1' => 1]);
         $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '']);
         $delPerms = $this->statement();
-        $resolveIds = $this->statement(false, [['id' => 9]]);
+        $resolveByName = $this->statement(false, [['id' => 9, 'name' => 'posts:delete']]);
         $insertPerms = $this->statement();
 
         $pdo = $this->createMock(PDO::class);
@@ -389,7 +427,7 @@ class RolesApiHandlerTest extends TestCase
             $visibility,
             $roleRow,
             $delPerms,
-            $resolveIds,
+            $resolveByName,
             $insertPerms
         );
 

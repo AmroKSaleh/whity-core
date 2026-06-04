@@ -21,23 +21,25 @@ use PDO;
  * Request contract
  * ----------------
  * Create and update accept the assigned permission list under the canonical key
- * `permissions`, expressed as `resource:action` COLON-notation strings (e.g.
- * `posts:read`). This is the authoritative key the Edit-role UI already uses;
- * the Create-role modal currently sends `permissionIds` (frontend bug #99) and
- * will be reconciled separately to this contract. Permission strings are
- * resolved to their `permissions.id` before being linked through the
- * `role_permissions` junction table (which references permissions by id).
+ * `permissions`. Each entry may be EITHER a numeric `permissions.id` (the form
+ * the web UI sends — its checkboxes are populated from `GET /api/permissions`
+ * which returns `{id, name, ...}`) OR a `resource:action` COLON-notation name
+ * string (e.g. `posts:read`, the Edit-role contract); mixed arrays are accepted.
+ * Ids are validated against the catalogue and names resolved to ids before being
+ * linked through the `role_permissions` junction table (which references
+ * permissions by id). Unknown ids/names are dropped, never fabricated (WC-110).
  *
  * Tenant scoping
  * --------------
- * The `roles` table is global (it has no `tenant_id` column), so a role's tenant
- * association is derived from the tenant-scoped `user_roles` junction table: a
- * role belongs to a tenant when at least one assignment links it to that tenant.
- * Newly created roles are linked to the current tenant via a `user_roles` seed
- * row using the acting user so they are immediately visible to — and only to —
- * that tenant. Every read/write is filtered by the resolved
- * {@see TenantContext::getTenantId()}; the SYSTEM tenant (id 0) is the sole
- * exception and sees every role across tenants. TenantContext is never bypassed.
+ * The `roles` table carries a nullable `tenant_id` column (migration 018): a
+ * role belongs to the tenant that created it. Newly created roles are stamped
+ * with the current tenant id and every read/write is filtered by the resolved
+ * {@see TenantContext::getTenantId()} against `roles.tenant_id`; the SYSTEM
+ * tenant (id 0) is the sole exception and sees every role across tenants.
+ * TenantContext is never bypassed. (Before WC-110 a role's tenant was inferred
+ * from a `user_roles` seed row for the acting user, which made API-created roles
+ * undeletable because the deletion guard counted that very seed assignment; that
+ * hack has been removed in favour of the explicit owning column.)
  *
  * Cache coherence
  * ---------------
@@ -93,14 +95,14 @@ class RolesApiHandler
                 ');
                 $stmt->execute();
             } else {
-                // A role is visible to a tenant when at least one user_roles
-                // assignment links it to that tenant (tenant isolation).
+                // A role is visible to a tenant when it is owned by that tenant
+                // (roles.tenant_id), enforcing tenant isolation (WC-110).
                 $stmt = $this->db->prepare('
                     SELECT r.id, r.name, r.description, r.parent_id, r.created_at,
                            COUNT(rp.id) AS permission_count
                     FROM roles r
-                    INNER JOIN user_roles ur ON ur.role_id = r.id AND ur.tenant_id = ?
                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
+                    WHERE r.tenant_id = ?
                     GROUP BY r.id
                     ORDER BY r.created_at DESC
                 ');
@@ -168,9 +170,9 @@ class RolesApiHandler
      * POST /api/roles - Create a new role scoped to the current tenant.
      *
      * Accepts `{name, description?, permissions?}` where `permissions` is a list
-     * of `resource:action` strings. The new role is linked to the current tenant
-     * via the `user_roles` junction so it is immediately visible only to that
-     * tenant.
+     * of numeric permission ids and/or `resource:action` name strings. The new
+     * role is stamped with the current tenant id (`roles.tenant_id`) so it is
+     * immediately visible only to that tenant.
      *
      * @param Request $request The incoming request.
      * @return Response JSON created role under the `data` key (201) or an error.
@@ -192,7 +194,7 @@ class RolesApiHandler
 
             $name = (string)$body['name'];
             $description = isset($body['description']) ? (string)$body['description'] : '';
-            /** @var array<int, string> $permissions */
+            /** @var array<int, string|int> $permissions */
             $permissions = $this->extractPermissionList($body);
 
             // Role names are globally unique at the database layer.
@@ -212,22 +214,20 @@ class RolesApiHandler
 
             $name = (string)$roleData['name'];
             $description = (string)$roleData['description'];
-            /** @var array<int, string> $permissions */
-            $permissions = array_values($roleData['permissions']);
+            /** @var array<int, string|int> $permissions */
+            $permissions = $this->normalizePermissionRefs((array)$roleData['permissions']);
 
-            // Insert the role.
+            // Insert the role, stamping it with the owning tenant so it is visible
+            // to — and only to — this tenant (WC-110). The SYSTEM tenant (id 0) is
+            // a real, scopeable owner here; it also sees every role on read.
             $stmt = $this->db->prepare('
-                INSERT INTO roles (name, description, created_at)
-                VALUES (?, ?, NOW())
+                INSERT INTO roles (name, description, tenant_id, created_at)
+                VALUES (?, ?, ?, NOW())
             ');
-            $stmt->execute([$name, $description]);
+            $stmt->execute([$name, $description, $tenantId]);
             $roleId = (int)$this->db->lastInsertId();
 
-            // Link the role to the current tenant via user_roles using the acting
-            // user, so it is immediately visible to — and only to — this tenant.
-            $this->linkRoleToTenant($roleId, $tenantId, $this->actingUserId($request));
-
-            // Resolve colon-notation permission strings to ids and link them.
+            // Resolve permission ids/names and link them.
             $linkedCount = $this->assignPermissions($roleId, $permissions);
 
             // Synchronous post-create hook.
@@ -274,8 +274,8 @@ class RolesApiHandler
      * PATCH /api/roles/{id} - Update a tenant-scoped role.
      *
      * Accepts any of `{name?, description?, permissions?}`. When `permissions` is
-     * present its `resource:action` strings fully replace the role's existing
-     * permission grants.
+     * present its entries (numeric ids and/or `resource:action` names) fully
+     * replace the role's existing permission grants.
      *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
@@ -346,8 +346,8 @@ class RolesApiHandler
                 $delStmt = $this->db->prepare('DELETE FROM role_permissions WHERE role_id = ?');
                 $delStmt->execute([$id]);
 
-                /** @var array<int, string> $permissions */
-                $permissions = array_values($body['permissions']);
+                /** @var array<int, string|int> $permissions */
+                $permissions = $this->normalizePermissionRefs($body['permissions']);
                 $this->assignPermissions((int)$id, $permissions);
             }
 
@@ -479,7 +479,7 @@ class RolesApiHandler
      * Whether a role is visible to the given tenant.
      *
      * The SYSTEM tenant (id 0) sees every role. For any other tenant, a role is
-     * visible only when a `user_roles` assignment links it to that tenant.
+     * visible only when it is owned by that tenant (`roles.tenant_id`) (WC-110).
      *
      * @param int      $roleId   The role id.
      * @param int|null $tenantId The resolved tenant id (null when unresolved).
@@ -500,11 +500,10 @@ class RolesApiHandler
         $stmt = $this->db->prepare('
             SELECT 1
             FROM roles r
-            INNER JOIN user_roles ur ON ur.role_id = r.id AND ur.tenant_id = ?
-            WHERE r.id = ?
+            WHERE r.id = ? AND r.tenant_id = ?
             LIMIT 1
         ');
-        $stmt->execute([$tenantId, $roleId]);
+        $stmt->execute([$roleId, $tenantId]);
         return $stmt->fetch() !== false;
     }
 
@@ -566,15 +565,16 @@ class RolesApiHandler
     }
 
     /**
-     * Resolve `resource:action` permission strings to ids and link them to a role
-     * via the `role_permissions` junction table.
+     * Resolve permission references (numeric ids and/or `resource:action` name
+     * strings) to ids and link them to a role via the `role_permissions` junction
+     * table.
      *
-     * Unknown permission strings (not present in the `permissions` catalogue) are
-     * skipped rather than fabricated, so a role can never reference a permission
-     * the system does not enforce. Returns the number of grants actually linked.
+     * Unknown ids/names (not present in the `permissions` catalogue) are skipped
+     * rather than fabricated, so a role can never reference a permission the system
+     * does not enforce. Returns the number of grants actually linked.
      *
-     * @param int               $roleId      The role id.
-     * @param array<int, string> $permissions Permission strings (colon notation).
+     * @param int                    $roleId      The role id.
+     * @param array<int, string|int> $permissions Permission ids and/or names.
      * @return int The number of permission grants linked.
      */
     private function assignPermissions(int $roleId, array $permissions): int
@@ -607,76 +607,143 @@ class RolesApiHandler
     }
 
     /**
-     * Resolve a list of `resource:action` permission strings to their ids.
+     * Resolve a mixed list of permission references to their `permissions.id`s.
      *
-     * Looks the strings up by `permissions.name`. Strings with no catalogue match
-     * are dropped. The result preserves uniqueness so a duplicated input string
-     * does not violate the `(role_id, permission_id)` uniqueness constraint.
+     * The web UI populates its checkboxes from `GET /api/permissions` (which
+     * returns `{id, name, ...}`) and therefore submits numeric permission ids,
+     * while the Edit-role contract submits `resource:action` name strings. To
+     * support both — including arrays that mix the two — each entry is classified:
      *
-     * @param array<int, string> $permissions Permission strings (colon notation).
-     * @return array<int, int> Resolved permission ids.
+     *  - An integer or numeric string is treated as a permission id and kept ONLY
+     *    when that id actually exists in the `permissions` catalogue.
+     *  - Anything else is treated as a `resource:action` name and resolved through
+     *    the catalogue by `permissions.name`.
+     *
+     * Unknown ids and unknown names are dropped (never fabricated), so a role can
+     * never reference a permission the system does not enforce. The result is
+     * de-duplicated to respect the `(role_id, permission_id)` uniqueness
+     * constraint while preserving first-seen order.
+     *
+     * @param array<int, string|int> $permissions Permission ids and/or names.
+     * @return array<int, int> Resolved, validated, de-duplicated permission ids.
      */
     private function resolvePermissionIds(array $permissions): array
     {
-        $names = array_values(array_unique(array_map(static fn($p): string => (string)$p, $permissions)));
+        $candidateIds = [];
+        $names = [];
+        // Preserve the caller's first-seen ordering across both id and name paths.
+        $order = [];
+
+        foreach ($permissions as $entry) {
+            if (is_int($entry) || (is_string($entry) && $this->isNumericId($entry))) {
+                $id = (int)$entry;
+                $candidateIds[$id] = true;
+                $order[] = ['id', $id];
+                continue;
+            }
+
+            $name = (string)$entry;
+            $names[$name] = true;
+            $order[] = ['name', $name];
+        }
+
+        // Validate numeric ids against the catalogue so only real ids survive.
+        $validIds = $this->existingPermissionIds(array_keys($candidateIds));
+        // Resolve names to ids via the catalogue.
+        $nameToId = $this->permissionIdsByName(array_keys($names));
+
+        $resolved = [];
+        foreach ($order as [$kind, $value]) {
+            if ($kind === 'id') {
+                if (isset($validIds[$value])) {
+                    $resolved[$value] = true;
+                }
+                continue;
+            }
+
+            if (isset($nameToId[$value])) {
+                $resolved[$nameToId[$value]] = true;
+            }
+        }
+
+        return array_map('intval', array_keys($resolved));
+    }
+
+    /**
+     * Whether a string represents a non-negative integer permission id.
+     *
+     * Accepts only plain digit strings (e.g. "42"); rejects floats, signed values
+     * and `resource:action` names so colon-notation strings are never mistaken
+     * for ids.
+     *
+     * @param string $value The raw candidate value.
+     * @return bool True when the value is a plain unsigned integer literal.
+     */
+    private function isNumericId(string $value): bool
+    {
+        return $value !== '' && ctype_digit($value);
+    }
+
+    /**
+     * Filter a list of candidate permission ids down to those that exist.
+     *
+     * @param array<int, int> $ids Candidate permission ids.
+     * @return array<int, true> Set of existing ids, keyed by id for O(1) lookup.
+     */
+    private function existingPermissionIds(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->prepare(
+            'SELECT id FROM permissions WHERE id IN (' . $placeholders . ')'
+        );
+        $stmt->execute(array_values($ids));
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $existing = [];
+        foreach ($rows as $row) {
+            if (isset($row['id'])) {
+                $existing[(int)$row['id']] = true;
+            }
+        }
+
+        return $existing;
+    }
+
+    /**
+     * Resolve a list of permission names to their ids.
+     *
+     * @param array<int, string> $names Permission names (colon notation).
+     * @return array<string, int> Map of name => id for names that exist.
+     */
+    private function permissionIdsByName(array $names): array
+    {
         if ($names === []) {
             return [];
         }
 
         $placeholders = implode(', ', array_fill(0, count($names), '?'));
         $stmt = $this->db->prepare(
-            'SELECT id FROM permissions WHERE name IN (' . $placeholders . ')'
+            'SELECT id, name FROM permissions WHERE name IN (' . $placeholders . ')'
         );
-        $stmt->execute($names);
+        $stmt->execute(array_values($names));
 
         /** @var array<int, array<string, mixed>> $rows */
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $ids = [];
+        $map = [];
         foreach ($rows as $row) {
-            if (isset($row['id'])) {
-                $ids[] = (int)$row['id'];
+            if (isset($row['id'], $row['name'])) {
+                $map[(string)$row['name']] = (int)$row['id'];
             }
         }
 
-        return array_values(array_unique($ids));
-    }
-
-    /**
-     * Link a role to a tenant via the tenant-scoped `user_roles` junction so the
-     * role becomes visible to that tenant.
-     *
-     * Uses the acting user as the assignment subject. The insert is idempotent at
-     * the database layer through the `(user_id, role_id)` unique constraint; any
-     * duplicate-assignment failure is swallowed so role creation still succeeds.
-     *
-     * @param int      $roleId   The newly created role id.
-     * @param int      $tenantId The current tenant id.
-     * @param int|null $userId   The acting user id, or null when unknown.
-     * @return void
-     */
-    private function linkRoleToTenant(int $roleId, int $tenantId, ?int $userId): void
-    {
-        if ($userId === null) {
-            return;
-        }
-
-        try {
-            $stmt = $this->db->prepare('
-                INSERT INTO user_roles (tenant_id, user_id, role_id, created_at)
-                VALUES (?, ?, ?, NOW())
-            ');
-            $stmt->execute([$tenantId, $userId, $roleId]);
-        } catch (\PDOException $e) {
-            // A duplicate assignment is harmless; only re-raise unexpected errors.
-            if (
-                stripos($e->getMessage(), 'unique') === false
-                && stripos($e->getMessage(), 'constraint') === false
-                && stripos($e->getMessage(), 'duplicate') === false
-            ) {
-                throw $e;
-            }
-        }
+        return $map;
     }
 
     /**
@@ -685,10 +752,12 @@ class RolesApiHandler
      * The authoritative key is `permissions` (the Edit-role UI contract). For
      * resilience against the known Create-role modal bug (#99) that sends
      * `permissionIds`, that key is accepted as a fallback ONLY when `permissions`
-     * is absent. Each entry is coerced to a string (colon-notation permission).
+     * is absent. Entries are normalised to scalars (int permission ids or string
+     * `resource:action` names) so {@see self::resolvePermissionIds()} can accept
+     * either form; non-scalar entries are discarded.
      *
      * @param array<string, mixed> $body The decoded request body.
-     * @return array<int, string> The permission list.
+     * @return array<int, string|int> The permission references (ids and/or names).
      */
     private function extractPermissionList(array $body): array
     {
@@ -704,30 +773,31 @@ class RolesApiHandler
             return [];
         }
 
-        return array_values(array_map(static fn($p): string => (string)$p, $raw));
+        return $this->normalizePermissionRefs($raw);
     }
 
     /**
-     * Resolve the acting user id from the authenticated request, if present.
+     * Normalise raw permission references into a clean list of ints and strings.
      *
-     * The RBAC middleware attaches the decoded token to {@see Request::$user};
-     * the user id lives under the `user_id` claim.
+     * Integers are kept as ids; strings are kept as-is (numeric strings are
+     * treated as ids downstream); other scalars are coerced to string; non-scalar
+     * entries (arrays/objects) are dropped.
      *
-     * @param Request $request The incoming request.
-     * @return int|null The acting user id, or null when unauthenticated.
+     * @param array<int|string, mixed> $raw Raw permission entries from the request.
+     * @return array<int, string|int> The normalised references.
      */
-    private function actingUserId(Request $request): ?int
+    private function normalizePermissionRefs(array $raw): array
     {
-        $user = $request->user;
-        if ($user === null) {
-            return null;
+        $refs = [];
+        foreach ($raw as $entry) {
+            if (is_int($entry) || is_string($entry)) {
+                $refs[] = $entry;
+            } elseif (is_scalar($entry)) {
+                $refs[] = (string)$entry;
+            }
         }
 
-        if (isset($user->user_id) && is_numeric($user->user_id)) {
-            return (int)$user->user_id;
-        }
-
-        return null;
+        return $refs;
     }
 
     /**
