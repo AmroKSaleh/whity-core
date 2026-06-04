@@ -108,16 +108,56 @@ class TenantsApiHandler
                 $stmt->execute([$currentTenantId]);
             }
 
-            $tenants = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            /** @var array<int, array<string, mixed>> $rows */
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            if (empty($tenants) && !$isSystemUser) {
+            if (empty($rows) && !$isSystemUser) {
                 return Response::error('Tenant not found', 404);
             }
+
+            // Shape each row into the public contract so the payload always carries
+            // the camelCase keys the frontend `Tenant` type binds (WC-122). The
+            // unquoted `userCount` SQL alias is folded to lowercase (`usercount`) in
+            // the result set by the database (PostgreSQL/MySQL both lowercase
+            // unquoted identifiers), so the delete-tenant dialog — which reads
+            // `userCount` — never saw the count; mapping here pins the casing
+            // regardless of the engine, mirroring {@see UsersApiHandler::toPublicUser()}.
+            $tenants = array_map(fn (array $row): array => $this->toPublicTenant($row), $rows);
 
             return Response::json(['data' => $tenants], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to fetch tenant: ' . $e->getMessage(), 500);
         }
+    }
+
+    /**
+     * Map a raw tenants row to the public API contract consumed by the web UI.
+     *
+     * Snake_case / engine-folded columns are normalised to the camelCase keys the
+     * frontend `Tenant` type binds: the user-count aggregate is exposed as
+     * `userCount` (the unquoted `userCount` SQL alias comes back lowercased as
+     * `usercount` from the database) and `created_at` as `createdAt`. This
+     * guarantees the delete-tenant dialog receives the associated-user count under
+     * the key it reads (WC-122) and keeps the casing consistent with the users
+     * payload (WC-100/WC-113).
+     *
+     * @param array<string, mixed> $row Raw row from the tenants SELECT.
+     * @return array{id: int, name: string, slug: string|null, userCount: int, createdAt: string|null}
+     */
+    private function toPublicTenant(array $row): array
+    {
+        // The user-count aggregate is aliased `userCount` in SQL but the database
+        // folds the unquoted result-set column name to lowercase, so accept either
+        // casing (and the explicit `userCount` from create()/SQLite tests).
+        $userCount = $row['userCount'] ?? $row['usercount'] ?? 0;
+
+        return [
+            'id' => (int)($row['id'] ?? 0),
+            'name' => (string)($row['name'] ?? ''),
+            'slug' => isset($row['slug']) ? (string)$row['slug'] : null,
+            'userCount' => (int)$userCount,
+            'createdAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
+        ];
     }
 
     /**
@@ -186,13 +226,13 @@ class TenantsApiHandler
             ]);
 
             return Response::json([
-                'data' => [
+                'data' => $this->toPublicTenant([
                     'id' => (int)$tenantId,
                     'name' => $name,
                     'slug' => $slug,
                     'userCount' => 0,
-                    'created_at' => date('Y-m-d H:i:s')
-                ]
+                    'created_at' => date('Y-m-d H:i:s'),
+                ])
             ], 201);
         } catch (\Exception $e) {
             return Response::error('Failed to create tenant: ' . $e->getMessage(), 500);
