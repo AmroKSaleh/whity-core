@@ -32,6 +32,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { User } from './page';
+import { useRoleOptions } from './use-role-options';
 
 // Only `role` is editable on this endpoint (WC-113). `name` is derived from the
 // email local-part (no users.name column) and `tenant` moves are intentionally
@@ -59,6 +60,10 @@ export function EditUserModal({
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Role dropdown options come from the live tenant-visible role list, so only
+  // roles that actually exist (and resolve server-side) are offered. This
+  // removes the phantom "Moderator" option that 404'd on save (WC-121).
+  const { roleOptions, isLoadingRoles } = useRoleOptions(isOpen);
 
   // Only the editable field (`role`) is bound to the form. Name and tenant are
   // displayed read-only directly from the user record (see below).
@@ -170,13 +175,19 @@ export function EditUserModal({
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select a role" />
+                        <SelectValue
+                          placeholder={
+                            isLoadingRoles ? 'Loading roles…' : 'Select a role'
+                          }
+                        />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="user">User</SelectItem>
-                      <SelectItem value="moderator">Moderator</SelectItem>
+                      {roleOptions.map((role) => (
+                        <SelectItem key={role.value} value={role.value}>
+                          {role.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />

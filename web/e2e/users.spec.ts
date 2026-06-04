@@ -15,10 +15,11 @@ import { deleteUser, findUserIdByEmail } from './support/api';
  * Rows are still located by email for stability.
  *
  * Role choice: the edit flows switch between the seeded base roles `user` and
- * `admin` (both exist in the demo seed and resolve server-side). The form's
- * "Moderator" option has no backing role in the seed, so the tests deliberately
- * avoid it — selecting it would 404 now that the backend validates the role
- * name (WC-113).
+ * `admin` (both exist in the demo seed and resolve server-side). The role
+ * dropdown is now driven from the live `GET /api/roles` list (WC-121), so it
+ * only ever offers roles that actually exist for the tenant — the old static
+ * "Moderator" option (which had no backing seed role and 404'd on submit) is
+ * gone.
  */
 test.describe('Users (admin)', () => {
   let createdEmail: string | null = null;
@@ -153,6 +154,52 @@ test.describe('Users (admin)', () => {
     const persisted = (body.data ?? []).find((u) => u.email === createdEmail);
     expect(persisted?.role).toBe('admin');
   });
+
+  // WC-121: creating a user with a chosen role must persist THAT role, not
+  // silently default to `user`. Previously the create handler read only
+  // `role_id` and ignored the submitted role NAME, so a user created as "admin"
+  // was created as "user". This test creates with role=Admin and asserts the
+  // persisted role is `admin` via BOTH the refreshed table and the list API.
+  test('creating a user with a specific role persists that role', async ({
+    adminPage,
+    page,
+    adminApi,
+  }) => {
+    const suffix = uniqueSuffix();
+    createdEmail = `e2e-create-admin-${suffix}@example.com`;
+
+    await adminPage.shell.clickNav('Users');
+    await page.waitForURL('**/admin/users');
+
+    await page.getByRole('button', { name: 'Create User' }).click();
+    const createDialog = page.getByRole('dialog');
+    await expect(createDialog.getByText('Create New User')).toBeVisible();
+
+    await createDialog.getByLabel('Name').fill(`Create Admin ${suffix}`);
+    await createDialog.getByLabel('Email').fill(createdEmail);
+    await createDialog.getByLabel('Password').fill('e2e-password-123');
+    // Pick the non-default `admin` role at creation time.
+    await createDialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: 'Admin' }).click();
+    await createDialog.getByLabel('Tenant').fill('1');
+    await createDialog.getByRole('button', { name: 'Create User' }).click();
+
+    await expect(page.getByText('User created successfully')).toBeVisible();
+
+    // The refreshed table shows the new user already in the `admin` role — NOT
+    // downgraded to `user` (the WC-121 defect). The assertion is exact so a
+    // stale "user" cell cannot satisfy it.
+    const row = page.getByRole('row', { name: new RegExp(createdEmail) });
+    await expect(row).toBeVisible();
+    await expect(row.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
+
+    // Independent confirmation straight from the list API: the persisted role is
+    // exactly what was chosen at creation.
+    const res = await adminApi.get('/api/users');
+    const body = (await res.json()) as { data?: Array<{ email: string; role: string }> };
+    const persisted = (body.data ?? []).find((u) => u.email === createdEmail);
+    expect(persisted?.role).toBe('admin');
+  });
 });
 
 test.describe('Edit User pre-fill (WC-100)', () => {
@@ -276,64 +323,79 @@ test.describe('Create User validation + dialog (admin)', () => {
 });
 
 /**
- * KNOWN APP BUG (documented as a fixme, not papered over).
+ * WC-121: the phantom "Moderator" dropdown option is GONE.
  *
- * The Edit User (and Create User) role dropdown offers a third option,
- * "Moderator" (value "moderator"), that has NO backing role in the demo seed.
- * Since the backend now validates/resolves the role NAME on PATCH (WC-113),
- * selecting Moderator and saving fails with 404 "Role not found" and the UI
- * shows a "Role not found" error toast instead of succeeding.
- *
- * This is a real product bug: the dropdown advertises a role that cannot be
- * assigned. The fix is to either seed a `moderator` role or remove the option
- * from create-modal.tsx / edit-modal.tsx. Until then this expectation (that
- * selecting Moderator succeeds) cannot pass, so it is a fixme.
+ * The role dropdown used to offer a static third option, "Moderator", that had
+ * NO backing role in the seed; once the backend began validating role NAMES
+ * (WC-113) selecting it 404'd. WC-121 drives the dropdown from the live
+ * `GET /api/roles` list, so it now only offers roles that actually exist for the
+ * tenant (`User` and `Admin` in the demo seed). This was a `test.fixme` for the
+ * known bug; it is now a real, passing assertion that the dropdown contains the
+ * seeded roles and NOT "Moderator".
  */
-test.describe('Users edit — Moderator option (known bug)', () => {
-  let createdEmail: string | null = null;
+test.describe('Users role dropdown is driven from real roles (WC-121)', () => {
+  test('the create dialog offers only the seeded roles and no phantom Moderator', async ({
+    adminPage,
+    page,
+  }) => {
+    await adminPage.shell.clickNav('Users');
+    await page.waitForURL('**/admin/users');
 
-  test.afterEach(async ({ adminApi }) => {
-    if (createdEmail) {
-      const id = await findUserIdByEmail(adminApi, createdEmail);
-      if (id !== null) await deleteUser(adminApi, id);
-      createdEmail = null;
-    }
+    await page.getByRole('button', { name: 'Create User' }).click();
+    const createDialog = page.getByRole('dialog');
+    await expect(createDialog.getByText('Create New User')).toBeVisible();
+
+    await createDialog.getByRole('combobox').click();
+
+    // The real seeded roles are offered...
+    await expect(page.getByRole('option', { name: 'User' })).toBeVisible();
+    await expect(page.getByRole('option', { name: 'Admin' })).toBeVisible();
+    // ...and the phantom "Moderator" option is no longer present.
+    await expect(page.getByRole('option', { name: 'Moderator' })).toHaveCount(0);
+
+    await page.keyboard.press('Escape'); // close the listbox
+    await createDialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(createDialog).toBeHidden();
   });
 
-  test.fixme(
-    'selecting the "Moderator" role on edit should persist (no backing role in seed)',
-    async ({ adminPage, page }) => {
-      const suffix = uniqueSuffix();
-      createdEmail = `e2e-moderator-${suffix}@example.com`;
+  test('the edit dialog offers only the seeded roles and no phantom Moderator', async ({
+    adminPage,
+    page,
+    adminApi,
+  }) => {
+    // The edit dialog needs an existing row; open it on a throwaway user and
+    // clean up via the API afterwards.
+    const suffix = uniqueSuffix();
+    const probeEmail = `e2e-dropdown-${suffix}@example.com`;
 
-      await adminPage.shell.clickNav('Users');
-      await page.waitForURL('**/admin/users');
+    await adminPage.shell.clickNav('Users');
+    await page.waitForURL('**/admin/users');
 
-      await page.getByRole('button', { name: 'Create User' }).click();
-      const createDialog = page.getByRole('dialog');
-      await createDialog.getByLabel('Name').fill(`Moderator Probe ${suffix}`);
-      await createDialog.getByLabel('Email').fill(createdEmail);
-      await createDialog.getByLabel('Password').fill('e2e-password-123');
-      await createDialog.getByRole('combobox').click();
-      await page.getByRole('option', { name: 'User' }).click();
-      await createDialog.getByLabel('Tenant').fill('1');
-      await createDialog.getByRole('button', { name: 'Create User' }).click();
-      await expect(page.getByText('User created successfully')).toBeVisible();
+    await page.getByRole('button', { name: 'Create User' }).click();
+    const createDialog = page.getByRole('dialog');
+    await createDialog.getByLabel('Name').fill(`Dropdown Probe ${suffix}`);
+    await createDialog.getByLabel('Email').fill(probeEmail);
+    await createDialog.getByLabel('Password').fill('e2e-password-123');
+    await createDialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: 'User' }).click();
+    await createDialog.getByLabel('Tenant').fill('1');
+    await createDialog.getByRole('button', { name: 'Create User' }).click();
+    await expect(page.getByText('User created successfully')).toBeVisible();
 
-      const row = page.getByRole('row', { name: new RegExp(createdEmail) });
+    try {
+      const row = page.getByRole('row', { name: new RegExp(probeEmail) });
       await row.getByRole('button').click();
       await page.getByRole('menuitem', { name: 'Edit' }).click();
       const editDialog = page.getByRole('dialog');
-      await editDialog.getByRole('combobox').click();
-      await page.getByRole('option', { name: 'Moderator' }).click();
-      await editDialog.getByRole('button', { name: 'Save Changes' }).click();
+      await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
 
-      // Expected once a `moderator` role is seeded (or the option removed):
-      await expect(page.getByText('User updated successfully')).toBeVisible();
-      const updatedRow = page.getByRole('row', { name: new RegExp(createdEmail) });
-      await expect(
-        updatedRow.getByRole('cell', { name: 'moderator', exact: true })
-      ).toBeVisible();
+      await editDialog.getByRole('combobox').click();
+      await expect(page.getByRole('option', { name: 'User' })).toBeVisible();
+      await expect(page.getByRole('option', { name: 'Admin' })).toBeVisible();
+      await expect(page.getByRole('option', { name: 'Moderator' })).toHaveCount(0);
+    } finally {
+      const id = await findUserIdByEmail(adminApi, probeEmail);
+      if (id !== null) await deleteUser(adminApi, id);
     }
-  );
+  });
 });

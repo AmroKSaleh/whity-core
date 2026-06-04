@@ -48,6 +48,138 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         TenantContext::reset();
     }
 
+    // ==================== WC-121: create persists the chosen role ====================
+
+    /**
+     * Creating a user with a chosen role NAME (as the Create form sends it)
+     * persists THAT role, not the `user` default.
+     *
+     * This is the regression test for the WC-121 create defect: the old handler
+     * read only `role_id` and defaulted to 2 (`user`), so a user created as
+     * "admin" was silently created as "user". It FAILS on current main (the
+     * persisted role_id stays 2) and passes after the fix.
+     */
+    public function testCreatePersistsChosenRoleByName(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'name' => 'Ignored Name',
+            'email' => 'create-admin@example.com',
+            'password' => 'secret-123',
+            'role' => 'admin',
+            'tenantId' => 1,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+
+        // The persisted row carries the admin role id (1), NOT the user default (2).
+        $roleId = (int) $this->pdo
+            ->query("SELECT role_id FROM users WHERE email = 'create-admin@example.com'")
+            ->fetchColumn();
+        $this->assertSame(1, $roleId, 'A user created as admin must persist the admin role, not default to user.');
+
+        // The response is the created user in the public shape, with the chosen role.
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('admin', $data['role']);
+        $this->assertSame('create-admin@example.com', $data['email']);
+        $this->assertSame(1, $data['tenantId']);
+        $this->assertArrayNotHasKey('password', $data, 'The password hash must never leak.');
+    }
+
+    /**
+     * A numeric `role_id` is still accepted for API callers and resolves to the
+     * same persisted role.
+     */
+    public function testCreateAcceptsNumericRoleId(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-byid@example.com',
+            'password' => 'secret-123',
+            'role_id' => 1,
+            'tenantId' => 1,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query("SELECT role_id FROM users WHERE email = 'create-byid@example.com'")->fetchColumn()
+        );
+    }
+
+    /**
+     * When no role is supplied the user defaults to the global `user` role
+     * (resolved by name, not a hard-coded id).
+     */
+    public function testCreateWithoutRoleDefaultsToUser(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-default@example.com',
+            'password' => 'secret-123',
+            'tenantId' => 1,
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame(
+            2,
+            (int) $this->pdo->query("SELECT role_id FROM users WHERE email = 'create-default@example.com'")->fetchColumn(),
+            'Absent role must default to the global user role.'
+        );
+
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('user', $data['role']);
+    }
+
+    /**
+     * A role NAME that is not visible to the tenant is rejected with 404 on
+     * create (matching the update path), so the create form can never silently
+     * downgrade an unknown role to `user` and no user is inserted.
+     */
+    public function testCreateWithUnresolvableRoleReturns404AndCreatesNothing(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-ghost@example.com',
+            'password' => 'secret-123',
+            'role' => 'ghost-role',
+            'tenantId' => 1,
+        ]));
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM users WHERE email = 'create-ghost@example.com'")->fetchColumn(),
+            'An unresolvable role must not create a user.'
+        );
+    }
+
+    /**
+     * A non-system tenant cannot create a user with another tenant's PRIVATE
+     * role: resolution is scoped to owned + global roles, so an unrelated
+     * tenant-private role resolves to nothing and the create is rejected (404).
+     */
+    public function testCreateCannotUseAnotherTenantsPrivateRole(): void
+    {
+        // A private role owned by tenant 2.
+        $this->seedRole(70, 'tenant2-private', 2);
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $response = $handler->create($this->authedRequest('POST', '/api/users', [
+            'email' => 'create-foreign-role@example.com',
+            'password' => 'secret-123',
+            'role' => 'tenant2-private',
+            'tenantId' => 1,
+        ]));
+
+        $this->assertSame(404, $response->getStatusCode(), "Tenant 1 must not assign tenant 2's private role on create.");
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM users WHERE email = 'create-foreign-role@example.com'")->fetchColumn()
+        );
+    }
+
     // ==================== AC1: role change persists ====================
 
     /**
