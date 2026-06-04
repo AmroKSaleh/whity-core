@@ -129,6 +129,13 @@ class RoleChecker
      *  3. Otherwise the permission is resolved through the role hierarchy: the
      *     user's role inherits every permission of the roles beneath it.
      *
+     * Both the direct-grant check (step 2) and the hierarchy resolution (step 3)
+     * read grants through the SAME correct join — `role_permissions` is linked to
+     * `permissions` by `permission_id` and matched on `permissions.name` (WC-54).
+     * There is no `role_permissions.permission_string` column; the historical
+     * query that referenced one 500-ed every permission-gated route against the
+     * real database.
+     *
      * The signature and semantics ("does this user effectively have this
      * permission?") are unchanged, so callers such as the RBAC middleware need no
      * modification.
@@ -144,10 +151,11 @@ class RoleChecker
             return false;
         }
 
-        // Step 2: direct grant on the user's primary role (backward compatible).
-        $sql = 'SELECT 1 FROM role_permissions rp JOIN users u ON u.role_id = rp.role_id WHERE u.id = :userId AND rp.permission_string = :permission';
-        $statement = $this->db->query($sql, [':userId' => $userId, ':permission' => $permission]);
-        if ($statement->fetch() !== false) {
+        // Step 2: direct grant on the user's primary role. A single query reaches
+        // role_permissions only through the user join, exactly as production data
+        // is reachable, and short-circuits before any hierarchy walk — preserving
+        // backward-compatible middleware semantics.
+        if ($this->userRoleHasDirectPermission($userId, $permission)) {
             return true;
         }
 
@@ -164,7 +172,9 @@ class RoleChecker
     /**
      * Get all permissions directly granted to a user through their role.
      *
-     * Does NOT include hierarchy-inherited permissions; use
+     * Reads grants through the real schema join (`role_permissions.permission_id`
+     * -> `permissions.name`), the same correct query the rest of this class uses
+     * (WC-54). Does NOT include hierarchy-inherited permissions; use
      * {@see self::getEffectivePermissionsForRole()} for the inherited set.
      *
      * @param int $userId The user ID to query.
@@ -172,7 +182,11 @@ class RoleChecker
      */
     public function getPermissionsForUser(int $userId): array
     {
-        $sql = 'SELECT DISTINCT rp.permission_string FROM role_permissions rp JOIN users u ON u.role_id = rp.role_id WHERE u.id = :userId';
+        $sql = 'SELECT DISTINCT p.name
+                FROM role_permissions rp
+                JOIN users u ON u.role_id = rp.role_id
+                JOIN permissions p ON p.id = rp.permission_id
+                WHERE u.id = :userId';
         $statement = $this->db->query($sql, [':userId' => $userId]);
         $results = $statement->fetchAll();
 
@@ -180,7 +194,7 @@ class RoleChecker
             return [];
         }
 
-        return array_map(static fn($row) => $row['permission_string'], $results);
+        return array_map(static fn($row) => $row['name'], $results);
     }
 
     /**
@@ -319,6 +333,37 @@ class RoleChecker
         }
 
         return (int) $result['role_id'];
+    }
+
+    /**
+     * Whether the role assigned to a user directly holds a given permission.
+     *
+     * The authoritative direct-grant query (WC-54): `role_permissions` reached
+     * through the user's role and joined to `permissions` on `permission_id`,
+     * matched on `permissions.name`. This mirrors the historical step-2 probe's
+     * `:userId` + `:permission` contract — role_permissions rows are reachable
+     * only via the user join, exactly as in production — while fixing the phantom
+     * `role_permissions.permission_string` column that 500-ed the query against
+     * the real schema. It reads grants through the SAME `permission_id ->
+     * permissions.name` join the hierarchy walk uses
+     * ({@see self::getDirectPermissionsForRole()}), so the direct-grant and
+     * inherited paths can never diverge on which schema they read.
+     *
+     * @param int    $userId     The user whose role is checked.
+     * @param string $permission The permission name (colon notation) to look for.
+     * @return bool True when the user's role directly holds the permission.
+     */
+    private function userRoleHasDirectPermission(int $userId, string $permission): bool
+    {
+        $statement = $this->db->query(
+            'SELECT 1 FROM role_permissions rp
+             JOIN users u ON u.role_id = rp.role_id
+             JOIN permissions p ON p.id = rp.permission_id
+             WHERE u.id = :userId AND p.name = :permission',
+            [':userId' => $userId, ':permission' => $permission]
+        );
+
+        return $statement->fetch() !== false;
     }
 
     /**

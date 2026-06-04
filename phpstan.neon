@@ -6,3 +6,7 @@ parameters:
     # referenced from the analysed test suite without analysing plugins/ itself.
     scanDirectories:
         - plugins
+        # Migrations are loaded at runtime by MigrationsCommand (require of the
+        # numbered file), not via Composer PSR-4. Point PHPStan at them so the
+        # WC-54 real-engine test can reference its migration class for analysis.
+        - database/migrations

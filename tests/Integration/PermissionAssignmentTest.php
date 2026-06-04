@@ -81,17 +81,24 @@ class PermissionAssignmentTest extends TestCase
         // Step 1: Register permission in PermissionRegistry
         $this->permissionRegistry->registerPermissions('core-users', ['users.create']);
 
-        // Step 2: Setup database mock to return the permission assignment
-        // Simulate: SELECT 1 FROM role_permissions WHERE role_id=1 AND permission_string='users.create'
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(['result' => 1]);
+        // Step 2: Setup database mock for the corrected grant lookup (WC-54).
+        // The direct-grant probe reaches role_permissions via the user join and
+        // joins permissions on permission_id, matched on permissions.name — NOT
+        // the phantom `permission_string`. The historical `:userId` + `:permission`
+        // binding contract is preserved.
+        $this->mockDb->method('query')->willReturnCallback(
+            function (string $sql, array $params): PDOStatement {
+                $this->assertStringContainsString('SELECT 1 FROM role_permissions rp', $sql);
+                $this->assertStringContainsString('JOIN users u ON u.role_id = rp.role_id', $sql);
+                $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
+                $this->assertStringNotContainsString('permission_string', $sql);
+                $this->assertSame([':userId' => 1, ':permission' => 'users.create'], $params);
 
-        $this->mockDb->method('query')
-            ->with(
-                'SELECT 1 FROM role_permissions rp JOIN users u ON u.role_id = rp.role_id WHERE u.id = :userId AND rp.permission_string = :permission',
-                [':userId' => 1, ':permission' => 'users.create']
-            )
-            ->willReturn($mockStatement);
+                $statement = $this->createMock(PDOStatement::class);
+                $statement->method('fetch')->willReturn(['result' => 1]);
+                return $statement;
+            }
+        );
 
         // Step 3: Create a valid JWT token for user with admin role
         $token = $this->jwtParser->create([
@@ -148,10 +155,11 @@ class PermissionAssignmentTest extends TestCase
         $this->permissionRegistry->registerPermissions('core-users', ['users.delete']);
 
         // Step 2: Setup database mock to return NO permission assignment.
-        // The legacy direct-grant probe returns no match; RoleChecker then falls
-        // back to hierarchy resolution (WC-15), which must also find nothing for
-        // this role so the user remains correctly denied. We route by SQL so
-        // every query the resolver issues is satisfied without granting access.
+        // The direct-grant probe (corrected real-schema join, WC-54) returns no
+        // match; RoleChecker then falls back to hierarchy resolution (WC-15),
+        // which must also find nothing for this role so the user remains correctly
+        // denied. We route by SQL so every query the resolver issues is satisfied
+        // without granting access.
         $this->mockDb->method('query')->willReturnCallback(
             function (string $sql): PDOStatement {
                 $statement = $this->createMock(PDOStatement::class);
@@ -232,17 +240,32 @@ class PermissionAssignmentTest extends TestCase
             'Permission should exist in registry before deletion'
         );
 
-        // Step 2: Setup database mock to return permission assignment
-        // This simulates the database still having the role_permissions entry
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(['result' => 1]);
+        // Step 2: Setup database mock to return the permission assignment via the
+        // corrected grant lookup (WC-54). This simulates the database still
+        // holding the role_permissions entry: hasPermission resolves the user's
+        // role id, then the direct-grant probe (real schema join) finds it. The
+        // post-deletion request below never reaches the database because the
+        // registry gate denies it first.
+        $this->mockDb->method('query')->willReturnCallback(
+            function (string $sql): PDOStatement {
+                $statement = $this->createMock(PDOStatement::class);
 
-        $this->mockDb->method('query')
-            ->with(
-                'SELECT 1 FROM role_permissions rp JOIN users u ON u.role_id = rp.role_id WHERE u.id = :userId AND rp.permission_string = :permission',
-                [':userId' => 3, ':permission' => 'custom-plugin.action']
-            )
-            ->willReturn($mockStatement);
+                if (str_contains($sql, 'SELECT role_id FROM users')) {
+                    $statement->method('fetch')->willReturn(['role_id' => 5]);
+                    return $statement;
+                }
+
+                if (str_contains($sql, 'SELECT 1 FROM role_permissions rp')) {
+                    $this->assertStringNotContainsString('permission_string', $sql);
+                    $statement->method('fetch')->willReturn(['result' => 1]);
+                    return $statement;
+                }
+
+                $statement->method('fetch')->willReturn(false);
+                $statement->method('fetchAll')->willReturn([]);
+                return $statement;
+            }
+        );
 
         // Step 3: Create JWT token for user with access
         $token = $this->jwtParser->create([
