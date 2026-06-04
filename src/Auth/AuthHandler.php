@@ -59,15 +59,25 @@ class AuthHandler
      *
      * @param PDO $db Database connection
      * @param JwtParser $jwtParser JWT parser for token creation
-     * @param TokenValidator $tokenValidator Token validator for token validation (optional)
-     * @param object $databaseWrapper Optional Database wrapper for BackupCodesService (for testing)
+     * @param TokenValidator|null $tokenValidator Token validator for token validation (optional)
+     * @param object|null $databaseWrapper Optional Database wrapper for BackupCodesService (for testing)
+     * @param TotpService|null $totpService Shared TOTP service for login-path 2FA validation.
+     *     Inject the SAME instance used by the setup/confirm path so the secret-encryption key is
+     *     identical end-to-end (see WC-95). When omitted, the key is resolved from the single shared
+     *     accessor TotpService::resolveEncryptionKey(), which cannot diverge from the setup path.
      */
-    public function __construct(PDO $db, JwtParser $jwtParser, ?TokenValidator $tokenValidator = null, ?object $databaseWrapper = null)
-    {
+    public function __construct(
+        PDO $db,
+        JwtParser $jwtParser,
+        ?TokenValidator $tokenValidator = null,
+        ?object $databaseWrapper = null,
+        ?TotpService $totpService = null
+    ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
         $this->tokenValidator = $tokenValidator ?? new TokenValidator($jwtParser, $db);
         $this->databaseWrapper = $databaseWrapper;
+        $this->totpService = $totpService;
     }
 
     /**
@@ -444,15 +454,19 @@ class AuthHandler
     }
 
     /**
-     * Get or instantiate TotpService
+     * Get the TotpService used for login-path 2FA validation.
+     *
+     * Prefers the instance injected via the constructor (the same one the setup/confirm path uses).
+     * If none was injected, it builds one from the single shared key accessor
+     * {@see TotpService::resolveEncryptionKey()} so this path can never diverge from the key used to
+     * encrypt the stored secret (the WC-95 root cause).
      *
      * @return TotpService
      */
     private function getTotpService(): TotpService
     {
         if ($this->totpService === null) {
-            $encryptionKey = $_ENV['ENCRYPTION_KEY'] ?? 'default-encryption-key';
-            $this->totpService = new TotpService($encryptionKey);
+            $this->totpService = new TotpService(TotpService::resolveEncryptionKey());
         }
         return $this->totpService;
     }

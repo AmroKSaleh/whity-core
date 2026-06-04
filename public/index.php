@@ -156,6 +156,12 @@ if ($appEnv !== 'development' && empty($_ENV['JWT_SECRET'])) {
 $jwtSecret = $_ENV['JWT_SECRET'] ?? 'dev_secret';
 $jwtParser = new JwtParser($jwtSecret);
 
+// 3b. Resolve the TOTP secret-encryption key (WC-95).
+// Single source of truth shared by the setup/confirm path and the login-validation path so the
+// 2FA secret is always encrypted and decrypted with the SAME key. Fails fast in non-development
+// when ENCRYPTION_KEY is missing/empty, mirroring the JWT_SECRET guard above.
+$totpService = new TotpService(TotpService::resolveEncryptionKey());
+
 // 4. Initialize permission registry
 $permissionRegistry = new PermissionRegistry();
 
@@ -238,7 +244,9 @@ $pluginLoader->load();
 $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage/deployments');
 
 // 10. Register authentication handler
-$authHandler = new AuthHandler($db->getPdo(), $jwtParser);
+// Inject the shared $totpService (built at step 3b) so the login-path 2FA validation uses the
+// SAME encryption key as the setup/confirm path (WC-95).
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 $router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
@@ -246,7 +254,7 @@ $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], 
 $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], null);
 
 // 10b. Register 2FA handler
-$totpService = new TotpService($_ENV['ENCRYPTION_KEY'] ?? 'dev_secret');
+// Reuses the single $totpService built at step 3b (WC-95) so setup/confirm and login share one key.
 $dbWrapper = new \Whity\Auth\DatabaseQueryWrapper($db->getPdo());
 $backupCodesService = new BackupCodesService($dbWrapper);
 $tokenValidator = new TokenValidator($jwtParser, $db->getPdo());

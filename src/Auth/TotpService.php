@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Auth;
 
 use OTPHP\TOTP;
@@ -16,6 +18,17 @@ use ParagonieConstantTime\Encoding;
  */
 class TotpService
 {
+    /**
+     * Development-only fallback for the secret-encryption key.
+     *
+     * This is the single source of truth for the dev default. Every code path that needs a
+     * TotpService MUST derive its key via {@see TotpService::resolveEncryptionKey()} so the
+     * store/confirm path and the login-validation path can never diverge (see WC-95). Outside
+     * `APP_ENV=development`, a missing/empty ENCRYPTION_KEY fails fast rather than falling back
+     * to this guessable value.
+     */
+    private const DEV_ENCRYPTION_KEY = 'dev_secret';
+
     private string $encryptionKey;
 
     /**
@@ -26,6 +39,35 @@ class TotpService
     public function __construct(string $encryptionKey)
     {
         $this->encryptionKey = $encryptionKey;
+    }
+
+    /**
+     * Resolve the TOTP secret-encryption key from the environment.
+     *
+     * Single source of truth for the encryption key across every 2FA code path (setup/confirm,
+     * login TOTP validation, backup-code/version flows). Mirrors how JWT_SECRET is handled in the
+     * application bootstrap: a missing/empty ENCRYPTION_KEY is fatal outside development, and only
+     * `APP_ENV=development` may fall back to the well-known dev default.
+     *
+     * @return string The resolved encryption key.
+     * @throws \RuntimeException If ENCRYPTION_KEY is missing/empty in a non-development environment.
+     */
+    public static function resolveEncryptionKey(): string
+    {
+        $appEnv = $_ENV['APP_ENV'] ?? 'production';
+        $key = $_ENV['ENCRYPTION_KEY'] ?? '';
+
+        if ($key === '') {
+            if ($appEnv !== 'development') {
+                throw new \RuntimeException(
+                    'ENCRYPTION_KEY environment variable must be set in non-development environments'
+                );
+            }
+
+            return self::DEV_ENCRYPTION_KEY;
+        }
+
+        return $key;
     }
 
     /**
