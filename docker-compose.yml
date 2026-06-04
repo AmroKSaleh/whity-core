@@ -42,6 +42,11 @@ services:
       # request while still catching connections that died while the worker idled.
       DB_PING_INTERVAL: ${DB_PING_INTERVAL:-5}
       JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      # ENCRYPTION_KEY: secret used to AES-256-CBC encrypt stored TOTP 2FA secrets (WC-95).
+      # MUST be identical across setup/confirm and login so encrypt/decrypt use the same key.
+      # The dev default below is for local use only; outside APP_ENV=development the app fails fast
+      # if this is unset/empty (mirroring JWT_SECRET). Override in production with a strong secret.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
       CADDY_GLOBAL_OPTIONS: "auto_https off"
       SERVER_NAME: ":80"
       SERVER_ROOT: "public/"
