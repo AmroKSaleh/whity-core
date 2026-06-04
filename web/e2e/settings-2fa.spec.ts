@@ -177,15 +177,17 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
 
 test.describe('Two-Factor Authentication — login challenge (admin)', () => {
   let secret = '';
+  let backupCodes: string[] = [];
 
   test.beforeEach(async ({ baseURL }) => {
     expect(baseURL).toBeTruthy();
     // Start from a guaranteed-clean baseline, then enable 2FA via the API and
-    // capture the secret for this test only.
+    // capture the secret + the freshly issued backup codes for this test only.
     await resetTwoFactorViaDb(ADMIN.email);
     const api = await createAuthedApi(baseURL as string, ADMIN);
     const enabled = await enableTwoFactor(api, computeTotp);
     secret = enabled.secret;
+    backupCodes = enabled.backupCodes;
     await api.dispose();
   });
 
@@ -240,32 +242,40 @@ test.describe('Two-Factor Authentication — login challenge (admin)', () => {
     }
   });
 
-  // KNOWN APP BUG (fixme, not papered over): backup codes are stored in
-  // XXXX-XXXX-XXXX form (14 chars, hyphenated) and validated by an EXACT
-  // password_verify against that string. But the login recovery-code input
-  // strips non-alphanumerics and truncates to 8 chars
-  // (.replace(/[^A-Z0-9]/g,'').slice(0,8)), so the UI can NEVER submit the real
-  // code — it is mangled to 8 chars and rejected (401). Verified empirically:
-  // the full code authenticates at POST /api/login/2fa (200) while the
-  // UI-truncated form is rejected (401). Fix: accept the hyphenated 14-char
-  // code (raise maxLength, keep hyphens) or normalise both sides.
-  test.fixme(
-    'login challenge accepts a backup/recovery code',
-    async ({ browser, baseURL }) => {
-      const context = await newCleanContext(browser, baseURL as string);
-      const page = await context.newPage();
-      try {
-        const login = new LoginPage(page);
-        await login.goto();
-        await login.submitExpecting2fa(ADMIN);
-        await login.useRecoveryCode();
-        // A real backup code is XXXX-XXXX-XXXX (14 chars); the input must accept
-        // it intact for this to pass once the bug is fixed.
-        await login.submitRecoveryCode('PLACEHOLDER-CODE');
-        await page.waitForURL('**/dashboard', { timeout: 20_000 });
-      } finally {
-        await context.close();
-      }
+  // WC-120 (FIXED): backup codes are issued in XXXX-XXXX-XXXX form (14 chars,
+  // hyphenated) and validated by an EXACT password_verify against that string.
+  // The login recovery-code input previously stripped non-alphanumerics and
+  // truncated to 8 chars, so the UI could NEVER submit the real code — it was
+  // mangled and rejected (401). The input now accepts the full code intact
+  // (auto-formatting to XXXX-XXXX-XXXX), so a real backup code logs the user in.
+  // This asserts the working behaviour end-to-end so a regression re-breaks the
+  // build rather than silently passing.
+  test('login challenge accepts a backup/recovery code (WC-120)', async ({
+    browser,
+    baseURL,
+  }) => {
+    expect(baseURL).toBeTruthy();
+    // Use a real, freshly issued backup code captured in beforeEach. It is the
+    // exact XXXX-XXXX-XXXX string the backend hashed, so password_verify matches.
+    const code = backupCodes[0];
+    expect(code, 'a backup code should have been issued').toMatch(
+      /^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
+    );
+
+    const context = await newCleanContext(browser, baseURL as string);
+    const page = await context.newPage();
+    try {
+      const login = new LoginPage(page);
+      await login.goto();
+      await login.submitExpecting2fa(ADMIN);
+      await login.useRecoveryCode();
+      await login.submitRecoveryCode(code);
+      await page.waitForURL('**/dashboard', { timeout: 20_000 });
+      await expect(
+        page.getByRole('heading', { name: 'Welcome back!' })
+      ).toBeVisible();
+    } finally {
+      await context.close();
     }
-  );
+  });
 });
