@@ -17,3 +17,6 @@ docs/*
 !docs/adr/
 .worktrees/
 .phpunit.cache/
+
+.claude/
+.playwright-mcp/

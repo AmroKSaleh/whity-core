@@ -355,4 +355,99 @@ class HttpKernelTest extends TestCase
         $responseData = json_decode($response->getBody(), true);
         $this->assertSame('Authentication required', $responseData['error']);
     }
+
+    /**
+     * Test memory limit is not exceeded when limit is set high
+     */
+    public function testMemoryLimitNotExceeded(): void
+    {
+        $oldLimit = $_ENV['WORKER_MEMORY_LIMIT_MB'] ?? null;
+        $_ENV['WORKER_MEMORY_LIMIT_MB'] = '10000'; // 10 GB
+        
+        try {
+            $handler = static function(Request $request): Response {
+                return Response::json(['message' => 'success']);
+            };
+            $this->router->register('GET', '/memory-ok', $handler);
+            $request = new Request('GET', '/memory-ok');
+            
+            $response = $this->kernel->handle($request);
+            $this->assertSame(200, $response->getStatusCode());
+            $this->assertFalse($this->kernel->hasExceededMemoryLimit());
+        } finally {
+            if ($oldLimit !== null) {
+                $_ENV['WORKER_MEMORY_LIMIT_MB'] = $oldLimit;
+            } else {
+                unset($_ENV['WORKER_MEMORY_LIMIT_MB']);
+            }
+        }
+    }
+
+    /**
+     * Test memory limit is exceeded when limit is set very low
+     */
+    public function testMemoryLimitExceeded(): void
+    {
+        $oldLimit = $_ENV['WORKER_MEMORY_LIMIT_MB'] ?? null;
+        $_ENV['WORKER_MEMORY_LIMIT_MB'] = '1'; // 1 MB
+        
+        try {
+            $handler = static function(Request $request): Response {
+                return Response::json(['message' => 'success']);
+            };
+            $this->router->register('GET', '/memory-limit', $handler);
+            $request = new Request('GET', '/memory-limit');
+            
+            $response = $this->kernel->handle($request);
+            $this->assertSame(200, $response->getStatusCode());
+            $this->assertTrue($this->kernel->hasExceededMemoryLimit());
+        } finally {
+            if ($oldLimit !== null) {
+                $_ENV['WORKER_MEMORY_LIMIT_MB'] = $oldLimit;
+            } else {
+                unset($_ENV['WORKER_MEMORY_LIMIT_MB']);
+            }
+        }
+    }
+
+    /**
+     * Stress test validating memory stability under heavy requests
+     */
+    public function testMemoryLimitStressTest(): void
+    {
+        $oldLimit = $_ENV['WORKER_MEMORY_LIMIT_MB'] ?? null;
+        $_ENV['WORKER_MEMORY_LIMIT_MB'] = '512'; // 512 MB, safe limit
+        
+        try {
+            $handler = static function(Request $request): Response {
+                // Perform some memory allocation and free it
+                $data = array_fill(0, 10000, 'some test string data');
+                unset($data);
+                return Response::json(['message' => 'success']);
+            };
+            $this->router->register('GET', '/stress', $handler);
+            
+            $initialMemory = memory_get_usage();
+            
+            for ($i = 0; $i < 100; $i++) {
+                $request = new Request('GET', '/stress');
+                $response = $this->kernel->handle($request);
+                $this->assertSame(200, $response->getStatusCode());
+                $this->assertFalse($this->kernel->hasExceededMemoryLimit());
+            }
+            
+            gc_collect_cycles();
+            $finalMemory = memory_get_usage();
+            
+            // Check that memory has not grown excessively (e.g. less than 1MB growth after GC)
+            $growth = $finalMemory - $initialMemory;
+            $this->assertLessThan(1024 * 1024, $growth, "Memory leaked: " . ($growth / 1024) . " KB");
+        } finally {
+            if ($oldLimit !== null) {
+                $_ENV['WORKER_MEMORY_LIMIT_MB'] = $oldLimit;
+            } else {
+                unset($_ENV['WORKER_MEMORY_LIMIT_MB']);
+            }
+        }
+    }
 }

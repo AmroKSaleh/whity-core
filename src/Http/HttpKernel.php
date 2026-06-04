@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Http;
 
 use Whity\Core\Request;
@@ -29,8 +31,9 @@ class HttpKernel
     private static array $shutdownFunctions = [];
     /** @var array<string> */
     private array $initialGlobals = [];
-    /** @var array<string> */
+    /** @var array<class-string> */
     private array $coreClasses = [];
+    private bool $memoryLimitExceeded = false;
 
     /**
      * Constructor
@@ -93,6 +96,7 @@ class HttpKernel
                 $className = 'Whity\\Core\\' . $subNamespace;
 
                 if (class_exists($className)) {
+                    /** @var class-string $className */
                     $this->coreClasses[] = $className;
                 }
             }
@@ -203,7 +207,37 @@ class HttpKernel
         } finally {
             // Clean up request state after request completes
             $this->resetRequestState();
+            $this->checkMemoryLimit();
         }
+    }
+
+    /**
+     * Check memory usage and set flag if limit is exceeded
+     */
+    private function checkMemoryLimit(): void
+    {
+        $limitMb = (int)($_ENV['WORKER_MEMORY_LIMIT_MB'] ?? $_SERVER['WORKER_MEMORY_LIMIT_MB'] ?? 128);
+        $limitBytes = $limitMb * 1024 * 1024;
+        $thresholdBytes = $limitBytes * 0.9;
+        $currentMemory = memory_get_usage();
+
+        if ($currentMemory > $thresholdBytes) {
+            $this->memoryLimitExceeded = true;
+            error_log(sprintf(
+                "[HttpKernel] Memory limit threshold exceeded: %d MB / %d MB (%.2f%%). Triggering worker recycling.",
+                (int)round($currentMemory / 1024 / 1024),
+                $limitMb,
+                ($currentMemory / $limitBytes) * 100
+            ));
+        }
+    }
+
+    /**
+     * Check if memory limit has been exceeded
+     */
+    public function hasExceededMemoryLimit(): bool
+    {
+        return $this->memoryLimitExceeded;
     }
 
     /**
@@ -226,7 +260,7 @@ class HttpKernel
 
             // Extract handler, params, and requiredRole from match result
             $handler = $matchedRoute['handler'];
-            $params = $matchedRoute['params'] ?? [];
+            $params = $matchedRoute['params'];
             $requiredRole = $matchedRoute['requiredRole'];
 
             // If a role is required, apply RBAC middleware
@@ -255,6 +289,7 @@ class HttpKernel
     private function wrapWithMiddleware(object $middleware, callable $next): callable
     {
         return function(Request $request) use ($middleware, $next): Response {
+            /** @var mixed $middleware */
             return $middleware->handle($request, $next);
         };
     }
