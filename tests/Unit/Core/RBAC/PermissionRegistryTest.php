@@ -4,6 +4,8 @@ namespace Tests\Unit\Core\RBAC;
 
 use PHPUnit\Framework\TestCase;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\RBAC\InvalidPermissionException;
 use Whity\Core\Hooks\HookManager;
 
 /**
@@ -134,5 +136,135 @@ class PermissionRegistryTest extends TestCase
 
         $registry = new PermissionRegistry($hookManager);
         $registry->registerPermissions('test-plugin', ['read', 'write']);
+    }
+
+    // ---------------------------------------------------------------------
+    // WC-13: source-tagged registration API (register / getAll / exists /
+    // getBySource) and core permission registration (issue #55).
+    // ---------------------------------------------------------------------
+
+    /**
+     * AC #1: core + plugin permissions are all returned by getAll() with source tags.
+     */
+    public function testGetAllReturnsCoreAndPluginPermissionsWithSourceTags(): void
+    {
+        $this->registry->register('core', ['users:read', 'users:write', 'roles:manage']);
+        $this->registry->register('invoices', ['invoices:read', 'invoices:write']);
+
+        $all = $this->registry->getAll();
+
+        $this->assertCount(5, $all);
+        $this->assertSame('core', $all['users:read']);
+        $this->assertSame('core', $all['users:write']);
+        $this->assertSame('core', $all['roles:manage']);
+        $this->assertSame('invoices', $all['invoices:read']);
+        $this->assertSame('invoices', $all['invoices:write']);
+    }
+
+    /**
+     * AC #2: exists() returns true for a registered permission.
+     */
+    public function testExistsReturnsTrueForRegisteredPermission(): void
+    {
+        $this->registry->register('core', ['users:delete']);
+
+        $this->assertTrue($this->registry->exists('users:delete'));
+    }
+
+    /**
+     * exists() returns false for an unregistered permission.
+     */
+    public function testExistsReturnsFalseForUnregisteredPermission(): void
+    {
+        $this->registry->register('core', ['users:read']);
+
+        $this->assertFalse($this->registry->exists('users:delete'));
+    }
+
+    /**
+     * register() is an alias of registerPermissions() and keeps both views in sync.
+     */
+    public function testRegisterIsBackwardCompatibleWithLegacyAccessors(): void
+    {
+        $this->registry->register('billing', ['invoices:read']);
+
+        $this->assertTrue($this->registry->permissionExists('invoices:read'));
+        $this->assertSame(['invoices:read'], $this->registry->getPluginPermissions('billing'));
+        $this->assertContains('billing', $this->registry->getRegisteredPlugins());
+    }
+
+    /**
+     * getBySource() returns only the permissions registered under a given source.
+     */
+    public function testGetBySourceReturnsOnlyThatSourcesPermissions(): void
+    {
+        $this->registry->register('core', ['users:read', 'users:write']);
+        $this->registry->register('invoices', ['invoices:read']);
+
+        $this->assertSame(['users:read', 'users:write'], $this->registry->getBySource('core'));
+        $this->assertSame(['invoices:read'], $this->registry->getBySource('invoices'));
+        $this->assertSame([], $this->registry->getBySource('unknown'));
+    }
+
+    /**
+     * register() rejects permissions that do not match the resource:action pattern.
+     */
+    public function testRegisterRejectsInvalidPermissionFormat(): void
+    {
+        $this->expectException(InvalidPermissionException::class);
+
+        $this->registry->register('bad', ['not-a-valid-permission']);
+    }
+
+    /**
+     * register() rejects permissions with an empty segment.
+     */
+    public function testRegisterRejectsEmptySegments(): void
+    {
+        $this->expectException(InvalidPermissionException::class);
+
+        $this->registry->register('bad', ['users:']);
+    }
+
+    /**
+     * Issue #55: core permissions become available without any explicit caller wiring.
+     */
+    public function testRegisterCorePermissionsPopulatesRegistry(): void
+    {
+        $this->registry->registerCorePermissions();
+
+        foreach (CorePermissions::all() as $permission) {
+            $this->assertTrue(
+                $this->registry->exists($permission),
+                "Expected core permission {$permission} to be registered"
+            );
+            $this->assertSame(CorePermissions::SOURCE, $this->registry->getAll()[$permission]);
+        }
+    }
+
+    /**
+     * Issue #55: a fresh registry exposes core permissions lazily on first lookup,
+     * so middleware works even when no explicit bootstrap call was made.
+     */
+    public function testCorePermissionsAreLazilyAvailableOnExists(): void
+    {
+        $registry = new PermissionRegistry();
+
+        $this->assertTrue($registry->exists(CorePermissions::USERS_READ));
+        $this->assertTrue($registry->permissionExists(CorePermissions::ROLES_MANAGE));
+    }
+
+    /**
+     * Lazy core registration is idempotent and does not duplicate the core source.
+     */
+    public function testCorePermissionsRegisteredOnlyOnce(): void
+    {
+        $registry = new PermissionRegistry();
+
+        $registry->registerCorePermissions();
+        $registry->registerCorePermissions();
+
+        $corePermissions = $registry->getBySource(CorePermissions::SOURCE);
+        $this->assertSame(CorePermissions::all(), $corePermissions);
     }
 }
