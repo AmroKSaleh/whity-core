@@ -13,7 +13,9 @@ test.describe('Authentication flow', () => {
     await expect(page.getByText(`You're logged in as`)).toContainText(ADMIN.email);
   });
 
-  test('invalid password keeps the user on /login', async ({ page }) => {
+  test('invalid password keeps the user on /login and shows an error (WC-98)', async ({
+    page,
+  }) => {
     const login = new LoginPage(page);
     await login.goto();
     await login.submit({ email: ADMIN.email, password: 'definitely-wrong-password' });
@@ -23,11 +25,23 @@ test.describe('Authentication flow', () => {
     // The dashboard heading must never appear.
     await expect(page.getByRole('heading', { name: 'Welcome back!' })).toHaveCount(0);
 
-    // KNOWN APP BUG: the login page does not surface an error message on
-    // invalid credentials (see auth-bugs.spec.ts for the documented failing
-    // assertion). We deliberately do not assert on a visible error here so
-    // this core "stays on /login" guarantee remains green.
+    // WC-98 (now fixed): the login page surfaces a destructive "Invalid
+    // credentials" alert on bad credentials.
+    await expect(page.getByText('Invalid credentials')).toBeVisible();
     await expect(login.emailInput).toBeVisible();
+  });
+
+  test('empty fields trigger inline client-side validation (no request fired)', async ({
+    page,
+  }) => {
+    const login = new LoginPage(page);
+    await login.goto();
+    // Submitting with both fields blank short-circuits client-side: the form
+    // shows "Email is required" / "Password is required" and never POSTs.
+    await login.signInButton.click();
+    await expect(page.getByText('Email is required')).toBeVisible();
+    await expect(page.getByText('Password is required')).toBeVisible();
+    await expect(page).toHaveURL(/\/login$/);
   });
 
   test('logout returns to /login', async ({ page }) => {

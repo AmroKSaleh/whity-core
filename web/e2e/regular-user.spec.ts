@@ -49,4 +49,59 @@ test.describe('Regular user (non-admin)', () => {
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await expect(page.getByText(REGULAR_USER.email).first()).toBeVisible();
   });
+
+  test('tenants and OUs pages also return no data for a regular user', async ({
+    userPage,
+    page,
+  }) => {
+    // Tenants: backend rejects the list fetch (403) -> empty table + error toast.
+    await userPage.shell.clickNav('Tenants');
+    await page.waitForURL('**/admin/tenants');
+    await expect(page.getByRole('heading', { name: 'Tenants' })).toBeVisible();
+    await expect(page.getByText('No data available')).toBeVisible();
+
+    // Organizational Units: same data-layer rejection -> empty state.
+    await userPage.shell.clickNav('Organizational Units');
+    await page.waitForURL('**/admin/ous');
+    await expect(
+      page.getByRole('heading', { name: 'Organizational Units' }).first()
+    ).toBeVisible();
+    await expect(page.getByText('No organizational units yet')).toBeVisible();
+  });
+
+  test('a regular user can enable 2FA setup on their own account (own-account scope)', async ({
+    userPage,
+    page,
+  }) => {
+    // 2FA is a self-service, own-account action — it is NOT admin-gated. The
+    // regular user can open the setup wizard from their Settings page. We open
+    // and cancel it (no confirm) so the user's account is never actually
+    // enrolled, keeping user@example.com a plain-login account for other specs.
+    await userPage.shell.clickNav('Settings');
+    await page.waitForURL('**/settings');
+
+    const enable = page.getByRole('button', { name: 'Enable 2FA' });
+    await expect(enable).toBeVisible();
+    await enable.click();
+
+    const wizard = page.getByRole('dialog');
+    await expect(wizard.getByText('Enable Two-Factor Authentication')).toBeVisible();
+    // Cancel without confirming — do not enrol the seeded user account.
+    await wizard.getByRole('button', { name: 'Cancel' }).click();
+    await expect(wizard).toBeHidden();
+  });
+
+  test('the dashboard reports the user id, role badge and email', async ({
+    userPage,
+    page,
+  }) => {
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByText('Your User ID')).toBeVisible();
+    await expect(page.getByText('Your Role')).toBeVisible();
+    // The role badge renders the capitalised role.
+    await expect(page.getByText('User', { exact: true })).toBeVisible();
+    await expect(page.getByText(REGULAR_USER.email).first()).toBeVisible();
+    // The footer also reflects the logged-in regular user.
+    await userPage.shell.expectLoggedInAs(REGULAR_USER.email);
+  });
 });

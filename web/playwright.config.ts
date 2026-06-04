@@ -53,7 +53,7 @@ export default defineConfig({
     },
     {
       name: 'authflow',
-      testMatch: /auth(-bugs)?\.spec\.ts/,
+      testMatch: /(auth(-bugs)?|demo)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -64,7 +64,7 @@ export default defineConfig({
     },
     {
       name: 'admin',
-      testMatch: /(navigation|roles|users|ous-tenants)\.spec\.ts/,
+      testMatch: /(navigation|roles|users|ous-tenants|stats|settings-2fa)\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },

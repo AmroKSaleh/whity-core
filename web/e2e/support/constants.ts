@@ -36,6 +36,22 @@ export const SIDEBAR_SECTIONS = [
 ] as const;
 
 /**
+ * The seeded base roles. Both are GLOBAL (NULL-tenant) roles in the demo seed:
+ * they are visible to every tenant via the role LIST endpoint, but a tenant
+ * cannot DELETE them (the backend returns 404 "Role not found" for a global
+ * role from a non-system tenant — WC-110). The Users edit dropdown resolves
+ * these names server-side, unlike its third "Moderator" option which has no
+ * backing role (see the documented quirk in users.spec.ts).
+ */
+export const SEEDED_ROLE_NAMES = ['admin', 'user'] as const;
+
+/**
+ * The seeded tenant the demo accounts belong to. Tenant 0 is the SYSTEM tenant
+ * and tenant 1 is the "Default Tenant"; neither may be destructively mutated.
+ */
+export const DEFAULT_TENANT_NAME = 'Default Tenant';
+
+/**
  * Generate a unique, clearly-attributable suffix for test entities so runs
  * never collide on the shared dev database and are trivially identifiable.
  */
