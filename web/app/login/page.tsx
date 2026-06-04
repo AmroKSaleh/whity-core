@@ -10,10 +10,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthenticated, login, isLoading, error, refreshAuth } = useAuth();
+  const { isAuthenticated, isLoading, refreshAuth } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [requires2fa, setRequires2fa] = useState(false);
@@ -60,6 +61,7 @@ export default function LoginPage() {
     }
 
     setIsSubmitting(true);
+    setLoginError(null);
     try {
       // Check for 2FA requirement first
       const response = await fetch('/api/login', {
@@ -87,10 +89,15 @@ export default function LoginPage() {
         router.push('/dashboard');
       } else {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Login failed');
+        const message =
+          response.status === 401
+            ? 'Invalid credentials'
+            : errorData.message || 'Login failed';
+        throw new Error(message);
       }
     } catch (err) {
-      // Error is handled by displaying below
+      const message = err instanceof Error ? err.message : 'Login failed';
+      setLoginError(message);
     } finally {
       setIsSubmitting(false);
     }
@@ -166,9 +173,9 @@ export default function LoginPage() {
           {!requires2fa && (
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
-              {error && (
+              {loginError && (
                 <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription>{loginError}</AlertDescription>
                 </Alert>
               )}
 
@@ -187,6 +194,9 @@ export default function LoginPage() {
                     setEmail(e.target.value);
                     if (fieldErrors.email) {
                       setFieldErrors({ ...fieldErrors, email: undefined });
+                    }
+                    if (loginError) {
+                      setLoginError(null);
                     }
                   }}
                   disabled={isFormDisabled}
@@ -211,6 +221,9 @@ export default function LoginPage() {
                     setPassword(e.target.value);
                     if (fieldErrors.password) {
                       setFieldErrors({ ...fieldErrors, password: undefined });
+                    }
+                    if (loginError) {
+                      setLoginError(null);
                     }
                   }}
                   disabled={isFormDisabled}
