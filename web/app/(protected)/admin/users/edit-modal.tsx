@@ -33,10 +33,12 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { User } from './page';
 
+// Only `role` is editable on this endpoint (WC-113). `name` is derived from the
+// email local-part (no users.name column) and `tenant` moves are intentionally
+// out of scope server-side, so both are presented read-only and excluded from
+// the editable schema.
 const editUserSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
   role: z.string().min(1, 'Role is required'),
-  tenantId: z.string().min(1, 'Tenant is required'),
 });
 
 type EditUserFormData = z.infer<typeof editUserSchema>;
@@ -58,14 +60,10 @@ export function EditUserModal({
   const { addToast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Build the form values from the (now-complete) user record. `tenantId` is a
-  // number on the API contract; guard against a missing value so we never emit
-  // the literal string "undefined"/"null", which would silently pass the
-  // required-field check while submitting garbage.
+  // Only the editable field (`role`) is bound to the form. Name and tenant are
+  // displayed read-only directly from the user record (see below).
   const toFormValues = (u: User): EditUserFormData => ({
-    name: u.name ?? '',
     role: u.role ?? '',
-    tenantId: u.tenantId != null ? String(u.tenantId) : '',
   });
 
   const form = useForm<EditUserFormData>({
@@ -83,20 +81,31 @@ export function EditUserModal({
     try {
       setIsSubmitting(true);
 
+      // Only `role` is editable here. `name` is derived from the email
+      // local-part (there is no users.name column) and `tenant` moves are out
+      // of scope server-side (WC-113), so both are shown read-only and never
+      // submitted — sending them would be ignored anyway.
       const response = await apiClient(`/api/users/${user.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          name: data.name,
           role: data.role,
-          tenantId: parseInt(data.tenantId, 10),
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || 'Failed to update user'
-        );
+        throw new Error(errorData.error || errorData.message || 'Failed to update user');
+      }
+
+      // Confirm the change actually persisted before claiming success: the
+      // backend returns the updated user, so we assert the role it reports back
+      // matches what we asked for rather than trusting a bare 200 (WC-113).
+      const payload = (await response.json().catch(() => null)) as
+        | { data?: { role?: string } }
+        | null;
+      const persistedRole = payload?.data?.role;
+      if (persistedRole !== undefined && persistedRole !== data.role) {
+        throw new Error('User update did not persist the selected role');
       }
 
       addToast('User updated successfully', 'success');
@@ -122,25 +131,35 @@ export function EditUserModal({
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormItem>
-              <FormLabel>Email</FormLabel>
-              <Input type="email" value={user.email} disabled />
+            {/*
+              Read-only fields use native label/input association (explicit
+              htmlFor + id) rather than FormLabel/FormControl, which derive their
+              ids from react-hook-form's FormField context these fields are not
+              part of. This keeps the label accessible-name query working.
+            */}
+            <div className="space-y-2">
+              <label
+                htmlFor="edit-user-email"
+                className="text-sm font-medium leading-none"
+              >
+                Email
+              </label>
+              <Input id="edit-user-email" type="email" value={user.email} disabled />
               <p className="text-xs text-muted-foreground">Email cannot be changed</p>
-            </FormItem>
+            </div>
 
-            <FormField
-              control={form.control as any}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Name</FormLabel>
-                  <FormControl>
-                    <Input placeholder="John Doe" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="space-y-2">
+              <label
+                htmlFor="edit-user-name"
+                className="text-sm font-medium leading-none"
+              >
+                Name
+              </label>
+              <Input id="edit-user-name" value={user.name} disabled />
+              <p className="text-xs text-muted-foreground">
+                Name is derived from the email and cannot be changed
+              </p>
+            </div>
 
             <FormField
               control={form.control as any}
@@ -165,23 +184,23 @@ export function EditUserModal({
               )}
             />
 
-            <FormField
-              control={form.control as any}
-              name="tenantId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Tenant</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      placeholder="1"
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <div className="space-y-2">
+              <label
+                htmlFor="edit-user-tenant"
+                className="text-sm font-medium leading-none"
+              >
+                Tenant
+              </label>
+              <Input
+                id="edit-user-tenant"
+                type="number"
+                value={user.tenantId != null ? String(user.tenantId) : ''}
+                disabled
+              />
+              <p className="text-xs text-muted-foreground">
+                Moving a user between tenants is not supported here
+              </p>
+            </div>
 
             <DialogFooter>
               <Button
