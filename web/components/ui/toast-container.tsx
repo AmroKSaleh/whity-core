@@ -1,35 +1,80 @@
 'use client';
 
 import { useToast } from '@/lib/toast-context';
-import { IconCheck, IconAlertCircle, IconInfoCircle, IconX } from '@tabler/icons-react';
+import type { ToastType } from '@/lib/toast-context';
+import {
+  IconCheck,
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconInfoCircle,
+  IconX,
+} from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
+
+/**
+ * Per-type styling driven by the semantic color tokens from base.json
+ * (success / warning / error / info). Errors map to the `error` token,
+ * keeping them visually aligned with the `destructive` family.
+ */
+const toastStyles: Record<ToastType, string> = {
+  success: 'bg-success text-success-foreground',
+  error: 'bg-error text-error-foreground',
+  warning: 'bg-warning text-warning-foreground',
+  info: 'bg-info text-info-foreground',
+};
+
+/** Assertive announcements for failures/warnings, polite for the rest. */
+const toastPoliteness: Record<ToastType, 'polite' | 'assertive'> = {
+  success: 'polite',
+  error: 'assertive',
+  warning: 'assertive',
+  info: 'polite',
+};
+
+function ToastIcon({ type }: { type: ToastType }) {
+  switch (type) {
+    case 'success':
+      return <IconCheck className="size-5" aria-hidden="true" />;
+    case 'error':
+      return <IconAlertCircle className="size-5" aria-hidden="true" />;
+    case 'warning':
+      return <IconAlertTriangle className="size-5" aria-hidden="true" />;
+    case 'info':
+      return <IconInfoCircle className="size-5" aria-hidden="true" />;
+  }
+}
 
 export function ToastContainer() {
   const { toasts, removeToast } = useToast();
 
   return (
-    <div className="fixed bottom-0 right-0 z-[9999] flex flex-col gap-3 p-4 pointer-events-none">
+    <div
+      role="region"
+      aria-label="Notifications"
+      className="fixed bottom-0 right-0 z-[9999] flex flex-col gap-3 p-4 pointer-events-none"
+    >
       {toasts.map((toast) => (
         <div
           key={toast.id}
+          role="status"
+          aria-live={toastPoliteness[toast.type]}
+          aria-atomic="true"
           className={cn(
             'pointer-events-auto flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium shadow-lg animate-in slide-in-from-right-full duration-200',
-            toast.type === 'success' && 'bg-green-500 text-white',
-            toast.type === 'error' && 'bg-red-500 text-white',
-            toast.type === 'info' && 'bg-blue-500 text-white'
+            toastStyles[toast.type]
           )}
         >
           <div className="flex items-center gap-3 flex-1">
-            {toast.type === 'success' && <IconCheck size={20} />}
-            {toast.type === 'error' && <IconAlertCircle size={20} />}
-            {toast.type === 'info' && <IconInfoCircle size={20} />}
+            <ToastIcon type={toast.type} />
             <span>{toast.message}</span>
           </div>
           <button
+            type="button"
             onClick={() => removeToast(toast.id)}
-            className="opacity-70 hover:opacity-100 transition-opacity"
+            aria-label="Dismiss notification"
+            className="opacity-70 hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/50 rounded-sm"
           >
-            <IconX size={16} />
+            <IconX className="size-4" aria-hidden="true" />
           </button>
         </div>
       ))}
