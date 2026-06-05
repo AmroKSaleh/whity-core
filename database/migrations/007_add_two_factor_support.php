@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Database\Migrations;
 
 use Whity\Database\Database;
@@ -7,16 +9,22 @@ use Whity\Database\Database;
 /**
  * Add Two-Factor Authentication Support
  *
- * Adds database schema for 2FA:
- * - Columns to users table: two_factor_secret, two_factor_enabled, two_factor_backup_codes_version
- * - New backup_codes table for storing hashed backup codes
- * - Indexes for efficient lookups by user_id, version, and used status
+ * Adds the database schema for 2FA:
+ *  - Columns on the users table: two_factor_secret, two_factor_enabled,
+ *    two_factor_backup_codes_version.
+ *  - A new backup_codes table for storing hashed backup codes.
+ *  - Indexes for efficient lookups by user_id, version and used status.
+ *
+ * This is kept as its own migration (rather than folded into the users CREATE)
+ * for two reasons: it introduces an entirely new table (backup_codes), and the
+ * users columns must be appended AFTER users.ou_id (added by 006) so the final
+ * users column order matches a fresh build exactly.
  */
 class AddTwoFactorSupport
 {
     public static function up(Database $db): void
     {
-        // Add 2FA columns to users table
+        // Add 2FA columns to the users table.
         $db->exec('
             ALTER TABLE users
             ADD COLUMN IF NOT EXISTS two_factor_secret VARCHAR(255),
@@ -24,7 +32,7 @@ class AddTwoFactorSupport
             ADD COLUMN IF NOT EXISTS two_factor_backup_codes_version INTEGER DEFAULT 0
         ');
 
-        // Create backup_codes table for storing hashed backup codes
+        // Create backup_codes table for storing hashed backup codes.
         $db->exec('
             CREATE TABLE IF NOT EXISTS backup_codes (
                 id SERIAL PRIMARY KEY,
@@ -37,7 +45,7 @@ class AddTwoFactorSupport
             )
         ');
 
-        // Create indexes for efficient queries
+        // Indexes for efficient queries.
         $db->exec('CREATE INDEX IF NOT EXISTS idx_backup_codes_user_id ON backup_codes(user_id)');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_backup_codes_user_id_version ON backup_codes(user_id, version)');
         $db->exec('CREATE INDEX IF NOT EXISTS idx_backup_codes_user_id_used ON backup_codes(user_id, used)');
@@ -45,10 +53,10 @@ class AddTwoFactorSupport
 
     public static function down(Database $db): void
     {
-        // Drop backup_codes table
+        // Drop backup_codes table.
         $db->exec('DROP TABLE IF EXISTS backup_codes CASCADE');
 
-        // Remove 2FA columns from users table
+        // Remove 2FA columns from the users table.
         $db->exec('
             ALTER TABLE users
             DROP COLUMN IF EXISTS two_factor_secret,

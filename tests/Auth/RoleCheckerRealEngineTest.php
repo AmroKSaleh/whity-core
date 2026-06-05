@@ -40,9 +40,10 @@ use Whity\Database\Database;
 final class RoleCheckerRealEngineTest extends TestCase
 {
     /**
-     * Permission names migrations 002/007/010/016 seed into the catalogue in
-     * production (colon notation after the 016 normalisation). The WC-54
-     * migration treats these as pre-existing and must not remove them on down().
+     * Permission names the seed migrations (002 for users/roles/tenants, 005 for
+     * OUs) put into the catalogue in production, in colon notation at source. The
+     * WC-54 grant migration treats these as pre-existing and must not remove them
+     * on down().
      *
      * @var array<int, string>
      */
@@ -61,7 +62,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         // Migration files live under database/migrations and are loaded at runtime
         // by MigrationsCommand (not via Composer PSR-4), so load it explicitly to
         // exercise the real migration class.
-        require_once dirname(__DIR__, 2) . '/database/migrations/019_grant_plugins_manage_to_admin.php';
+        require_once dirname(__DIR__, 2) . '/database/migrations/013_grant_plugins_manage_to_admin.php';
     }
 
     protected function setUp(): void

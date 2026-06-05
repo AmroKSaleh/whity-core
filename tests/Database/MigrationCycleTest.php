@@ -93,7 +93,7 @@ final class MigrationCycleTest extends TestCase
     {
         $this->runMigrate('run');
         $total = $this->migrationCount();
-        $this->assertGreaterThanOrEqual(15, $total, 'Expected the full migration set to have run.');
+        $this->assertGreaterThanOrEqual(13, $total, 'Expected the full consolidated migration set to have run.');
 
         // Roll back every migration one at a time.
         for ($i = 0; $i < $total; $i++) {
