@@ -93,7 +93,7 @@ class InitialPasswordTest extends TestCase
     public function testSystemTenantMigrationContainsNoHardcodedLiteralPassword(): void
     {
         $source = (string) file_get_contents(
-            dirname(__DIR__, 2) . '/database/migrations/011_create_system_tenant.php'
+            dirname(__DIR__, 2) . '/database/migrations/010_create_system_tenant.php'
         );
 
         $this->assertStringNotContainsString("'system_admin_123'", $source);

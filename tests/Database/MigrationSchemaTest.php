@@ -22,6 +22,14 @@ use Whity\Database\Database;
  *
  * They are intentionally database-agnostic so they pass in CI where no
  * PostgreSQL instance is available.
+ *
+ * NOTE: the migration set was consolidated (cleanup/consolidate-migrations) so
+ * that each table is created in its FINAL form in one place — the patch
+ * migrations that used to add columns / rewrite constraints / normalise
+ * permission notation after the fact have been folded into the create
+ * migrations. These tests assert that consolidated reality: cascade foreign keys
+ * are verified inline on the create migrations, and the seed migrations seed
+ * colon notation directly (no after-the-fact normalisation migration).
  */
 final class MigrationSchemaTest extends TestCase
 {
@@ -63,22 +71,33 @@ final class MigrationSchemaTest extends TestCase
         return $cases;
     }
 
-    public function testAllFourteenPlusMigrationsArePresentAndOrdered(): void
+    public function testConsolidatedMigrationsArePresentAndOrdered(): void
     {
         $files = glob(self::$migrationDir . '/*.php') ?: [];
         sort($files);
 
         $names = array_map(static fn (string $f): string => basename($f), $files);
 
-        // The original 14 RBAC/core migrations plus the user_roles junction (015).
+        // The consolidated set: foundational create migrations plus the OU,
+        // 2FA, revoked-token, user_roles and permission-grant migrations.
         $this->assertContains('001_create_users_roles.php', $names);
         $this->assertContains('002_create_permissions.php', $names);
-        $this->assertContains('009_create_ou_role_assignments.php', $names);
-        $this->assertContains('013_add_cascading_deletes.php', $names);
-        $this->assertContains('014_add_two_factor_support.php', $names);
-        $this->assertContains('015_create_user_roles.php', $names);
+        $this->assertContains('005_create_organizational_units.php', $names);
+        $this->assertContains('006_add_ou_to_users.php', $names);
+        $this->assertContains('007_add_two_factor_support.php', $names);
+        $this->assertContains('008_create_ou_role_assignments.php', $names);
+        $this->assertContains('012_create_user_roles.php', $names);
+        $this->assertContains('013_grant_plugins_manage_to_admin.php', $names);
 
-        $this->assertGreaterThanOrEqual(15, count($files), 'Expected at least 15 migration files.');
+        // The absorbed patch migrations must be gone (folded into the creates).
+        $this->assertNotContains('003_add_slug_to_tenants.php', $names);
+        $this->assertNotContains('004_add_description_to_roles.php', $names);
+        $this->assertNotContains('013_add_cascading_deletes.php', $names);
+        $this->assertNotContains('016_normalize_permission_notation.php', $names);
+        $this->assertNotContains('017_add_role_hierarchy.php', $names);
+        $this->assertNotContains('018_add_tenant_id_to_roles.php', $names);
+
+        $this->assertGreaterThanOrEqual(13, count($files), 'Expected at least 13 consolidated migration files.');
 
         // Verify the numeric prefixes are strictly increasing so run order is deterministic.
         $prefixes = [];
@@ -95,6 +114,9 @@ final class MigrationSchemaTest extends TestCase
         sort($sorted);
         $this->assertSame($sorted, $prefixes, 'Migration numeric prefixes must be in ascending order.');
         $this->assertSame(count($prefixes), count(array_unique($prefixes)), 'Duplicate migration prefixes detected.');
+
+        // Prefixes must be a contiguous 1..N sequence (no gaps left by deletes).
+        $this->assertSame(range(1, count($prefixes)), $prefixes, 'Migration prefixes must form a contiguous 1..N sequence.');
     }
 
     /**
@@ -145,11 +167,12 @@ final class MigrationSchemaTest extends TestCase
     {
         $createUsers = $this->readFile('001_create_users_roles.php');
 
-        // tenant_id column: INTEGER NOT NULL REFERENCES tenants(id)
+        // tenant_id column: INTEGER NOT NULL REFERENCES tenants(id) with cascade
+        // (the cascade was previously a separate patch migration; it is now inline).
         $this->assertMatchesRegularExpression(
-            '/tenant_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+tenants\s*\(\s*id\s*\)/i',
+            '/tenant_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+tenants\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
             $createUsers,
-            'users.tenant_id must be a non-nullable INTEGER referencing tenants(id).'
+            'users.tenant_id must be a non-nullable INTEGER referencing tenants(id) ON DELETE CASCADE.'
         );
 
         // Index on tenant_id.
@@ -163,7 +186,7 @@ final class MigrationSchemaTest extends TestCase
     public function testUsersTableHasCoreRbacColumns(): void
     {
         $createUsers = $this->readFile('001_create_users_roles.php');
-        $addOu = $this->readFile('008_add_ou_to_users.php');
+        $addOu = $this->readFile('006_add_ou_to_users.php');
 
         // id / email / password / role_id / created_at present in the base table.
         foreach (['id', 'email', 'password', 'role_id', 'created_at'] as $column) {
@@ -174,7 +197,14 @@ final class MigrationSchemaTest extends TestCase
             );
         }
 
-        // ou_id is added by migration 008 with a FK to organizational_units.
+        // role_id carries a cascade FK to roles (folded from the cascade patch).
+        $this->assertMatchesRegularExpression(
+            '/role_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+roles\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $createUsers,
+            'users.role_id must reference roles(id) ON DELETE CASCADE.'
+        );
+
+        // ou_id is added by the OU migration with a FK to organizational_units.
         $this->assertMatchesRegularExpression(
             '/ADD COLUMN IF NOT EXISTS\s+ou_id\s+INTEGER\s+REFERENCES\s+organizational_units\s*\(\s*id\s*\)/i',
             $addOu,
@@ -182,16 +212,66 @@ final class MigrationSchemaTest extends TestCase
         );
     }
 
+    public function testRolesTableHasFinalHierarchyAndTenantColumns(): void
+    {
+        $createRoles = $this->readFile('001_create_users_roles.php');
+
+        // description column (folded from the description patch).
+        $this->assertMatchesRegularExpression(
+            '/description\s+TEXT\s+DEFAULT/i',
+            $createRoles,
+            'roles.description must be present in the base create (folded from the description patch).'
+        );
+
+        // parent_id self-reference with ON DELETE SET NULL (role hierarchy patch).
+        $this->assertMatchesRegularExpression(
+            '/parent_id\s+INTEGER\s+NULL\s+REFERENCES\s+roles\s*\(\s*id\s*\)\s+ON DELETE SET NULL/i',
+            $createRoles,
+            'roles.parent_id must self-reference roles(id) ON DELETE SET NULL.'
+        );
+
+        // No-self-parent guard.
+        $this->assertMatchesRegularExpression(
+            '/CONSTRAINT\s+chk_roles_no_self_parent\s+CHECK\s*\(\s*parent_id\s+IS\s+NULL\s+OR\s+parent_id\s*<>\s*id\s*\)/i',
+            $createRoles,
+            'roles must keep the chk_roles_no_self_parent guard.'
+        );
+
+        // tenant_id with ON DELETE CASCADE (owning-tenant patch).
+        $this->assertMatchesRegularExpression(
+            '/tenant_id\s+INTEGER\s+NULL\s+REFERENCES\s+tenants\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $createRoles,
+            'roles.tenant_id must reference tenants(id) ON DELETE CASCADE.'
+        );
+
+        // Both supporting indexes.
+        $this->assertMatchesRegularExpression('/CREATE INDEX IF NOT EXISTS\s+\w+\s+ON\s+roles\s*\(\s*parent_id\s*\)/i', $createRoles);
+        $this->assertMatchesRegularExpression('/CREATE INDEX IF NOT EXISTS\s+\w+\s+ON\s+roles\s*\(\s*tenant_id\s*\)/i', $createRoles);
+    }
+
+    public function testTenantsTableHasSlugColumn(): void
+    {
+        $createTenants = $this->readFile('001_create_users_roles.php');
+
+        // slug is folded into the base tenants create (was a later ADD COLUMN patch).
+        $this->assertMatchesRegularExpression(
+            '/slug\s+VARCHAR\(\d+\)\s+UNIQUE/i',
+            $createTenants,
+            'tenants.slug must be present (UNIQUE) in the base create.'
+        );
+    }
+
     public function testRolesAndPermissionsJunctionExists(): void
     {
         $permissions = $this->readFile('002_create_permissions.php');
 
+        // role_permissions FKs are now inline with ON DELETE CASCADE (folded).
         $this->assertMatchesRegularExpression(
-            '/role_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+roles\s*\(\s*id\s*\)/i',
+            '/role_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+roles\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
             $permissions
         );
         $this->assertMatchesRegularExpression(
-            '/permission_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+permissions\s*\(\s*id\s*\)/i',
+            '/permission_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+permissions\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
             $permissions
         );
         // Junction uniqueness prevents duplicate grants.
@@ -203,7 +283,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testUserRolesJunctionTableLinksUsersAndRolesPerTenant(): void
     {
-        $sql = $this->readFile('015_create_user_roles.php');
+        $sql = $this->readFile('012_create_user_roles.php');
 
         $this->assertMatchesRegularExpression('/CREATE TABLE IF NOT EXISTS\s+user_roles\b/i', $sql);
 
@@ -240,7 +320,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testOrganizationalUnitsSupportParentHierarchy(): void
     {
-        $sql = $this->readFile('007_create_organizational_units.php');
+        $sql = $this->readFile('005_create_organizational_units.php');
 
         $this->assertMatchesRegularExpression(
             '/parent_id\s+INTEGER\s+REFERENCES\s+organizational_units\s*\(\s*id\s*\)/i',
@@ -255,7 +335,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testOuRoleAssignmentsCascadeFromAllParents(): void
     {
-        $sql = $this->readFile('009_create_ou_role_assignments.php');
+        $sql = $this->readFile('008_create_ou_role_assignments.php');
 
         foreach (
             [
@@ -274,7 +354,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testRevokedTokensTableExistsForJwtRevocation(): void
     {
-        $sql = $this->readFile('012_create_revoked_tokens.php');
+        $sql = $this->readFile('011_create_revoked_tokens.php');
 
         $this->assertMatchesRegularExpression('/jti\s+VARCHAR\(\d+\)\s+NOT\s+NULL\s+UNIQUE/i', $sql);
         $this->assertMatchesRegularExpression('/expires_at\s+TIMESTAMP\s+NOT\s+NULL/i', $sql);
@@ -282,7 +362,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testTwoFactorColumnsAndBackupCodesTableExist(): void
     {
-        $sql = $this->readFile('014_add_two_factor_support.php');
+        $sql = $this->readFile('007_add_two_factor_support.php');
 
         foreach (['two_factor_secret', 'two_factor_enabled', 'two_factor_backup_codes_version'] as $column) {
             $this->assertMatchesRegularExpression(
@@ -299,25 +379,41 @@ final class MigrationSchemaTest extends TestCase
         );
     }
 
-    public function testCascadingDeletesMigrationConvertsCoreForeignKeys(): void
+    public function testCoreCascadingDeletesAreFoldedIntoCreateMigrations(): void
     {
-        $sql = $this->readFile('013_add_cascading_deletes.php');
+        // The dedicated cascade-rewrite migration was folded into the create
+        // migrations. Verify the cascade foreign keys live inline on the tables
+        // they belong to (and are therefore reversed by those creates' down()).
+        $usersRoles = $this->readFile('001_create_users_roles.php');
+        $permissions = $this->readFile('002_create_permissions.php');
+        $deployments = $this->readFile('004_create_deployment_tables.php');
 
-        // users -> tenants and roles cascade.
+        // users -> tenants and roles cascade (inline).
         $this->assertMatchesRegularExpression(
-            '/users_tenant_id_fkey\s+FOREIGN KEY \(tenant_id\) REFERENCES tenants\(id\) ON DELETE CASCADE/i',
-            $sql
+            '/REFERENCES\s+tenants\(id\)\s+ON DELETE CASCADE/i',
+            $usersRoles
         );
         $this->assertMatchesRegularExpression(
-            '/role_permissions_permission_id_fkey\s+FOREIGN KEY \(permission_id\) REFERENCES permissions\(id\) ON DELETE CASCADE/i',
-            $sql
+            '/REFERENCES\s+roles\(id\)\s+ON DELETE CASCADE/i',
+            $usersRoles
         );
 
-        // down() must restore the non-cascading constraints (reversible).
-        $this->assertStringContainsString('public static function down', $sql);
+        // role_permissions.permission_id cascade (inline).
         $this->assertMatchesRegularExpression(
-            '/DROP CONSTRAINT IF EXISTS users_tenant_id_fkey/i',
-            $sql
+            '/permission_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+permissions\(id\)\s+ON DELETE CASCADE/i',
+            $permissions
+        );
+
+        // deployments + migration_rollbacks tenant cascade (inline).
+        $this->assertMatchesRegularExpression(
+            '/tenant_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+tenants\(id\)\s+ON DELETE CASCADE/i',
+            $deployments
+        );
+
+        // The dedicated cascade-rewrite migration must no longer exist.
+        $this->assertFileDoesNotExist(
+            self::$migrationDir . '/013_add_cascading_deletes.php',
+            'The separate cascading-deletes migration must be folded into the create migrations.'
         );
     }
 
@@ -340,7 +436,7 @@ final class MigrationSchemaTest extends TestCase
     public function testSeedStyleInsertsUseOnConflictForIdempotency(): void
     {
         // Migrations that insert default rows must guard against duplicates on re-run.
-        foreach (['001_create_users_roles.php', '002_create_permissions.php', '007_create_organizational_units.php'] as $file) {
+        foreach (['001_create_users_roles.php', '002_create_permissions.php', '005_create_organizational_units.php'] as $file) {
             $sql = $this->readFile($file);
             if (stripos($sql, 'INSERT INTO') !== false) {
                 $this->assertMatchesRegularExpression(
@@ -383,21 +479,30 @@ final class MigrationSchemaTest extends TestCase
 
     /**
      * The seed migrations must define permissions in `resource:action` (colon)
-     * notation so a fresh database matches the RBAC registry (issue #55).
+     * notation so a fresh database matches the RBAC registry (issue #55). The
+     * after-the-fact dot->colon normalisation migration was removed because the
+     * seeds now emit colon notation at source.
      *
      * @dataProvider permissionNotationProvider
      */
     public function testSeedMigrationsUseColonNotation(string $dotForm, string $colonForm): void
     {
         $seedSql = $this->readFile('002_create_permissions.php')
-            . $this->readFile('007_create_organizational_units.php')
-            . $this->readFile('010_assign_ou_permissions_to_roles.php');
+            . $this->readFile('005_create_organizational_units.php')
+            . $this->readFile('009_assign_ou_permissions_to_roles.php');
 
         // The dot-notation form must no longer appear as a quoted permission literal.
         $this->assertStringNotContainsString(
             "'{$dotForm}'",
             $seedSql,
             "Seed migrations must not seed the dot-notation permission '{$dotForm}'."
+        );
+
+        // And the colon form must be present somewhere in the seed surface.
+        $this->assertStringContainsString(
+            $colonForm,
+            $seedSql,
+            "Seed migrations must seed the colon-notation permission '{$colonForm}'."
         );
     }
 
@@ -407,7 +512,7 @@ final class MigrationSchemaTest extends TestCase
      */
     public function testNoSeedMigrationContainsDotNotationPermission(): void
     {
-        foreach (['002_create_permissions.php', '007_create_organizational_units.php', '010_assign_ou_permissions_to_roles.php'] as $file) {
+        foreach (['002_create_permissions.php', '005_create_organizational_units.php', '009_assign_ou_permissions_to_roles.php'] as $file) {
             $sql = $this->readFile($file);
             $this->assertDoesNotMatchRegularExpression(
                 "/'(users|roles|tenants|ous|permissions|plugins)\.(read|create|update|delete|assign|write|manage)'/",
@@ -417,50 +522,29 @@ final class MigrationSchemaTest extends TestCase
         }
     }
 
-    public function testNormalizationMigrationExistsAndIsReversible(): void
+    /**
+     * The after-the-fact dot->colon normalisation migration must be gone: the
+     * seeds emit colon notation directly, so there is nothing to normalise.
+     */
+    public function testNormalizationMigrationIsRemoved(): void
     {
-        $file = '016_normalize_permission_notation.php';
-        $sql = $this->readFile($file);
+        $this->assertFileDoesNotExist(
+            self::$migrationDir . '/016_normalize_permission_notation.php',
+            'The permission-notation normalisation migration must be removed; seeds now use colon notation at source.'
+        );
 
-        // Both lifecycle methods are present.
-        $this->assertStringContainsString('public static function up', $sql);
-        $this->assertStringContainsString('public static function down', $sql);
-
-        // up() rewrites dot -> colon; down() rewrites colon -> dot. Both use a
-        // REPLACE() UPDATE so they are pure data normalisations.
-        $this->assertMatchesRegularExpression('/UPDATE\s+permissions/i', $sql);
-        $this->assertMatchesRegularExpression('/REPLACE\s*\(\s*name/i', $sql);
-
-        // The class must resolve via the runner's naming convention.
-        $className = $this->loadMigrationClass(self::$migrationDir . '/' . $file);
-        $this->assertSame('Database\\Migrations\\NormalizePermissionNotation', $className);
-    }
-
-    public function testNormalizationMigrationIsIdempotentlyScopedToKnownResources(): void
-    {
-        $sql = $this->readFile('016_normalize_permission_notation.php');
-
-        // It must constrain its UPDATE with a LIKE filter so already-normalised
-        // rows (and plugin permissions) are left untouched — the basis for both
-        // idempotency and avoiding collateral edits.
-        $this->assertMatchesRegularExpression('/LIKE\s+:pattern/i', $sql);
-
-        // Every core resource must be covered by the rewrite.
-        foreach (['users', 'roles', 'tenants', 'ous', 'permissions', 'plugins'] as $resource) {
-            $this->assertStringContainsString(
-                "'{$resource}'",
-                $sql,
-                "Normalisation migration must cover the '{$resource}' resource."
-            );
-        }
+        $sql = $this->allMigrationSql();
+        $this->assertDoesNotMatchRegularExpression(
+            '/class\s+NormalizePermissionNotation/i',
+            $sql,
+            'No migration should define NormalizePermissionNotation any more.'
+        );
     }
 
     /**
-     * Proves the dot<->colon transform applied by the migration's REPLACE() is
-     * a correct, idempotent, and reversible round-trip for every core permission.
-     *
-     * This mirrors PostgreSQL's REPLACE(name, '<res>.', '<res>:') semantics in
-     * pure PHP so the mapping is verified without a live database.
+     * Proves the dot<->colon transform is a correct, idempotent and reversible
+     * round-trip for every core permission. Although the runtime normalisation
+     * migration was removed, this guards the canonical mapping the seeds rely on.
      *
      * @dataProvider permissionNotationProvider
      */

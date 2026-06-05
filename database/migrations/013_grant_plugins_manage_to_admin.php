@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Database\Migrations;
 
 use Whity\Database\Database;
@@ -13,15 +15,22 @@ use Whity\Core\RBAC\CorePermissions;
  * permission an existing core route actually enforces through the permission
  * pipeline.
  *
+ * This runs LAST in the sequence on purpose: the earlier seed migrations
+ * (002 for users/roles/tenants, 005 for OUs) insert their permissions with
+ * human-readable descriptions, and this catalogue catch-up only fills in the
+ * remaining canonical core strings (e.g. `*:write`, `roles:manage`,
+ * `permissions:read`, `plugins:manage`) via ON CONFLICT DO NOTHING — so the
+ * human descriptions are never overwritten.
+ *
  * Why this migration exists
  * -------------------------
  * Since WC-4 (PR #130) wired route-level `requiredPermission` forwarding into the
  * live request pipeline, the five plugin-admin endpoints are gated by
  * `plugins:manage` ({@see CorePermissions::PLUGINS_MANAGE}). That permission is
- * defined only in the in-memory {@see CorePermissions} registry — it was never
- * seeded into the `permissions` catalogue (migrations 002/007/010 seed a smaller
- * set) and was never granted to the `admin` role. As a result an authenticated
- * admin reaching a plugin endpoint passes the registry gate but finds no matching
+ * defined only in the in-memory {@see CorePermissions} registry — it is not part
+ * of the smaller human-described set the earlier seed migrations (002, 005) insert
+ * and was never granted to the `admin` role. As a result an authenticated admin
+ * reaching a plugin endpoint passes the registry gate but finds no matching
  * `role_permissions` row and is denied (403) even though they are the platform
  * administrator. This migration closes that gap.
  *
@@ -50,13 +59,13 @@ use Whity\Core\RBAC\CorePermissions;
  * down() removes exactly what up() added and nothing else:
  *  - the `plugins:manage` grant on the `admin` role, and
  *  - the catalogue rows for the core permissions that did NOT already exist
- *    before this migration. Rows seeded by earlier migrations (002/007/010/016 —
- *    see {@see self::PRE_SEEDED}) are deliberately left in place, and any row
- *    still referenced by a `role_permissions` grant is kept, so down() never
- *    orphans a grant nor deletes a permission another migration owns.
+ *    before this migration. Rows seeded by earlier migrations (002 for
+ *    users/roles/tenants, 005 for OUs — see {@see self::PRE_SEEDED}) are
+ *    deliberately left in place, and any row still referenced by a
+ *    `role_permissions` grant is kept, so down() never orphans a grant nor
+ *    deletes a permission another migration owns.
  *
- * Patterned after migrations 015 / 016: additive, idempotent forward, and a
- * precise reversible down().
+ * Additive, idempotent forward, and a precise reversible down().
  */
 class GrantPluginsManageToAdmin
 {
@@ -66,12 +75,11 @@ class GrantPluginsManageToAdmin
     private const GRANTED_PERMISSION = CorePermissions::PLUGINS_MANAGE;
 
     /**
-     * Core permission names that existing migrations already seed into the
-     * `permissions` catalogue (002 + 016 normalisation for users/roles/tenants;
-     * 007/010 for OUs). down() must NOT remove these — they predate this
-     * migration and are owned by their seeding migrations. Only the genuinely
-     * new {@see CorePermissions::all()} strings (those NOT in this list) are this
-     * migration's to remove on rollback.
+     * Core permission names that earlier migrations already seed into the
+     * `permissions` catalogue (002 for users/roles/tenants; 005 for OUs). down()
+     * must NOT remove these — they predate this migration and are owned by their
+     * seeding migrations. Only the genuinely new {@see CorePermissions::all()}
+     * strings (those NOT in this list) are this migration's to remove on rollback.
      *
      * @var array<int, string>
      */
