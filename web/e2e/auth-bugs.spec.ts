@@ -19,7 +19,12 @@ test.describe('Auth regression guards', () => {
     await login.submit({ email: ADMIN.email, password: 'definitely-wrong-password' });
 
     await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByText(/invalid credentials|login failed/i)).toBeVisible();
+    // WC-75 also fires a transient toast ("Login failed (401): Invalid
+    // credentials"), so match the inline Alert's exact text to stay
+    // unambiguous and avoid Next.js's empty route-announcer role="alert".
+    await expect(
+      page.getByText('Invalid credentials', { exact: true })
+    ).toBeVisible();
   });
 
   test('the error clears when the user edits a field after a failed attempt', async ({
@@ -28,10 +33,17 @@ test.describe('Auth regression guards', () => {
     const login = new LoginPage(page);
     await login.goto();
     await login.submit({ email: ADMIN.email, password: 'definitely-wrong-password' });
-    await expect(page.getByText('Invalid credentials')).toBeVisible();
+    // The persistent inline Alert text (exact match avoids the longer WC-75
+    // toast text, which auto-dismisses).
+    await expect(
+      page.getByText('Invalid credentials', { exact: true })
+    ).toBeVisible();
 
-    // Typing into the email field clears the error (loginError reset onChange).
+    // Typing into the email field clears the inline error (loginError reset onChange).
+    // The transient toast also clears, so no "Invalid credentials" text remains.
     await login.emailInput.fill(`${ADMIN.email}x`);
-    await expect(page.getByText('Invalid credentials')).toHaveCount(0);
+    await expect(
+      page.getByText('Invalid credentials', { exact: true })
+    ).toHaveCount(0);
   });
 });
