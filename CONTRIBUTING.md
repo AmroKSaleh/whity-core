@@ -60,10 +60,13 @@ The variables consumed by [`docker-compose.yml`](docker-compose.yml) and
 | `DB_PORT`          | PostgreSQL port.                                                     | `5432`                                 |
 | `JWT_SECRET`       | Secret used to sign/verify JWTs. **Required outside development.**   | `dev_secret_key_change_in_production`  |
 | `ENCRYPTION_KEY`   | AES-256-CBC key for stored TOTP 2FA secrets. **Must be identical** across setup/confirm/login. **Required outside development.** | `dev_encryption_key_change_in_production` |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated browser-origin allowlist. The request `Origin` is reflected (with credentials) only on an exact match — never `*`. | `http://localhost:3000` |
+| `WORKER_MEMORY_LIMIT_MB` | Per-worker memory ceiling; crossing ~90% triggers graceful worker recycling. | `128` |
+| `INITIAL_ADMIN_PASSWORD` / `INITIAL_USER_PASSWORD` / `INITIAL_SYSTEM_ADMIN_PASSWORD` | Seed/system-admin passwords. If unset, a random password is generated and printed **once** to the log — there is no hardcoded fallback. | _(random)_ |
 
 Outside `APP_ENV=development`, the app **fails fast** if `JWT_SECRET` or
-`ENCRYPTION_KEY` is unset or empty. Never commit real secrets — `.env` is
-git-ignored.
+`ENCRYPTION_KEY` is unset/empty, or if `JWT_SECRET` is shorter than 32
+characters. Never commit real secrets — `.env` is git-ignored.
 
 Connection-pooling knobs for the persistent FrankenPHP workers
 (`DB_CONNECT_TIMEOUT`, `DB_MAX_LIFETIME`, `DB_PING_INTERVAL`) and worker tuning
@@ -212,6 +215,26 @@ rebase (`git push --force-with-lease`).
   assume. Per [`web/AGENTS.md`](web/AGENTS.md), read
   `web/node_modules/next/dist/docs/` before writing frontend code and heed
   deprecation notices.
+
+### Clean code over backward-compatibility (no legacy)
+
+Whity Core has **no production deployments**, so there is no installed base to
+stay compatible with. Prefer making the codebase *correct and clean* over
+preserving old behavior:
+
+- Delete dead code and finish half-built features instead of working around
+  them.
+- Drop compatibility shims — no alias methods or dual-accept code paths; pick
+  one canonical API and update every caller.
+- Migrations are a **clean, consolidated set** (each table created in its final
+  form). When the schema changes, prefer editing the relevant migration over
+  layering a patch-migration; there is no deployed database to upgrade
+  incrementally. Keep `up()` idempotent and `down()` correct, and prove
+  schema-equivalence if you rewrite history.
+- Don't add "existing deployments must…" caveats — they don't apply.
+
+The quality bar still holds: clean means tested and verified (real-engine tests,
+green CI), not unverified.
 
 ## Testing Requirements
 
@@ -368,10 +391,14 @@ class TaskController extends BaseController {
 
 ### 2. RBAC enforcement
 
-Every protected operation verifies permissions at the handler boundary:
+Every protected operation verifies permissions at the handler boundary. The
+checker takes the user id, the `resource:action` permission, and the tenant id,
+and resolves the user's **effective** permissions — their direct role plus the
+role hierarchy plus roles inherited through their organizational unit (and its
+ancestor OUs):
 
 ```php
-if (!$roleChecker->hasPermission($user, 'tasks:update')) {
+if (!$roleChecker->hasPermission($userId, 'tasks:update', $tenantId)) {
     // structured 403
 }
 ```
