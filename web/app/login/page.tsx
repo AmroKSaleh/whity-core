@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { useToast } from '@/lib/toast-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -34,6 +35,7 @@ function formatBackupCode(raw: string): string {
 export default function LoginPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading, refreshAuth } = useAuth();
+  const { addToast } = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
@@ -116,11 +118,16 @@ export default function LoginPage() {
           response.status === 401
             ? 'Invalid credentials'
             : errorData.message || 'Login failed';
-        throw new Error(message);
+        // Keep the inline Alert (WC-98) and also surface the failure as a
+        // toast, including the HTTP status code for context.
+        setLoginError(message);
+        addToast(`Login failed (${response.status}): ${message}`, 'error');
       }
     } catch (err) {
+      // Network/transport error — no HTTP status is available.
       const message = err instanceof Error ? err.message : 'Login failed';
       setLoginError(message);
+      addToast(`Login failed: ${message}`, 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -162,15 +169,21 @@ export default function LoginPage() {
       } else if (response.status === 401) {
         const errorMsg = backupCodeMode ? 'Invalid recovery code. Please try again.' : 'Invalid authenticator code. Please try again.';
         setTwoFactorError(errorMsg);
+        addToast(`Verification failed (401): ${errorMsg}`, 'error');
         setTwoFactorCode('');
         twoFactorInputRef.current?.focus();
       } else {
         const errorData = await response.json().catch(() => ({}));
-        setTwoFactorError(errorData.message || 'Verification failed. Please try again.');
+        const errorMsg = errorData.message || 'Verification failed. Please try again.';
+        setTwoFactorError(errorMsg);
+        addToast(`Verification failed (${response.status}): ${errorMsg}`, 'error');
         setTwoFactorCode('');
       }
     } catch (err) {
-      setTwoFactorError('An error occurred. Please try again.');
+      // Network/transport error — no HTTP status is available.
+      const errorMsg = 'An error occurred. Please try again.';
+      setTwoFactorError(errorMsg);
+      addToast(errorMsg, 'error');
       setTwoFactorCode('');
     } finally {
       setTwoFactorLoading(false);

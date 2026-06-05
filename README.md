@@ -75,7 +75,7 @@ See [OpenAPI Schema Generation](docs/wiki/OpenAPI-Schema-Generation.md) for deta
 | Backend Runtime | PHP 8.4+ | Native reflection, dynamic execution |
 | Concurrency | FrankenPHP / Swoole | Persistent workers, 100k+ concurrent |
 | Database | PostgreSQL 15+ | JSONB, relational integrity, ACID |
-| Web Client | React 18 + TypeScript | Heavy state management |
+| Web Client | React 19 + TypeScript | Heavy state management |
 | Desktop | Electron | Native OS access |
 | Mobile | Flutter + Dart | Native ARM compilation |
 

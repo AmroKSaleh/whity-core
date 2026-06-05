@@ -20,14 +20,24 @@ test.describe('Authentication flow', () => {
     await login.goto();
     await login.submit({ email: ADMIN.email, password: 'definitely-wrong-password' });
 
+    // WC-75: a failure also fires a transient error toast that includes the
+    // HTTP status code. Assert it first — it auto-dismisses after ~3s. Match
+    // the full toast text exactly so it never collides with the inline Alert.
+    await expect(
+      page.getByText('Login failed (401): Invalid credentials', { exact: true })
+    ).toBeVisible();
+
     // The app must NOT navigate away from /login on bad credentials.
     await expect(page).toHaveURL(/\/login$/);
     // The dashboard heading must never appear.
     await expect(page.getByRole('heading', { name: 'Welcome back!' })).toHaveCount(0);
 
-    // WC-98 (now fixed): the login page surfaces a destructive "Invalid
-    // credentials" alert on bad credentials.
-    await expect(page.getByText('Invalid credentials')).toBeVisible();
+    // WC-98: the login page also surfaces a persistent destructive "Invalid
+    // credentials" inline alert on bad credentials, kept alongside the toast.
+    // Exact match targets the Alert's text node, not the longer toast text.
+    await expect(
+      page.getByText('Invalid credentials', { exact: true })
+    ).toBeVisible();
     await expect(login.emailInput).toBeVisible();
   });
 

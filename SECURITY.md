@@ -74,7 +74,15 @@ Task::whereRaw("title = '" . $title . "'");
 
 - **In Transit:** TLS 1.3+
 - **At Rest:** AES-256 for sensitive fields
-- **Passwords:** Argon2id hashing
+- **Passwords:** bcrypt hashing via PHP `password_hash()` with `PASSWORD_BCRYPT`
+  (default cost factor 10). The same algorithm secures user passwords and
+  two-factor backup/recovery codes; all verification goes through
+  `password_verify()`.
+
+> **Future hardening:** evaluate migrating to Argon2id (`PASSWORD_ARGON2ID`).
+> This is a non-trivial change requiring rehash-on-login so existing bcrypt
+> hashes are upgraded as users authenticate; it is intentionally out of scope
+> here and tracked separately.
 
 ## Deployment Security
 
@@ -94,4 +102,4 @@ Log all permission denials and data modifications with user, tenant, IP, timesta
 
 ---
 
-*Last updated: 2026-05-16*
+*Last updated: 2026-06-05*

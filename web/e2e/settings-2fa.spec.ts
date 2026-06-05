@@ -91,6 +91,12 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
     const secret = await settings.readWizardSecret();
     expect(secret.length, 'a base32 secret should be shown').toBeGreaterThan(10);
 
+    // WC-72: the manual-entry secret is no longer clipped to 150px with an
+    // ellipsis — the full code renders so it is selectable/copyable. The
+    // rendered <code> text must equal the secret with no truncation marker.
+    expect(secret).not.toContain('…'); // no "…" ellipsis
+    await expect(settings.wizard.locator('code').first()).toHaveText(secret);
+
     await settings.wizard.getByRole('button', { name: 'Next' }).click();
 
     // Submit a freshly computed TOTP. A code can land right on a 30s window
@@ -212,10 +218,12 @@ test.describe('Two-Factor Authentication — login challenge (admin)', () => {
       await login.goto();
       await login.submitExpecting2fa(ADMIN);
       // A wrong-but-well-formed 6-digit code is rejected (401); the form shows
-      // an error and stays on /login.
+      // an error and stays on /login. WC-75 also fires a transient toast
+      // ("Verification failed (401): ...") with the same trailing message, so
+      // match the inline Alert's exact text to stay unambiguous.
       await login.submitTwoFactorCode('000000');
       await expect(
-        page.getByText('Invalid authenticator code. Please try again.')
+        page.getByText('Invalid authenticator code. Please try again.', { exact: true })
       ).toBeVisible();
       await expect(page).toHaveURL(/\/login$/);
     } finally {

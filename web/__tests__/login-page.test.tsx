@@ -3,6 +3,8 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { useRouter } from 'next/navigation';
 import LoginPage from '@/app/login/page';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { ToastProvider } from '@/lib/toast-context';
+import { ToastContainer } from '@/components/ui/toast-container';
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
@@ -40,7 +42,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -85,7 +89,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -133,7 +139,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -194,7 +202,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -246,7 +256,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -300,7 +312,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -349,7 +363,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -399,7 +415,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -441,7 +459,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -490,7 +510,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -550,7 +572,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -607,7 +631,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -670,7 +696,9 @@ describe('LoginPage - 2FA Flow', () => {
 
     render(
       <AuthProvider>
-        <LoginPage />
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
       </AuthProvider>
     );
 
@@ -716,5 +744,97 @@ describe('LoginPage - 2FA Flow', () => {
 
     // Recovery form should still be visible (not switched back) - check input is still there
     expect(screen.getByPlaceholderText('XXXX-XXXX-XXXX')).toBeInTheDocument();
+  });
+
+  // WC-75: login failures fire an error toast in addition to the inline Alert.
+  test('testFailedLoginShowsToastAndAlert', async () => {
+    // Mock initial /api/me call from AuthProvider
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    // Mock login endpoint returning 401 (invalid credentials)
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+    });
+
+    render(
+      <AuthProvider>
+        <ToastProvider>
+          <LoginPage />
+          <ToastContainer />
+        </ToastProvider>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeTruthy();
+    });
+
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'wrong-password' } });
+    fireEvent.click(submitButton);
+
+    // Inline Alert (WC-98) still renders (getByText throws if absent).
+    await waitFor(() => {
+      expect(screen.getByText('Invalid credentials')).toBeTruthy();
+    });
+
+    // A toast is fired too, including the HTTP status code.
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Login failed \(401\): Invalid credentials/i)
+      ).toBeTruthy();
+    });
+  });
+
+  // WC-75: the requires_2fa (202) path must NOT fire an error toast.
+  test('test202DoesNotFireErrorToast', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      ok: false,
+      json: async () => ({ requires_2fa: true }),
+    });
+
+    render(
+      <AuthProvider>
+        <ToastProvider>
+          <LoginPage />
+          <ToastContainer />
+        </ToastProvider>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeTruthy();
+    });
+
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.click(submitButton);
+
+    // Advances to the 2FA step (getByText throws if absent)...
+    await waitFor(() => {
+      expect(screen.getByText(/Enter the 6-digit code/i)).toBeTruthy();
+    });
+
+    // ...without firing any "Login failed" error toast.
+    expect(screen.queryByText(/Login failed/i)).toBeNull();
   });
 });

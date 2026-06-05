@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { Button } from '@/components/ui/button';
+import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
   IconMenu2,
@@ -12,23 +13,39 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconDashboard,
-  IconUsers,
-  IconLock,
-  IconBuilding,
-  IconBuildingCommunity,
-  IconSettings,
 } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
-import type { IconProps } from '@tabler/icons-react';
+import type { Icon } from '@tabler/icons-react';
 
-const iconMap: Record<string, React.ComponentType<IconProps>> = {
-  dashboard: IconDashboard,
-  users: IconUsers,
-  lock: IconLock,
-  building: IconBuilding,
-  'building-community': IconBuildingCommunity,
-  settings: IconSettings,
-};
+/**
+ * Resolve a navigation `icon` name to a Tabler icon component.
+ *
+ * Core nav items emit kebab-case names (e.g. `"building-community"`), but
+ * plugins may supply any Tabler icon by its kebab/snake name or its full
+ * PascalCase component name (e.g. `"IconUsers"`). We normalize the name to the
+ * `Icon<PascalCase>` export and look it up dynamically against the full
+ * `@tabler/icons-react` set, falling back to a safe default for unknown names
+ * so a plugin can never render a missing-icon hole.
+ */
+const tablerIcons = TablerIcons as unknown as Record<string, Icon | undefined>;
+
+function resolveIcon(name: string | undefined): Icon {
+  if (!name) {
+    return IconDashboard;
+  }
+
+  // Split on hyphen/underscore/whitespace, capitalize each segment, join.
+  const pascal = name
+    .trim()
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join('');
+
+  const componentName = pascal.startsWith('Icon') ? pascal : `Icon${pascal}`;
+
+  return tablerIcons[componentName] ?? IconDashboard;
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -147,7 +164,7 @@ export function Sidebar() {
                 )}
                 <div className="space-y-1">
                   {navItems.map((item, index) => {
-                    const Icon = iconMap[item.icon] || IconDashboard;
+                    const Icon = resolveIcon(item.icon);
                     const hrefSegments = item.href.split('/').filter(Boolean).length;
                     const isActive = pathname === item.href ||
                       (pathname.startsWith(item.href + '/') && hrefSegments > 1);
