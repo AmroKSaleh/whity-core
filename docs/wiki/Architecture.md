@@ -184,8 +184,7 @@ Permissions use **`resource:action` colon notation** (e.g. `users:read`, `roles:
 
 `PermissionRegistry` (`src/Core/RBAC/PermissionRegistry.php`) is the worker-level catalogue of every permission known to the platform, keyed by source: the literal `core` for built-ins, or the plugin name for plugin permissions.
 
-- `register($source, $permissions)` validates each permission against `^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$` (throws `InvalidPermissionException` on a malformed name).
-- `registerPermissions($pluginId, $permissions)` is the backward-compatible entry point the `PluginLoader` uses; it does **not** enforce the pattern.
+- `register($source, $permissions)` is the single registration entry point (core and plugins alike). It validates each permission against `^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$`, throwing `InvalidPermissionException` on a malformed name. The `PluginLoader` calls it inside a per-plugin error boundary, so a plugin declaring a bad permission is logged and skipped rather than crashing the host.
 - Core permissions are registered lazily on first read (`ensureCoreRegistered()`), so the RBAC layer can validate them even without explicit bootstrap wiring (issue #55).
 - When a plugin is unloaded, its permissions vanish from the registry instantly — no orphaned permission rows.
 

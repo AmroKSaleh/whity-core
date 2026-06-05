@@ -276,23 +276,21 @@ class RolesApiHandlerTest extends TestCase
     }
 
     /**
-     * Resilience for frontend bug #99: when only `permissionIds` is supplied the
-     * handler falls back to it, but `permissions` remains authoritative.
+     * `permissions` is the sole accepted key: a legacy `permissionIds` payload is
+     * ignored, so the role is created with zero permissions and no permission
+     * resolution/insert runs (no fallback to the dropped compat key).
      */
-    public function testCreateFallsBackToPermissionIdsKeyWhenPermissionsAbsent(): void
+    public function testCreateIgnoresLegacyPermissionIdsKey(): void
     {
-        $nameCheck = $this->statement(false);
-        $insertRole = $this->statement();
-        $resolveByName = $this->statement(false, [['id' => 7, 'name' => 'posts:read']]);
-        $insertPerms = $this->statement();
+        $nameCheck = $this->statement(false);   // role name free
+        $insertRole = $this->statement();        // INSERT roles (with tenant_id)
 
+        // Only the name check and role insert may run: with `permissions` absent,
+        // extractPermissionList() yields an empty list, so no resolve/insert of
+        // role_permissions occurs. willReturn (not consecutive) keeps the test from
+        // asserting on a permission-resolution call that must never happen.
         $pdo = $this->createMock(PDO::class);
-        $pdo->method('prepare')->willReturnOnConsecutiveCalls(
-            $nameCheck,
-            $insertRole,
-            $resolveByName,
-            $insertPerms
-        );
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($nameCheck, $insertRole);
         $pdo->method('lastInsertId')->willReturn('51');
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
@@ -304,7 +302,7 @@ class RolesApiHandlerTest extends TestCase
         $response = $handler->create($request);
 
         $this->assertSame(201, $response->getStatusCode());
-        $this->assertSame(1, json_decode($response->getBody(), true)['data']['permissionCount']);
+        $this->assertSame(0, json_decode($response->getBody(), true)['data']['permissionCount']);
     }
 
     // ==================== LIST (tenant scoping) ====================

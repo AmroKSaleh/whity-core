@@ -59,9 +59,11 @@ class ExamplePlugin implements PluginInterface
      */
     public function getPermissions(): array
     {
+        // Permissions use the mandated `resource:action` colon notation,
+        // validated against /^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$/ by the RBAC layer.
         return [
-            'example.view',
-            'example.admin',
+            'example:view',
+            'example:admin',
         ];
     }
 

@@ -80,8 +80,8 @@ class PluginInterfaceTest extends TestCase
 
         $permissions = $plugin->getPermissions();
         $this->assertIsArray($permissions);
-        $this->assertContains('example.view', $permissions);
-        $this->assertContains('example.admin', $permissions);
+        $this->assertContains('example:view', $permissions);
+        $this->assertContains('example:admin', $permissions);
 
         $hooks = $plugin->getHooks();
         $this->assertIsArray($hooks);
