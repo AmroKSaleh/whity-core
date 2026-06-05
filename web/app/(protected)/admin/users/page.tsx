@@ -81,8 +81,8 @@ export default function UsersPage() {
   const rowActions = (user: User) => (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm">
-          <IconMenu2 size={16} />
+        <Button variant="ghost" size="icon-sm" aria-label="Row actions">
+          <IconMenu2 />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -90,8 +90,8 @@ export default function UsersPage() {
           Edit
         </DropdownMenuItem>
         <DropdownMenuItem
+          variant="destructive"
           onClick={() => handleDeleteClick(user)}
-          className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
         >
           Delete
         </DropdownMenuItem>
@@ -109,7 +109,7 @@ export default function UsersPage() {
             onClick={() => setIsCreateModalOpen(true)}
             className="gap-2"
           >
-            <IconPlus size={18} />
+            <IconPlus />
             Create User
           </Button>
         }
