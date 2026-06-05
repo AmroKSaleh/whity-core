@@ -1,0 +1,94 @@
+# Staging stack for whity-core (WC-32, Sprint 4).
+#
+# A standalone, prod-like stack that runs ISOLATED from the dev demo:
+#   * distinct project name        -> -p whity-staging
+#   * distinct named volume        -> postgres_data_staging
+#   * distinct container names      -> whity_staging_*
+#   * NON-default host ports        -> frankenphp 8100, postgres 5433
+# so it never collides with `docker compose up` (dev demo on :8000 / :5432).
+#
+# "Prod-like" means APP_ENV is NOT `development`, so the JWT_SECRET (>= 32 char)
+# and ENCRYPTION_KEY fail-fast guards in public/index.php engage. Supply real
+# secrets and seed passwords via an env file (see .env.staging.example).
+#
+# Usage (from repo root):
+#   cp .env.staging.example .env.staging          # then edit the secrets
+#   docker compose -p whity-staging \
+#     -f docker-compose.staging.yml --env-file .env.staging up -d --build
+#   ./scripts/init-staging-db.sh                   # migrate + seed
+#   curl http://localhost:8100/api/health          # -> 200
+#
+# Tear down (keep volume):   docker compose -p whity-staging -f docker-compose.staging.yml down
+# Tear down (wipe volume):   docker compose -p whity-staging -f docker-compose.staging.yml down -v
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: whity_staging_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-whity}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      POSTGRES_DB: ${DB_NAME:-whity_core}
+    ports:
+      # Non-default host port so it never collides with the dev demo on 5432.
+      - "${DB_PORT_HOST:-5433}:5432"
+    volumes:
+      - postgres_data_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-whity} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frankenphp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whity_staging_frankenphp
+    ports:
+      # Non-default host port so it never collides with the dev demo on 8000.
+      - "${APP_PORT_HOST:-8100}:80"
+    environment:
+      # Prod-like: NOT `development`, so JWT/ENCRYPTION guards fail fast on weak secrets.
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      # In-network Postgres always listens on 5432; only the host mapping changes.
+      DB_PORT: 5432
+      # Connection-pool knobs for the persistent FrankenPHP workers (WC-21).
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5}
+      DB_MAX_LIFETIME: ${DB_MAX_LIFETIME:-1800}
+      DB_PING_INTERVAL: ${DB_PING_INTERVAL:-5}
+      # MUST be >= 32 chars outside development or the worker refuses to boot.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      # MUST be set outside development (AES-256-CBC key for stored TOTP secrets).
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+      # Explicit CORS allowlist (never a wildcard); reflected back with credentials.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3100}
+      # Seed/system-admin passwords consumed by `seed` / migration 010.
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD must be set for staging}
+      INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD:?INITIAL_USER_PASSWORD must be set for staging}
+      INITIAL_SYSTEM_ADMIN_PASSWORD: ${INITIAL_SYSTEM_ADMIN_PASSWORD:?INITIAL_SYSTEM_ADMIN_PASSWORD must be set for staging}
+      CADDY_GLOBAL_OPTIONS: "auto_https off"
+      SERVER_NAME: ":80"
+      SERVER_ROOT: "public/"
+      # Prod-like worker pool sizing; override per load-test scenario.
+      FRANKENPHP_WORKERS: ${FRANKENPHP_WORKERS:-8}
+      FRANKENPHP_TIMEOUT: ${FRANKENPHP_TIMEOUT:-60s}
+      MAX_REQUESTS: ${MAX_REQUESTS:-500}
+    volumes:
+      # Serve the committed tree (mirrors the dev compose bind mount). The app
+      # writes a plugin-manifest cache + sqlite scratch file under /app at runtime,
+      # so this stays writable; only the Caddyfile is pinned read-only.
+      - .:/app
+      - ./Caddyfile:/etc/frankenphp/Caddyfile:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /app
+
+volumes:
+  # Distinct named volume so staging data never mixes with the dev demo's.
+  postgres_data_staging:
