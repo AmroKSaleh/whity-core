@@ -91,45 +91,41 @@ export default function OUsPage() {
   );
 
   return (
-    <>
+    <div className="space-y-8">
       <AdminHeader
         title="Organizational Units"
-        description="Manage organizational units and hierarchies"
-      />
-
-      <div className="space-y-8 p-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight">Organizational Units</h2>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-              Create and manage organizational units (OUs) to structure your organization
-            </p>
-          </div>
-          <Button onClick={() => setIsCreateModalOpen(true)}>
-            <IconPlus size={20} className="mr-2" />
+        description="Create and manage organizational units (OUs) to structure your organization"
+        action={
+          <Button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="gap-2"
+          >
+            <IconPlus />
             Create OU
           </Button>
-        </div>
+        }
+      />
 
-        {isLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <p className="text-slate-600 dark:text-slate-400">Loading...</p>
-          </div>
-        ) : ous.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 py-8 dark:border-slate-700">
-            <p className="text-slate-600 dark:text-slate-400">No organizational units yet</p>
+      <DataTable
+        columns={columns}
+        data={ous}
+        rowActions={rowActions}
+        isLoading={isLoading}
+        emptyState={{
+          title: 'No organizational units yet',
+          description: 'Create an organizational unit to structure your organization.',
+          action: (
             <Button
               onClick={() => setIsCreateModalOpen(true)}
               variant="outline"
-              className="mt-4"
+              className="mt-4 gap-2"
             >
+              <IconPlus />
               Create the first OU
             </Button>
-          </div>
-        ) : (
-          <DataTable columns={columns} data={ous} rowActions={rowActions} />
-        )}
-      </div>
+          ),
+        }}
+      />
 
       <CreateOuModal
         isOpen={isCreateModalOpen}
@@ -176,6 +172,6 @@ export default function OUsPage() {
           ou={selectedOu}
         />
       )}
-    </>
+    </div>
   );
 }
