@@ -8,6 +8,7 @@ use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Tenant\TenantContext;
 
 /**
  * RBAC Middleware for enforcing role-based access control
@@ -87,14 +88,24 @@ class RbacMiddleware
             return Response::error('Invalid token payload', 401);
         }
 
+        // Authorization is tenant scoped (WC-54): effective roles/permissions
+        // include grants reached through the user's organizational unit, which are
+        // tenant-bound, so the resolved tenant id is required to evaluate them.
+        // EnforceTenantIsolation runs before RBAC and locks the context; an absent
+        // tenant means the request was never tenant-resolved, so fail closed.
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            return Response::error('Unresolved tenant context', 401);
+        }
+
         // Enforce the required role against the authoritative store.
-        if ($requiredRole !== null && !$this->roleChecker->hasRole($userId, $requiredRole)) {
+        if ($requiredRole !== null && !$this->roleChecker->hasRole($userId, $requiredRole, $tenantId)) {
             return $this->forbidden();
         }
 
         // Enforce the required permission against the authoritative store. The
         // permission name is echoed back so clients know what they are missing.
-        if ($requiredPermission !== null && !$this->roleChecker->hasPermission($userId, $requiredPermission)) {
+        if ($requiredPermission !== null && !$this->roleChecker->hasPermission($userId, $requiredPermission, $tenantId)) {
             return $this->forbidden($requiredPermission);
         }
 

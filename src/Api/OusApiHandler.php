@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
@@ -15,6 +16,14 @@ use PDO;
  *
  * Handles CRUD operations for organizational units (OUs) with parent-child
  * hierarchies, role assignments, and strict tenant isolation.
+ *
+ * Cache coherence
+ * ---------------
+ * OU role assignments feed a user's effective roles/permissions (WC-54), so any
+ * mutation to those assignments ({@see self::assignRole()}, {@see self::removeRole()})
+ * invalidates the worker-level effective-permission caches via
+ * {@see RoleChecker::clearCache()}; otherwise an authorization check could keep
+ * serving a stale resolved set after a grant was added or revoked.
  */
 class OusApiHandler
 {
@@ -436,6 +445,11 @@ class OusApiHandler
                 $assignStmt->execute([$tenantId, $ouId, $roleId]);
                 $assignmentId = $this->db->lastInsertId();
 
+                // Invalidate the worker-level effective-permission caches: this new
+                // OU role assignment changes the effective roles of every user in
+                // the OU (and its descendants), so cached resolutions are now stale.
+                RoleChecker::clearCache();
+
                 // Dispatch hook after role assignment
                 $this->hookManager->dispatch('ou.role_assigned', [
                     'id' => (int)$assignmentId,
@@ -495,6 +509,11 @@ class OusApiHandler
                 WHERE ou_id = ? AND role_id = ? AND tenant_id = ?
             ');
             $deleteStmt->execute([$ouId, $roleId, $tenantId]);
+
+            // Invalidate the worker-level effective-permission caches: revoking an
+            // OU role assignment changes the effective roles of every user in the
+            // OU (and its descendants), so cached resolutions are now stale.
+            RoleChecker::clearCache();
 
             // Dispatch hook after role removal
             $this->hookManager->dispatch('ou.role_removed', [

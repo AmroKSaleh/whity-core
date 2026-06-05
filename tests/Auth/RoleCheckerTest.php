@@ -4,29 +4,41 @@ declare(strict_types=1);
 
 namespace Tests\Auth;
 
+use PDO;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Whity\Auth\RoleChecker;
-use Whity\Database\Database;
 use Whity\Core\RBAC\PermissionRegistry;
-use PDOStatement;
+use Whity\Database\Database;
 
 /**
- * Tests for RoleChecker class
+ * Tests for {@see RoleChecker}.
+ *
+ * Authorization checks ({@see RoleChecker::hasRole()},
+ * {@see RoleChecker::hasPermission()}) traverse several related tables (users,
+ * roles, role_permissions, organizational_units, ou_role_assignments) and unfold
+ * through both the role hierarchy and the OU parent chain. Mocking that graph by
+ * matching exact SQL strings is brittle and hides real SQL semantics (the very
+ * gap WC-54 flaw 1 slipped through), so these tests run the real resolver against
+ * an in-memory SQLite engine seeded with the production schema. The two genuinely
+ * static lookups ({@see RoleChecker::getRoleForUser()},
+ * {@see RoleChecker::getPermissionsForUser()}) are still exercised the same way —
+ * just through real rows rather than stubbed statements.
  */
 class RoleCheckerTest extends TestCase
 {
+    private const TENANT = 1;
+
+    private PDO $pdo;
+    private Database $db;
     private RoleChecker $roleChecker;
-    private Database $mockDb;
-    private PermissionRegistry $mockRegistry;
 
     protected function setUp(): void
     {
-        $this->mockDb = $this->createMock(Database::class);
-        $this->mockRegistry = $this->createMock(PermissionRegistry::class);
-        $this->roleChecker = new RoleChecker($this->mockDb, $this->mockRegistry);
-        // Worker-level cache is static; reset it so cases never leak into one another.
         RoleChecker::clearCache();
+        $this->pdo = $this->makeSchema();
+        $this->db = $this->wrapSqlite($this->pdo);
+        $this->roleChecker = new RoleChecker($this->db, $this->registry());
     }
 
     protected function tearDown(): void
@@ -34,181 +46,80 @@ class RoleCheckerTest extends TestCase
         RoleChecker::clearCache();
     }
 
-    /**
-     * Build a PDOStatement mock returning the given fetch / fetchAll values.
-     *
-     * @param mixed              $fetch    Value returned by fetch().
-     * @param array<int, mixed>  $fetchAll Value returned by fetchAll().
-     */
-    private function statement(mixed $fetch = false, array $fetchAll = []): PDOStatement
-    {
-        $statement = $this->createMock(PDOStatement::class);
-        $statement->method('fetch')->willReturn($fetch);
-        $statement->method('fetchAll')->willReturn($fetchAll);
-        return $statement;
-    }
+    // ---------------------------------------------------------------------
+    // Primary role lookups
+    // ---------------------------------------------------------------------
 
-    /**
-     * Test getRoleForUser returns correct role
-     */
     public function testGetRoleForUser(): void
     {
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(['name' => 'admin']);
+        $userId = $this->seedUser('admin@example.com', 'admin');
 
-        $this->mockDb->method('query')
-            ->with('SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = :userId', [':userId' => 1])
-            ->willReturn($mockStatement);
-
-        $role = $this->roleChecker->getRoleForUser(1);
-
-        $this->assertSame('admin', $role);
+        $this->assertSame('admin', $this->roleChecker->getRoleForUser($userId));
     }
 
-    /**
-     * Test getRoleForUser returns null for nonexistent user
-     */
     public function testGetRoleForNonexistentUser(): void
     {
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(false);
-
-        $this->mockDb->method('query')
-            ->with('SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = :userId', [':userId' => 999])
-            ->willReturn($mockStatement);
-
-        $role = $this->roleChecker->getRoleForUser(999);
-
-        $this->assertNull($role);
+        $this->assertNull($this->roleChecker->getRoleForUser(999));
     }
 
-    /**
-     * Test hasRole returns true when user has the role
-     */
+    // ---------------------------------------------------------------------
+    // hasRole (effective role set)
+    // ---------------------------------------------------------------------
+
     public function testHasRoleReturnsTrue(): void
     {
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(['name' => 'user']);
+        $userId = $this->seedUser('user@example.com', 'user');
 
-        $this->mockDb->method('query')
-            ->with('SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = :userId', [':userId' => 2])
-            ->willReturn($mockStatement);
-
-        $hasRole = $this->roleChecker->hasRole(2, 'user');
-
-        $this->assertTrue($hasRole);
+        $this->assertTrue($this->roleChecker->hasRole($userId, 'user', self::TENANT));
     }
 
-    /**
-     * Test hasRole returns false when user doesn't have the role
-     */
     public function testHasRoleReturnsFalse(): void
     {
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(['name' => 'user']);
+        $userId = $this->seedUser('user@example.com', 'user');
 
-        $this->mockDb->method('query')
-            ->with('SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = :userId', [':userId' => 2])
-            ->willReturn($mockStatement);
-
-        $hasRole = $this->roleChecker->hasRole(2, 'admin');
-
-        $this->assertFalse($hasRole);
+        $this->assertFalse($this->roleChecker->hasRole($userId, 'admin', self::TENANT));
     }
 
-    /**
-     * Test hasPermission returns false if permission doesn't exist in registry
-     */
+    public function testHasRoleWorksForAdmin(): void
+    {
+        $userId = $this->seedUser('admin@example.com', 'admin');
+
+        $this->assertTrue($this->roleChecker->hasRole($userId, 'admin', self::TENANT));
+    }
+
+    // ---------------------------------------------------------------------
+    // hasPermission / getPermissionsForUser
+    // ---------------------------------------------------------------------
+
     public function testHasPermissionReturnsFalseIfPermissionDoesntExistInRegistry(): void
     {
-        $this->mockRegistry->method('permissionExists')
-            ->with('nonexistent.permission')
-            ->willReturn(false);
+        $userId = $this->seedUser('admin@example.com', 'admin');
 
-        $hasPermission = $this->roleChecker->hasPermission(1, 'nonexistent.permission');
-
-        $this->assertFalse($hasPermission);
-    }
-
-    /**
-     * Test hasPermission returns true when the user's role directly holds the
-     * permission, read through the real schema join (WC-54).
-     *
-     * The step-2 direct-grant probe reaches role_permissions via the user join
-     * and joins `permissions ON permission_id`, matched on `permissions.name` —
-     * there is no `role_permissions.permission_string` column. It keeps the
-     * historical `:userId` + `:permission` binding contract.
-     */
-    public function testHasPermissionReturnsTrueIfUserHasPermission(): void
-    {
-        $this->mockRegistry->method('permissionExists')
-            ->with('users:read')
-            ->willReturn(true);
-
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql, array $params): PDOStatement {
-                $this->assertStringContainsString('SELECT 1 FROM role_permissions rp', $sql);
-                $this->assertStringContainsString('JOIN users u ON u.role_id = rp.role_id', $sql);
-                $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
-                $this->assertStringContainsString('p.name = :permission', $sql);
-                $this->assertStringNotContainsString('permission_string', $sql);
-                $this->assertSame([':userId' => 1, ':permission' => 'users:read'], $params);
-                return $this->statement(['1' => 1]);
-            }
+        // An unregistered permission can never be granted, regardless of grants.
+        $this->assertFalse(
+            $this->roleChecker->hasPermission($userId, 'nonexistent:permission', self::TENANT)
         );
-
-        $hasPermission = $this->roleChecker->hasPermission(1, 'users:read');
-
-        $this->assertTrue($hasPermission);
     }
 
-    /**
-     * Test getPermissionsForUser returns all user permissions, read through the
-     * real schema join (WC-54): role_permissions -> permissions on permission_id,
-     * projecting `permissions.name` (not the non-existent `permission_string`).
-     */
+    public function testHasPermissionReturnsTrueIfUserRoleHoldsItDirectly(): void
+    {
+        $this->grant('user', 'users:read');
+        $userId = $this->seedUser('user@example.com', 'user');
+
+        $this->assertTrue($this->roleChecker->hasPermission($userId, 'users:read', self::TENANT));
+    }
+
     public function testGetPermissionsForUserReturnsAllUserPermissions(): void
     {
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetchAll')->willReturn([
-            ['name' => 'users:read'],
-            ['name' => 'users:write'],
-            ['name' => 'roles:read'],
-        ]);
+        $this->grant('admin', 'users:read');
+        $this->grant('admin', 'users:write');
+        $this->grant('admin', 'roles:read');
+        $userId = $this->seedUser('admin@example.com', 'admin');
 
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql, array $params) use ($mockStatement): PDOStatement {
-                $this->assertStringContainsString('SELECT DISTINCT p.name', $sql);
-                $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
-                $this->assertStringNotContainsString('permission_string', $sql);
-                $this->assertSame([':userId' => 1], $params);
-                return $mockStatement;
-            }
-        );
+        $permissions = $this->roleChecker->getPermissionsForUser($userId);
 
-        $permissions = $this->roleChecker->getPermissionsForUser(1);
-
-        $this->assertCount(3, $permissions);
-        $this->assertContains('users:read', $permissions);
-        $this->assertContains('users:write', $permissions);
-        $this->assertContains('roles:read', $permissions);
-    }
-
-    /**
-     * Test hasRole still works (backwards compatibility)
-     */
-    public function testHasRoleStillWorks(): void
-    {
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn(['name' => 'admin']);
-
-        $this->mockDb->method('query')
-            ->with('SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = :userId', [':userId' => 3])
-            ->willReturn($mockStatement);
-
-        $hasRole = $this->roleChecker->hasRole(3, 'admin');
-
-        $this->assertTrue($hasRole);
+        sort($permissions);
+        $this->assertSame(['roles:read', 'users:read', 'users:write'], $permissions);
     }
 
     // ---------------------------------------------------------------------
@@ -216,139 +127,64 @@ class RoleCheckerTest extends TestCase
     // ---------------------------------------------------------------------
 
     /**
-     * Hierarchy fixture: super_admin(1) -> admin(2) -> editor(3) -> viewer(4).
-     *
-     * Routes the DB queries RoleChecker issues during hierarchy resolution to
-     * canned results: parent chain lookups and per-role direct-permission
-     * lookups. Direct grants per role:
-     *   viewer(4)  => dashboard:read
-     *   editor(3)  => posts:write
-     *   admin(2)   => users:read
-     *   super_admin(1) => tenants:manage
-     *
-     * @param array<int, int|null>            $parents      role_id => parent role_id (null = root)
-     * @param array<int, array<int, string>>  $permsByRole  role_id => [permission strings]
-     */
-    private function wireHierarchy(array $parents, array $permsByRole): void
-    {
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql, array $params) use ($parents, $permsByRole): PDOStatement {
-                // users.role_id lookup for a user.
-                if (str_contains($sql, 'SELECT role_id FROM users')) {
-                    $userId = $params[':userId'];
-                    // Convention used by the tests: user id maps to its own role id.
-                    return $this->statement(['role_id' => $userId]);
-                }
-
-                // roles.parent_id lookup.
-                if (str_contains($sql, 'SELECT parent_id FROM roles')) {
-                    $roleId = $params[':roleId'];
-                    return $this->statement(['parent_id' => $parents[$roleId] ?? null]);
-                }
-
-                // per-role direct permissions (permissions JOIN role_permissions).
-                // The hierarchy walk projects `SELECT p.name FROM permissions p`,
-                // which the step-2 probe (`SELECT 1 FROM role_permissions rp ...`)
-                // does not match, so the two paths stay disambiguated.
-                if (str_contains($sql, 'FROM permissions p')) {
-                    $roleId = $params[':roleId'];
-                    $rows = array_map(
-                        static fn(string $name): array => ['name' => $name],
-                        $permsByRole[$roleId] ?? []
-                    );
-                    return $this->statement(false, $rows);
-                }
-
-                // The step-2 direct-grant probe in hasPermission
-                // (`SELECT 1 FROM role_permissions rp JOIN permissions p ...`):
-                // no direct match, forcing resolution down the hierarchy path.
-                return $this->statement(false);
-            }
-        );
-    }
-
-    /**
-     * AC1: admin inherits editor + viewer permissions via the hierarchy chain.
+     * Effective permissions for a role include everything inherited up the
+     * parent chain: admin -> editor -> viewer.
      */
     public function testEffectivePermissionsForAdminIncludeInheritedRoles(): void
     {
-        $this->wireHierarchy(
-            parents: [1 => null, 2 => 1, 3 => 2, 4 => 3],
-            permsByRole: [
-                4 => ['dashboard:read'],
-                3 => ['posts:write'],
-                2 => ['users:read'],
-                1 => ['tenants:manage'],
-            ]
-        );
+        // editor(3)'s parent is admin(2), whose parent is super_admin(1): walking
+        // up from editor collects editor + admin + super_admin grants.
+        $this->setParent('editor', 'admin');
+        $this->setParent('admin', 'super_admin');
+        $this->grant('viewer', 'dashboard:read');
+        $this->grant('editor', 'posts:write');
+        $this->grant('admin', 'users:read');
+        $this->grant('super_admin', 'tenants:manage');
 
-        // admin is role id 2; walking up reaches super_admin(1), and down-chain
-        // editor(3)/viewer(4) are inherited because admin's parent chain is
-        // super_admin. Inheritance is "higher inherits lower", so we resolve from
-        // the perspective of a higher role: editor(3) inherits viewer(4) etc.
-        $editorEffective = $this->roleChecker->getEffectivePermissionsForRole(3);
+        $editorEffective = $this->roleChecker->getEffectivePermissionsForRole($this->roleId('editor'));
 
-        // editor inherits viewer's dashboard:read plus its own posts:write,
-        // plus admin/super_admin up the chain.
         $this->assertContains('posts:write', $editorEffective);
         $this->assertContains('users:read', $editorEffective);
         $this->assertContains('tenants:manage', $editorEffective);
     }
 
     /**
-     * AC1 (precise wording): checking whether 'admin' has the viewer-level
-     * permission 'dashboard:read' grants access via inheritance.
-     *
-     * Hierarchy here models "higher inherits lower" with viewer at the TOP of the
-     * parent chain so that admin -> editor -> viewer resolves viewer's grant.
+     * Checking whether an admin user has a viewer-level permission resolves via
+     * inheritance: admin -> editor -> viewer.
      */
     public function testAdminInheritsViewerPermissionViaHierarchy(): void
     {
-        // Parent chain expresses inheritance source: admin(2)'s parent is
-        // editor(3), whose parent is viewer(4). Walking up from admin collects
-        // editor's and viewer's permissions.
-        $this->mockRegistry->method('permissionExists')
-            ->with('dashboard:read')->willReturn(true);
+        $this->setParent('admin', 'editor');
+        $this->setParent('editor', 'viewer');
+        $this->grant('admin', 'users:read');
+        $this->grant('editor', 'posts:write');
+        $this->grant('viewer', 'dashboard:read');
 
-        $this->wireHierarchy(
-            parents: [2 => 3, 3 => 4, 4 => null],
-            permsByRole: [
-                2 => ['users:read'],
-                3 => ['posts:write'],
-                4 => ['dashboard:read'],
-            ]
-        );
+        $userId = $this->seedUser('admin@example.com', 'admin');
 
-        // user id 2 maps to role id 2 (admin) by the fixture convention.
         $this->assertTrue(
-            $this->roleChecker->hasPermission(2, 'dashboard:read'),
+            $this->roleChecker->hasPermission($userId, 'dashboard:read', self::TENANT),
             "admin should inherit viewer's dashboard:read via the hierarchy chain"
         );
     }
 
-    /**
-     * Effective set is the union of own + all ancestors' permissions.
-     */
     public function testEffectivePermissionsAreUnionOfChain(): void
     {
-        $this->wireHierarchy(
-            parents: [2 => 3, 3 => 4, 4 => null],
-            permsByRole: [
-                2 => ['users:read'],
-                3 => ['posts:write'],
-                4 => ['dashboard:read'],
-            ]
-        );
+        $this->setParent('admin', 'editor');
+        $this->setParent('editor', 'viewer');
+        $this->grant('admin', 'users:read');
+        $this->grant('editor', 'posts:write');
+        $this->grant('viewer', 'dashboard:read');
 
-        $effective = $this->roleChecker->getEffectivePermissionsForRole(2);
+        $effective = $this->roleChecker->getEffectivePermissionsForRole($this->roleId('admin'));
 
         sort($effective);
         $this->assertSame(['dashboard:read', 'posts:write', 'users:read'], $effective);
     }
 
     /**
-     * AC2: a circular hierarchy (A -> B -> A) is detected, logged as a warning,
-     * and resolution terminates without an infinite loop.
+     * A circular role hierarchy (A -> B -> A) is detected, logged, and resolution
+     * terminates without an infinite loop.
      */
     public function testCircularHierarchyIsDetectedAndLogged(): void
     {
@@ -363,137 +199,209 @@ class RoleCheckerTest extends TestCase
                 })
             );
 
-        $checker = new RoleChecker($this->mockDb, $this->mockRegistry, $logger);
+        $this->grant('editor', 'a:read');
+        $this->grant('viewer', 'b:read');
+        // editor <-> viewer two-node cycle.
+        $this->setParent('editor', 'viewer');
+        $this->setParent('viewer', 'editor');
 
-        // A(10) -> B(11) -> A(10): a two-node cycle.
-        $this->wireHierarchy(
-            parents: [10 => 11, 11 => 10],
-            permsByRole: [
-                10 => ['a:read'],
-                11 => ['b:read'],
-            ]
-        );
+        $checker = new RoleChecker($this->db, $this->registry(), $logger);
 
-        // Must terminate (no infinite loop) and still return the permissions it
-        // managed to collect before the cycle closed.
-        $effective = $checker->getEffectivePermissionsForRole(10, 7);
+        $effective = $checker->getEffectivePermissionsForRole($this->roleId('editor'), 7);
 
         $this->assertContains('a:read', $effective);
         $this->assertContains('b:read', $effective);
     }
 
-    /**
-     * A self-referential role (A -> A) is treated as a cycle and terminates.
-     */
     public function testSelfReferentialRoleTerminates(): void
     {
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects($this->once())->method('warning');
 
-        $checker = new RoleChecker($this->mockDb, $this->mockRegistry, $logger);
+        $this->grant('editor', 'a:read');
+        $this->setParent('editor', 'editor');
 
-        $this->wireHierarchy(
-            parents: [10 => 10],
-            permsByRole: [10 => ['a:read']],
-        );
+        $checker = new RoleChecker($this->db, $this->registry(), $logger);
 
-        $effective = $checker->getEffectivePermissionsForRole(10);
+        $effective = $checker->getEffectivePermissionsForRole($this->roleId('editor'));
 
         $this->assertSame(['a:read'], $effective);
     }
 
     /**
      * Resolved effective permissions are cached at the worker level so repeated
-     * resolution does not re-walk the hierarchy.
+     * role resolution does not re-walk the hierarchy.
      */
     public function testEffectivePermissionsAreCachedPerRole(): void
     {
-        $callCount = 0;
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql, array $params) use (&$callCount): PDOStatement {
-                $callCount++;
-                if (str_contains($sql, 'SELECT parent_id FROM roles')) {
-                    return $this->statement(['parent_id' => null]);
-                }
-                if (str_contains($sql, 'FROM permissions p')) {
-                    return $this->statement(false, [['name' => 'dashboard:read']]);
-                }
-                return $this->statement(false);
-            }
-        );
+        $this->grant('viewer', 'dashboard:read');
+        $roleId = $this->roleId('viewer');
 
-        $first = $this->roleChecker->getEffectivePermissionsForRole(4);
-        $callsAfterFirst = $callCount;
-        $second = $this->roleChecker->getEffectivePermissionsForRole(4);
+        $first = $this->roleChecker->getEffectivePermissionsForRole($roleId);
 
-        $this->assertSame($first, $second);
-        $this->assertSame(
-            $callsAfterFirst,
-            $callCount,
-            'Second resolution must be served from cache without new DB queries'
-        );
+        // Mutate the underlying grant AFTER caching; without invalidation the
+        // cached set must still be served unchanged.
+        $this->grant('viewer', 'posts:write');
+        $second = $this->roleChecker->getEffectivePermissionsForRole($roleId);
+
+        $this->assertSame($first, $second, 'A cached role set must be served without re-reading grants.');
+        $this->assertNotContains('posts:write', $second);
     }
 
     /**
      * clearCache() invalidates the worker-level cache so a subsequent resolution
-     * re-walks the hierarchy (used by RolesApiHandler after assignment writes).
+     * reflects new grants.
      */
     public function testClearCacheForcesReResolution(): void
     {
-        $queryCalls = 0;
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql) use (&$queryCalls): PDOStatement {
-                $queryCalls++;
-                if (str_contains($sql, 'SELECT parent_id FROM roles')) {
-                    return $this->statement(['parent_id' => null]);
-                }
-                if (str_contains($sql, 'FROM permissions p')) {
-                    return $this->statement(false, [['name' => 'dashboard:read']]);
-                }
-                return $this->statement(false);
-            }
-        );
+        $this->grant('viewer', 'dashboard:read');
+        $roleId = $this->roleId('viewer');
 
-        $this->roleChecker->getEffectivePermissionsForRole(4);
-        $afterFirst = $queryCalls;
+        $this->roleChecker->getEffectivePermissionsForRole($roleId);
 
+        $this->grant('viewer', 'posts:write');
         RoleChecker::clearCache();
-        $this->roleChecker->getEffectivePermissionsForRole(4);
+        $second = $this->roleChecker->getEffectivePermissionsForRole($roleId);
 
-        $this->assertGreaterThan(
-            $afterFirst,
-            $queryCalls,
-            'After clearCache() the hierarchy must be re-walked (more DB queries)'
-        );
+        $this->assertContains('posts:write', $second, 'After clearCache() the new grant must be visible.');
     }
 
-    /**
-     * hasPermission honours a direct grant without consulting the hierarchy,
-     * preserving backward-compatible semantics for the RBAC middleware.
-     *
-     * The direct-grant probe now reads the real schema join (WC-54); a hit on it
-     * must short-circuit before any parent-chain (`SELECT parent_id FROM roles`)
-     * resolution.
-     */
-    public function testHasPermissionDirectGrantShortCircuits(): void
+    // ==================== Helpers ====================
+
+    private function registry(): PermissionRegistry
     {
-        $this->mockRegistry->method('permissionExists')
-            ->with('users:read')->willReturn(true);
+        $registry = new PermissionRegistry();
+        // Register the colon-notation permissions these tests grant so the step-1
+        // registry gate never short-circuits them.
+        $registry->register('test', [
+            'users:read', 'users:write', 'roles:read', 'dashboard:read',
+            'posts:write', 'tenants:manage', 'a:read', 'b:read',
+        ]);
 
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql): PDOStatement {
-                // The direct-grant probe through the real join returns a hit and
-                // must short-circuit before any parent-chain resolution.
-                if (str_contains($sql, 'SELECT 1 FROM role_permissions rp')) {
-                    $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
-                    $this->assertStringNotContainsString('permission_string', $sql);
-                    return $this->statement(['1' => 1]);
-                }
+        return $registry;
+    }
 
-                $this->fail('Direct grant should short-circuit before hierarchy resolution');
-            }
+    private function grant(string $roleName, string $permission): void
+    {
+        $this->pdo->prepare('INSERT OR IGNORE INTO permissions (name, created_at) VALUES (?, NOW())')
+            ->execute([$permission]);
+        $stmt = $this->pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+        $stmt->execute([$permission]);
+        $permissionId = (int) $stmt->fetchColumn();
+
+        $this->pdo->prepare(
+            'INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())'
+        )->execute([$this->roleId($roleName), $permissionId]);
+    }
+
+    private function setParent(string $roleName, string $parentRoleName): void
+    {
+        $this->pdo->prepare('UPDATE roles SET parent_id = ? WHERE id = ?')
+            ->execute([$this->roleId($parentRoleName), $this->roleId($roleName)]);
+    }
+
+    private function seedUser(string $email, string $roleName): int
+    {
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at)
+             VALUES (?, ?, ?, ?, NULL, NOW())'
         );
+        $stmt->execute([self::TENANT, $email, 'x', $this->roleId($roleName)]);
 
-        $this->assertTrue($this->roleChecker->hasPermission(2, 'users:read'));
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function roleId(string $roleName): int
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM roles WHERE name = ?');
+        $stmt->execute([$roleName]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function wrapSqlite(PDO $pdo): Database
+    {
+        $db = Database::withFactory(static fn (): PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
+    }
+
+    private function makeSchema(): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+
+        $pdo->exec('
+            CREATE TABLE roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                parent_id INTEGER,
+                tenant_id INTEGER,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES
+            (1, 'super_admin', NOW()), (2, 'admin', NOW()), (3, 'editor', NOW()),
+            (4, 'viewer', NOW()), (5, 'user', NOW())");
+
+        $pdo->exec('
+            CREATE TABLE permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT,
+                created_at TEXT
+            )
+        ');
+
+        $pdo->exec('
+            CREATE TABLE role_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role_id INTEGER NOT NULL REFERENCES roles(id),
+                permission_id INTEGER NOT NULL REFERENCES permissions(id),
+                created_at TEXT,
+                UNIQUE(role_id, permission_id)
+            )
+        ');
+
+        $pdo->exec('
+            CREATE TABLE organizational_units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                parent_id INTEGER,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                created_at TEXT
+            )
+        ');
+
+        $pdo->exec('
+            CREATE TABLE ou_role_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                ou_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                created_at TEXT,
+                UNIQUE(ou_id, role_id)
+            )
+        ');
+
+        $pdo->exec('
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                role_id INTEGER,
+                ou_id INTEGER,
+                created_at TEXT
+            )
+        ');
+
+        return $pdo;
     }
 }

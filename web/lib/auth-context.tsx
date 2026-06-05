@@ -10,7 +10,6 @@ interface User {
 }
 
 interface AuthContextType {
-  token: string | null;
   user: User | null;
   isLoading: boolean;
   error: string | null;
@@ -48,21 +47,11 @@ function decodeJWT(token: string): JWTPayload | null {
   }
 }
 
-function isTokenExpired(token: string): boolean {
-  const payload = decodeJWT(token);
-  if (!payload || !payload.exp) {
-    return true;
-  }
-  const expiryTime = payload.exp * 1000; // Convert to milliseconds
-  return Date.now() >= expiryTime;
-}
-
 interface AuthProviderProps {
   children: ReactNode;
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -111,17 +100,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const data = await response.json();
-      const authToken = data.token;
 
-      // Store token in localStorage
-      localStorage.setItem('whity_auth_token', authToken);
-      setToken(authToken);
-
-      // Decode and set user from response or token
+      // Authentication state lives entirely in the server-set httpOnly cookies
+      // (#51); the JWT is never persisted client-side. We only mirror the user
+      // profile into React state for rendering. Prefer the response `user`
+      // object; fall back to decoding the response token purely to populate that
+      // profile (it is not stored).
       if (data.user) {
         setUser(data.user);
-      } else {
-        const payload = decodeJWT(authToken);
+      } else if (typeof data.token === 'string') {
+        const payload = decodeJWT(data.token);
         const userId = payload?.id || payload?.user_id;
         if (payload && userId && payload.email) {
           setUser({
@@ -149,7 +137,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch (error) {
       console.error('Logout request failed:', error);
     } finally {
-      setToken(null);
       setUser(null);
       setError(null);
     }
@@ -187,7 +174,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   );
 
   const value: AuthContextType = {
-    token,
     user,
     isLoading,
     error,

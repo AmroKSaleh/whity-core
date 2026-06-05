@@ -160,18 +160,11 @@ class RolesApiTenantIsolationTest extends TestCase
     {
         $jwtParser = new JwtParser(self::SECRET);
         $registry = new PermissionRegistry(); // core perms register lazily
-        $db = $this->createMock(Database::class);
 
-        // The user's role grants an unrelated read permission only.
-        $db->method('query')->willReturnCallback(
-            function (string $sql, array $bindings): PDOStatement {
-                $statement = $this->createMock(PDOStatement::class);
-                $granted = ($bindings[':permission'] ?? null) === CorePermissions::USERS_READ;
-                $statement->method('fetch')->willReturn($granted ? ['1' => 1] : false);
-                $statement->method('fetchAll')->willReturn([]);
-                return $statement;
-            }
-        );
+        // Mirror production: the tenant is resolved/locked before RBAC runs. The
+        // caller (user 7) holds a role granting only an unrelated read permission.
+        TenantContext::setTenantId(1);
+        $db = $this->roleCheckerDbGranting(7, [CorePermissions::USERS_READ]);
 
         $roleChecker = new RoleChecker($db, $registry);
         $middleware = new RbacMiddleware($jwtParser, $roleChecker);
@@ -216,17 +209,11 @@ class RolesApiTenantIsolationTest extends TestCase
     {
         $jwtParser = new JwtParser(self::SECRET);
         $registry = new PermissionRegistry();
-        $db = $this->createMock(Database::class);
 
-        $db->method('query')->willReturnCallback(
-            function (string $sql, array $bindings): PDOStatement {
-                $statement = $this->createMock(PDOStatement::class);
-                $granted = ($bindings[':permission'] ?? null) === CorePermissions::ROLES_WRITE;
-                $statement->method('fetch')->willReturn($granted ? ['1' => 1] : false);
-                $statement->method('fetchAll')->willReturn([]);
-                return $statement;
-            }
-        );
+        // Mirror production: tenant resolved/locked before RBAC. The caller
+        // (user 8) holds a role granting roles:write.
+        TenantContext::setTenantId(1);
+        $db = $this->roleCheckerDbGranting(8, [CorePermissions::ROLES_WRITE]);
 
         $roleChecker = new RoleChecker($db, $registry);
         $middleware = new RbacMiddleware($jwtParser, $roleChecker);
@@ -259,5 +246,48 @@ class RolesApiTenantIsolationTest extends TestCase
 
         $this->assertTrue($handlerReached, 'Create handler should run with roles:write');
         $this->assertSame(201, $response->getStatusCode());
+    }
+
+    /**
+     * Build a {@see Database} over a real in-memory SQLite engine in which the
+     * given user (tenant 1, no OU) holds a dedicated role granting exactly
+     * $granted — used to drive the RoleChecker honestly through its multi-query
+     * resolution flow rather than a single stubbed query shape.
+     *
+     * @param array<int, string> $granted Permissions the user's role grants.
+     */
+    private function roleCheckerDbGranting(int $userId, array $granted): Database
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+
+        $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, parent_id INTEGER, tenant_id INTEGER, created_at TEXT)');
+        $pdo->exec('CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT)');
+        $pdo->exec('CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT, UNIQUE(role_id, permission_id))');
+        $pdo->exec('CREATE TABLE organizational_units (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, slug TEXT NOT NULL, created_at TEXT)');
+        $pdo->exec('CREATE TABLE ou_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, ou_id INTEGER NOT NULL, role_id INTEGER NOT NULL, created_at TEXT, UNIQUE(ou_id, role_id))');
+        $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL, email TEXT NOT NULL, password TEXT NOT NULL, role_id INTEGER, ou_id INTEGER, created_at TEXT)');
+
+        $pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute(['role_' . $userId]);
+        $roleId = (int) $pdo->lastInsertId();
+        foreach ($granted as $permission) {
+            $pdo->prepare('INSERT OR IGNORE INTO permissions (name, created_at) VALUES (?, NOW())')->execute([$permission]);
+            $stmt = $pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+            $stmt->execute([$permission]);
+            $permissionId = (int) $stmt->fetchColumn();
+            $pdo->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
+                ->execute([$roleId, $permissionId]);
+        }
+        $pdo->prepare('INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, 1, ?, ?, ?, NULL, NOW())')
+            ->execute([$userId, "u{$userId}@example.com", 'x', $roleId]);
+
+        $db = Database::withFactory(static fn (): PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
     }
 }
