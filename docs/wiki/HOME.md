@@ -15,6 +15,12 @@ Welcome to the Whity Core documentation.
 - **[Tenant Isolation](TENANT_ISOLATION.md)** — Multi-tenancy, `TenantContext`, query scoping.
 - **[Hook System](HOOK_SYSTEM.md)** — Plugin event/extension mechanism.
 
+## Contributing
+
+- **[Development Workflow](Development-Workflow.md)** — How work is planned and shipped: the Instruction Set (IS) and the Tasker flow (`WC-XX` numbering, task lifecycle, parallel execution).
+- **[CONTRIBUTING.md](../../CONTRIBUTING.md)** — Dev setup, coding standards, testing, and the PR process.
+- **[Plugin Development](Plugin-Development.md)** — Build plugins against `PluginInterface`.
+
 ## What is Whity Core?
 
 Whity Core is a white-labeled multi-tenant PHP 8.4 framework for SaaS applications, served by FrankenPHP persistent workers over a shared PostgreSQL database.

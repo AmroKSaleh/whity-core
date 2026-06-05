@@ -6,7 +6,10 @@ merged. Read it in full before your first contribution.
 
 For the high-level design, see [README.md](README.md) and the
 [Architecture wiki](docs/wiki/Architecture.md). For plugin authoring
-specifically, see [Plugin Development](docs/wiki/Plugin-Development.md).
+specifically, see [Plugin Development](docs/wiki/Plugin-Development.md). For how
+work is planned and tracked — the Instruction Set and the Tasker flow (`WC-XX`
+numbering, task lifecycle, parallel execution) — see
+[Development Workflow](docs/wiki/Development-Workflow.md).
 
 ## Table of Contents
 
@@ -430,6 +433,7 @@ only scalar data — never model instances or DB connections.
 
 ## Further Reading
 
+- [Development Workflow](docs/wiki/Development-Workflow.md) — the Instruction Set + Tasker flow (how work moves from "ready" to "merged")
 - [Architecture](docs/wiki/Architecture.md) — design principles and runtime model
 - [Plugin Development](docs/wiki/Plugin-Development.md) — building plugins
 - [Hook System](docs/wiki/HOOK_SYSTEM.md) — registering and using hooks
