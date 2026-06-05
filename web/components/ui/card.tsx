@@ -5,14 +5,25 @@ import { cn } from "@/lib/utils"
 function Card({
   className,
   size = "default",
+  interactive = false,
   ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"div"> & {
+  size?: "default" | "sm"
+  /**
+   * Opt into the hover/elevated treatment for clickable cards (deepens the
+   * hairline ring + adds a soft shadow on hover/focus-within). Token-driven.
+   */
+  interactive?: boolean
+}) {
   return (
     <div
       data-slot="card"
       data-size={size}
+      data-interactive={interactive || undefined}
       className={cn(
         "group/card flex flex-col gap-4 overflow-hidden rounded-lg bg-card py-4 text-xs/relaxed text-card-foreground ring-1 ring-foreground/10 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:py-3 *:[img:first-child]:rounded-t-lg *:[img:last-child]:rounded-b-lg",
+        interactive &&
+          "cursor-pointer transition-shadow hover:shadow-md hover:ring-foreground/20 focus-within:ring-2 focus-within:ring-ring/50",
         className
       )}
       {...props}
