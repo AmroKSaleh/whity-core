@@ -1,4 +1,0 @@
-[     118ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
-[     161ms] [LOG] [HMR] connected @ http://localhost:3000/_next/static/chunks/node_modules_next_dist_115brz8._.js:2477
-[    6397ms] [ERROR] Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME @ otpauth://totp/Whity%3Aadmin%40example.com?issuer=Whity&secret=436W54PZHHV2BHT567QT77DKE4N6OTNL6JHSEAC7OHCS5EVMLDSR725Q7EO4RLBRBKE2KHU3JHPQHEA53CEP6EF3YMHCO5DCW42RSQQ:0
-[    6412ms] [ERROR] Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME @ otpauth://totp/Whity%3Aadmin%40example.com?issuer=Whity&secret=LXMU4RO2JAHJL7D6MDMXV5IJZXWNE2PIAYZGDBK2AD6E2OJW4BDY4MDJCE32LJFMU7A4D5R3YL334C6QUJQ6QIIWQWDQ7E4YIW5UVAY:0
