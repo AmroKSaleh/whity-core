@@ -364,12 +364,25 @@ class CrossTenantAccessTest extends TestCase
         $mockOuCheckStatement->method('execute')->willReturn(true);
         $mockOuCheckStatement->method('fetch')->willReturn(['id' => self::OU_ENGINEERING_ID]);
 
+        // WC-56: the role is validated as visible to the caller's tenant. The
+        // seeded admin role is a GLOBAL role (NULL tenant_id, per WC-110), so it
+        // resolves for any tenant — assigning a *visible* role is legitimate at
+        // the handler level; whether a "user" may do so is the RBAC middleware's
+        // job. The cross-tenant *private* role case is covered separately.
+        $mockRoleCheckStatement = $this->createMock(PDOStatement::class);
+        $mockRoleCheckStatement->method('execute')->willReturn(true);
+        $mockRoleCheckStatement->method('fetch')->willReturn(['id' => self::ROLE_ADMIN]);
+
         // Mock INSERT for role assignment (this succeeds at handler level)
         $mockInsertStatement = $this->createMock(PDOStatement::class);
         $mockInsertStatement->method('execute')->willReturn(true);
 
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockOuCheckStatement, $mockInsertStatement);
+            ->willReturnOnConsecutiveCalls(
+                $mockOuCheckStatement,
+                $mockRoleCheckStatement,
+                $mockInsertStatement
+            );
 
         $this->mockDb->method('lastInsertId')
             ->willReturn('100');

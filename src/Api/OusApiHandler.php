@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Api;
 
 use Whity\Core\Request;
@@ -403,6 +405,26 @@ class OusApiHandler
             $stmt->execute([$ouId, $tenantId]);
             if (!$stmt->fetch()) {
                 return Response::error('Organizational unit not found', 404);
+            }
+
+            // Validate the role is visible to the caller's tenant before attaching
+            // it (WC-56). Without this a tenant could attach another tenant's
+            // private role to its own OU. Own roles and globals (NULL tenant_id)
+            // are allowed, consistent with the WC-110 role-visibility model. A
+            // role outside that set returns 404 (not 403) so cross-tenant role
+            // existence is never disclosed.
+            $roleStmt = $this->db->prepare('
+                SELECT id FROM roles WHERE id = ? AND (tenant_id = ? OR tenant_id IS NULL)
+            ');
+            $roleStmt->execute([$roleId, $tenantId]);
+            if (!$roleStmt->fetch()) {
+                error_log(sprintf(
+                    '[ous] denied role assignment: tenant_id=%s ou_id=%s role_id=%s',
+                    var_export($tenantId, true),
+                    var_export($ouId, true),
+                    var_export($roleId, true)
+                ));
+                return Response::error('Role not found', 404);
             }
 
             // Insert role assignment
