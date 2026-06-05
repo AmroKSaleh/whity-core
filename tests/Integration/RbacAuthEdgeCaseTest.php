@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
-use PDOStatement;
+use PDO;
 use PHPUnit\Framework\TestCase;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
@@ -13,6 +13,7 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Http\RbacMiddleware;
 
@@ -34,36 +35,52 @@ use Whity\Http\RbacMiddleware;
 class RbacAuthEdgeCaseTest extends TestCase
 {
     private const SECRET = 'wc17-edge-secret';
+    private const TENANT = 1;
 
     protected function setUp(): void
     {
         RoleChecker::clearCache();
+        // Mirror production: the tenant is resolved/locked before RBAC runs.
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
     }
 
     protected function tearDown(): void
     {
         RoleChecker::clearCache();
+        TenantContext::reset();
     }
 
     /**
-     * Build a RoleChecker over a Database mock that grants exactly $granted to the
-     * caller's role (direct grant path), or none when $granted is empty.
+     * Build a RoleChecker over a real in-memory SQLite engine in which the given
+     * user (in tenant 1, no OU) holds a role granting exactly $granted.
+     *
+     * Using the real engine keeps the checker honest about the multi-query
+     * resolution flow (role id -> OU chain -> per-role permissions) rather than
+     * coupling to a single stubbed query shape.
      *
      * @param array<int, string> $granted Permissions the user's role grants.
      */
-    private function roleCheckerGranting(array $granted): RoleChecker
+    private function roleCheckerGranting(int $userId, array $granted): RoleChecker
     {
-        $db = $this->createMock(Database::class);
-        $db->method('query')->willReturnCallback(
-            function (string $sql, array $bindings) use ($granted): PDOStatement {
-                $statement = $this->createMock(PDOStatement::class);
-                $hit = in_array($bindings[':permission'] ?? null, $granted, true);
-                $statement->method('fetch')->willReturn($hit ? ['1' => 1] : false);
-                $statement->method('fetchAll')->willReturn([]);
-                return $statement;
-            }
-        );
-        return new RoleChecker($db, new PermissionRegistry());
+        $pdo = $this->makeSchema();
+
+        $pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute(['role_' . $userId]);
+        $roleId = (int) $pdo->lastInsertId();
+        foreach ($granted as $permission) {
+            $pdo->prepare('INSERT OR IGNORE INTO permissions (name, created_at) VALUES (?, NOW())')->execute([$permission]);
+            $stmt = $pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+            $stmt->execute([$permission]);
+            $permissionId = (int) $stmt->fetchColumn();
+            $pdo->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
+                ->execute([$roleId, $permissionId]);
+        }
+        $pdo->prepare(
+            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
+             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
+        )->execute([$userId, self::TENANT, "u{$userId}@example.com", 'x', $roleId]);
+
+        return new RoleChecker($this->wrapSqlite($pdo), new PermissionRegistry());
     }
 
     /**
@@ -189,7 +206,7 @@ class RbacAuthEdgeCaseTest extends TestCase
     public function testValidTokenViaAccessTokenCookieIsAccepted(): void
     {
         $jwtParser = new JwtParser(self::SECRET);
-        $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting([CorePermissions::USERS_READ]));
+        $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting(8, [CorePermissions::USERS_READ]));
 
         $token = $jwtParser->create(['user_id' => 8, 'email' => 'cookie@example.com']);
         $request = new Request(
@@ -233,7 +250,7 @@ class RbacAuthEdgeCaseTest extends TestCase
     {
         $jwtParser = new JwtParser(self::SECRET);
         $valid = $jwtParser->create(['user_id' => 10, 'email' => 'mixed@example.com']);
-        $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting([CorePermissions::USERS_READ]));
+        $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting(10, [CorePermissions::USERS_READ]));
 
         // Malformed header ("Bearer" with no token) is treated as absent, so the
         // cookie fallback IS consulted and the valid cookie token is accepted.
@@ -261,7 +278,7 @@ class RbacAuthEdgeCaseTest extends TestCase
     {
         $jwtParser = new JwtParser(self::SECRET);
         // Store grants nothing to this user's role.
-        $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting([]));
+        $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting(11, []));
 
         $token = $jwtParser->create([
             'user_id' => 11,
@@ -296,5 +313,85 @@ class RbacAuthEdgeCaseTest extends TestCase
         $this->assertFalse($handlerReached);
         $this->assertSame(401, $response->getStatusCode());
         $this->assertSame('Invalid token payload', json_decode($response->getBody(), true)['error']);
+    }
+
+    // ==================== Helpers ====================
+
+    private function wrapSqlite(PDO $pdo): Database
+    {
+        $db = Database::withFactory(static fn (): PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
+    }
+
+    private function makeSchema(): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+
+        $pdo->exec('
+            CREATE TABLE roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                parent_id INTEGER,
+                tenant_id INTEGER,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE role_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role_id INTEGER NOT NULL REFERENCES roles(id),
+                permission_id INTEGER NOT NULL REFERENCES permissions(id),
+                created_at TEXT,
+                UNIQUE(role_id, permission_id)
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE organizational_units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                parent_id INTEGER,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE ou_role_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                ou_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                created_at TEXT,
+                UNIQUE(ou_id, role_id)
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                role_id INTEGER,
+                ou_id INTEGER,
+                created_at TEXT
+            )
+        ');
+
+        return $pdo;
     }
 }

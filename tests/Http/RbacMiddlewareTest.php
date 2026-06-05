@@ -8,12 +8,21 @@ use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Tenant\TenantContext;
 
 /**
  * Tests for RbacMiddleware class
  */
 class RbacMiddlewareTest extends TestCase
 {
+    /**
+     * Tenant id locked into the context for the authorization-decision tests.
+     * EnforceTenantIsolation resolves and locks this before RBAC runs in
+     * production; here we set it directly so the middleware can thread it into
+     * the (tenant-scoped) RoleChecker calls.
+     */
+    private const TENANT = 1;
+
     private RbacMiddleware $middleware;
     private JwtParser $mockJwtParser;
     private RoleChecker $mockRoleChecker;
@@ -24,6 +33,15 @@ class RbacMiddlewareTest extends TestCase
         $this->mockJwtParser = $this->createMock(JwtParser::class);
         $this->mockRoleChecker = $this->createMock(RoleChecker::class);
         $this->middleware = new RbacMiddleware($this->mockJwtParser, $this->mockRoleChecker);
+
+        // Mirror the production pipeline: the tenant is resolved/locked before RBAC.
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
+    }
+
+    protected function tearDown(): void
+    {
+        TenantContext::reset();
     }
 
     /**
@@ -107,7 +125,7 @@ class RbacMiddlewareTest extends TestCase
             ->willReturn($payload);
 
         $this->mockRoleChecker->method('hasRole')
-            ->with(123, 'admin')
+            ->with(123, 'admin', self::TENANT)
             ->willReturn(true);
 
         $response = $this->middleware->handle($request, $next, 'admin');
@@ -187,7 +205,7 @@ class RbacMiddlewareTest extends TestCase
             ->willReturn($payload);
 
         $this->mockRoleChecker->method('hasRole')
-            ->with(123, 'admin')
+            ->with(123, 'admin', self::TENANT)
             ->willReturn(true);
 
         $response = $this->middleware->handle($request, $next, 'admin');
@@ -217,7 +235,7 @@ class RbacMiddlewareTest extends TestCase
             ->willReturn($payload);
 
         $this->mockRoleChecker->method('hasRole')
-            ->with(123, 'admin')
+            ->with(123, 'admin', self::TENANT)
             ->willReturn(false);
 
         $response = $this->middleware->handle($request, $next, 'admin');
@@ -301,7 +319,7 @@ class RbacMiddlewareTest extends TestCase
             ->willReturn($payload);
 
         $this->mockRoleChecker->method('hasRole')
-            ->with(456, 'admin')
+            ->with(456, 'admin', self::TENANT)
             ->willReturn(true);
 
         $response = $this->middleware->handle($request, $next, 'admin');
@@ -339,7 +357,7 @@ class RbacMiddlewareTest extends TestCase
 
         // Authoritative store: user does NOT have the permission.
         $this->mockRoleChecker->method('hasPermission')
-            ->with(99, 'users:read')
+            ->with(99, 'users:read', self::TENANT)
             ->willReturn(false);
 
         $response = $this->middleware->handle($request, $next, null, 'users:read');
@@ -364,7 +382,7 @@ class RbacMiddlewareTest extends TestCase
 
         $this->mockJwtParser->method('parse')->willReturn($payload);
         $this->mockRoleChecker->method('hasPermission')
-            ->with(7, 'users:read')
+            ->with(7, 'users:read', self::TENANT)
             ->willReturn(false);
 
         $response = $this->middleware->handle($request, $next, null, 'users:read');
@@ -390,7 +408,7 @@ class RbacMiddlewareTest extends TestCase
 
         $this->mockJwtParser->method('parse')->willReturn($payload);
         $this->mockRoleChecker->method('hasRole')
-            ->with(8, 'admin')
+            ->with(8, 'admin', self::TENANT)
             ->willReturn(false);
 
         $response = $this->middleware->handle($request, $next, 'admin');
@@ -420,7 +438,7 @@ class RbacMiddlewareTest extends TestCase
             ->willReturn($payload);
 
         $this->mockRoleChecker->method('hasPermission')
-            ->with(123, 'edit:users')
+            ->with(123, 'edit:users', self::TENANT)
             ->willReturn(true);
 
         $response = $this->middleware->handle($request, $next, null, 'edit:users');
@@ -450,7 +468,7 @@ class RbacMiddlewareTest extends TestCase
             ->willReturn($payload);
 
         $this->mockRoleChecker->method('hasPermission')
-            ->with(123, 'delete:users')
+            ->with(123, 'delete:users', self::TENANT)
             ->willReturn(false);
 
         $response = $this->middleware->handle($request, $next, null, 'delete:users');
@@ -480,11 +498,11 @@ class RbacMiddlewareTest extends TestCase
             ->willReturn($payload);
 
         $this->mockRoleChecker->method('hasRole')
-            ->with(123, 'admin')
+            ->with(123, 'admin', self::TENANT)
             ->willReturn(true);
 
         $this->mockRoleChecker->method('hasPermission')
-            ->with(123, 'manage:permissions')
+            ->with(123, 'manage:permissions', self::TENANT)
             ->willReturn(true);
 
         $response = $this->middleware->handle($request, $next, 'admin', 'manage:permissions');
@@ -516,7 +534,7 @@ class RbacMiddlewareTest extends TestCase
             ->method('hasRole');
 
         $this->mockRoleChecker->method('hasPermission')
-            ->with(123, 'read:reports')
+            ->with(123, 'read:reports', self::TENANT)
             ->willReturn(true);
 
         $response = $this->middleware->handle($request, $next, null, 'read:reports');

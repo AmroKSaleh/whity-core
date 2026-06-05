@@ -12,7 +12,27 @@ use Whity\Core\RBAC\PermissionRegistry;
  * Role Checker for verifying user roles and permissions from the database.
  *
  * Queries user roles and permissions from the database and verifies whether a
- * user holds a specific role or permission.
+ * user holds a specific role or permission. Authorization is always tenant
+ * scoped: every public check ({@see self::hasRole()}, {@see self::hasPermission()},
+ * {@see self::getEffectiveRolesForUser()}) takes the resolved tenant id so that
+ * grants reached through tenant-scoped organizational units can never leak across
+ * tenant boundaries.
+ *
+ * Effective-roles model (WC-54)
+ * -----------------------------
+ * A user's EFFECTIVE role set is the UNION of:
+ *  1. Their DIRECT role (`users.role_id`).
+ *  2. Every role assigned to the organizational unit the user belongs to
+ *     (`users.ou_id`), AND every role assigned to that OU's ANCESTORS — the chain
+ *     of `organizational_units.parent_id` walked UP to the root. A user in a child
+ *     OU therefore inherits the roles granted to every OU above it. All OU role
+ *     lookups are filtered by `ou_role_assignments.tenant_id = :tenantId`, so an
+ *     OU role assigned in tenant A never grants anything in tenant B.
+ *
+ * The user's EFFECTIVE PERMISSION set is then the union of the hierarchy-resolved
+ * permission set (see below) of EVERY effective role. So a permission is granted
+ * if the user's direct role — or any OU/ancestor-OU role, or any role those
+ * inherit through the role hierarchy — holds it.
  *
  * Role hierarchy (WC-15)
  * ----------------------
@@ -22,28 +42,35 @@ use Whity\Core\RBAC\PermissionRegistry;
  * beneath it. The effective permission set for a role is resolved by walking up
  * the parent chain and unioning each role's directly-granted permissions.
  *
- * Cycle safety
- * ------------
- * A malformed hierarchy (e.g. A -> B -> A) must never hang request processing.
- * Traversal therefore tracks visited role ids and is bounded by a hard
+ * Cycle/depth safety
+ * ------------------
+ * A malformed hierarchy (e.g. A -> B -> A in roles, or a cyclic OU parent chain)
+ * must never hang request processing. Every traversal — the role parent chain AND
+ * the OU parent chain — tracks visited ids and is bounded by a hard
  * {@see self::MAX_HIERARCHY_DEPTH} safeguard; a detected cycle (or exceeding the
  * depth bound) is logged as a warning and resolution terminates gracefully with
- * the permissions collected so far.
+ * whatever was collected so far.
  *
- * Worker-level cache
- * ------------------
- * Resolved effective permission sets are memoised in a process (worker) level
- * static cache to avoid re-walking the hierarchy on every authorization check.
- * The cache holds only derived, non-request-specific data (role id =>
- * permission list) so it is safe to share across the requests a FrankenPHP
- * worker serves. It MUST be invalidated whenever role/permission assignments or
- * the hierarchy change — {@see RolesApiHandler} calls {@see self::clearCache()}
- * after any mutating write.
+ * Worker-level caches
+ * -------------------
+ * Two derived, non-request-specific caches memoise resolution so authorization
+ * never re-walks the graph on every check:
+ *  - {@see self::$effectivePermissionCache}: roleId => permission list (a role's
+ *    hierarchy-resolved permissions; tenant-independent).
+ *  - {@see self::$effectiveUserPermissionCache}: "userId:tenantId" => permission
+ *    list (the user's full effective permission set, which IS tenant scoped
+ *    because OU membership/assignments are).
+ * Both hold only derived data (no request-specific state), so they are safe to
+ * share across the requests a FrankenPHP worker serves. They MUST be invalidated
+ * whenever role/permission assignments, the role hierarchy, OU membership, or OU
+ * role assignments change — {@see RolesApiHandler}, {@see UsersApiHandler} and
+ * {@see OusApiHandler} call {@see self::clearCache()} after any mutating write.
  */
 class RoleChecker
 {
     /**
-     * Hard upper bound on hierarchy traversal depth.
+     * Hard upper bound on hierarchy traversal depth (role parent chain AND OU
+     * parent chain).
      *
      * Acts as a belt-and-braces safeguard alongside visited-set cycle detection:
      * even a pathological or corrupted hierarchy can never loop or recurse beyond
@@ -56,12 +83,26 @@ class RoleChecker
      *
      * Structure: [roleId => ['perm:a', 'perm:b', ...]]. Derived data only; never
      * holds request-specific state, so it is safe to reuse across requests on a
-     * persistent worker. Invalidated via {@see self::clearCache()} on any
-     * role/permission assignment change.
+     * persistent worker. A role's resolved permissions are tenant-independent, so
+     * this cache is keyed by role id alone. Invalidated via {@see self::clearCache()}.
      *
      * @var array<int, array<int, string>>
      */
     private static array $effectivePermissionCache = [];
+
+    /**
+     * Process (worker) level cache of a user's full effective permission set,
+     * keyed by "userId:tenantId".
+     *
+     * The set unions the hierarchy-resolved permissions of the user's direct role
+     * AND every OU/ancestor-OU role. Because OU membership and OU role assignments
+     * are tenant scoped, this cache MUST be keyed by tenant in addition to user —
+     * the same user resolved under a different tenant may see a different set.
+     * Derived data only; invalidated via {@see self::clearCache()}.
+     *
+     * @var array<string, array<int, string>>
+     */
+    private static array $effectiveUserPermissionCache = [];
 
     private Database $db;
     private PermissionRegistry $registry;
@@ -86,8 +127,10 @@ class RoleChecker
     /**
      * Get the role name for a specific user.
      *
-     * Queries the database to retrieve the role name for the given user ID using
-     * a JOIN between the users and roles tables.
+     * Queries the database to retrieve the DIRECT role name for the given user ID
+     * using a JOIN between the users and roles tables. This is the user's primary
+     * role only; it does NOT consider OU-inherited roles (use
+     * {@see self::getEffectiveRolesForUser()} for the full set).
      *
      * @param int $userId The user ID to query.
      * @return string|null The role name if the user exists, null otherwise.
@@ -106,76 +149,69 @@ class RoleChecker
     }
 
     /**
-     * Check if a user has a specific role.
+     * Check if a user effectively has a specific role within a tenant.
+     *
+     * A user "has" a role when it is in their EFFECTIVE role set — their direct
+     * role ({@see users}.role_id) OR any role assigned to their organizational
+     * unit or any of its ancestors, all scoped to {@see $tenantId}. OU role
+     * assignments are therefore additive: a user in an OU that has the `admin`
+     * role assigned satisfies a `hasRole($userId, 'admin', $tenantId)` check even
+     * if their direct role is `user`. Cross-tenant OU roles never count because
+     * the OU-role lookup is filtered by tenant id.
      *
      * @param int    $userId       The user ID to check.
      * @param string $requiredRole The role name to verify against.
-     * @return bool True if the user has the required role, false otherwise.
+     * @param int    $tenantId     The resolved tenant id (0 = system tenant).
+     * @return bool True if the user effectively has the required role.
      */
-    public function hasRole(int $userId, string $requiredRole): bool
+    public function hasRole(int $userId, string $requiredRole, int $tenantId): bool
     {
-        $userRole = $this->getRoleForUser($userId);
-        return $userRole === $requiredRole;
+        $effectiveRoles = $this->getEffectiveRolesForUser($userId, $tenantId);
+
+        return in_array($requiredRole, $effectiveRoles, true);
     }
 
     /**
-     * Check if a user has a specific permission.
+     * Check if a user effectively has a specific permission within a tenant.
      *
      * Resolution order:
      *  1. The permission must exist in the {@see PermissionRegistry} (an unknown
      *     permission can never be granted).
-     *  2. A direct grant on the user's role is honoured (backward-compatible with
-     *     the historical {@see role_permissions} check the middleware relies on).
-     *  3. Otherwise the permission is resolved through the role hierarchy: the
-     *     user's role inherits every permission of the roles beneath it.
+     *  2. Otherwise the permission is resolved against the user's EFFECTIVE
+     *     permission set: the union, over every effective role (direct role +
+     *     OU/ancestor-OU roles, all tenant scoped), of that role's
+     *     hierarchy-resolved permissions ({@see self::getEffectivePermissionsForRole()}).
      *
-     * Both the direct-grant check (step 2) and the hierarchy resolution (step 3)
-     * read grants through the SAME correct join — `role_permissions` is linked to
-     * `permissions` by `permission_id` and matched on `permissions.name` (WC-54).
-     * There is no `role_permissions.permission_string` column; the historical
-     * query that referenced one 500-ed every permission-gated route against the
-     * real database.
-     *
-     * The signature and semantics ("does this user effectively have this
-     * permission?") are unchanged, so callers such as the RBAC middleware need no
-     * modification.
+     * Direct-role grants, role-hierarchy inheritance and OU-inherited grants are
+     * all read through the SAME `role_permissions.permission_id -> permissions.name`
+     * join, so the paths can never diverge on which schema they read (WC-54). There
+     * is no `role_permissions.permission_string` column.
      *
      * @param int    $userId     The user ID to check.
      * @param string $permission The permission string to verify (colon notation).
-     * @return bool True if the user has the permission (directly or inherited).
+     * @param int    $tenantId   The resolved tenant id (0 = system tenant).
+     * @return bool True if the user effectively has the permission.
      */
-    public function hasPermission(int $userId, string $permission): bool
+    public function hasPermission(int $userId, string $permission, int $tenantId): bool
     {
         // Step 1: an unregistered permission can never be granted.
         if (!$this->registry->permissionExists($permission)) {
             return false;
         }
 
-        // Step 2: direct grant on the user's primary role. A single query reaches
-        // role_permissions only through the user join, exactly as production data
-        // is reachable, and short-circuits before any hierarchy walk — preserving
-        // backward-compatible middleware semantics.
-        if ($this->userRoleHasDirectPermission($userId, $permission)) {
-            return true;
-        }
-
-        // Step 3: hierarchy-inherited grant. Resolve the effective permission set
-        // for the user's role by walking up the parent chain.
-        $roleId = $this->getRoleIdForUser($userId);
-        if ($roleId === null) {
-            return false;
-        }
-
-        return in_array($permission, $this->getEffectivePermissionsForRole($roleId), true);
+        // Step 2: resolve the user's full effective permission set (direct role +
+        // OU/ancestor-OU roles, each expanded through the role hierarchy) and test
+        // membership.
+        return in_array($permission, $this->getEffectivePermissionsForUser($userId, $tenantId), true);
     }
 
     /**
-     * Get all permissions directly granted to a user through their role.
+     * Get all permissions directly granted to a user through their primary role.
      *
      * Reads grants through the real schema join (`role_permissions.permission_id`
      * -> `permissions.name`), the same correct query the rest of this class uses
-     * (WC-54). Does NOT include hierarchy-inherited permissions; use
-     * {@see self::getEffectivePermissionsForRole()} for the inherited set.
+     * (WC-54). Does NOT include hierarchy-inherited or OU-inherited permissions;
+     * use {@see self::getEffectivePermissionsForUser()} for the full set.
      *
      * @param int $userId The user ID to query.
      * @return array<int, string> Permission strings granted directly to the user.
@@ -198,6 +234,42 @@ class RoleChecker
     }
 
     /**
+     * Resolve a user's full EFFECTIVE permission set within a tenant.
+     *
+     * The union, over every effective role of the user (direct role + every
+     * tenant-scoped OU/ancestor-OU role), of that role's hierarchy-resolved
+     * permissions ({@see self::getEffectivePermissionsForRole()}). This is the set
+     * {@see self::hasPermission()} tests against.
+     *
+     * Results are memoised in the per-user worker-level cache (keyed by
+     * userId:tenantId because OU membership/assignments are tenant scoped);
+     * {@see self::clearCache()} invalidates them after any role/OU mutation.
+     *
+     * @param int $userId   The user ID to resolve.
+     * @param int $tenantId The resolved tenant id (0 = system tenant).
+     * @return array<int, string> The effective permission strings.
+     */
+    public function getEffectivePermissionsForUser(int $userId, int $tenantId): array
+    {
+        $cacheKey = $userId . ':' . $tenantId;
+        if (isset(self::$effectiveUserPermissionCache[$cacheKey])) {
+            return self::$effectiveUserPermissionCache[$cacheKey];
+        }
+
+        $permissions = [];
+        foreach ($this->getEffectiveRoleIdsForUser($userId, $tenantId) as $roleId) {
+            foreach ($this->getEffectivePermissionsForRole($roleId, $tenantId) as $permission) {
+                $permissions[$permission] = true;
+            }
+        }
+
+        $resolved = array_keys($permissions);
+        self::$effectiveUserPermissionCache[$cacheKey] = $resolved;
+
+        return $resolved;
+    }
+
+    /**
      * Resolve the effective permission set for a role, including everything
      * inherited from roles beneath it in the hierarchy.
      *
@@ -207,7 +279,7 @@ class RoleChecker
      * over-deep hierarchy is logged as a warning and resolution terminates with
      * the permissions gathered so far rather than looping forever.
      *
-     * Results are memoised in the worker-level cache; {@see self::clearCache()}
+     * Results are memoised in the per-role worker-level cache; {@see self::clearCache()}
      * invalidates them after any role/permission assignment change.
      *
      * @param int      $roleId   The role whose effective permissions to resolve.
@@ -256,62 +328,86 @@ class RoleChecker
     }
 
     /**
-     * Get effective roles for a user including OU-inherited roles.
+     * Get a user's effective roles (names) within a tenant.
      *
-     * Returns roles from both direct assignment and OU membership via a UNION of:
-     *  1. The user's direct role from users.role_id.
-     *  2. Roles assigned to the user's OU via ou_role_assignments.
+     * Returns the union of:
+     *  1. The user's direct role from {@see users}.role_id.
+     *  2. Roles assigned to the user's organizational unit AND every ancestor OU
+     *     (walking {@see organizational_units}.parent_id up to the root), via
+     *     {@see ou_role_assignments}, filtered to {@see $tenantId}.
+     *
+     * OU role assignments are additive and tenant scoped: an assignment made in
+     * another tenant can never appear here. The OU parent-chain walk is bounded by
+     * cycle/depth safety identical to the role hierarchy.
      *
      * @param int $userId   The user ID to query.
-     * @param int $tenantId The tenant ID for scoping.
-     * @return array<int, string> Map of role_id => role_name.
+     * @param int $tenantId The tenant ID for scoping (0 = system tenant).
+     * @return array<int, string> Distinct effective role NAMES (direct + OU-inherited).
      */
     public function getEffectiveRolesForUser(int $userId, int $tenantId): array
     {
-        $sql = '
-            SELECT DISTINCT r.id, r.name
-            FROM roles r
-            WHERE r.id IN (
-                -- Direct role from users table
-                SELECT u.role_id FROM users u WHERE u.id = :userId AND u.tenant_id = :tenantId
-                UNION
-                -- Roles from OU assignments
-                SELECT ora.role_id FROM ou_role_assignments ora
-                WHERE ora.ou_id = (SELECT ou_id FROM users WHERE id = :userId AND tenant_id = :tenantId)
-                  AND ora.tenant_id = :tenantId
-            )
-        ';
-
-        $statement = $this->db->query($sql, [
-            ':userId' => $userId,
-            ':tenantId' => $tenantId
-        ]);
-        $results = $statement->fetchAll();
-
-        if ($results === false || empty($results)) {
+        $roleIds = $this->getEffectiveRoleIdsForUser($userId, $tenantId);
+        if ($roleIds === []) {
             return [];
         }
 
-        $roles = [];
-        foreach ($results as $row) {
-            $roles[(int)$row['id']] = $row['name'];
+        $names = [];
+        foreach ($roleIds as $roleId) {
+            $name = $this->getRoleName($roleId);
+            if ($name !== null) {
+                $names[$name] = true;
+            }
         }
-        return $roles;
+
+        return array_keys($names);
     }
 
     /**
-     * Invalidate the worker-level effective-permission cache.
+     * Invalidate the worker-level effective-permission caches.
      *
-     * Must be called whenever role/permission assignments or the role hierarchy
-     * change so that subsequent authorization checks see the new grants rather
-     * than a stale resolved set. {@see RolesApiHandler} invokes this after any
-     * mutating write (create/update/delete).
+     * Must be called whenever any input to authorization changes — role/permission
+     * assignments, the role hierarchy, a user's OU membership, or OU role
+     * assignments — so subsequent checks see the new grants rather than a stale
+     * resolved set. {@see RolesApiHandler}, {@see UsersApiHandler} and
+     * {@see OusApiHandler} invoke this after any such mutating write.
      *
      * @return void
      */
     public static function clearCache(): void
     {
         self::$effectivePermissionCache = [];
+        self::$effectiveUserPermissionCache = [];
+    }
+
+    /**
+     * Resolve the distinct effective role IDs for a user within a tenant.
+     *
+     * The union of the user's direct role id and every role id assigned to their
+     * OU and its ancestors (tenant scoped). This is the integer backbone shared by
+     * {@see self::getEffectiveRolesForUser()} (which maps to names) and
+     * {@see self::getEffectivePermissionsForUser()} (which expands to permissions).
+     *
+     * @param int $userId   The user ID.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return array<int, int> Distinct effective role ids.
+     */
+    private function getEffectiveRoleIdsForUser(int $userId, int $tenantId): array
+    {
+        $roleIds = [];
+
+        $directRoleId = $this->getRoleIdForUser($userId);
+        if ($directRoleId !== null) {
+            $roleIds[$directRoleId] = true;
+        }
+
+        $ouId = $this->getOuIdForUser($userId, $tenantId);
+        if ($ouId !== null) {
+            foreach ($this->getOuChainRoleIds($ouId, $tenantId) as $roleId) {
+                $roleIds[$roleId] = true;
+            }
+        }
+
+        return array_keys($roleIds);
     }
 
     /**
@@ -336,34 +432,139 @@ class RoleChecker
     }
 
     /**
-     * Whether the role assigned to a user directly holds a given permission.
+     * Resolve the organizational unit id a user belongs to, tenant scoped.
      *
-     * The authoritative direct-grant query (WC-54): `role_permissions` reached
-     * through the user's role and joined to `permissions` on `permission_id`,
-     * matched on `permissions.name`. This mirrors the historical step-2 probe's
-     * `:userId` + `:permission` contract — role_permissions rows are reachable
-     * only via the user join, exactly as in production — while fixing the phantom
-     * `role_permissions.permission_string` column that 500-ed the query against
-     * the real schema. It reads grants through the SAME `permission_id ->
-     * permissions.name` join the hierarchy walk uses
-     * ({@see self::getDirectPermissionsForRole()}), so the direct-grant and
-     * inherited paths can never diverge on which schema they read.
+     * The tenant predicate guarantees a user record is only read in the context of
+     * its own tenant, so a mismatched (userId, tenantId) pair yields no OU and
+     * therefore no OU-inherited roles.
      *
-     * @param int    $userId     The user whose role is checked.
-     * @param string $permission The permission name (colon notation) to look for.
-     * @return bool True when the user's role directly holds the permission.
+     * @param int $userId   The user ID.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return int|null The OU id, or null when the user is not in an OU.
      */
-    private function userRoleHasDirectPermission(int $userId, string $permission): bool
+    private function getOuIdForUser(int $userId, int $tenantId): ?int
     {
         $statement = $this->db->query(
-            'SELECT 1 FROM role_permissions rp
-             JOIN users u ON u.role_id = rp.role_id
-             JOIN permissions p ON p.id = rp.permission_id
-             WHERE u.id = :userId AND p.name = :permission',
-            [':userId' => $userId, ':permission' => $permission]
+            'SELECT ou_id FROM users WHERE id = :userId AND tenant_id = :tenantId',
+            [':userId' => $userId, ':tenantId' => $tenantId]
         );
+        $result = $statement->fetch();
 
-        return $statement->fetch() !== false;
+        if ($result === false || $result['ou_id'] === null) {
+            return null;
+        }
+
+        return (int) $result['ou_id'];
+    }
+
+    /**
+     * Collect every role id assigned to an OU and all of its ancestors.
+     *
+     * Walks the {@see organizational_units}.parent_id chain UP from $ouId to the
+     * root, unioning the {@see ou_role_assignments} role ids found at each level.
+     * All assignment lookups are filtered by {@see $tenantId}, and the parent-chain
+     * lookups are tenant scoped too, so the walk can never cross into another
+     * tenant's hierarchy. Bounded by visited-set cycle detection and a hard
+     * {@see self::MAX_HIERARCHY_DEPTH}, mirroring the role-hierarchy walk.
+     *
+     * @param int $ouId     The OU the user belongs to.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return array<int, int> Distinct role ids inherited through the OU chain.
+     */
+    private function getOuChainRoleIds(int $ouId, int $tenantId): array
+    {
+        $roleIds = [];
+        $visited = [];
+        $currentOuId = $ouId;
+        $depth = 0;
+
+        while ($currentOuId !== null) {
+            if (isset($visited[$currentOuId])) {
+                $this->warnCircularOuChain($ouId, $currentOuId, $tenantId, array_keys($visited));
+                break;
+            }
+
+            if ($depth >= self::MAX_HIERARCHY_DEPTH) {
+                $this->warnOuMaxDepthExceeded($ouId, $tenantId);
+                break;
+            }
+
+            $visited[$currentOuId] = true;
+            $depth++;
+
+            foreach ($this->getRoleIdsAssignedToOu($currentOuId, $tenantId) as $roleId) {
+                $roleIds[$roleId] = true;
+            }
+
+            $currentOuId = $this->getParentOuId($currentOuId, $tenantId);
+        }
+
+        return array_keys($roleIds);
+    }
+
+    /**
+     * Get the role ids directly assigned to a single OU, tenant scoped.
+     *
+     * @param int $ouId     The OU id.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return array<int, int> The assigned role ids.
+     */
+    private function getRoleIdsAssignedToOu(int $ouId, int $tenantId): array
+    {
+        $statement = $this->db->query(
+            'SELECT role_id FROM ou_role_assignments WHERE ou_id = :ouId AND tenant_id = :tenantId',
+            [':ouId' => $ouId, ':tenantId' => $tenantId]
+        );
+        $results = $statement->fetchAll();
+
+        if ($results === false || $results === []) {
+            return [];
+        }
+
+        return array_map(static fn($row) => (int) $row['role_id'], $results);
+    }
+
+    /**
+     * Get the parent OU id for an OU, tenant scoped, or null at the root.
+     *
+     * @param int $ouId     The OU id.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return int|null The parent OU id, or null when there is no parent.
+     */
+    private function getParentOuId(int $ouId, int $tenantId): ?int
+    {
+        $statement = $this->db->query(
+            'SELECT parent_id FROM organizational_units WHERE id = :ouId AND tenant_id = :tenantId',
+            [':ouId' => $ouId, ':tenantId' => $tenantId]
+        );
+        $result = $statement->fetch();
+
+        if ($result === false || $result['parent_id'] === null) {
+            return null;
+        }
+
+        return (int) $result['parent_id'];
+    }
+
+    /**
+     * Resolve a role's name by id.
+     *
+     * @param int $roleId The role id.
+     * @return string|null The role name, or null when the role does not exist.
+     */
+    private function getRoleName(int $roleId): ?string
+    {
+        $statement = $this->db->query(
+            'SELECT name FROM roles WHERE id = :roleId',
+            [':roleId' => $roleId]
+        );
+        $result = $statement->fetch();
+
+        if ($result === false) {
+            return null;
+        }
+
+        return $result['name'];
     }
 
     /**
@@ -454,6 +655,51 @@ class RoleChecker
             'event' => 'rbac.role_hierarchy.max_depth_exceeded',
             'tenant_id' => $tenantId,
             'start_role_id' => $startRoleId,
+            'max_depth' => self::MAX_HIERARCHY_DEPTH,
+        ]);
+    }
+
+    /**
+     * Emit a structured warning that a circular OU parent chain was detected.
+     *
+     * @param int            $startOuId  The OU whose resolution started the walk.
+     * @param int            $repeatOuId The OU that closed the cycle.
+     * @param int            $tenantId   Tenant id for structured context.
+     * @param array<int,int> $chain      The visited OU-id chain leading to the cycle.
+     * @return void
+     */
+    private function warnCircularOuChain(int $startOuId, int $repeatOuId, int $tenantId, array $chain): void
+    {
+        if ($this->logger === null) {
+            return;
+        }
+
+        $this->logger->warning('Circular organizational-unit hierarchy detected; OU role inheritance terminated', [
+            'event' => 'rbac.ou_hierarchy.cycle_detected',
+            'tenant_id' => $tenantId,
+            'start_ou_id' => $startOuId,
+            'repeated_ou_id' => $repeatOuId,
+            'visited_chain' => $chain,
+        ]);
+    }
+
+    /**
+     * Emit a structured warning that the OU parent-chain depth safeguard was hit.
+     *
+     * @param int $startOuId The OU whose resolution started the walk.
+     * @param int $tenantId  Tenant id for structured context.
+     * @return void
+     */
+    private function warnOuMaxDepthExceeded(int $startOuId, int $tenantId): void
+    {
+        if ($this->logger === null) {
+            return;
+        }
+
+        $this->logger->warning('Organizational-unit hierarchy exceeded maximum depth; OU role inheritance terminated', [
+            'event' => 'rbac.ou_hierarchy.max_depth_exceeded',
+            'tenant_id' => $tenantId,
+            'start_ou_id' => $startOuId,
             'max_depth' => self::MAX_HIERARCHY_DEPTH,
         ]);
     }

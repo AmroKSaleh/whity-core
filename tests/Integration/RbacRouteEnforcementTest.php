@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
+use PDO;
 use PHPUnit\Framework\TestCase;
-use PDOStatement;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\CorePermissions;
@@ -13,33 +13,36 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Http\RbacMiddleware;
 
 /**
- * Integration tests for route-level RBAC enforcement (WC-14, issue #9).
+ * Integration tests for route-level RBAC enforcement (WC-14, issue #9; updated
+ * for WC-54 tenant-scoped, OU-aware authorization).
  *
  * Drives the real {@see RbacMiddleware}, {@see RoleChecker} and
  * {@see PermissionRegistry} together, resolving the required permission from a
- * real {@see Router} entry exactly as the HTTP kernel does, to prove the three
- * acceptance criteria end-to-end:
+ * real {@see Router} entry exactly as the HTTP kernel does, against an in-memory
+ * SQLite engine seeded with the production roles/permissions/users schema. The
+ * resolved tenant is locked into {@see TenantContext} before dispatch, mirroring
+ * the EnforceTenantIsolation middleware that runs ahead of RBAC in production.
  *
+ * Acceptance criteria:
  *  1. /api/users requires {@see CorePermissions::USERS_READ}; a user whose role
  *     grants it reaches the handler.
  *  2. The same route denies a user without the permission with a structured 403
  *     `{error: 'Insufficient permissions', required: 'users:read'}`.
  *  3. A route with no permission requirement lets any authenticated user pass.
- *
- * Role-permission data is seeded in COLON notation via {@see CorePermissions}
- * and stubbed at the database layer, so these tests do not depend on the legacy
- * dot-notation seeds being reconciled (WC-55).
  */
 class RbacRouteEnforcementTest extends TestCase
 {
     private const SECRET = 'test-secret-key';
+    private const TENANT = 1;
 
     private JwtParser $jwtParser;
     private PermissionRegistry $registry;
+    private PDO $pdo;
     private Database $db;
     private RoleChecker $roleChecker;
     private RbacMiddleware $middleware;
@@ -47,20 +50,29 @@ class RbacRouteEnforcementTest extends TestCase
 
     protected function setUp(): void
     {
+        RoleChecker::clearCache();
         $this->jwtParser = new JwtParser(self::SECRET);
         // Real registry; core permissions (incl. users:read) register lazily.
         $this->registry = new PermissionRegistry();
-        $this->db = $this->createMock(Database::class);
+        $this->pdo = $this->makeSchema();
+        $this->db = $this->wrapSqlite($this->pdo);
         $this->roleChecker = new RoleChecker($this->db, $this->registry);
         $this->middleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
         $this->router = new Router();
+
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
+    }
+
+    protected function tearDown(): void
+    {
+        TenantContext::reset();
+        RoleChecker::clearCache();
     }
 
     /**
      * Resolve and enforce a request the way the HTTP kernel does:
      * match the route, then run the matched permission through the middleware.
-     *
-     * @param array<string, mixed> $params Captured route params (unused here).
      */
     private function dispatch(Request $request, callable $handler): Response
     {
@@ -81,31 +93,44 @@ class RbacRouteEnforcementTest extends TestCase
     }
 
     /**
-     * Stub the role_permissions lookup used by RoleChecker::hasPermission.
+     * Seed a user (in tenant 1, no OU) whose direct role grants exactly the given
+     * permissions; returns the user id.
      *
      * @param array<int, string> $grantedPermissions Permissions the user's role grants.
      */
-    private function seedRolePermissions(int $userId, array $grantedPermissions): void
+    private function seedUserWithPermissions(int $userId, array $grantedPermissions): void
     {
-        $this->db->method('query')->willReturnCallback(
-            function (string $sql, array $bindings) use ($userId, $grantedPermissions): PDOStatement {
-                $statement = $this->createMock(PDOStatement::class);
-                $matches = ($bindings[':userId'] ?? null) === $userId
-                    && in_array($bindings[':permission'] ?? null, $grantedPermissions, true);
-                $statement->method('fetch')->willReturn($matches ? ['1' => 1] : false);
-                return $statement;
-            }
-        );
+        // A dedicated role per user keeps grants isolated between tests/cases.
+        $roleName = 'role_' . $userId;
+        $this->pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute([$roleName]);
+        $roleId = (int) $this->pdo->lastInsertId();
+
+        foreach ($grantedPermissions as $permission) {
+            $this->pdo->prepare('INSERT OR IGNORE INTO permissions (name, created_at) VALUES (?, NOW())')
+                ->execute([$permission]);
+            $stmt = $this->pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+            $stmt->execute([$permission]);
+            $permissionId = (int) $stmt->fetchColumn();
+            $this->pdo->prepare(
+                'INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())'
+            )->execute([$roleId, $permissionId]);
+        }
+
+        $this->pdo->prepare(
+            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
+             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
+        )->execute([$userId, self::TENANT, "u{$userId}@example.com", 'x', $roleId]);
     }
 
     /**
-     * Build a signed access token carrying the given user id.
+     * Build a signed access token carrying the given user id and tenant.
      */
     private function tokenFor(int $userId, string $email): string
     {
         return $this->jwtParser->create([
             'user_id' => $userId,
             'email' => $email,
+            'tenant_id' => self::TENANT,
         ]);
     }
 
@@ -123,7 +148,7 @@ class RbacRouteEnforcementTest extends TestCase
             null,
             CorePermissions::USERS_READ
         );
-        $this->seedRolePermissions($userId, [CorePermissions::USERS_READ]);
+        $this->seedUserWithPermissions($userId, [CorePermissions::USERS_READ]);
 
         $token = $this->tokenFor($userId, 'reader@example.com');
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
@@ -155,7 +180,7 @@ class RbacRouteEnforcementTest extends TestCase
             CorePermissions::USERS_READ
         );
         // Role grants an unrelated permission only.
-        $this->seedRolePermissions($userId, [CorePermissions::OUS_READ]);
+        $this->seedUserWithPermissions($userId, [CorePermissions::OUS_READ]);
 
         $token = $this->tokenFor($userId, 'noaccess@example.com');
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
@@ -221,7 +246,7 @@ class RbacRouteEnforcementTest extends TestCase
             'widgets:create' // never registered in the registry
         );
         // DB would grant it, but the registry gate must reject first.
-        $this->seedRolePermissions($userId, ['widgets:create']);
+        $this->seedUserWithPermissions($userId, ['widgets:create']);
 
         $token = $this->tokenFor($userId, 'ghost@example.com');
         $request = new Request('POST', '/api/widgets', ['Authorization' => "Bearer {$token}"]);
@@ -251,5 +276,85 @@ class RbacRouteEnforcementTest extends TestCase
         $response = $this->dispatch($request, static fn(Request $req): Response => new Response(200, '[]'));
 
         $this->assertSame(401, $response->getStatusCode());
+    }
+
+    // ==================== Helpers ====================
+
+    private function wrapSqlite(PDO $pdo): Database
+    {
+        $db = Database::withFactory(static fn (): PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
+    }
+
+    private function makeSchema(): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+
+        $pdo->exec('
+            CREATE TABLE roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                parent_id INTEGER,
+                tenant_id INTEGER,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE role_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role_id INTEGER NOT NULL REFERENCES roles(id),
+                permission_id INTEGER NOT NULL REFERENCES permissions(id),
+                created_at TEXT,
+                UNIQUE(role_id, permission_id)
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE organizational_units (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                parent_id INTEGER,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE ou_role_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                ou_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                created_at TEXT,
+                UNIQUE(ou_id, role_id)
+            )
+        ');
+        $pdo->exec('
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                role_id INTEGER,
+                ou_id INTEGER,
+                created_at TEXT
+            )
+        ');
+
+        return $pdo;
     }
 }

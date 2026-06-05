@@ -116,20 +116,24 @@ Users get roles two ways: the primary `users.role_id` column (migration 001), an
 ### hasPermission
 
 ```php
-public function hasPermission(int $userId, string $permission): bool
+public function hasPermission(int $userId, string $permission, int $tenantId): bool
 ```
+
+Every check is **tenant scoped** (WC-54): the user's effective grants include roles reached through their organizational unit, which are tenant-bound, so the resolved tenant id (from `TenantContext`) is required.
 
 Resolution order:
 
 1. **Registry check** — `if (!$this->registry->permissionExists($permission)) return false;`. An unregistered permission (e.g. one whose plugin was unloaded) can never be granted.
-2. **Direct grant** — a row in `role_permissions` for the user's primary role:
-   ```sql
-   SELECT 1 FROM role_permissions rp
-   JOIN users u ON u.role_id = rp.role_id
-   WHERE u.id = :userId AND rp.permission_string = :permission
-   ```
-   (This historical, string-based grant path is preserved for backward compatibility with the original middleware contract.)
-3. **Hierarchy inheritance** — otherwise resolve the user's role id (`users.role_id`) and check the **effective permission set** for that role.
+2. **Effective permission set** — otherwise resolve the user's full effective permission set and test membership. The set is the union, over every **effective role** (see below), of that role's hierarchy-resolved permissions. Every grant — direct, role-hierarchy-inherited, or OU-inherited — is read through the SAME real-schema join (`role_permissions.permission_id → permissions.name`); there is no `role_permissions.permission_string` column.
+
+### Effective roles (direct + OU inheritance)
+
+A user's **effective role set** is the UNION of:
+
+1. Their **direct role** (`users.role_id`).
+2. Every role assigned to their **organizational unit AND each ancestor OU** — the `organizational_units.parent_id` chain walked up to the root — via `ou_role_assignments`, filtered to the current tenant.
+
+So a user in a child OU inherits the roles granted to every OU above it, and OU role assignments are **additive** (they never restrict). The OU parent-chain walk has the same visited-set cycle detection and `MAX_HIERARCHY_DEPTH` bound as the role hierarchy. Because the lookups are tenant scoped, an OU role assigned in tenant A can never grant anything in tenant B.
 
 ### Role hierarchy + worker cache
 
@@ -140,14 +144,15 @@ Safety:
 - **Cycle detection** via a visited-set — a malformed loop (`A → B → A`) is logged and traversal stops with the permissions collected so far.
 - **Depth bound** `MAX_HIERARCHY_DEPTH = 64` — even a non-repeating-but-pathological chain cannot loop forever.
 
-Resolved sets are memoized in a **worker-level static cache** (`$effectivePermissionCache`, keyed by role id). It holds only derived, non-request data, so it is safe across requests on a persistent worker. It **must** be invalidated when grants or the hierarchy change — `RoleChecker::clearCache()` is called by `RolesApiHandler` after every create/update/delete.
+Resolved sets are memoized in two **worker-level static caches**: `$effectivePermissionCache` (per role id; a role's resolved permissions are tenant-independent) and `$effectiveUserPermissionCache` (per `userId:tenantId`, because OU membership and OU role assignments are tenant scoped). Both hold only derived, non-request data, so they are safe across requests on a persistent worker. They **must** be invalidated when any authorization input changes — `RoleChecker::clearCache()` is called by `RolesApiHandler` (role/permission writes), `UsersApiHandler` (role re-assignment or OU-membership change) and `OusApiHandler` (OU role assign/remove).
 
 ### Other helpers
 
-- `hasRole($userId, $role)` — compares the user's primary role name (`users.role_id → roles.name`).
-- `getRoleForUser($userId)` — the user's primary role name.
-- `getPermissionsForUser($userId)` — directly-granted permissions for the user's role (no inherited set).
-- `getEffectiveRolesForUser($userId, $tenantId)` — unions the user's direct role with roles inherited through their organizational unit (`ou_role_assignments`).
+- `hasRole($userId, $role, $tenantId)` — true when `$role` is in the user's effective role set (direct role + OU/ancestor-OU roles, tenant scoped).
+- `getRoleForUser($userId)` — the user's primary (direct) role name only.
+- `getPermissionsForUser($userId)` — directly-granted permissions for the user's primary role (no inherited set).
+- `getEffectiveRolesForUser($userId, $tenantId)` — the effective role-name set (direct + OU/ancestor-OU inherited).
+- `getEffectivePermissionsForUser($userId, $tenantId)` — the full effective permission set `hasPermission()` tests against.
 
 ## Enforcement at the route boundary
 
@@ -158,16 +163,18 @@ Flow:
 1. If the route requires neither a role nor a permission, pass through (fail-open).
 2. Extract the bearer token from the `Authorization` header (or `access_token` cookie); missing → `401`.
 3. Validate the JWT via `JwtParser`; invalid/expired → `401`. The `user_id` claim must be an integer → else `401`.
-4. If `requiredRole` is set, enforce it via `RoleChecker::hasRole()`.
-5. If `requiredPermission` is set, enforce it via `RoleChecker::hasPermission()`; the `403` body echoes the missing permission under `required`.
-6. Attach the decoded payload as `Request::$user` and call the next handler.
+4. Read the resolved tenant id from `TenantContext` (set earlier by `EnforceTenantIsolation`); an unresolved tenant → `401` (fail closed, since OU-inherited grants cannot be evaluated without it).
+5. If `requiredRole` is set, enforce it via `RoleChecker::hasRole($userId, $role, $tenantId)`.
+6. If `requiredPermission` is set, enforce it via `RoleChecker::hasPermission($userId, $permission, $tenantId)`; the `403` body echoes the missing permission under `required`.
+7. Attach the decoded payload as `Request::$user` and call the next handler.
 
 > Security invariant: authorization is **always** decided against the server-side store via `RoleChecker`. Role/permission claims that may appear in the JWT are never trusted for access decisions (issue #54). The core routes in `public/index.php` are protected with the legacy role string `'admin'`.
 
-Inside a handler you can still check a permission explicitly:
+Inside a handler you can still check a permission explicitly (pass the resolved tenant id):
 
 ```php
-if (!$roleChecker->hasPermission($request->user->user_id, 'reports:read')) {
+$tenantId = TenantContext::getTenantId();
+if (!$roleChecker->hasPermission($request->user->user_id, 'reports:read', $tenantId)) {
     return Response::error('Permission denied', 403);
 }
 ```

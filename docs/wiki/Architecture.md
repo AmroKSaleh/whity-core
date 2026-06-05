@@ -193,17 +193,21 @@ Permissions use **`resource:action` colon notation** (e.g. `users:read`, `roles:
 
 ### RoleChecker (hierarchy + cache)
 
-`RoleChecker` (`src/Auth/RoleChecker.php`) answers `hasRole()` and `hasPermission()` against the database.
+`RoleChecker` (`src/Auth/RoleChecker.php`) answers `hasRole($userId, $role, $tenantId)` and `hasPermission($userId, $permission, $tenantId)` against the database. Every check is **tenant scoped** (WC-54): a user's effective grants include roles reached through their organizational unit, which are tenant-bound, so the resolved tenant id (from `TenantContext`) is threaded into every check.
 
-`hasPermission($userId, $permission)` resolution order:
+A user's **effective role set** is the UNION of:
+
+1. Their **direct role** (`users.role_id`).
+2. Every role assigned to their **organizational unit AND each ancestor OU** — the `organizational_units.parent_id` chain walked up to the root — via `ou_role_assignments`, filtered to the current tenant. A user in a child OU therefore inherits the roles granted to every OU above it; an OU role assigned in another tenant never counts.
+
+`hasRole()` returns true when `$role` is in that effective set. `hasPermission($userId, $permission, $tenantId)` resolution order:
 
 1. The permission **must exist in the registry** — an unregistered permission can never be granted.
-2. **Direct grant** on the user's primary role (`role_permissions` joined to `users.role_id`).
-3. Otherwise resolve via the **role hierarchy**: walk up the `roles.parent_id` chain from the user's role, unioning each role's directly-granted permissions (`getEffectivePermissionsForRole()`).
+2. Otherwise resolve against the user's **effective permission set**: the union, over every effective role, of that role's hierarchy-resolved permissions (`getEffectivePermissionsForRole()` walks up the `roles.parent_id` chain, unioning each role's directly-granted `role_permissions`).
 
-The hierarchy walk is protected by visited-set **cycle detection** and a hard `MAX_HIERARCHY_DEPTH = 64` bound; a cycle or over-deep chain is logged and resolution terminates gracefully. Resolved effective permission sets are memoized in a **worker-level static cache** (`$effectivePermissionCache`) — derived, non-request data, safe to share across the requests a worker serves. The cache is invalidated via `RoleChecker::clearCache()`, which `RolesApiHandler` calls after any mutating write.
+Both the role-hierarchy walk and the OU parent-chain walk are protected by visited-set **cycle detection** and a hard `MAX_HIERARCHY_DEPTH = 64` bound; a cycle or over-deep chain is logged and resolution terminates gracefully. Resolved sets are memoized in two **worker-level static caches** — `$effectivePermissionCache` (per role id; tenant-independent) and `$effectiveUserPermissionCache` (per `userId:tenantId`, because OU membership/assignments are tenant scoped). Both hold derived, non-request data safe to share across the requests a worker serves, and both are invalidated via `RoleChecker::clearCache()`, which `RolesApiHandler` (role/permission writes), `UsersApiHandler` (role/OU-membership changes) and `OusApiHandler` (OU role assign/remove) call after any mutating write.
 
-`RoleChecker` also exposes `getEffectiveRolesForUser($userId, $tenantId)`, which unions a user's direct role (`users.role_id`) with roles inherited through their organizational unit (`ou_role_assignments`).
+`RoleChecker` also exposes `getEffectiveRolesForUser($userId, $tenantId)` (the role-name list of the effective set) and `getEffectivePermissionsForUser($userId, $tenantId)` (the resolved permission set `hasPermission()` tests against).
 
 ### RbacMiddleware route enforcement
 

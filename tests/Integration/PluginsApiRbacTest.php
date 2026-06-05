@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
+use PDO;
 use PHPUnit\Framework\TestCase;
-use PDOStatement;
 use Whity\Api\PluginsApiHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
@@ -15,6 +15,7 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Http\RbacMiddleware;
 
@@ -38,10 +39,10 @@ use Whity\Http\RbacMiddleware;
 class PluginsApiRbacTest extends TestCase
 {
     private const SECRET = 'test-secret-key';
+    private const TENANT = 1;
 
     private JwtParser $jwtParser;
     private PermissionRegistry $registry;
-    private Database $db;
     private RoleChecker $roleChecker;
     private RbacMiddleware $middleware;
     private Router $router;
@@ -65,10 +66,14 @@ class PluginsApiRbacTest extends TestCase
 
     protected function setUp(): void
     {
+        RoleChecker::clearCache();
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
+
         $this->jwtParser = new JwtParser(self::SECRET);
         $this->registry = new PermissionRegistry();
-        $this->db = $this->createMock(Database::class);
-        $this->roleChecker = new RoleChecker($this->db, $this->registry);
+        // Default to an empty-grant store; each test re-seeds via seedRolePermissions.
+        $this->roleChecker = new RoleChecker($this->makeEmptyDb(), $this->registry);
         $this->middleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
         $this->router = new Router();
 
@@ -115,6 +120,8 @@ class PluginsApiRbacTest extends TestCase
     protected function tearDown(): void
     {
         $this->removeDirectory($this->tempDir);
+        RoleChecker::clearCache();
+        TenantContext::reset();
     }
 
     /**
@@ -141,26 +148,73 @@ class PluginsApiRbacTest extends TestCase
     }
 
     /**
-     * Stub the role_permissions lookup used by RoleChecker::hasPermission.
+     * Seed the role_permissions store backing RoleChecker::hasPermission with a
+     * real in-memory SQLite engine: the given user (tenant 1, no OU) holds a
+     * dedicated role granting exactly $grantedPermissions. Rebuilds the checker
+     * and middleware so the dispatch path uses the seeded store.
      *
      * @param array<int, string> $grantedPermissions Permissions the user's role grants.
      */
     private function seedRolePermissions(int $userId, array $grantedPermissions): void
     {
-        $this->db->method('query')->willReturnCallback(
-            function (string $sql, array $bindings) use ($userId, $grantedPermissions): PDOStatement {
-                $statement = $this->createMock(PDOStatement::class);
-                $matches = ($bindings[':userId'] ?? null) === $userId
-                    && in_array($bindings[':permission'] ?? null, $grantedPermissions, true);
-                $statement->method('fetch')->willReturn($matches ? ['1' => 1] : false);
-                return $statement;
-            }
-        );
+        $pdo = $this->makeSchema();
+
+        $pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute(['role_' . $userId]);
+        $roleId = (int) $pdo->lastInsertId();
+        foreach ($grantedPermissions as $permission) {
+            $pdo->prepare('INSERT OR IGNORE INTO permissions (name, created_at) VALUES (?, NOW())')->execute([$permission]);
+            $stmt = $pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+            $stmt->execute([$permission]);
+            $permissionId = (int) $stmt->fetchColumn();
+            $pdo->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
+                ->execute([$roleId, $permissionId]);
+        }
+        $pdo->prepare('INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, ?, ?, ?, ?, NULL, NOW())')
+            ->execute([$userId, self::TENANT, "user{$userId}@example.com", 'x', $roleId]);
+
+        $this->roleChecker = new RoleChecker($this->wrapSqlite($pdo), $this->registry);
+        $this->middleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
     }
 
     private function tokenFor(int $userId): string
     {
-        return $this->jwtParser->create(['user_id' => $userId, 'email' => "user{$userId}@example.com"]);
+        return $this->jwtParser->create([
+            'user_id' => $userId,
+            'email' => "user{$userId}@example.com",
+            'tenant_id' => self::TENANT,
+        ]);
+    }
+
+    private function makeEmptyDb(): Database
+    {
+        return $this->wrapSqlite($this->makeSchema());
+    }
+
+    private function wrapSqlite(PDO $pdo): Database
+    {
+        $db = Database::withFactory(static fn (): PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
+    }
+
+    private function makeSchema(): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+
+        $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, parent_id INTEGER, tenant_id INTEGER, created_at TEXT)');
+        $pdo->exec('CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT)');
+        $pdo->exec('CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT, UNIQUE(role_id, permission_id))');
+        $pdo->exec('CREATE TABLE organizational_units (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, slug TEXT NOT NULL, created_at TEXT)');
+        $pdo->exec('CREATE TABLE ou_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, ou_id INTEGER NOT NULL, role_id INTEGER NOT NULL, created_at TEXT, UNIQUE(ou_id, role_id))');
+        $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL, email TEXT NOT NULL, password TEXT NOT NULL, role_id INTEGER, ou_id INTEGER, created_at TEXT)');
+
+        return $pdo;
     }
 
     /**

@@ -100,10 +100,10 @@ components/admin/
 ### Authentication & Authorization
 
 - All admin routes are protected via `(protected)` layout
-- Requires valid JWT token in localStorage (`whity_auth_token`)
-- Auth context checks token validity and expiry
+- Authentication uses server-set **httpOnly cookies** (#51); the JWT is never stored in `localStorage` or readable by JavaScript
+- Auth context bootstraps from `GET /api/me` (sent with `credentials: 'include'`) and tracks only the user profile, not the token
 - Automatic redirect to login for unauthenticated users
-- User role stored in JWT payload for future role-based access control
+- Authorization is enforced server-side against the database via `RoleChecker` (the JWT role claim is never trusted for access decisions)
 
 ### Data Flow
 
@@ -344,8 +344,8 @@ toast({
 ## Troubleshooting
 
 **Issue: Admin pages redirect to login**
-- Solution: Ensure you're logged in and token is in localStorage
-- Check: Open DevTools → Application → localStorage → look for `whity_auth_token`
+- Solution: Ensure you're logged in (a fresh login sets the httpOnly auth cookies)
+- Check: Open DevTools → Application → Cookies → confirm the `access_token` cookie is present; if `GET /api/me` returns 401 the session has expired — log in again
 
 **Issue: Sidebar not showing**
 - Solution: Check browser console for errors

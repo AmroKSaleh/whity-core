@@ -327,6 +327,7 @@ class UsersApiHandler
             $updates = [];
             $params_array = [];
             $roleChanged = false;
+            $ouChanged = false;
 
             if (isset($body['email']) && $body['email'] !== $user['email']) {
                 // Check if new email already exists within the owning tenant.
@@ -384,9 +385,11 @@ class UsersApiHandler
                     // Safe to update ou_id
                     $updates[] = 'ou_id = ?';
                     $params_array[] = $ouId;
+                    $ouChanged = true;
                 } else {
                     // Set to NULL (user in root)
                     $updates[] = 'ou_id = NULL';
+                    $ouChanged = true;
                 }
             }
 
@@ -408,9 +411,10 @@ class UsersApiHandler
             $stmt = $this->db->prepare($sql);
             $stmt->execute($params_array);
 
-            // A role re-assignment changes the user's effective permission set;
+            // A role re-assignment OR an OU-membership change alters the user's
+            // effective role/permission set (OU roles are inherited, WC-54);
             // invalidate the worker-level cache so RBAC checks are not stale.
-            if ($roleChanged) {
+            if ($roleChanged || $ouChanged) {
                 RoleChecker::clearCache();
             }
 
@@ -419,6 +423,7 @@ class UsersApiHandler
                 'tenant_id' => $currentTenantId,
                 'user_id' => (int)$id,
                 'role_changed' => $roleChanged,
+                'ou_changed' => $ouChanged,
             ]);
 
             return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);

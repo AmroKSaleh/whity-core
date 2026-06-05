@@ -1,335 +1,237 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Integration;
 
+use PDO;
 use PHPUnit\Framework\TestCase;
-use Whity\Http\RbacMiddleware;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
-use PDOStatement;
+use Whity\Http\RbacMiddleware;
 
 /**
- * Integration tests for permission assignment and enforcement
+ * Integration tests for permission assignment and enforcement.
  *
- * Verifies that permission assignment to roles and permission enforcement
- * work correctly end-to-end. Tests the interaction between PermissionRegistry,
- * RoleChecker, and RbacMiddleware to ensure the system properly enforces
- * permissions.
+ * Verifies that permission assignment to roles and permission enforcement work
+ * correctly end-to-end through the real {@see PermissionRegistry},
+ * {@see RoleChecker} and {@see RbacMiddleware}, against an in-memory SQLite engine
+ * seeded with the production schema. The resolved tenant is locked into
+ * {@see TenantContext} ahead of RBAC, mirroring production.
  *
  * Key flows tested:
- * 1. Permission registered → assigned to role → user with role can access
- * 2. Permission registered → NOT assigned to role → user denied access
+ * 1. Permission registered → assigned to role → user with role can access.
+ * 2. Permission registered → NOT assigned to role → user denied access.
  * 3. Permission registered → assigned → unregistered → user instantly denied
+ *    (the registry gate denies before any grant lookup).
  */
 class PermissionAssignmentTest extends TestCase
 {
-    private RbacMiddleware $rbacMiddleware;
+    private const TENANT = 1;
+
     private JwtParser $jwtParser;
-    private RoleChecker $roleChecker;
     private PermissionRegistry $permissionRegistry;
-    private Database $mockDb;
+    private PDO $pdo;
+    private Database $db;
+    private RoleChecker $roleChecker;
+    private RbacMiddleware $rbacMiddleware;
 
     protected function setUp(): void
     {
-        // Initialize the real PermissionRegistry (in-memory)
-        $this->permissionRegistry = new PermissionRegistry();
-
-        // Create mock database for RoleChecker
-        $this->mockDb = $this->createMock(Database::class);
-
-        // Create RoleChecker with real PermissionRegistry and mock database
-        $this->roleChecker = new RoleChecker($this->mockDb, $this->permissionRegistry);
-
-        // Create JWT parser with test secret
-        $this->jwtParser = new JwtParser('test-secret-key');
-
-        // Create middleware with real services
-        $this->rbacMiddleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
-
-        // The effective-permission cache is worker (static) scoped; reset it so
-        // resolved sets never leak between test cases.
         RoleChecker::clearCache();
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
+
+        $this->permissionRegistry = new PermissionRegistry();
+        $this->pdo = $this->makeSchema();
+        $this->db = $this->wrapSqlite($this->pdo);
+        $this->roleChecker = new RoleChecker($this->db, $this->permissionRegistry);
+        $this->jwtParser = new JwtParser('test-secret-key');
+        $this->rbacMiddleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
     }
 
     protected function tearDown(): void
     {
         RoleChecker::clearCache();
+        TenantContext::reset();
     }
 
     /**
-     * Test 1: User with assigned permission can access protected resource
-     *
-     * Flow:
-     * 1. Register permission "users.create" in PermissionRegistry
-     * 2. Assign permission to admin role in database (simulated)
-     * 3. Create user with admin role
-     * 4. Make API request with permission requirement
-     * 5. Assert: Request succeeds (200 OK)
-     *
-     * Verifies:
-     * - PermissionRegistry lookup works correctly
-     * - Database role_permissions query returns assigned permissions
-     * - RbacMiddleware allows request with valid permission
-     * - End-to-end permission enforcement succeeds
+     * Test 1: a user whose role is granted the permission reaches the handler.
      */
     public function testUserWithAssignedPermissionCanAccess(): void
     {
-        // Step 1: Register permission in PermissionRegistry
         $this->permissionRegistry->registerPermissions('core-users', ['users.create']);
+        // Role 'admin' is granted users.create; user 1 holds that role.
+        $roleId = $this->seedRole('admin');
+        $this->grant($roleId, 'users.create');
+        $this->seedUser(1, $roleId);
 
-        // Step 2: Setup database mock for the corrected grant lookup (WC-54).
-        // The direct-grant probe reaches role_permissions via the user join and
-        // joins permissions on permission_id, matched on permissions.name — NOT
-        // the phantom `permission_string`. The historical `:userId` + `:permission`
-        // binding contract is preserved.
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql, array $params): PDOStatement {
-                $this->assertStringContainsString('SELECT 1 FROM role_permissions rp', $sql);
-                $this->assertStringContainsString('JOIN users u ON u.role_id = rp.role_id', $sql);
-                $this->assertStringContainsString('JOIN permissions p ON p.id = rp.permission_id', $sql);
-                $this->assertStringNotContainsString('permission_string', $sql);
-                $this->assertSame([':userId' => 1, ':permission' => 'users.create'], $params);
-
-                $statement = $this->createMock(PDOStatement::class);
-                $statement->method('fetch')->willReturn(['result' => 1]);
-                return $statement;
-            }
-        );
-
-        // Step 3: Create a valid JWT token for user with admin role
         $token = $this->jwtParser->create([
             'user_id' => 1,
             'email' => 'admin@example.com',
-            'exp' => time() + 3600
+            'tenant_id' => self::TENANT,
+            'exp' => time() + 3600,
         ]);
 
-        // Step 4: Make API request with permission requirement
         $request = new Request('POST', '/api/users', ['Authorization' => "Bearer {$token}"]);
-        $requestSucceeded = false;
-        $responseStatus = null;
-
-        $next = function(Request $req) use (&$requestSucceeded, &$responseStatus) {
-            $requestSucceeded = true;
-            $responseStatus = 200;
+        $handlerCalled = false;
+        $next = function (Request $req) use (&$handlerCalled): Response {
+            $handlerCalled = true;
             return new Response(200, json_encode(['data' => 'User created successfully']));
         };
 
-        // Execute middleware with permission requirement
         $response = $this->rbacMiddleware->handle($request, $next, null, 'users.create');
 
-        // Step 5: Assert request succeeded
-        $this->assertTrue($requestSucceeded, 'Handler should be called when permission is granted');
-        $this->assertSame(200, $response->getStatusCode(), 'Request should succeed with status 200');
-        $this->assertSame(200, $responseStatus, 'Handler should receive and respond with 200 status');
-
-        // Verify user object is set on request
-        $this->assertNotNull($request->user, 'User object should be set on request');
-        $this->assertSame(1, $request->user->user_id, 'User ID should be correct');
-        $this->assertSame('admin@example.com', $request->user->email, 'Email should be correct');
+        $this->assertTrue($handlerCalled, 'Handler should be called when permission is granted');
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertNotNull($request->user);
+        $this->assertSame(1, $request->user->user_id);
+        $this->assertSame('admin@example.com', $request->user->email);
     }
 
     /**
-     * Test 2: User without assigned permission is denied access
-     *
-     * Flow:
-     * 1. Register permission "users.delete" in PermissionRegistry
-     * 2. Do NOT assign permission to user's role in database
-     * 3. Create user with that role
-     * 4. Make API request that requires permission
-     * 5. Assert: Request denied (403 Forbidden)
-     *
-     * Verifies:
-     * - PermissionRegistry correctly reports permission exists
-     * - Database query correctly returns no match for unassigned permission
-     * - RoleChecker::hasPermission returns false when permission not assigned
-     * - RbacMiddleware denies request with 403 Forbidden status
-     * - Proper error message is returned
+     * Test 2: a user whose role lacks the permission (and has no inheriting
+     * hierarchy or OU grant) is denied 403.
      */
     public function testUserWithoutAssignedPermissionDenied(): void
     {
-        // Step 1: Register permission in PermissionRegistry
         $this->permissionRegistry->registerPermissions('core-users', ['users.delete']);
+        // Role grants nothing relevant; no parent, no OU.
+        $roleId = $this->seedRole('user');
+        $this->seedUser(2, $roleId);
 
-        // Step 2: Setup database mock to return NO permission assignment.
-        // The direct-grant probe (corrected real-schema join, WC-54) returns no
-        // match; RoleChecker then falls back to hierarchy resolution (WC-15),
-        // which must also find nothing for this role so the user remains correctly
-        // denied. We route by SQL so every query the resolver issues is satisfied
-        // without granting access.
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql): PDOStatement {
-                $statement = $this->createMock(PDOStatement::class);
-                if (str_contains($sql, 'SELECT role_id FROM users')) {
-                    // User has a role, but it grants nothing relevant.
-                    $statement->method('fetch')->willReturn(['role_id' => 2]);
-                    $statement->method('fetchAll')->willReturn([]);
-                } elseif (str_contains($sql, 'SELECT parent_id FROM roles')) {
-                    // Role is a hierarchy root: no parent to inherit from.
-                    $statement->method('fetch')->willReturn(['parent_id' => null]);
-                    $statement->method('fetchAll')->willReturn([]);
-                } else {
-                    // Legacy direct-grant probe and per-role permission lookups:
-                    // no matching grant.
-                    $statement->method('fetch')->willReturn(false);
-                    $statement->method('fetchAll')->willReturn([]);
-                }
-                return $statement;
-            }
-        );
-
-        // Step 3: Create a valid JWT token for user with regular user role
         $token = $this->jwtParser->create([
             'user_id' => 2,
             'email' => 'user@example.com',
-            'exp' => time() + 3600
+            'tenant_id' => self::TENANT,
+            'exp' => time() + 3600,
         ]);
 
-        // Step 4: Make API request that requires the unassigned permission
         $request = new Request('DELETE', '/api/users/1', ['Authorization' => "Bearer {$token}"]);
         $handlerCalled = false;
-
-        $next = function(Request $req) use (&$handlerCalled) {
+        $next = function (Request $req) use (&$handlerCalled): Response {
             $handlerCalled = true;
             return new Response(200, '{}');
         };
 
-        // Execute middleware with permission requirement that user doesn't have
         $response = $this->rbacMiddleware->handle($request, $next, null, 'users.delete');
 
-        // Step 5: Assert request was denied
         $this->assertFalse($handlerCalled, 'Handler should not be called when permission is denied');
-        $this->assertSame(403, $response->getStatusCode(), 'Request should be denied with status 403');
-
-        // Verify error response
-        $responseData = json_decode($response->getBody(), true);
-        $this->assertArrayHasKey('error', $responseData, 'Response should contain error key');
-        $this->assertSame('Insufficient permissions', $responseData['error'], 'Error message should be "Insufficient permissions"');
+        $this->assertSame(403, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame('Insufficient permissions', $body['error']);
     }
 
     /**
-     * Test 3: Deleted plugin permissions instantly deny access
-     *
-     * Flow:
-     * 1. Register "custom-plugin.action" permission in PermissionRegistry
-     * 2. Assign permission to a role in database (simulated)
-     * 3. Create user with that role
-     * 4. Verify permission access works (permission check succeeds)
-     * 5. Unregister permission from PermissionRegistry (simulate plugin deletion)
-     * 6. Make same API request with same token
-     * 7. Assert: Request now denied (403) even though role still has database assignment
-     *
-     * Verifies:
-     * - Permission deletion from registry is instant
-     * - RoleChecker::hasPermission checks registry FIRST before database
-     * - Deleted permissions cannot be used even if database still has assignment
-     * - Plugin lifecycle is properly enforced
-     * - No stale permissions persist after plugin deletion
+     * Test 3: unregistering a permission instantly denies access even though the
+     * role_permissions grant still exists — the registry gate denies first.
      */
     public function testDeletedPluginPermissionsInstantlyDenied(): void
     {
-        // Step 1: Register custom plugin permission
         $this->permissionRegistry->registerPermissions('custom-plugin', ['custom-plugin.action']);
+        $this->assertTrue($this->permissionRegistry->permissionExists('custom-plugin.action'));
 
-        // Verify permission exists in registry
-        $this->assertTrue(
-            $this->permissionRegistry->permissionExists('custom-plugin.action'),
-            'Permission should exist in registry before deletion'
-        );
+        $roleId = $this->seedRole('plugin-role');
+        $this->grant($roleId, 'custom-plugin.action');
+        $this->seedUser(3, $roleId);
 
-        // Step 2: Setup database mock to return the permission assignment via the
-        // corrected grant lookup (WC-54). This simulates the database still
-        // holding the role_permissions entry: hasPermission resolves the user's
-        // role id, then the direct-grant probe (real schema join) finds it. The
-        // post-deletion request below never reaches the database because the
-        // registry gate denies it first.
-        $this->mockDb->method('query')->willReturnCallback(
-            function (string $sql): PDOStatement {
-                $statement = $this->createMock(PDOStatement::class);
-
-                if (str_contains($sql, 'SELECT role_id FROM users')) {
-                    $statement->method('fetch')->willReturn(['role_id' => 5]);
-                    return $statement;
-                }
-
-                if (str_contains($sql, 'SELECT 1 FROM role_permissions rp')) {
-                    $this->assertStringNotContainsString('permission_string', $sql);
-                    $statement->method('fetch')->willReturn(['result' => 1]);
-                    return $statement;
-                }
-
-                $statement->method('fetch')->willReturn(false);
-                $statement->method('fetchAll')->willReturn([]);
-                return $statement;
-            }
-        );
-
-        // Step 3: Create JWT token for user with access
         $token = $this->jwtParser->create([
             'user_id' => 3,
             'email' => 'user@example.com',
-            'exp' => time() + 3600
+            'tenant_id' => self::TENANT,
+            'exp' => time() + 3600,
         ]);
 
-        // Step 4: Verify permission access works BEFORE deletion
+        // Before deletion: access works.
         $request1 = new Request('POST', '/api/custom', ['Authorization' => "Bearer {$token}"]);
-        $firstRequestSucceeded = false;
-
-        $next1 = function(Request $req) use (&$firstRequestSucceeded) {
-            $firstRequestSucceeded = true;
+        $firstReached = false;
+        $next1 = function (Request $req) use (&$firstReached): Response {
+            $firstReached = true;
             return new Response(200, json_encode(['status' => 'ok']));
         };
-
         $response1 = $this->rbacMiddleware->handle($request1, $next1, null, 'custom-plugin.action');
+        $this->assertTrue($firstReached, 'Handler should be called before permission deletion');
+        $this->assertSame(200, $response1->getStatusCode());
 
-        // Assert: First request succeeds (permission exists and is assigned)
-        $this->assertTrue($firstRequestSucceeded, 'Handler should be called before permission deletion');
-        $this->assertSame(200, $response1->getStatusCode(), 'First request should succeed with status 200');
-
-        // Step 5: Unregister permission from PermissionRegistry (simulate plugin deletion)
-        // We do this by creating a new registry instance without the permission,
-        // simulating what would happen when the plugin is unloaded
+        // Simulate plugin unload: a fresh registry no longer knows the permission.
         $this->permissionRegistry = new PermissionRegistry();
-
-        // Verify permission no longer exists in registry
-        $this->assertFalse(
-            $this->permissionRegistry->permissionExists('custom-plugin.action'),
-            'Permission should be deleted from registry'
-        );
-
-        // Create new RoleChecker with the updated registry (no permissions)
-        $this->roleChecker = new RoleChecker($this->mockDb, $this->permissionRegistry);
-
-        // Create new middleware with updated RoleChecker
+        $this->assertFalse($this->permissionRegistry->permissionExists('custom-plugin.action'));
+        RoleChecker::clearCache();
+        $this->roleChecker = new RoleChecker($this->db, $this->permissionRegistry);
         $this->rbacMiddleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
 
-        // Step 6: Make same request with same token AFTER deletion
+        // After deletion: denied, even though the DB grant still exists.
         $request2 = new Request('POST', '/api/custom', ['Authorization' => "Bearer {$token}"]);
-        $secondRequestSucceeded = false;
-
-        $next2 = function(Request $req) use (&$secondRequestSucceeded) {
-            $secondRequestSucceeded = true;
+        $secondReached = false;
+        $next2 = function (Request $req) use (&$secondReached): Response {
+            $secondReached = true;
             return new Response(200, json_encode(['status' => 'ok']));
         };
-
-        // Execute middleware with the deleted permission
         $response2 = $this->rbacMiddleware->handle($request2, $next2, null, 'custom-plugin.action');
 
-        // Step 7: Assert request is now denied
-        $this->assertFalse($secondRequestSucceeded, 'Handler should not be called after permission deletion');
-        $this->assertSame(403, $response2->getStatusCode(), 'Request should be denied with status 403 after permission deletion');
+        $this->assertFalse($secondReached, 'Handler should not be called after permission deletion');
+        $this->assertSame(403, $response2->getStatusCode());
+        $body = json_decode($response2->getBody(), true);
+        $this->assertSame('Insufficient permissions', $body['error']);
+    }
 
-        // Verify error response
-        $responseData = json_decode($response2->getBody(), true);
-        $this->assertArrayHasKey('error', $responseData, 'Response should contain error key');
-        $this->assertSame('Insufficient permissions', $responseData['error'], 'Error message should indicate insufficient permissions');
+    // ==================== Helpers ====================
 
-        // Additional verification: Confirm that database query was never made for second request
-        // (because permission check fails in registry before querying database)
-        // This is verified by the fact that we configured mockDb to expect a specific call
-        // but it never happens because the registry check fails first
+    private function seedRole(string $name): int
+    {
+        $this->pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute([$name]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function grant(int $roleId, string $permission): void
+    {
+        $this->pdo->prepare('INSERT OR IGNORE INTO permissions (name, created_at) VALUES (?, NOW())')->execute([$permission]);
+        $stmt = $this->pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+        $stmt->execute([$permission]);
+        $permissionId = (int) $stmt->fetchColumn();
+        $this->pdo->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
+            ->execute([$roleId, $permissionId]);
+    }
+
+    private function seedUser(int $userId, int $roleId): void
+    {
+        $this->pdo->prepare(
+            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
+             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
+        )->execute([$userId, self::TENANT, "u{$userId}@example.com", 'x', $roleId]);
+    }
+
+    private function wrapSqlite(PDO $pdo): Database
+    {
+        $db = Database::withFactory(static fn (): PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
+    }
+
+    private function makeSchema(): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+
+        $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, parent_id INTEGER, tenant_id INTEGER, created_at TEXT)');
+        $pdo->exec('CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT)');
+        $pdo->exec('CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT, UNIQUE(role_id, permission_id))');
+        $pdo->exec('CREATE TABLE organizational_units (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, slug TEXT NOT NULL, created_at TEXT)');
+        $pdo->exec('CREATE TABLE ou_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, ou_id INTEGER NOT NULL, role_id INTEGER NOT NULL, created_at TEXT, UNIQUE(ou_id, role_id))');
+        $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL, email TEXT NOT NULL, password TEXT NOT NULL, role_id INTEGER, ou_id INTEGER, created_at TEXT)');
+
+        return $pdo;
     }
 }

@@ -13,6 +13,7 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Http\RbacMiddleware;
 
@@ -45,17 +46,22 @@ use Whity\Http\RbacMiddleware;
 class RbacLifecycleTest extends TestCase
 {
     private const SECRET = 'wc17-lifecycle-secret';
+    private const TENANT = 1;
 
     protected function setUp(): void
     {
         // The effective-permission cache is process-static; reset between cases
         // so a resolution in one test never leaks into another.
         RoleChecker::clearCache();
+        // Mirror production: the tenant is resolved/locked before RBAC runs.
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
     }
 
     protected function tearDown(): void
     {
         RoleChecker::clearCache();
+        TenantContext::reset();
     }
 
     /**

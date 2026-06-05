@@ -90,7 +90,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         // engine raises "no such column", surfacing as a 500. After the fix it
         // resolves through permissions.name and returns true.
         $this->assertTrue(
-            $checker->hasPermission($adminUserId, 'plugins:manage'),
+            $checker->hasPermission($adminUserId, 'plugins:manage', 1),
             'A direct role_permissions grant (via permission_id join) must satisfy hasPermission().'
         );
     }
@@ -103,7 +103,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         $checker = $this->roleChecker();
 
         $this->assertFalse(
-            $checker->hasPermission($userId, 'plugins:manage'),
+            $checker->hasPermission($userId, 'plugins:manage', 1),
             'A role without the grant and without a hierarchy parent must be denied.'
         );
     }
@@ -127,7 +127,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         // Pre-condition: no grant exists yet (the production state on main).
         $adminUserId = $this->seedUser('admin@example.com', 'admin');
         $this->assertFalse(
-            $this->roleChecker()->hasPermission($adminUserId, 'plugins:manage'),
+            $this->roleChecker()->hasPermission($adminUserId, 'plugins:manage', 1),
             'Sanity: before the migration the admin must NOT hold plugins:manage.'
         );
 
@@ -136,7 +136,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         GrantPluginsManageToAdmin::up($this->db);
 
         $this->assertTrue(
-            $this->roleChecker()->hasPermission($adminUserId, 'plugins:manage'),
+            $this->roleChecker()->hasPermission($adminUserId, 'plugins:manage', 1),
             'After the migration grant, the admin must hold plugins:manage.'
         );
     }
@@ -336,6 +336,7 @@ final class RoleCheckerRealEngineTest extends TestCase
                 email TEXT NOT NULL,
                 password TEXT NOT NULL,
                 role_id INTEGER,
+                ou_id INTEGER,
                 created_at TEXT
             )
         ');
