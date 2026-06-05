@@ -90,10 +90,12 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\PluginLoader;
 use Whity\Auth\JwtParser;
+use Whity\Auth\JwtSecretGuard;
 use Whity\Auth\RoleChecker;
 use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
+use Whity\Http\Cors;
 use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Api\UsersApiHandler;
 use Whity\Api\RolesApiHandler;
@@ -171,9 +173,12 @@ $router = new Router();
 
 // 3. Initialize JWT parser
 $appEnv = $_ENV['APP_ENV'] ?? 'production';
-if ($appEnv !== 'development' && empty($_ENV['JWT_SECRET'])) {
-    throw new \RuntimeException('JWT_SECRET environment variable must be set in production environments');
-}
+// Outside development the JWT secret must be present AND >= 32 chars; a missing or
+// short secret is brute-forceable, so the app refuses to start (WC-53).
+JwtSecretGuard::assertValid(
+    isset($_ENV['JWT_SECRET']) ? (string)$_ENV['JWT_SECRET'] : null,
+    $appEnv
+);
 $jwtSecret = $_ENV['JWT_SECRET'] ?? 'dev_secret';
 $jwtParser = new JwtParser($jwtSecret);
 
@@ -398,13 +403,12 @@ if ($isWorker) {
                 // Create request from PHP superglobals
                 $request = Request::fromGlobals();
 
+                // Resolve CORS headers once per request from the allowlist (WC-53).
+                $corsHeaders = Cors::headers($request->getHeader('Origin'));
+
                 // Handle OPTIONS preflight requests for CORS
                 if ($request->getMethod() === 'OPTIONS') {
-                    $response = new Response(204, '', [
-                        'Access-Control-Allow-Origin' => '*',
-                        'Access-Control-Allow-Methods' => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-                        'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
-                    ]);
+                    $response = new Response(204, '', $corsHeaders);
                     $response->send();
                     return;
                 }
@@ -412,11 +416,8 @@ if ($isWorker) {
                 // Handle request through kernel
                 $response = $kernel->handle($request);
 
-                // Get current headers and add CORS
-                $headers = $response->getHeaders();
-                $headers['Access-Control-Allow-Origin'] = '*';
-                $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-                $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+                // Merge CORS headers into the response.
+                $headers = array_merge($response->getHeaders(), $corsHeaders);
 
                 // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
                 $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
@@ -427,10 +428,10 @@ if ($isWorker) {
                 // Handle any uncaught exceptions
                 try {
                     $errorResponse = Response::error('Internal server error', 500);
-                    $errorHeaders = $errorResponse->getHeaders();
-                    $errorHeaders['Access-Control-Allow-Origin'] = '*';
-                    $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-                    $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+                    $errorHeaders = array_merge(
+                        $errorResponse->getHeaders(),
+                        Cors::headers($_SERVER['HTTP_ORIGIN'] ?? null)
+                    );
                     $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
                     $errorResponse->send();
                 } catch (\Throwable $sendError) {
@@ -478,13 +479,12 @@ if ($isWorker) {
         // Create request from PHP superglobals
         $request = Request::fromGlobals();
 
+        // Resolve CORS headers once per request from the allowlist (WC-53).
+        $corsHeaders = Cors::headers($request->getHeader('Origin'));
+
         // Handle OPTIONS preflight requests for CORS
         if ($request->getMethod() === 'OPTIONS') {
-            $response = new Response(204, '', [
-                'Access-Control-Allow-Origin' => '*',
-                'Access-Control-Allow-Methods' => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-                'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
-            ]);
+            $response = new Response(204, '', $corsHeaders);
             $response->send();
             exit;
         }
@@ -492,11 +492,8 @@ if ($isWorker) {
         // Handle request through kernel
         $response = $kernel->handle($request);
 
-        // Get current headers and add CORS
-        $headers = $response->getHeaders();
-        $headers['Access-Control-Allow-Origin'] = '*';
-        $headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-        $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+        // Merge CORS headers into the response.
+        $headers = array_merge($response->getHeaders(), $corsHeaders);
 
         // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
         $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
@@ -507,10 +504,10 @@ if ($isWorker) {
         // Handle any uncaught exceptions
         try {
             $errorResponse = Response::error('Internal server error', 500);
-            $errorHeaders = $errorResponse->getHeaders();
-            $errorHeaders['Access-Control-Allow-Origin'] = '*';
-            $errorHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-            $errorHeaders['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+            $errorHeaders = array_merge(
+                $errorResponse->getHeaders(),
+                Cors::headers($_SERVER['HTTP_ORIGIN'] ?? null)
+            );
             $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
             $errorResponse->send();
         } catch (\Throwable $sendError) {

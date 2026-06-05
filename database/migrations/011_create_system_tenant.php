@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Database\Migrations;
 
 use Whity\Database\Database;
+use Whity\Database\InitialPassword;
 
 /**
  * Create System Tenant
@@ -26,8 +29,11 @@ class CreateSystemTenant
         // Reset sequence to start at 1 for normal tenants (and restore MINVALUE)
         $db->exec('ALTER SEQUENCE tenants_id_seq RESTART WITH 1 MINVALUE 1');
 
-        // Create system admin user
-        $adminPassword = password_hash('system_admin_123', PASSWORD_BCRYPT);
+        // Create system admin user. Password is sourced from
+        // INITIAL_SYSTEM_ADMIN_PASSWORD or generated once at random — never a
+        // static literal. This only affects FRESH installs; existing deployments
+        // keep their previously-stored hash and must rotate it manually.
+        $adminPassword = InitialPassword::hashFor('INITIAL_SYSTEM_ADMIN_PASSWORD', 'system@whity.local');
         $db->query(
             'INSERT INTO users (tenant_id, email, password, role_id, created_at)
              VALUES (0, :email, :password, 1, NOW())
