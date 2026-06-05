@@ -1,7 +1,6 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import type { IconProps } from '@tabler/icons-react';
 
 export interface NavigationItem {
   id: string;
@@ -47,8 +46,13 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     const grouped = new Map<string, NavigationItem[]>();
     grouped.set('_ungrouped', []);
 
+    // Sort by `order` ascending so the client is robust regardless of the order
+    // the API returns items in. Array.prototype.sort is stable (ES2019+), so
+    // items sharing an `order` keep their original relative order.
+    const sortedItems = [...items].sort((a, b) => a.order - b.order);
+
     // Group items by group property
-    items.forEach((item) => {
+    sortedItems.forEach((item) => {
       const groupId = item.group || '_ungrouped';
       if (!grouped.has(groupId)) {
         grouped.set(groupId, []);
