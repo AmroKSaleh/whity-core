@@ -360,7 +360,7 @@ class {$class} implements PluginInterface
             'requiredRole' => null,
         ]];
     }
-    public function getPermissions(): array { return ['{$class}:use']; }
+    public function getPermissions(): array { return ['fixture:use']; }
     public function getHooks(): array { return []; }
     public function getMigrations(): array { return []; }
     public function handle(Request \$request): Response

@@ -6,6 +6,7 @@ namespace Whity\Core;
 
 use ReflectionClass;
 use Throwable;
+use Whity\Core\RBAC\InvalidPermissionException;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
@@ -985,9 +986,21 @@ class PluginLoader
             }
         }
 
-        // 2. Register permissions with the permission registry
+        // 2. Register permissions with the permission registry. Permissions are
+        //    validated against the `resource:action` pattern; a plugin declaring a
+        //    malformed permission is rejected with a logged warning rather than
+        //    crashing the host (per-plugin error boundary, same as routes/hooks).
         if ($this->permissionRegistry !== null) {
-            $this->permissionRegistry->registerPermissions($plugin->getName(), $plugin->getPermissions());
+            try {
+                $this->permissionRegistry->register($plugin->getName(), $plugin->getPermissions());
+            } catch (InvalidPermissionException $e) {
+                $warningMsg = "Plugin {$pluginKey} declares an invalid permission: " . $e->getMessage();
+                if ($this->logger !== null) {
+                    $this->logger->warning($warningMsg);
+                } else {
+                    error_log($warningMsg);
+                }
+            }
         }
 
         // 3. Register hooks with the hook manager, tracking each subscription so

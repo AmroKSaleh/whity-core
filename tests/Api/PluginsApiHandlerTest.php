@@ -249,7 +249,7 @@ class {$class} implements PluginInterface
             'requiredRole' => null,
         ]];
     }
-    public function getPermissions(): array { return ['{$class}:read', '{$class}:write']; }
+    public function getPermissions(): array { return ['fixture:read', 'fixture:write']; }
     public function getHooks(): array { return []; }
     public function getMigrations(): array { return []; }
     public function handle(Request \$request): Response

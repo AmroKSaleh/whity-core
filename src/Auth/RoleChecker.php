@@ -195,7 +195,7 @@ class RoleChecker
     public function hasPermission(int $userId, string $permission, int $tenantId): bool
     {
         // Step 1: an unregistered permission can never be granted.
-        if (!$this->registry->permissionExists($permission)) {
+        if (!$this->registry->exists($permission)) {
             return false;
         }
 

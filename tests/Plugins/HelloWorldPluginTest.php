@@ -161,8 +161,8 @@ final class HelloWorldPluginTest extends TestCase
         $this->assertSame('admin', $adminMatch['requiredRole']);
 
         // Permissions were registered for the plugin source.
-        $this->assertTrue($permissionRegistry->permissionExists('hello:view'));
-        $this->assertTrue($permissionRegistry->permissionExists('hello:manage'));
+        $this->assertTrue($permissionRegistry->exists('hello:view'));
+        $this->assertTrue($permissionRegistry->exists('hello:manage'));
 
         // The user.creating hook is registered.
         $this->assertNotEmpty($hookManager->getListeners('user.creating'));

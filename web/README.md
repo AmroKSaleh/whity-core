@@ -63,8 +63,6 @@ A few flows hit real app bugs (not test issues); they are kept as `test.fixme`
 so they are visible without failing the suite:
 
 - Invalid login shows no error message (`app/login/page.tsx`).
-- Create Role drops selected permissions — the modal posts `permissionIds`
-  but the backend honours `permissions` (`app/(protected)/admin/roles/create-modal.tsx`).
 - Edit User modal does not pre-fill Name/Tenant (the users list API omits both).
 - OU delete via the UI errors because the `/api/*` proxy turns the backend's
   HTTP 204 into a 500 (`app/api/[...path]/route.ts`); the backend delete itself

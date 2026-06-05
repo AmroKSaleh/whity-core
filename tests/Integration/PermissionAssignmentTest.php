@@ -66,10 +66,10 @@ class PermissionAssignmentTest extends TestCase
      */
     public function testUserWithAssignedPermissionCanAccess(): void
     {
-        $this->permissionRegistry->registerPermissions('core-users', ['users.create']);
-        // Role 'admin' is granted users.create; user 1 holds that role.
+        $this->permissionRegistry->register('core-users', ['users:create']);
+        // Role 'admin' is granted users:create; user 1 holds that role.
         $roleId = $this->seedRole('admin');
-        $this->grant($roleId, 'users.create');
+        $this->grant($roleId, 'users:create');
         $this->seedUser(1, $roleId);
 
         $token = $this->jwtParser->create([
@@ -86,7 +86,7 @@ class PermissionAssignmentTest extends TestCase
             return new Response(200, json_encode(['data' => 'User created successfully']));
         };
 
-        $response = $this->rbacMiddleware->handle($request, $next, null, 'users.create');
+        $response = $this->rbacMiddleware->handle($request, $next, null, 'users:create');
 
         $this->assertTrue($handlerCalled, 'Handler should be called when permission is granted');
         $this->assertSame(200, $response->getStatusCode());
@@ -101,7 +101,7 @@ class PermissionAssignmentTest extends TestCase
      */
     public function testUserWithoutAssignedPermissionDenied(): void
     {
-        $this->permissionRegistry->registerPermissions('core-users', ['users.delete']);
+        $this->permissionRegistry->register('core-users', ['users:delete']);
         // Role grants nothing relevant; no parent, no OU.
         $roleId = $this->seedRole('user');
         $this->seedUser(2, $roleId);
@@ -120,7 +120,7 @@ class PermissionAssignmentTest extends TestCase
             return new Response(200, '{}');
         };
 
-        $response = $this->rbacMiddleware->handle($request, $next, null, 'users.delete');
+        $response = $this->rbacMiddleware->handle($request, $next, null, 'users:delete');
 
         $this->assertFalse($handlerCalled, 'Handler should not be called when permission is denied');
         $this->assertSame(403, $response->getStatusCode());
@@ -134,11 +134,11 @@ class PermissionAssignmentTest extends TestCase
      */
     public function testDeletedPluginPermissionsInstantlyDenied(): void
     {
-        $this->permissionRegistry->registerPermissions('custom-plugin', ['custom-plugin.action']);
-        $this->assertTrue($this->permissionRegistry->permissionExists('custom-plugin.action'));
+        $this->permissionRegistry->register('custom-plugin', ['custom_plugin:action']);
+        $this->assertTrue($this->permissionRegistry->exists('custom_plugin:action'));
 
         $roleId = $this->seedRole('plugin-role');
-        $this->grant($roleId, 'custom-plugin.action');
+        $this->grant($roleId, 'custom_plugin:action');
         $this->seedUser(3, $roleId);
 
         $token = $this->jwtParser->create([
@@ -155,13 +155,13 @@ class PermissionAssignmentTest extends TestCase
             $firstReached = true;
             return new Response(200, json_encode(['status' => 'ok']));
         };
-        $response1 = $this->rbacMiddleware->handle($request1, $next1, null, 'custom-plugin.action');
+        $response1 = $this->rbacMiddleware->handle($request1, $next1, null, 'custom_plugin:action');
         $this->assertTrue($firstReached, 'Handler should be called before permission deletion');
         $this->assertSame(200, $response1->getStatusCode());
 
         // Simulate plugin unload: a fresh registry no longer knows the permission.
         $this->permissionRegistry = new PermissionRegistry();
-        $this->assertFalse($this->permissionRegistry->permissionExists('custom-plugin.action'));
+        $this->assertFalse($this->permissionRegistry->exists('custom_plugin:action'));
         RoleChecker::clearCache();
         $this->roleChecker = new RoleChecker($this->db, $this->permissionRegistry);
         $this->rbacMiddleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
@@ -173,7 +173,7 @@ class PermissionAssignmentTest extends TestCase
             $secondReached = true;
             return new Response(200, json_encode(['status' => 'ok']));
         };
-        $response2 = $this->rbacMiddleware->handle($request2, $next2, null, 'custom-plugin.action');
+        $response2 = $this->rbacMiddleware->handle($request2, $next2, null, 'custom_plugin:action');
 
         $this->assertFalse($secondReached, 'Handler should not be called after permission deletion');
         $this->assertSame(403, $response2->getStatusCode());

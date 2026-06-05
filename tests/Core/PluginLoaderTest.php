@@ -198,7 +198,7 @@ class TestPermissionsAndHooksPlugin implements PluginInterface
     public function getRoutes(): array { return []; }
     
     public function getPermissions(): array {
-        return ['test.permission.one', 'test.permission.two'];
+        return ['test:permission_one', 'test:permission_two'];
     }
     
     public function getHooks(): array {
@@ -227,8 +227,8 @@ PHP;
         $loader->load();
 
         // Verify permissions are registered
-        $this->assertTrue($permissionRegistry->permissionExists('test.permission.one'));
-        $this->assertTrue($permissionRegistry->permissionExists('test.permission.two'));
+        $this->assertTrue($permissionRegistry->exists('test:permission_one'));
+        $this->assertTrue($permissionRegistry->exists('test:permission_two'));
 
         // Verify hooks are registered and callable
         $listeners = $hookManager->getListeners('test.hook.event');
