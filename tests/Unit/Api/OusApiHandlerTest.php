@@ -248,11 +248,17 @@ class OusApiHandlerTest extends TestCase
         $mockSelectStatement->method('fetch')
             ->willReturn(TestFixtureBuilder::ou(5, $this->testTenantId, 'Engineering'));
 
+        // WC-56: the role must now be validated as visible to the caller's
+        // tenant before the assignment is inserted. A tenant-owned role resolves.
+        $mockRoleStatement = $this->createMock(PDOStatement::class);
+        $mockRoleStatement->method('execute')->willReturn(true);
+        $mockRoleStatement->method('fetch')->willReturn(['id' => 3]);
+
         $mockInsertStatement = $this->createMock(PDOStatement::class);
         $mockInsertStatement->method('execute')->willReturn(true);
 
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockInsertStatement);
+            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockRoleStatement, $mockInsertStatement);
 
         $body = json_encode(['role_id' => 3]);
 
@@ -522,6 +528,12 @@ class OusApiHandlerTest extends TestCase
         $mockSelectStatement->method('fetch')
             ->willReturn(TestFixtureBuilder::ou(5, $this->testTenantId, 'Engineering'));
 
+        // WC-56: the role resolves for the caller's tenant, so the flow reaches
+        // the INSERT (which then fails on the duplicate-assignment constraint).
+        $mockRoleStatement = $this->createMock(PDOStatement::class);
+        $mockRoleStatement->method('execute')->willReturn(true);
+        $mockRoleStatement->method('fetch')->willReturn(['id' => 3]);
+
         // INSERT fails due to UNIQUE constraint
         $mockInsertStatement = $this->createMock(PDOStatement::class);
         $mockInsertStatement->method('execute')->willThrowException(
@@ -529,7 +541,7 @@ class OusApiHandlerTest extends TestCase
         );
 
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockInsertStatement);
+            ->willReturnOnConsecutiveCalls($mockSelectStatement, $mockRoleStatement, $mockInsertStatement);
 
         $body = json_encode(['role_id' => 3]);
 
