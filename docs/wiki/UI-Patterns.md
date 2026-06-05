@@ -38,14 +38,14 @@ The admin list pages already follow this: a single `isLoading` flag, then either
 
 | Situation | Pattern | Component |
 |-----------|---------|-----------|
-| Whole list/table loading | Centered **spinner** in a sized container | `DataTable` (built-in `isLoading`) |
-| In-button (submit in flight) | **Disable + label swap** | `Button` (`disabled`, `"Saving…"`) |
-| Content placeholders (preferred for known layouts) | **Skeleton** blocks | shadcn `skeleton` *(not yet installed)* |
+| Whole list/table loading | **Skeleton** rows in the table shape | `DataTable` (built-in `isLoading`) |
+| In-button (submit in flight) | **`loading` prop** (spinner + disabled) or disable + label swap | `Button` (`loading`, or `disabled` + `"Saving…"`) |
+| Content placeholders (preferred for known layouts) | **Skeleton** blocks | `Skeleton` (`@/components/ui/skeleton`) |
 
 ### Table loading (the shipped pattern)
 
-`DataTable` renders a centered spinner + "Loading…" inside a fixed-height container when
-`isLoading` is `true`, so the surrounding layout does not jump:
+`DataTable` renders **skeleton rows** in the table's shape when `isLoading` is `true`, so the
+surrounding layout does not jump and the loading view matches the eventual content:
 
 ```tsx
 // web/app/(protected)/admin/users/page.tsx
@@ -54,22 +54,24 @@ The admin list pages already follow this: a single `isLoading` flag, then either
 
 ```tsx
 // web/components/admin/data-table.tsx (loading branch)
-<div className="h-64 flex items-center justify-center …">
-  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary …" />
-  <p className="text-sm …">Loading…</p>
-</div>
+<tbody className="divide-y divide-border">
+  {Array.from({ length: 5 }).map((_, i) => (
+    <tr key={i}>{/* one <Skeleton className="h-4 w-3/4" /> per column */}</tr>
+  ))}
+</tbody>
 ```
 
-The spinner ring already uses `border-primary` (token-driven). The container chrome
-(`bg-slate-50`, `text-slate-600`, `border-slate-200`) uses raw palette classes — it should use
-`bg-muted` / `text-muted-foreground` / `border-border`. See [Follow-ups](#follow-ups).
+The table chrome is token-driven (`bg-muted`, `text-muted-foreground`, `border-border`); the
+skeleton fill uses `bg-muted` via the `Skeleton` component. An `sr-only` `role="status"` node
+announces "Loading…".
 
 ### In-button loading
 
-There is no `loading` prop on `Button`; the app disables the button and swaps the label:
+`Button` has a `loading` prop (spinner + `disabled` + `aria-busy`); the label-swap convention
+also still works:
 
 ```tsx
-<Button type="submit" disabled={isSubmitting}>
+<Button type="submit" loading={isSubmitting}>
   {isSubmitting ? "Saving…" : "Save Changes"}
 </Button>
 ```
@@ -77,17 +79,18 @@ There is no `loading` prop on `Button`; the app disables the button and swaps th
 ### Recommended: skeletons for structured content
 
 For content with a known shape (cards, stat tiles, table rows), prefer **skeletons** over a
-bare spinner — they preserve layout and feel faster. Install the shadcn `skeleton` component
-(`npx shadcn@latest add skeleton`) and style it with `bg-muted` + `animate-pulse`:
+bare spinner — they preserve layout and feel faster. Use the `Skeleton` component
+(`@/components/ui/skeleton`), token-driven (`bg-muted` + `animate-pulse`):
 
 ```tsx
+import { Skeleton } from "@/components/ui/skeleton";
 // Skeleton row placeholder (token-driven)
-<div className="h-7 w-full animate-pulse rounded-md bg-muted" />
+<Skeleton className="h-7 w-full" />
 ```
 
 > [!NOTE]
-> `skeleton` is referenced in the Shadcn-UI-Setup catalog but is **not installed** in
-> `web/components/ui/`. Adding it is a follow-up for the component owner.
+> `Skeleton` lives at `web/components/ui/skeleton.tsx` and is adopted by `DataTable`'s loading
+> state. Reach for it for any structured-content loading view.
 
 **Tokens:** spinner accent → `primary` (or `accent`); skeleton fill → `muted`; helper text →
 `muted-foreground`; container → `card`/`muted` + `border`.
@@ -102,7 +105,7 @@ bare spinner — they preserve layout and feel faster. Install the shadcn `skele
 
 | Altitude | Use when | Component | Tokens |
 |----------|----------|-----------|--------|
-| **Toast** (transient) | Result of a user action (save/delete/fetch failed) | `useToast().addToast(msg, "error")` + `ToastContainer` | error styling (should be `destructive`) |
+| **Toast** (transient) | Result of a user action (save/delete/fetch failed) | `useToast().addToast(msg, "error")` + `ToastContainer` | `error` token |
 | **Inline** (persistent, in-flow) | A specific section/region failed; user should see it until resolved | `Alert variant="destructive"` | `destructive`, `card` |
 | **Field-level** | A single form field is invalid | `FormMessage` | `destructive` (see [Validation](#form-validation)) |
 | **Page-level** | The whole route can't render (auth, fatal fetch) | full-bleed `Alert`/empty layout + retry, or a route error boundary | `destructive`, `muted-foreground` |
@@ -158,9 +161,9 @@ For a whole-route failure, render a centered message + a primary **retry** actio
 fetch), mirroring the empty-state layout but with destructive emphasis. A Next.js route
 `error.tsx` boundary is the idiomatic home for unrecoverable render errors.
 
-> [!WARNING]
-> Toast error styling currently uses `bg-red-500 text-white`, not the `destructive` token.
-> Align toasts to tokens (and add `aria-live`) — see [Follow-ups](#follow-ups).
+> [!NOTE]
+> Toast error styling uses the semantic `error` token (`bg-error`/`text-error-foreground`), and
+> the container is a labeled `aria-live` region — see [Component-Library › Toast](Component-Library.md#toast-notifications).
 
 ---
 
@@ -170,14 +173,17 @@ fetch), mirroring the empty-state layout but with destructive emphasis. A Next.j
 
 ### The shipped pattern
 
-`DataTable` renders a centered "No data available" message when `sortedData.length === 0`
-(and not loading), in the same sized container as the loading state — so empty never looks
-broken:
+`DataTable` renders a centered icon + title (default "No data available") when
+`sortedData.length === 0` (and not loading), in a sized container — so empty never looks broken.
+Pass the optional `emptyState` prop (`{ icon?, title?, description?, action? }`) to enrich it
+with a description and a create CTA:
 
 ```tsx
 // web/components/admin/data-table.tsx (empty branch)
-<div className="h-64 flex items-center justify-center …">
-  <p className="text-sm …">No data available</p>
+<div className="flex h-64 flex-col items-center justify-center gap-2 rounded-lg border border-border bg-muted/30 text-center">
+  <IconDatabaseOff className="size-8 text-muted-foreground" />
+  <p className="text-sm font-medium">No data available</p>
+  {/* optional description + CTA via the `emptyState` prop */}
 </div>
 ```
 
@@ -213,8 +219,9 @@ say "No results match your filters" and offer "Clear filters" instead of a creat
 (`Button` default).
 
 > [!NOTE]
-> The shipped `DataTable` empty state is text-only (no icon/CTA) and uses `slate-*` palette
-> classes. Enriching it with icon + CTA and migrating to tokens is a follow-up.
+> The shipped `DataTable` empty state now uses the icon + title anatomy on token-driven chrome,
+> and accepts an `emptyState` prop for an optional description + CTA. Distinguishing "no data"
+> from "no filter results" is still per-page.
 
 ---
 
@@ -307,28 +314,28 @@ The `Form` layer wires this for you (see [Component-Library › Form](Component-
 |---------|-----------|-------------|--------------|
 | Loading (list) | `DataTable isLoading` / skeletons | `primary`, `muted`, `muted-foreground` | `users/page.tsx` |
 | Loading (action) | `Button disabled` + label | — | every modal `onSubmit` |
-| Error (transient) | `useToast().addToast(_, "error")` | `destructive` *(should be)* | every admin mutation |
+| Error (transient) | `useToast().addToast(_, "error")` | `error` | every admin mutation |
 | Error (inline/page) | `Alert variant="destructive"` | `destructive`, `card` | delete modals |
 | Empty | centered icon + title + desc + CTA | `muted-foreground`, `primary` | `DataTable` empty branch |
 | Validation | Zod + RHF + `Form*` + `FormMessage` | `destructive`, `muted-foreground` | `users/create-modal.tsx` |
 
 ## Follow-ups
 
-Inconsistencies found while documenting these patterns (not fixed here — docs/assets only):
+Resolved in WC-125:
 
-1. **`DataTable` loading/empty/table chrome uses raw palette classes** (`slate-*`, `bg-white`)
-   instead of tokens (`muted`, `border`, `card`, `muted-foreground`). Migrate to tokens.
-2. **Empty state is minimal** — text-only, no icon or CTA. Adopt the richer empty-state anatomy
-   above (and distinguish "no data" from "no filter results").
-3. **Toast styling is not token-aligned** (`bg-red-500`/`bg-green-500`/`bg-blue-500`) and the
-   container has no `aria-live`/`role="status"`; the dismiss button lacks an accessible name.
-   Align to `destructive` + semantic `success`/`info` tokens and add a live region.
-4. **No `skeleton` component installed** — loading uses spinners only. Add shadcn `skeleton`
-   for structured-content loading.
+1. ✅ **`DataTable` chrome → tokens** — loading/empty/table chrome now uses `muted`/`border`/
+   `muted-foreground`/`foreground` (no raw palette).
+2. ✅ **Empty state anatomy** — icon + title by default, with an optional `emptyState` prop for
+   description + CTA. (Distinguishing "no data" from "no filter results" is still per-page.)
+3. ✅ **Toast token-aligned + live region** — semantic `success`/`error`/`warning`/`info` tokens,
+   `aria-live` region, labeled dismiss button.
+4. ✅ **`Skeleton` component** — `web/components/ui/skeleton.tsx`, adopted by `DataTable` loading.
+6. ✅ **Textarea `aria-invalid`** — destructive ring now applies on the error state.
+
+Still open:
+
 5. **No shared empty/error-state component.** Each page reimplements (or relies on `DataTable`).
    Consider a small `EmptyState` / `ErrorState` primitive for consistency.
-6. **Textarea lacks `aria-invalid` error styling**, so field validation on textareas won't show
-   the destructive ring (see [Component-Library](Component-Library.md#textarea)).
 
 ## Related documentation
 

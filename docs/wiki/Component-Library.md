@@ -95,7 +95,7 @@ sit on the 8px grid rhythm (see [Design-System-Grid](Design-System-Grid.md)).
 | Disabled | `disabled:opacity-50`, `disabled:pointer-events-none` | dims tokens |
 | Invalid | `aria-invalid:border-destructive` + `aria-invalid:ring-destructive/20` | `destructive` |
 | Expanded (popup trigger) | `aria-expanded:bg-muted` (outline/ghost/secondary) | `muted` / `secondary` |
-| Loading | **Not built in.** App convention: set `disabled` and swap the label (e.g. `Saving…`). See [Follow-ups](#follow-ups). | — |
+| Loading | Pass `loading` to show a spinning `IconLoader2`, auto-`disabled`, and `aria-busy`. (Label-swap convention, e.g. `Saving…`, is still fine for submit buttons.) | motion + `aria-busy` |
 
 ### Accessibility
 - Renders a native `<button>` (or, via `asChild`, the child element) — keyboard-activatable by default.
@@ -116,8 +116,8 @@ import { IconPlus } from "@tabler/icons-react";
 <Button variant="outline" onClick={onCancel}>Cancel</Button>
 <Button variant="destructive" onClick={onDelete}>Delete</Button>
 
-// Loading convention (no built-in prop):
-<Button type="submit" disabled={isSubmitting}>
+// Built-in loading prop (spinner + disabled + aria-busy):
+<Button type="submit" loading={isSubmitting}>
   {isSubmitting ? "Saving…" : "Save Changes"}
 </Button>
 
@@ -174,16 +174,18 @@ import { Badge } from "@/components/ui/badge";
 `CardTitle`, `CardDescription`, `CardAction`, `CardContent`, `CardFooter`.
 
 **Variants:** `size` = `default` | `sm` (tighter gap/padding). Edge images auto-round.
+**Props:** `interactive` (opt into the hover/elevated treatment for clickable cards).
 
 ### States
 
 | State | Behavior | Token |
 |-------|----------|-------|
 | Default | `bg-card` / `text-card-foreground`, `ring-1 ring-foreground/10` (hairline border) | `card`, `foreground` |
-| (Hover/elevated) | **No built-in hover.** Add `hover:` utilities where a card is interactive (e.g. a clickable card link). See [Follow-ups](#follow-ups). | — |
+| Hover/elevated | Opt-in via `interactive`: deepens the ring (`hover:ring-foreground/20`), adds `hover:shadow-md`, and shows a `focus-within` ring for keyboard users | `foreground`, `ring` |
 
-> The Design-System-Overview lists a "Hover (elevated)" card state; the shipped Card has no
-> hover styling. Treat hover/elevation as an opt-in per usage, not a built-in variant.
+> Pass `interactive` only on cards that are actually clickable (e.g. a card wrapping a link or
+> button). Non-interactive cards keep the flat default — don't add hover affordances to static
+> surfaces.
 
 ### Accessibility
 - Card is a generic container (`<div>`). Use real heading elements inside `CardTitle` when it
@@ -244,13 +246,10 @@ import { Input } from "@/components/ui/input";
 **Purpose:** Multi-line text input. `min-h-[80px]`.
 
 ### States
-Default · placeholder · focus (`focus-visible:ring-2`) · disabled (`opacity-50`, `cursor-not-allowed`).
-
-> [!WARNING]
-> **Textarea is NOT token-aligned.** It uses raw Tailwind palette classes
-> (`border-slate-200`, `bg-white`, `ring-slate-950`, `dark:bg-slate-950`, …) instead of the
-> `input` / `ring` / `border` tokens that `Input` uses. It also has no `aria-invalid` error
-> styling. This is a real inconsistency — see [Follow-ups](#follow-ups).
+Default · placeholder · focus (`focus-visible:border-ring` + `ring-2 ring-ring/30`) ·
+disabled (`opacity-50`, `cursor-not-allowed`) · invalid (`aria-invalid:border-destructive` +
+`ring-destructive/20`). Token-aligned with `Input` — uses the `input` / `ring` / `border` /
+`destructive` tokens (no raw palette).
 
 ```tsx
 import { Textarea } from "@/components/ui/textarea";
@@ -338,9 +337,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
   trapping; `SubTrigger` chevron flips under RTL (`rtl:rotate-180`).
 
 > [!NOTE]
-> In `users/page.tsx` the Delete item is colored with raw palette classes
-> (`text-red-600 … dark:text-red-400`) instead of using `variant="destructive"`, which would
-> apply the `destructive` token. Prefer `variant="destructive"`. See [Follow-ups](#follow-ups).
+> The Delete item in `users/page.tsx` uses `variant="destructive"` (the `destructive` token),
+> not raw palette. Prefer `variant="destructive"` for any dangerous menu action.
 
 ```tsx
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -490,23 +488,23 @@ import { IconAlertCircle } from "@tabler/icons-react";
 or failure). This is a **custom toast system**, not the shadcn/Radix Toast primitive.
 
 **API:** `useToast()` exposes `addToast(message, type, duration?)`, `removeToast(id)`. Types:
-`success` | `error` | `info`. Default duration `3000ms`. `ToastContainer` renders bottom-end,
-fixed, with a slide-in animation and a per-toast `IconX` dismiss button. Icons: `IconCheck`
-(success), `IconAlertCircle` (error), `IconInfoCircle` (info).
+`success` | `error` | `warning` | `info`. Default duration `3000ms`. `ToastContainer` renders
+bottom-end, fixed, with a slide-in animation and a per-toast `IconX` dismiss button. Icons:
+`IconCheck` (success), `IconAlertCircle` (error), `IconAlertTriangle` (warning), `IconInfoCircle`
+(info).
 
 ### States
 Enter (slide-in) · visible · dismiss (manual `IconX` or auto after `duration`).
 
-> [!WARNING]
-> **Toast colors are NOT token-aligned.** It uses raw palette classes (`bg-green-500`,
-> `bg-red-500`, `bg-blue-500`, `text-white`) rather than the `destructive` token or the
-> `success`/`info` semantic tokens from `base.json`. This is a real inconsistency — see
-> [Follow-ups](#follow-ups).
+Each type maps to its semantic token pair: `success` → `bg-success`/`text-success-foreground`,
+`error` → `bg-error`/`text-error-foreground`, `warning` → `bg-warning`/`text-warning-foreground`,
+`info` → `bg-info`/`text-info-foreground`. No raw palette.
 
 ### Accessibility
-- Currently a plain `<div>` container with no `role="status"`/`aria-live` region, so toasts
-  are **not announced** to screen readers, and the dismiss `<button>` has no accessible name.
-  Tracked as a follow-up.
+- The container is a labeled `role="region"` ("Notifications"); each toast is `role="status"`
+  with `aria-live` (`assertive` for `error`/`warning`, `polite` for `success`/`info`) and
+  `aria-atomic`, so toasts are announced. The dismiss `<button>` has an `aria-label`
+  ("Dismiss notification").
 
 ```tsx
 import { useToast } from "@/lib/toast-context";
@@ -574,11 +572,11 @@ See [UI-Patterns › Form validation](UI-Patterns.md#form-validation) for the fu
 
 | Component | Default | Hover | Focus | Active | Disabled | Loading | Error/Invalid | Selected/Active |
 |-----------|:------:|:----:|:----:|:-----:|:-------:|:------:|:-------------:|:--------------:|
-| Button | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ convention | ✅ | ✅ (expanded) |
+| Button | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ (`loading`) | ✅ | ✅ (expanded) |
 | Badge | ✅ | ✅ link | ✅ | — | — | — | ✅ | — |
-| Card | ✅ | ⚠️ opt-in | — | — | — | — | — | — |
+| Card | ✅ | ✅ (`interactive`) | — | — | — | — | — | — |
 | Input | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| Textarea | ✅ | — | ✅ | — | ✅ | — | ❌ | — |
+| Textarea | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
 | Select | ✅ | ✅ (dark) | ✅ | — | ✅ | — | ✅ | ✅ |
 | Dropdown Menu | ✅ | ✅ | ✅ | — | ✅ | — | — | ✅ (sub-open) |
 | Tabs | ✅ | ✅ | ✅ | — | ✅ | — | — | ✅ (active) |
@@ -593,24 +591,24 @@ See [UI-Patterns › Form validation](UI-Patterns.md#form-validation) for the fu
 
 ## Follow-ups
 
-Gaps and inconsistencies found while writing this spec (none fixed here — docs/assets only):
+Resolved in WC-125 (design-system adherence, a11y, and missing states):
 
-1. **Button has no `loading` state.** App fakes it with `disabled` + label swap. Consider a
-   `loading`/`isLoading` prop with a spinner (e.g. a Tabler `IconLoader2` spin) for consistency.
-2. **Card "hover/elevated" state is documented in the Overview but not implemented.** Either
-   add a built-in interactive/hover variant or remove the claim from Design-System-Overview.
-3. **Textarea is not token-aligned** — it uses `slate-*` / `bg-white` palette classes and has
-   no `aria-invalid` error styling, unlike `Input`. Align it to `input`/`ring`/`border`/`destructive`.
-4. **Toast is not token-aligned** — `bg-green-500` / `bg-red-500` / `bg-blue-500` instead of
-   `destructive` + the `success`/`info` semantic tokens. Also no `aria-live`/`role="status"`
-   and the dismiss button lacks an accessible name.
-5. **Semantic colors unused.** `base.json` defines `success` / `warning` / `error` / `info`,
-   but they are not surfaced in `globals.css` nor used by Alert/Toast. Wire them in (coordinate
-   with the token agent) and add matching Alert variants.
-6. **Destructive list action uses raw palette.** `users/page.tsx` Delete item uses
-   `text-red-600` instead of `<DropdownMenuItem variant="destructive">`. Switch to the variant.
-7. **DataTable is not token-aligned** — its loading/empty/table chrome uses `slate-*` palette
-   classes (see [UI-Patterns](UI-Patterns.md)). Migrate to tokens.
+1. ✅ **Button `loading` state** — added a `loading` prop (spinner + `disabled` + `aria-busy`).
+2. ✅ **Card hover/elevated** — added the `interactive` opt-in (ring/shadow/focus-within), token-driven.
+3. ✅ **Textarea token-aligned** — migrated to `input`/`ring`/`border` tokens and added
+   `aria-invalid` error styling, matching `Input`.
+4. ✅ **Toast token-aligned + accessible** — semantic `success`/`error`/`warning`/`info` tokens,
+   `role="region"`/`role="status"` + `aria-live`, and a labeled dismiss button.
+6. ✅ **Destructive list action** — `users/page.tsx` Delete now uses
+   `<DropdownMenuItem variant="destructive">`.
+7. ✅ **DataTable token-aligned** — loading (skeleton)/empty (icon+title)/table chrome migrated to
+   tokens (see [UI-Patterns](UI-Patterns.md)).
+
+Still open:
+
+5. **Semantic colors — Alert variants.** `globals.css` now surfaces `success`/`warning`/`error`/
+   `info` (and Toast consumes them), but `Alert` still ships only `default` + `destructive`. Add
+   matching success/warning/info `Alert` variants.
 
 ## Related documentation
 

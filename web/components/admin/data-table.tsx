@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { IconChevronUp, IconChevronDown } from '@tabler/icons-react';
+import { IconChevronUp, IconChevronDown, IconDatabaseOff } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
 
 /**
  * Column configuration for the data table
@@ -14,6 +15,18 @@ export interface Column<T> {
 }
 
 /**
+ * Optional customization of the table's empty state, following the
+ * icon / title / description / CTA anatomy from UI-Patterns.md. When omitted,
+ * a generic "No data available" message is shown.
+ */
+export interface EmptyState {
+  icon?: React.ReactNode;
+  title?: string;
+  description?: string;
+  action?: React.ReactNode;
+}
+
+/**
  * Props for the DataTable component
  */
 export interface DataTableProps<T extends { id: string | number }> {
@@ -21,6 +34,8 @@ export interface DataTableProps<T extends { id: string | number }> {
   data: T[];
   rowActions?: (item: T) => React.ReactNode;
   isLoading?: boolean;
+  /** Optional richer empty-state content (icon/title/description/CTA). */
+  emptyState?: EmptyState;
 }
 
 /**
@@ -56,6 +71,7 @@ export function DataTable<T extends { id: string | number }>({
   data,
   rowActions,
   isLoading = false,
+  emptyState,
 }: DataTableProps<T>) {
   const [sortColumn, setSortColumn] = useState<keyof T | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -127,59 +143,97 @@ export function DataTable<T extends { id: string | number }>({
     }
 
     return sortDirection === 'asc' ? (
-      <IconChevronUp size={16} className="inline ml-1" />
+      <IconChevronUp className="inline ml-1 size-4" />
     ) : (
-      <IconChevronDown size={16} className="inline ml-1" />
+      <IconChevronDown className="inline ml-1 size-4" />
     );
   };
 
+  const columnCount = columns.length + (rowActions ? 1 : 0);
+
   /**
-   * Render loading state
+   * Render loading state — skeleton rows preserve the table layout (preferred
+   * over a bare spinner per UI-Patterns.md).
    */
   if (isLoading) {
     return (
-      <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
-        <div className="h-64 flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-            <p className="text-sm text-slate-600 dark:text-slate-400">Loading...</p>
-          </div>
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-muted border-b border-border">
+              <tr>
+                {columns.map((column) => (
+                  <th
+                    key={String(column.key)}
+                    className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider"
+                  >
+                    {column.label}
+                  </th>
+                ))}
+                {rowActions && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    Actions
+                  </th>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {Array.from({ length: 5 }).map((_, rowIndex) => (
+                <tr key={rowIndex}>
+                  {Array.from({ length: columnCount }).map((__, colIndex) => (
+                    <td key={colIndex} className="px-6 py-4">
+                      <Skeleton className="h-4 w-3/4" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+        <span className="sr-only" role="status" aria-live="polite">
+          Loading…
+        </span>
       </div>
     );
   }
 
   /**
-   * Render empty state
+   * Render empty state — icon / title / description / optional CTA anatomy
+   * (UI-Patterns.md). Defaults keep the generic "No data available" message.
    */
   if (sortedData.length === 0) {
     return (
-      <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
-        <div className="h-64 flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-          <div className="text-center">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              No data available
-            </p>
-          </div>
-        </div>
+      <div className="flex h-64 flex-col items-center justify-center gap-2 rounded-lg border border-border bg-muted/30 text-center">
+        {emptyState?.icon ?? (
+          <IconDatabaseOff className="size-8 text-muted-foreground" />
+        )}
+        <p className="text-sm font-medium">
+          {emptyState?.title ?? 'No data available'}
+        </p>
+        {emptyState?.description && (
+          <p className="text-xs text-muted-foreground">
+            {emptyState.description}
+          </p>
+        )}
+        {emptyState?.action}
       </div>
     );
   }
 
   return (
-    <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden">
+    <div className="border border-border rounded-lg overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full">
           {/* Table Header */}
-          <thead className="bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+          <thead className="bg-muted border-b border-border">
             <tr>
               {columns.map((column) => (
                 <th
                   key={String(column.key)}
                   onClick={() => handleSort(column)}
                   className={cn(
-                    'px-6 py-3 text-left text-xs font-medium text-slate-700 dark:text-slate-300 uppercase tracking-wider',
-                    column.sortable && 'cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors'
+                    'px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider',
+                    column.sortable && 'cursor-pointer hover:bg-muted/60 transition-colors'
                   )}
                 >
                   <div className="flex items-center">
@@ -189,7 +243,7 @@ export function DataTable<T extends { id: string | number }>({
                 </th>
               ))}
               {rowActions && (
-                <th className="px-6 py-3 text-left text-xs font-medium text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Actions
                 </th>
               )}
@@ -197,16 +251,16 @@ export function DataTable<T extends { id: string | number }>({
           </thead>
 
           {/* Table Body */}
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+          <tbody className="divide-y divide-border">
             {sortedData.map((row) => (
               <tr
                 key={String(row.id)}
-                className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                className="hover:bg-muted/50 transition-colors"
               >
                 {columns.map((column) => (
                   <td
                     key={String(column.key)}
-                    className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 dark:text-slate-100"
+                    className="px-6 py-4 whitespace-nowrap text-sm text-foreground"
                   >
                     {String(row[column.key] ?? '-')}
                   </td>

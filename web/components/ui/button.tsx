@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Slot } from "radix-ui"
+import { IconLoader2 } from "@tabler/icons-react"
 
 import { cn } from "@/lib/utils"
 
@@ -44,12 +45,20 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  loading = false,
+  disabled,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    /** Show an inline spinner, disable the button, and expose `aria-busy`. */
+    loading?: boolean
   }) {
   const Comp = asChild ? Slot.Root : "button"
+  // When rendering via `asChild`, Slot requires a single child element, so we
+  // cannot inject a spinner alongside it — only apply the busy/disabled state.
+  const showSpinner = loading && !asChild
 
   return (
     <Comp
@@ -57,8 +66,19 @@ function Button({
       data-variant={variant}
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
+      disabled={disabled || (loading && !asChild)}
+      aria-busy={loading || undefined}
       {...props}
-    />
+    >
+      {showSpinner ? (
+        <>
+          <IconLoader2 className="animate-spin" aria-hidden="true" />
+          {children}
+        </>
+      ) : (
+        children
+      )}
+    </Comp>
   )
 }
 
