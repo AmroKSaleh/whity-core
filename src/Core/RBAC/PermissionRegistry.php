@@ -59,8 +59,9 @@ class PermissionRegistry
     /**
      * Register a set of permissions under a given source.
      *
-     * This is the preferred registration entry point. Every permission is
-     * validated against the `resource:action` pattern before being stored.
+     * The single registration entry point for both core and plugin permissions.
+     * Every permission is validated against the `resource:action` pattern before
+     * being stored; a malformed permission aborts the whole registration.
      *
      * @param string $source The permission source (`core` or a plugin name).
      * @param array<int, string> $permissions Array of `resource:action` strings.
@@ -77,23 +78,6 @@ class PermissionRegistry
         }
 
         $this->storeAndDispatch($source, array_values($permissions));
-    }
-
-    /**
-     * Register permissions for a plugin.
-     *
-     * Backward-compatible entry point used by {@see \Whity\Core\PluginLoader}.
-     * Unlike {@see register()}, this method does not enforce the
-     * `resource:action` pattern, preserving the behaviour relied upon by
-     * existing callers and tests.
-     *
-     * @param string $pluginId The plugin ID.
-     * @param array<int, string> $permissions Array of permission strings.
-     * @return void
-     */
-    public function registerPermissions(string $pluginId, array $permissions): void
-    {
-        $this->storeAndDispatch($pluginId, array_values($permissions));
     }
 
     /**
@@ -137,19 +121,6 @@ class PermissionRegistry
     }
 
     /**
-     * Check if a permission exists in the registry.
-     *
-     * Backward-compatible alias of {@see exists()}.
-     *
-     * @param string $permission The permission to check.
-     * @return bool True if permission exists, false otherwise.
-     */
-    public function permissionExists(string $permission): bool
-    {
-        return $this->exists($permission);
-    }
-
-    /**
      * Get every registered permission mapped to its source.
      *
      * @return array<string, string> Map of `permission => source`.
@@ -179,55 +150,6 @@ class PermissionRegistry
         $this->ensureCoreRegistered();
 
         return $this->permissionsBySource[$source] ?? [];
-    }
-
-    /**
-     * Get permissions for a specific plugin.
-     *
-     * Backward-compatible accessor scoped to plugin sources; the `core` source
-     * is intentionally excluded so legacy plugin-oriented callers are unaffected.
-     *
-     * @param string $pluginId The plugin ID.
-     * @return array<int, string> The permissions for this plugin, or an empty array.
-     */
-    public function getPluginPermissions(string $pluginId): array
-    {
-        if ($pluginId === CorePermissions::SOURCE) {
-            return [];
-        }
-
-        return $this->permissionsBySource[$pluginId] ?? [];
-    }
-
-    /**
-     * Get all active permissions from registered plugins, keyed by plugin ID.
-     *
-     * Backward-compatible accessor; the `core` source is excluded so the shape
-     * matches the historical plugin-only contract.
-     *
-     * @return array<string, array<int, string>> Permissions keyed by plugin ID.
-     */
-    public function getAllActivePermissions(): array
-    {
-        $plugins = $this->permissionsBySource;
-        unset($plugins[CorePermissions::SOURCE]);
-
-        return $plugins;
-    }
-
-    /**
-     * Get the list of registered plugin IDs.
-     *
-     * Backward-compatible accessor; the `core` source is excluded.
-     *
-     * @return array<int, string> Array of plugin IDs.
-     */
-    public function getRegisteredPlugins(): array
-    {
-        $plugins = $this->permissionsBySource;
-        unset($plugins[CorePermissions::SOURCE]);
-
-        return array_keys($plugins);
     }
 
     /**

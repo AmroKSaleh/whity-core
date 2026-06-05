@@ -466,7 +466,7 @@ final class HelloWorldPluginTest extends TestCase
         $loader->load();
 
         $this->assertNotNull($router->match(new Request('GET', '/api/hello')));
-        $this->assertTrue($permissions->permissionExists('hello:view'));
+        $this->assertTrue($permissions->exists('hello:view'));
         $this->assertNotEmpty($hooks->getListeners('user.creating'));
     }
 }

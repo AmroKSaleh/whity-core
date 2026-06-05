@@ -822,31 +822,21 @@ class RolesApiHandler
     /**
      * Extract the canonical `permissions` list from a request body.
      *
-     * The authoritative key is `permissions` (the Edit-role UI contract). For
-     * resilience against the known Create-role modal bug (#99) that sends
-     * `permissionIds`, that key is accepted as a fallback ONLY when `permissions`
-     * is absent. Entries are normalised to scalars (int permission ids or string
-     * `resource:action` names) so {@see self::resolvePermissionIds()} can accept
-     * either form; non-scalar entries are discarded.
+     * `permissions` is the sole accepted key (the create/edit-role UI contract).
+     * Entries may be int permission ids or string `resource:action` names (WC-110)
+     * and are normalised to scalars so {@see self::resolvePermissionIds()} can
+     * accept either form; non-scalar entries are discarded.
      *
      * @param array<string, mixed> $body The decoded request body.
      * @return array<int, string|int> The permission references (ids and/or names).
      */
     private function extractPermissionList(array $body): array
     {
-        $raw = null;
-        if (array_key_exists('permissions', $body) && is_array($body['permissions'])) {
-            $raw = $body['permissions'];
-        } elseif (array_key_exists('permissionIds', $body) && is_array($body['permissionIds'])) {
-            // Backwards-compatible fallback for frontend bug #99 only.
-            $raw = $body['permissionIds'];
-        }
-
-        if ($raw === null) {
+        if (!array_key_exists('permissions', $body) || !is_array($body['permissions'])) {
             return [];
         }
 
-        return $this->normalizePermissionRefs($raw);
+        return $this->normalizePermissionRefs($body['permissions']);
     }
 
     /**

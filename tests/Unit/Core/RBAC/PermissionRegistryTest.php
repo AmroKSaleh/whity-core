@@ -21,99 +21,90 @@ class PermissionRegistryTest extends TestCase
     }
 
     /**
-     * Test registerPermissions() stores plugin permissions
+     * Test register() stores a source's permissions, retrievable via getBySource().
      */
-    public function testRegisterPermissionsStoresPluginPermissions(): void
+    public function testRegisterStoresSourcePermissions(): void
     {
-        $pluginId = 'test-plugin';
-        $permissions = ['create', 'read', 'update', 'delete'];
+        $source = 'test-plugin';
+        $permissions = ['posts:create', 'posts:read', 'posts:update', 'posts:delete'];
 
-        $this->registry->registerPermissions($pluginId, $permissions);
+        $this->registry->register($source, $permissions);
 
-        $result = $this->registry->getPluginPermissions($pluginId);
+        $result = $this->registry->getBySource($source);
         $this->assertEquals($permissions, $result);
     }
 
     /**
-     * Test permissionExists() returns true for registered permission
+     * Test exists() returns true for a registered permission.
      */
-    public function testPermissionExistsReturnsTrueForRegisteredPermission(): void
+    public function testExistsReturnsTrueForRegisteredPermissionFromSource(): void
     {
-        $this->registry->registerPermissions('plugin1', ['read', 'write']);
+        $this->registry->register('plugin1', ['posts:read', 'posts:write']);
 
-        $this->assertTrue($this->registry->permissionExists('read'));
-        $this->assertTrue($this->registry->permissionExists('write'));
+        $this->assertTrue($this->registry->exists('posts:read'));
+        $this->assertTrue($this->registry->exists('posts:write'));
     }
 
     /**
-     * Test permissionExists() returns false for unregistered permission
+     * Test exists() returns false for an unregistered permission.
      */
-    public function testPermissionExistsReturnsFalseForUnregisteredPermission(): void
+    public function testExistsReturnsFalseForUnregisteredPermissionFromSource(): void
     {
-        $this->registry->registerPermissions('plugin1', ['read']);
+        $this->registry->register('plugin1', ['posts:read']);
 
-        $this->assertFalse($this->registry->permissionExists('write'));
-        $this->assertFalse($this->registry->permissionExists('nonexistent'));
+        $this->assertFalse($this->registry->exists('posts:write'));
+        $this->assertFalse($this->registry->exists('posts:nonexistent'));
     }
 
     /**
-     * Test getAllActivePermissions() returns all plugin permissions
+     * Test getAll() returns every registered permission tagged by its source.
      */
-    public function testGetAllActivePermissionsReturnsAllPluginPermissions(): void
+    public function testGetAllReturnsPermissionsTaggedBySource(): void
     {
-        $this->registry->registerPermissions('plugin1', ['read', 'write']);
-        $this->registry->registerPermissions('plugin2', ['delete', 'create']);
+        $this->registry->register('plugin1', ['posts:read', 'posts:write']);
+        $this->registry->register('plugin2', ['files:delete', 'files:create']);
 
-        $result = $this->registry->getAllActivePermissions();
+        $result = $this->registry->getAll();
 
-        $this->assertIsArray($result);
-        $this->assertArrayHasKey('plugin1', $result);
-        $this->assertArrayHasKey('plugin2', $result);
-        $this->assertEquals(['read', 'write'], $result['plugin1']);
-        $this->assertEquals(['delete', 'create'], $result['plugin2']);
+        $this->assertSame('plugin1', $result['posts:read']);
+        $this->assertSame('plugin1', $result['posts:write']);
+        $this->assertSame('plugin2', $result['files:delete']);
+        $this->assertSame('plugin2', $result['files:create']);
     }
 
     /**
-     * Test getRegisteredPlugins() returns plugin IDs
+     * Test getBySource() returns the permissions for each registered source.
      */
-    public function testGetRegisteredPluginsReturnsPluginIds(): void
+    public function testGetBySourceReturnsEachSourcesPermissions(): void
     {
-        $this->registry->registerPermissions('plugin1', ['read']);
-        $this->registry->registerPermissions('plugin2', ['write']);
-        $this->registry->registerPermissions('plugin3', ['delete']);
+        $this->registry->register('plugin1', ['posts:read']);
+        $this->registry->register('plugin2', ['files:write']);
+        $this->registry->register('plugin3', ['users:delete']);
 
-        $result = $this->registry->getRegisteredPlugins();
-
-        $this->assertIsArray($result);
-        $this->assertCount(3, $result);
-        $this->assertContains('plugin1', $result);
-        $this->assertContains('plugin2', $result);
-        $this->assertContains('plugin3', $result);
+        $this->assertSame(['posts:read'], $this->registry->getBySource('plugin1'));
+        $this->assertSame(['files:write'], $this->registry->getBySource('plugin2'));
+        $this->assertSame(['users:delete'], $this->registry->getBySource('plugin3'));
     }
 
     /**
-     * Test registerPermissions() accepts empty permission array
+     * Test register() accepts an empty permission array (registers an empty source).
      */
-    public function testRegisterPermissionsWithEmptyArrayIsAllowed(): void
+    public function testRegisterWithEmptyArrayIsAllowed(): void
     {
-        $pluginId = 'empty-plugin';
+        $source = 'empty-plugin';
 
-        // Should not throw
-        $this->registry->registerPermissions($pluginId, []);
+        // Should not throw.
+        $this->registry->register($source, []);
 
-        $result = $this->registry->getPluginPermissions($pluginId);
-        $this->assertEquals([], $result);
-
-        $plugins = $this->registry->getRegisteredPlugins();
-        $this->assertContains($pluginId, $plugins);
+        $this->assertSame([], $this->registry->getBySource($source));
     }
 
     /**
-     * Test getPluginPermissions() returns empty array for unregistered plugin
+     * Test getBySource() returns an empty array for an unregistered source.
      */
-    public function testGetPluginPermissionsReturnsEmptyArrayForUnregisteredPlugin(): void
+    public function testGetBySourceReturnsEmptyArrayForUnregisteredSource(): void
     {
-        $result = $this->registry->getPluginPermissions('nonexistent-plugin');
+        $result = $this->registry->getBySource('nonexistent-plugin');
 
         $this->assertIsArray($result);
         $this->assertEmpty($result);
@@ -135,7 +126,7 @@ class PermissionRegistryTest extends TestCase
             );
 
         $registry = new PermissionRegistry($hookManager);
-        $registry->registerPermissions('test-plugin', ['read', 'write']);
+        $registry->register('test-plugin', ['posts:read', 'posts:write']);
     }
 
     // ---------------------------------------------------------------------
@@ -182,15 +173,15 @@ class PermissionRegistryTest extends TestCase
     }
 
     /**
-     * register() is an alias of registerPermissions() and keeps both views in sync.
+     * register() stores under the given source and surfaces via exists()/getBySource()/getAll().
      */
-    public function testRegisterIsBackwardCompatibleWithLegacyAccessors(): void
+    public function testRegisterSurfacesPermissionAcrossAllViews(): void
     {
         $this->registry->register('billing', ['invoices:read']);
 
-        $this->assertTrue($this->registry->permissionExists('invoices:read'));
-        $this->assertSame(['invoices:read'], $this->registry->getPluginPermissions('billing'));
-        $this->assertContains('billing', $this->registry->getRegisteredPlugins());
+        $this->assertTrue($this->registry->exists('invoices:read'));
+        $this->assertSame(['invoices:read'], $this->registry->getBySource('billing'));
+        $this->assertSame('billing', $this->registry->getAll()['invoices:read']);
     }
 
     /**
@@ -251,7 +242,7 @@ class PermissionRegistryTest extends TestCase
         $registry = new PermissionRegistry();
 
         $this->assertTrue($registry->exists(CorePermissions::USERS_READ));
-        $this->assertTrue($registry->permissionExists(CorePermissions::ROLES_MANAGE));
+        $this->assertTrue($registry->exists(CorePermissions::ROLES_MANAGE));
     }
 
     /**

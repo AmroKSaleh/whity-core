@@ -37,19 +37,16 @@ plugins:manage
 `PermissionRegistry` (`src/Core/RBAC/PermissionRegistry.php`) holds every permission the platform currently knows about, organized by **source**: the literal `core` for built-ins, or the plugin name for plugin permissions.
 
 ```php
-// Strict registration (validates resource:action), used for first-class sources.
+// The single registration entry point for core AND plugin sources. Every
+// permission is validated against the resource:action pattern; an invalid
+// permission throws InvalidPermissionException.
 $registry->register('core', CorePermissions::all());
-
-// Plugin registration entry point used by PluginLoader.
-// (Does NOT enforce the pattern — preserves existing plugin/test behaviour.)
-$registry->registerPermissions('my-plugin', ['my_plugin:use', 'my_plugin:admin']);
+$registry->register('my-plugin', ['my_plugin:use', 'my_plugin:admin']);
 
 // Queries
-$registry->exists('users:read');            // true  (alias: permissionExists())
-$registry->getAll();                          // ['permission' => 'source', ...]
-$registry->getBySource('core');               // ['users:read', ...]
-$registry->getPluginPermissions('my-plugin'); // plugin-only (excludes core)
-$registry->getAllActivePermissions();         // ['plugin' => [...]] (excludes core)
+$registry->exists('users:read');   // true
+$registry->getAll();               // ['permission' => 'source', ...]
+$registry->getBySource('core');    // ['users:read', ...] (per-source list)
 ```
 
 Key behaviours:
@@ -61,7 +58,7 @@ Key behaviours:
 
 ### How a plugin declares permissions
 
-Plugins declare permissions through the declarative `PluginInterface::getPermissions()` (`src/Core/PluginInterface.php`) — there is **no** `onEnable()` method. The `PluginLoader` reads the array and calls `PermissionRegistry::registerPermissions($plugin->getName(), $plugin->getPermissions())` (`PluginLoader::registerCapabilities()`).
+Plugins declare permissions through the declarative `PluginInterface::getPermissions()` (`src/Core/PluginInterface.php`) — there is **no** `onEnable()` method. The `PluginLoader` reads the array and calls `PermissionRegistry::register($plugin->getName(), $plugin->getPermissions())` (`PluginLoader::registerCapabilities()`). A plugin that declares a permission outside the `resource:action` pattern is rejected with a logged warning rather than crashing the host.
 
 ```php
 final class MyPlugin implements \Whity\Core\PluginInterface
@@ -123,7 +120,7 @@ Every check is **tenant scoped** (WC-54): the user's effective grants include ro
 
 Resolution order:
 
-1. **Registry check** — `if (!$this->registry->permissionExists($permission)) return false;`. An unregistered permission (e.g. one whose plugin was unloaded) can never be granted.
+1. **Registry check** — `if (!$this->registry->exists($permission)) return false;`. An unregistered permission (e.g. one whose plugin was unloaded) can never be granted.
 2. **Effective permission set** — otherwise resolve the user's full effective permission set and test membership. The set is the union, over every **effective role** (see below), of that role's hierarchy-resolved permissions. Every grant — direct, role-hierarchy-inherited, or OU-inherited — is read through the SAME real-schema join (`role_permissions.permission_id → permissions.name`); there is no `role_permissions.permission_string` column.
 
 ### Effective roles (direct + OU inheritance)
@@ -213,7 +210,7 @@ Because step 1 of `hasPermission()` consults the registry, removing a plugin ins
 
 1. Before: the plugin's `getPermissions()` are in the registry; granted users pass.
 2. The plugin is unloaded / hot-reloaded away → `PluginLoader::unregisterAll()` drops it, and its source entry leaves the registry.
-3. After: `registry->permissionExists('my_plugin:use')` is `false`, so `hasPermission()` returns `false` immediately even though a `role_permissions` row may still exist.
+3. After: `registry->exists('my_plugin:use')` is `false`, so `hasPermission()` returns `false` immediately even though a `role_permissions` row may still exist.
 
 ## Summary
 
