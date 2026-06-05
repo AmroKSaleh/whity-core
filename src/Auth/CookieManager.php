@@ -5,8 +5,10 @@ namespace Whity\Auth;
 /**
  * Static helper class for secure cookie management
  *
- * Provides methods to set and clear JWT tokens in HTTP-only cookies with
- * strict security flags (Secure, HttpOnly, SameSite=Strict).
+ * Provides methods to set and clear JWT tokens in HTTP-only cookies. Cookies are
+ * issued with HttpOnly and SameSite=Lax. The Secure flag is intentionally omitted
+ * so cookies work over localhost HTTP during development; production deployments
+ * served over HTTPS should add Secure (see SECURE_FLAGS).
  *
  * Token cookies are stored separately with different expiration times:
  * - access_token: 15 minutes (path=/api)

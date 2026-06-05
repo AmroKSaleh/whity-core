@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Database;
 
 /**
@@ -7,6 +9,10 @@ namespace Whity\Database;
  *
  * Seeds default tenant, roles, and users with hashed passwords.
  * All inserts use ON CONFLICT for idempotent execution.
+ *
+ * Initial user passwords are sourced from the INITIAL_ADMIN_PASSWORD and
+ * INITIAL_USER_PASSWORD environment variables; when unset, a random password is
+ * generated and printed once (see {@see InitialPassword}). No static default.
  */
 class Seeder
 {
@@ -47,9 +53,10 @@ class Seeder
         $userRole = $userRoleResult->fetch();
         $userRoleId = $userRole['id'] ?? 2;
 
-        // Hash passwords
-        $adminPassword = password_hash('admin123', PASSWORD_BCRYPT);
-        $userPassword = password_hash('user123', PASSWORD_BCRYPT);
+        // Hash passwords. Sourced from env (INITIAL_ADMIN_PASSWORD /
+        // INITIAL_USER_PASSWORD) or a one-time random value — never a static literal.
+        $adminPassword = InitialPassword::hashFor('INITIAL_ADMIN_PASSWORD', 'admin@example.com');
+        $userPassword = InitialPassword::hashFor('INITIAL_USER_PASSWORD', 'user@example.com');
 
         // Insert admin user (idempotent with ON CONFLICT)
         $db->query(

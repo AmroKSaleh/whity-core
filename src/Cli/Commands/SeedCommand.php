@@ -27,8 +27,10 @@ class SeedCommand
 
             echo "\033[0;32m✓ Database successfully seeded\033[0m\n";
             echo "  - Default Tenant created\n";
-            echo "  - Admin user: admin@example.com / admin123\n";
-            echo "  - Regular user: user@example.com / user123\n\n";
+            echo "  - Admin user: admin@example.com\n";
+            echo "  - Regular user: user@example.com\n";
+            echo "  Passwords are taken from INITIAL_ADMIN_PASSWORD / INITIAL_USER_PASSWORD;\n";
+            echo "  if unset, a random password was generated and printed above.\n\n";
 
             return 0;
         } catch (\Exception $e) {
