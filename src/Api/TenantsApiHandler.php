@@ -162,9 +162,28 @@ class TenantsApiHandler
 
     /**
      * POST /api/tenants - Create a new tenant
+     *
+     * Tenant creation is a platform-level operation: it provisions a brand-new
+     * tenant boundary rather than acting within an existing one. It is therefore
+     * restricted to system users (tenant_id=0). A regular tenant's admin — even
+     * with the global `admin` role the route requires — must not be able to
+     * mint additional tenants, as that would be a platform-level privilege
+     * escalation (WC-49). The strict system-authority check is used here rather
+     * than {@see canManageTenant()}, which only governs writes to an *existing*
+     * tenant.
      */
     public function create(Request $request): Response
     {
+        // Platform-level guard: only system users may create tenants. This runs
+        // before any work so a non-system caller can never provision a tenant.
+        if (!$this->isSystemUser()) {
+            error_log(sprintf(
+                '[tenants] denied create: tenant_id=%s',
+                var_export(TenantContext::getTenantId(), true)
+            ));
+            return Response::error('Only system administrators may create tenants', 403);
+        }
+
         try {
             $body = json_decode($request->getBody(), true);
 

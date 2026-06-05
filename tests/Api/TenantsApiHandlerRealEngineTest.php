@@ -128,6 +128,77 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
         $this->assertNotNull($tenant['createdAt']);
     }
 
+    // ============ WC-49: tenant creation is gated to system administrators ============
+
+    /**
+     * A regular tenant's admin must not be able to create tenants. Creating a
+     * tenant is a platform-level operation, so a non-system caller is refused
+     * with 403 and NO row is written. This FAILS on pre-fix main, where the
+     * handler creates the tenant for any caller behind the global `admin` role.
+     */
+    public function testNonSystemTenantAdminCannotCreateTenant(): void
+    {
+        $before = (int) $this->pdo->query('SELECT COUNT(*) FROM tenants')->fetchColumn();
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->create(
+            new Request('POST', '/api/tenants', [], (string) json_encode(['name' => 'Rogue Tenant']))
+        );
+
+        $this->assertSame(403, $response->getStatusCode(), 'A non-system tenant admin must not create tenants.');
+        $error = json_decode($response->getBody(), true)['error'];
+        $this->assertSame('Only system administrators may create tenants', $error);
+
+        // No tenant was provisioned by the unauthorized caller.
+        $after = (int) $this->pdo->query('SELECT COUNT(*) FROM tenants')->fetchColumn();
+        $this->assertSame($before, $after, 'A denied create must not write a tenant row.');
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM tenants WHERE name = 'Rogue Tenant'")->fetchColumn()
+        );
+    }
+
+    /**
+     * A null/unresolved tenant context is not the system tenant and must also be
+     * refused, so the gate can never be bypassed by an absent context.
+     */
+    public function testUnresolvedTenantContextCannotCreateTenant(): void
+    {
+        TenantContext::reset();
+        $response = $this->handler()->create(
+            new Request('POST', '/api/tenants', [], (string) json_encode(['name' => 'No Context Tenant']))
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM tenants WHERE name = 'No Context Tenant'")->fetchColumn()
+        );
+    }
+
+    /**
+     * The system user (tenant 0) retains platform authority and may still create
+     * tenants — the gate must not regress the legitimate flow.
+     */
+    public function testSystemUserCanStillCreateTenant(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->create(
+            new Request('POST', '/api/tenants', [], (string) json_encode(['name' => 'New Tenant', 'slug' => 'new-tenant']))
+        );
+
+        $this->assertSame(201, $response->getStatusCode(), 'A system user must still be able to create tenants.');
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('New Tenant', $data['name']);
+        $this->assertSame('new-tenant', $data['slug']);
+
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM tenants WHERE name = 'New Tenant'")->fetchColumn(),
+            'The system-created tenant must be persisted.'
+        );
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): TenantsApiHandler
@@ -158,6 +229,9 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
     {
         $pdo = new PDO('sqlite::memory:');
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        // create() inserts with PostgreSQL's NOW(); register a UDF so the handler's
+        // statement runs unmodified against SQLite (mirrors the Roles real-engine test).
+        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
 
         $pdo->exec('
             CREATE TABLE tenants (
