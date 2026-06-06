@@ -30,6 +30,7 @@ tenants:read tenants:write tenants:delete
 ous:read     ous:write     ous:delete     ous:assign
 permissions:read
 plugins:manage
+delegation:manage
 ```
 
 ## PermissionRegistry — the in-memory catalogue
@@ -204,6 +205,70 @@ POST /api/roles
 
 Ids are validated against the catalogue; names are resolved to ids via `permissions.name`. **Unknown ids/names are dropped, never fabricated**, before being linked through `role_permissions` (which references permissions by id). Every mutating write calls `RoleChecker::clearCache()` so RBAC checks never go stale.
 
+## Permission delegation (WC-34)
+
+Delegation lets a **role-holder grant a SUBSET of their OWN effective permissions** to a role or a user, tenant- and optionally OU-scoped, with a revocable lifecycle. It layers on top of the RBAC resolution above without replacing it.
+
+| Component | Responsibility | File |
+| --- | --- | --- |
+| `permission_delegations` | Stores each delegated permission (one row per permission). | `database/migrations/014_create_permission_delegations.php` |
+| `DelegationRepository` | All tenant-scoped SQL for delegations (insert/list/find/revoke + resolution lookup). | `src/Core/Delegation/DelegationRepository.php` |
+| `DelegationService` | Enforces the subset invariant on create; resolves live delegated permissions for `RoleChecker`. | `src/Core/Delegation/DelegationService.php` |
+| `DelegationsApiHandler` | RBAC-protected API (create/list/revoke), gated on `delegation:manage`. | `src/Api/DelegationsApiHandler.php` |
+| `PermissionNotDelegableException` | Typed domain error for a subset-invariant violation → `422`. | `src/Api/Exception/PermissionNotDelegableException.php` |
+
+### Storage model
+
+```sql
+CREATE TABLE permission_delegations (
+    id              SERIAL PRIMARY KEY,
+    tenant_id       INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    grantor_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    grantee_type    VARCHAR(16) NOT NULL,   -- 'role' | 'user' (CHECK-constrained)
+    grantee_id      INTEGER NOT NULL,
+    permission      VARCHAR(255) NOT NULL,  -- a resource:action string
+    ou_id           INTEGER NULL REFERENCES organizational_units(id) ON DELETE CASCADE,
+    granted_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+    revoked_at      TIMESTAMP NULL,         -- NULL = LIVE; non-destructive revoke
+    CONSTRAINT chk_permission_delegations_grantee_type CHECK (grantee_type IN ('role','user'))
+);
+```
+
+- **Polymorphic grantee** — modelled as a discriminator + id pair (`grantee_type` + `grantee_id`) with a CHECK pinning the type to `role`|`user`. This keeps resolution a single equality match (no "exactly one of two FK columns" gymnastics).
+- **One row per permission** — each delegated permission is an independent, individually-revocable grant.
+- **Lifecycle** — a delegation is LIVE while `revoked_at IS NULL`; revocation is non-destructive (it stamps `revoked_at`) so the historical grant survives for the audit trail.
+- **Indexing** — `idx_pd_resolution(tenant_id, grantee_type, grantee_id, revoked_at)` covers the hot resolution lookup; secondary indexes cover listing by grantor and by OU.
+
+### The HARD subset invariant
+
+> **A grantor can NEVER delegate a permission they do not themselves currently hold.**
+
+Enforced server-side, always, in `DelegationService::delegate()`: it computes the grantor's effective permission set via `RoleChecker::getEffectivePermissionsForUser()` (direct role + role hierarchy + OU inheritance) and rejects any requested permission outside that set — or any permission not registered in the `PermissionRegistry` — by throwing `PermissionNotDelegableException`. The handler translates that into a safe `422` and writes **no row**; the internal reason (which permissions were denied) is logged, never leaked.
+
+The `delegation:manage` permission gates **who may manage delegations** (the API route); it never widens **what** a grantor may delegate. To avoid transitive re-delegation escalation, the grantor's delegable set is their BASE RBAC effective set — the `RoleChecker` the service uses to bound a grantor is deliberately *not* delegation-aware, so "you can only delegate what RBAC grants you, never what was delegated TO you".
+
+### How delegated permissions enter resolution
+
+`RoleChecker` takes an optional `DelegatedPermissionResolver` (implemented by `DelegationService`). When wired (as it is in `public/index.php`), `getEffectivePermissionsForUser()` unions the user's base effective permissions with the **live** delegated permissions resolved for them, so a non-revoked delegation actually makes `hasPermission()` return `true`:
+
+```
+effective = (direct role + hierarchy + OU roles)  ∪  (live delegations to the user)  ∪  (live delegations to any of the user's effective roles)
+```
+
+Delegated grants are resolved tenant-scoped and OU-scoped:
+
+- A **user-targeted** delegation reaches that user; a **role-targeted** delegation reaches every user whose effective role set contains that role.
+- **OU scope**: a delegation with `ou_id IS NULL` applies tenant-wide; a delegation scoped to OU *X* applies only to grantees whose OU is *X* or a descendant of *X* (resolved from the user's OU + ancestor chain, mirroring OU role inheritance).
+- **Cache**: delegated grants flow through the same per-user worker cache as RBAC, so create/revoke call `RoleChecker::clearCache()` to avoid serving a stale resolved set.
+
+### API
+
+All routes are gated on `delegation:manage` and are tenant-scoped:
+
+- `POST /api/delegations` — `{granteeType: 'role'|'user', granteeId, permissions: string[], ouId?: int|null}`. Returns `201` (one row per permission) or `422` when the subset invariant is violated; `404` when the grantee/OU is not visible to the tenant.
+- `GET /api/delegations` — list with optional `granteeType`/`granteeId`/`grantorUserId`/`includeRevoked` filters.
+- `DELETE /api/delegations/{id}` — non-destructive revoke; `404` when not found / not visible / already revoked.
+
 ## Deleted/unloaded plugins: automatic denial
 
 Because step 1 of `hasPermission()` consults the registry, removing a plugin instantly denies its permissions with no DB cleanup:
@@ -220,4 +285,5 @@ Because step 1 of `hasPermission()` consults the registry, removing a plugin ins
 - `RoleChecker` resolves access: registry existence → direct grant → hierarchy inheritance, with cycle/depth-safe traversal and a worker-level cache invalidated on writes.
 - `RbacMiddleware` enforces route requirements against the authoritative store and never trusts JWT role/permission claims.
 - `RolesApiHandler` is tenant-scoped via `roles.tenant_id` (NULL = global), and accepts permission ids or names.
+- **Delegation** (WC-34) lets a role-holder grant a SUBSET of their own effective permissions to a role or user, tenant/OU-scoped and revocable. The HARD invariant — you can never delegate a permission you do not hold — is enforced server-side in `DelegationService`, and live delegations enter `hasPermission()` resolution through the `DelegatedPermissionResolver` wired into `RoleChecker`.
 </content>

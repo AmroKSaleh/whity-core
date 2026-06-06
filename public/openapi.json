@@ -53,6 +53,178 @@
                     }
                 ]
             }
+        },
+        "/api/delegations": {
+            "get": {
+                "summary": "List permission delegations visible to the current tenant",
+                "description": "Returns delegations for the current tenant (the system tenant id 0 sees all). Gated on the delegation:manage permission. Optional query filters: granteeType (role|user), granteeId, grantorUserId, includeRevoked.",
+                "tags": [
+                    "Delegations"
+                ],
+                "parameters": [
+                    {
+                        "name": "granteeType",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "role",
+                                "user"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "granteeId",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "grantorUserId",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "includeRevoked",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of delegations under the data key"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden (missing delegation:manage)"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "summary": "Create a delegation (grant a subset of the grantor's own permissions)",
+                "description": "Delegates a subset of the acting user's effective permissions to a role or user, optionally scoped to an OU subtree. Gated on delegation:manage. The HARD subset invariant is enforced server-side: delegating a permission the grantor does not hold returns 422 and writes no row.",
+                "tags": [
+                    "Delegations"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "granteeType",
+                                    "granteeId",
+                                    "permissions"
+                                ],
+                                "properties": {
+                                    "granteeType": {
+                                        "type": "string",
+                                        "enum": [
+                                            "role",
+                                            "user"
+                                        ]
+                                    },
+                                    "granteeId": {
+                                        "type": "integer"
+                                    },
+                                    "permissions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "description": "resource:action permission strings, each a subset of the grantor's effective set"
+                                    },
+                                    "ouId": {
+                                        "type": "integer",
+                                        "nullable": true,
+                                        "description": "Optional OU-subtree scope; null = tenant-wide"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Delegation created (one row per permission)"
+                    },
+                    "400": {
+                        "description": "Invalid request (bad grantee type, missing fields)"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden (missing delegation:manage)"
+                    },
+                    "404": {
+                        "description": "Grantee or OU not visible to the tenant"
+                    },
+                    "422": {
+                        "description": "Subset invariant violated: the grantor does not hold a requested permission"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/delegations/{id}": {
+            "delete": {
+                "summary": "Revoke a delegation",
+                "description": "Non-destructively revokes a delegation (sets revoked_at). Tenant-scoped. Gated on delegation:manage. The grantee loses the delegated access immediately.",
+                "tags": [
+                    "Delegations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Delegation revoked"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden (missing delegation:manage)"
+                    },
+                    "404": {
+                        "description": "Delegation not found, not visible to the tenant, or already revoked"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "components": {
