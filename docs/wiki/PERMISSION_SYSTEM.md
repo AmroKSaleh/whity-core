@@ -29,9 +29,12 @@ roles:read   roles:write   roles:delete   roles:manage
 tenants:read tenants:write tenants:delete
 ous:read     ous:write     ous:delete     ous:assign
 permissions:read
+audit:read
 plugins:manage
 delegation:manage
 ```
+
+> `audit:read` (WC-34) gates the read-only security audit trail (`GET /api/audit-logs`). Migration `016_create_audit_log` seeds it into the `permissions` catalogue and grants it to the seeded `admin` role, so administrators can read the trail out of the box. See [AUDIT_TRAIL](AUDIT_TRAIL.md).
 
 ## PermissionRegistry — the in-memory catalogue
 

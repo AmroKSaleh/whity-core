@@ -50,6 +50,9 @@ final class CorePermissions
     // Permission catalogue
     public const PERMISSIONS_READ = 'permissions:read';
 
+    // Audit trail (WC-34): read-only access to the security audit log.
+    public const AUDIT_READ = 'audit:read';
+
     // Plugin lifecycle management
     public const PLUGINS_MANAGE = 'plugins:manage';
 
@@ -82,6 +85,7 @@ final class CorePermissions
             self::OUS_DELETE,
             self::OUS_ASSIGN,
             self::PERMISSIONS_READ,
+            self::AUDIT_READ,
             self::PLUGINS_MANAGE,
             self::DELEGATION_MANAGE,
         ];

@@ -44,6 +44,7 @@ final class MigrationSchemaTest extends TestCase
         'ou_role_assignments',
         'revoked_tokens',
         'backup_codes',
+        'audit_log',
         'core_schema_migrations',
         'permission_delegations',
     ];
@@ -379,6 +380,67 @@ final class MigrationSchemaTest extends TestCase
             '/user_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+users\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
             $sql,
             'backup_codes.user_id must cascade-delete with its user.'
+        );
+    }
+
+    public function testAuditLogTableHasExpectedColumnsAndIndexes(): void
+    {
+        $sql = $this->readFile('016_create_audit_log.php');
+
+        // Tenant scope cascades with the tenant, mirroring the other scoped tables.
+        $this->assertMatchesRegularExpression(
+            '/tenant_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+tenants\(id\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'audit_log.tenant_id must be NOT NULL and cascade-delete with its tenant.'
+        );
+
+        // actor_user_id is nullable (failed logins / system actions have no actor).
+        $this->assertMatchesRegularExpression(
+            '/actor_user_id\s+INTEGER\s+NULL/i',
+            $sql,
+            'audit_log.actor_user_id must be nullable.'
+        );
+
+        foreach (['action', 'target_type', 'target_id', 'metadata', 'ip_address', 'created_at'] as $column) {
+            $this->assertMatchesRegularExpression(
+                '/\b' . $column . '\b/i',
+                $sql,
+                "audit_log must define the {$column} column."
+            );
+        }
+
+        // The tenant-scoped, time-ordered index that backs the listing query.
+        $this->assertMatchesRegularExpression(
+            '/CREATE INDEX IF NOT EXISTS\s+idx_audit_log_tenant_created\s+ON audit_log\s*\(\s*tenant_id,\s*created_at DESC/i',
+            $sql,
+            'audit_log must have a (tenant_id, created_at DESC, ...) index for newest-first tenant queries.'
+        );
+
+        // down() must drop the table.
+        $this->assertMatchesRegularExpression(
+            '/DROP TABLE IF EXISTS audit_log/i',
+            $sql,
+            'audit_log migration down() must drop the table.'
+        );
+    }
+
+    public function testAuditLogMigrationSeedsAndGrantsAuditReadPermission(): void
+    {
+        $sql = $this->readFile('016_create_audit_log.php');
+
+        // Seeds the audit:read permission row (idempotently).
+        $this->assertStringContainsString('audit:read', $sql);
+        $this->assertMatchesRegularExpression(
+            '/INSERT INTO permissions[\s\S]+ON CONFLICT \(name\) DO NOTHING/i',
+            $sql,
+            'audit:read must be seeded idempotently.'
+        );
+
+        // Grants it to the admin role idempotently.
+        $this->assertMatchesRegularExpression(
+            '/INSERT INTO role_permissions[\s\S]+ON CONFLICT \(role_id, permission_id\) DO NOTHING/i',
+            $sql,
+            'audit:read must be granted to admin idempotently.'
         );
     }
 

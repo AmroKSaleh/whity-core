@@ -7,7 +7,7 @@ use Whity\Core\Response;
 use Whity\Auth\TotpService;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
-use Whity\Core\Tenant\TenantContext;
+use Whity\Core\Audit\AuditLogger;
 use PDO;
 
 /**
@@ -31,23 +31,56 @@ class TwoFactorHandler
     private TokenValidator $tokenValidator;
 
     /**
+     * Optional security audit-trail writer (WC-34). When set, 2FA enable/disable
+     * are recorded to the audit log. Null in contexts that do not audit.
+     */
+    private ?AuditLogger $auditLogger;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
      * @param TotpService $totpService TOTP service for secret generation and validation
      * @param BackupCodesService $backupCodesService Backup codes service
      * @param TokenValidator $tokenValidator Token validator for access tokens
+     * @param AuditLogger|null $auditLogger Optional audit-trail writer (WC-34).
      */
     public function __construct(
         PDO $db,
         TotpService $totpService,
         BackupCodesService $backupCodesService,
-        TokenValidator $tokenValidator
+        TokenValidator $tokenValidator,
+        ?AuditLogger $auditLogger = null
     ) {
         $this->db = $db;
         $this->totpService = $totpService;
         $this->backupCodesService = $backupCodesService;
         $this->tokenValidator = $tokenValidator;
+        $this->auditLogger = $auditLogger;
+    }
+
+    /**
+     * Record a 2FA audit entry when an audit logger is configured.
+     *
+     * The 2FA routes run behind tenant isolation, so the tenant, actor and IP are
+     * resolved from the request-scoped audit context; the acting user is the
+     * target. No secret/code material is ever included.
+     *
+     * @param string $action The audit action key (e.g. `auth.2fa.enabled`).
+     * @param int    $userId The acting user id (also the target).
+     * @return void
+     */
+    private function audit(string $action, int $userId): void
+    {
+        if ($this->auditLogger === null) {
+            return;
+        }
+
+        $this->auditLogger->record($action, [
+            'actor_user_id' => $userId,
+            'target_type' => 'user',
+            'target_id' => $userId,
+        ]);
     }
 
     /**
@@ -166,6 +199,8 @@ class TwoFactorHandler
                 $insertStmt->execute([$userId, $hashedCode, 1]);
             }
 
+            $this->audit('auth.2fa.enabled', (int) $userId);
+
             return Response::json([
                 'backup_codes' => $codes,
                 'message' => 'Two-factor authentication enabled successfully'
@@ -218,6 +253,8 @@ class TwoFactorHandler
                 WHERE id = ?
             ');
             $updateStmt->execute([$userId]);
+
+            $this->audit('auth.2fa.disabled', (int) $userId);
 
             return Response::json([
                 'message' => 'Two-factor authentication disabled'

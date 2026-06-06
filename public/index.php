@@ -112,9 +112,12 @@ use Whity\Api\HealthApiHandler;
 use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Delegation\DelegationService;
 use Whity\Api\TwoFactorHandler;
+use Whity\Api\AuditLogApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Audit\AuditContext;
+use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Deployment\DeploymentManager;
 use Whity\Core\Log\ErrorLogLogger;
 use Whity\Core\Tenant\TenantContext;
@@ -202,6 +205,15 @@ $permissionRegistry->registerCorePermissions();
 $hookManager = new HookManager();
 \Whity\register_service(HookManager::class, $hookManager); // @phpstan-ignore-line
 
+// 4c. Initialize the security audit-trail writer (WC-34) and subscribe it to the
+// core CRUD lifecycle hooks. This is the SINGLE writer for the audit_log table:
+// role/user/tenant/OU mutations are captured by subscribing to the hooks the
+// handlers already fire (no per-handler audit code), while the auth/2FA paths —
+// which do not fire hooks — receive the same logger and call record() directly.
+// It is process-scoped infrastructure; per-request actor/IP live in AuditContext.
+$auditLogger = new AuditLogger($db->getPdo(), $logger);
+$auditLogger->subscribe($hookManager);
+
 // Register core navigation items
 $hookManager->listen('navigation.register', function ($data, $context) {
     $items = $data['items'] ?? [];
@@ -259,6 +271,14 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'order' => 5,
     ];
     $items[] = [
+        'id' => 'audit-logs',
+        'label' => 'Audit Logs',
+        'href' => '/admin/audit-logs',
+        'icon' => 'history',
+        'group' => 'admin',
+        'order' => 6,
+    ];
+    $items[] = [
         'id' => 'settings',
         'label' => 'Settings',
         'href' => '/settings',
@@ -313,7 +333,7 @@ $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage
 // 10. Register authentication handler
 // Inject the shared $totpService (built at step 3b) so the login-path 2FA validation uses the
 // SAME encryption key as the setup/confirm path (WC-95).
-$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger);
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 $router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
@@ -326,7 +346,7 @@ $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], nu
 $dbWrapper = new \Whity\Auth\DatabaseQueryWrapper($db->getPdo());
 $backupCodesService = new BackupCodesService($dbWrapper);
 $tokenValidator = new TokenValidator($jwtParser, $db->getPdo());
-$twoFactorHandler = new TwoFactorHandler($db->getPdo(), $totpService, $backupCodesService, $tokenValidator);
+$twoFactorHandler = new TwoFactorHandler($db->getPdo(), $totpService, $backupCodesService, $tokenValidator, $auditLogger);
 $router->register('POST', '/api/auth/2fa/setup', [$twoFactorHandler, 'setup'], null);
 $router->register('POST', '/api/auth/2fa/confirm', [$twoFactorHandler, 'confirm'], null);
 $router->register('POST', '/api/auth/2fa/disable', [$twoFactorHandler, 'disable'], null);
@@ -414,6 +434,13 @@ $router->register('GET', '/api/delegations', [$delegationsHandler, 'list'], null
 $router->register('POST', '/api/delegations', [$delegationsHandler, 'create'], null, null, CorePermissions::DELEGATION_MANAGE);
 $router->register('DELETE', '/api/delegations/{id}', [$delegationsHandler, 'revoke'], null, null, CorePermissions::DELEGATION_MANAGE);
 
+// 13. Register the audit-log read API (WC-34). Gated on the audit:read permission
+// (6th positional arg; requiredRole stays null so RbacMiddleware enforces the
+// permission). Tenant-scoped in the handler: the SYSTEM tenant (id 0) sees all
+// tenants, every other tenant sees only its own entries.
+$auditLogHandler = new AuditLogApiHandler($db->getPdo(), $roleChecker);
+$router->register('GET', '/api/audit-logs', [$auditLogHandler, 'list'], null, null, CorePermissions::AUDIT_READ);
+
 // Handle requests (persistent worker mode or fallback single-request mode)
 $isWorker = function_exists('frankenphp_handle_request');
 
@@ -484,6 +511,8 @@ if ($isWorker) {
                 $hookManager->dispatch('worker.request.end', []);
                 // Reset tenant context to prevent cross-request leakage
                 \Whity\Core\Tenant\TenantContext::reset();
+                // Reset the audit actor/IP context for the same reason (WC-34).
+                AuditContext::reset();
                 // DB session hygiene (WC-21/PR #84): after the response is sent,
                 // roll back any dangling transaction and DISCARD ALL session-local
                 // state on the shared worker connection so nothing request-specific
@@ -556,6 +585,7 @@ if ($isWorker) {
         error_log($e->getMessage() . "\n" . $e->getTraceAsString());
     } finally {
         \Whity\Core\Tenant\TenantContext::reset();
+        AuditContext::reset();
     }
 }
 

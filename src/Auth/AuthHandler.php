@@ -4,6 +4,7 @@ namespace Whity\Auth;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use PDO;
@@ -64,6 +65,13 @@ class AuthHandler
     private LoggerInterface $logger;
 
     /**
+     * Optional audit-trail writer (WC-34). When set, login success/failure and
+     * 2FA-login events are recorded to the security audit log. Null in contexts
+     * (most tests) that do not exercise auditing.
+     */
+    private ?AuditLogger $auditLogger;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
@@ -76,6 +84,8 @@ class AuthHandler
      *     accessor TotpService::resolveEncryptionKey(), which cannot diverge from the setup path.
      * @param LoggerInterface|null $logger Optional PSR-3 logger for structured audit records
      *     (self-service profile updates, WC-64). Defaults to a NullLogger when omitted.
+     * @param AuditLogger|null $auditLogger Optional security audit-trail writer (WC-34). When
+     *     omitted, login/2FA events are not audited (keeps existing tests untouched).
      */
     public function __construct(
         PDO $db,
@@ -83,7 +93,8 @@ class AuthHandler
         ?TokenValidator $tokenValidator = null,
         ?object $databaseWrapper = null,
         ?TotpService $totpService = null,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
@@ -91,6 +102,65 @@ class AuthHandler
         $this->databaseWrapper = $databaseWrapper;
         $this->totpService = $totpService;
         $this->logger = $logger ?? new NullLogger();
+        $this->auditLogger = $auditLogger;
+    }
+
+    /**
+     * Record a security audit entry when an audit logger is configured.
+     *
+     * The auth path knows the tenant/actor before the request-scoped context is
+     * populated (it runs as a public route), so it passes them explicitly. The
+     * client IP is derived from the request's forwarding headers. No credential
+     * material is ever included in the metadata.
+     *
+     * @param string               $action   The audit action key.
+     * @param Request               $request  The incoming request (for IP derivation).
+     * @param int|null              $tenantId The tenant the action belongs to.
+     * @param int|null              $actorId  The acting user id, if known.
+     * @param array<string, mixed>  $metadata Action-specific, secret-free metadata.
+     * @return void
+     */
+    private function audit(string $action, Request $request, ?int $tenantId, ?int $actorId, array $metadata = []): void
+    {
+        if ($this->auditLogger === null) {
+            return;
+        }
+
+        $this->auditLogger->record($action, [
+            'tenant_id' => $tenantId,
+            'actor_user_id' => $actorId,
+            'target_type' => 'user',
+            'target_id' => $actorId,
+            'metadata' => $metadata,
+            'ip_address' => $this->clientIp($request),
+        ]);
+    }
+
+    /**
+     * Best-effort client IP extraction from forwarding headers.
+     *
+     * Prefers the first hop in `X-Forwarded-For`, then `X-Real-IP`. Returns null
+     * when neither is present (e.g. CLI). Never throws.
+     *
+     * @param Request $request The incoming request.
+     * @return string|null The client IP, or null.
+     */
+    private function clientIp(Request $request): ?string
+    {
+        $forwarded = $request->getHeader('X-Forwarded-For');
+        if (is_string($forwarded) && $forwarded !== '') {
+            $first = trim(explode(',', $forwarded)[0]);
+            if ($first !== '') {
+                return substr($first, 0, 45);
+            }
+        }
+
+        $realIp = $request->getHeader('X-Real-IP');
+        if (is_string($realIp) && $realIp !== '') {
+            return substr(trim($realIp), 0, 45);
+        }
+
+        return null;
     }
 
     /**
@@ -131,16 +201,29 @@ class AuthHandler
 
         // User not found
         if (!$user) {
+            // Failed login: no authenticated user/tenant yet. Record under the
+            // system tenant with the attempted email (no credential material).
+            $this->audit('auth.login.failure', $request, null, null, [
+                'email' => is_string($email) ? $email : null,
+                'reason' => 'user_not_found',
+            ]);
             return Response::error('Invalid credentials', 401);
         }
 
         // Verify password
         if (!password_verify($password, $user['password'])) {
+            $this->audit('auth.login.failure', $request, (int) $user['tenant_id'], (int) $user['id'], [
+                'email' => is_string($email) ? $email : null,
+                'reason' => 'invalid_password',
+            ]);
             return Response::error('Invalid credentials', 401);
         }
 
         // Check if 2FA is enabled
         if (!empty($user['two_factor_enabled'])) {
+            // First factor passed; the second factor is still required. Record the
+            // challenge so the trail shows the partial authentication.
+            $this->audit('auth.login.2fa_required', $request, (int) $user['tenant_id'], (int) $user['id']);
             // Create temporary token (5 minutes) for 2FA verification
             $tempToken = $this->jwtParser->create([
                 'user_id' => $user['id'],
@@ -187,6 +270,9 @@ class AuthHandler
         // Set cookies
         CookieManager::setAccessToken($accessToken, 900);
         CookieManager::setRefreshToken($refreshToken, 604800);
+
+        // Successful single-factor login.
+        $this->audit('auth.login.success', $request, (int) $user['tenant_id'], (int) $user['id']);
 
         // Return success response with user data only (no token in body)
         return Response::json([
@@ -639,10 +725,31 @@ class AuthHandler
         }
 
         if (!$isValid) {
+            $this->audit(
+                'auth.2fa.verify_failure',
+                $request,
+                isset($user['tenant_id']) ? (int) $user['tenant_id'] : null,
+                (int) $userId,
+                ['reason' => 'invalid_2fa_code']
+            );
             return Response::error('Invalid 2FA code', 401);
         }
 
-        // Both validations failed
+        // Second factor verified — full login completes.
+        $this->audit(
+            'auth.2fa.verify_success',
+            $request,
+            isset($user['tenant_id']) ? (int) $user['tenant_id'] : null,
+            (int) $userId
+        );
+        $this->audit(
+            'auth.login.success',
+            $request,
+            isset($user['tenant_id']) ? (int) $user['tenant_id'] : null,
+            (int) $userId,
+            ['second_factor' => true]
+        );
+
         return $this->completeTwoFaLogin($claims);
     }
 
