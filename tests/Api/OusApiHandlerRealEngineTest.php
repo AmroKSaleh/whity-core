@@ -297,6 +297,28 @@ final class OusApiHandlerRealEngineTest extends TestCase
     }
 
     /**
+     * Moving an OU to root (explicit parent_id = null) clears its parent. This
+     * relies on array_key_exists rather than isset, since isset(null) is false
+     * and would otherwise silently drop the change.
+     */
+    public function testMoveToRootClearsParent(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        // Backend (11) currently has parent 10; move it to root.
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/ous/11', [], (string) json_encode(['parent_id' => null])),
+            ['id' => 11]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertNull(
+            $this->pdo->query('SELECT parent_id FROM organizational_units WHERE id = 11')->fetchColumn() ?: null,
+            'Moving an OU to root must clear parent_id.'
+        );
+    }
+
+    /**
      * Moving an OU under itself is rejected with a 4xx and no row change.
      */
     public function testSelfMoveIsRejected(): void

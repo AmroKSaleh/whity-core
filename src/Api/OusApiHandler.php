@@ -266,9 +266,18 @@ class OusApiHandler
                 $params_array[] = $body['description'];
             }
 
-            // Handle parent_id update
-            if (isset($body['parent_id']) && $body['parent_id'] !== $ou['parent_id']) {
-                $newParentId = $body['parent_id'];
+            // Handle parent_id update. Use array_key_exists (not isset) so an
+            // explicit `null` — "move to root" from the picker — is honoured;
+            // isset() is false for null and would silently drop the change.
+            // Compare as nullable ints so the int (JSON body) vs string (PDO
+            // column) representations of the same parent are not seen as a diff.
+            $currentParentId = $ou['parent_id'] === null ? null : (int)$ou['parent_id'];
+            $requestedParentId = array_key_exists('parent_id', $body) && $body['parent_id'] !== null
+                ? (int)$body['parent_id']
+                : null;
+
+            if (array_key_exists('parent_id', $body) && $requestedParentId !== $currentParentId) {
+                $newParentId = $requestedParentId;
 
                 // Validate parent exists in same tenant
                 if ($newParentId !== null) {
