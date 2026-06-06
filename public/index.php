@@ -373,6 +373,8 @@ $router->register('POST', '/api/ous', [$ousHandler, 'create'], 'admin');
 $router->register('GET', '/api/ous/{id}', [$ousHandler, 'get'], 'admin');
 $router->register('PATCH', '/api/ous/{id}', [$ousHandler, 'update'], 'admin');
 $router->register('DELETE', '/api/ous/{id}', [$ousHandler, 'delete'], 'admin');
+$router->register('GET', '/api/ous/{id}/roles', [$ousHandler, 'roles'], 'admin');
+$router->register('GET', '/api/ous/{id}/members', [$ousHandler, 'members'], 'admin');
 $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
 $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
 
