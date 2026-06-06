@@ -98,6 +98,17 @@ class RoleChecker
      * AND every OU/ancestor-OU role. Because OU membership and OU role assignments
      * are tenant scoped, this cache MUST be keyed by tenant in addition to user —
      * the same user resolved under a different tenant may see a different set.
+     *
+     * The key ALSO carries a delegation-awareness flag ("userId:tenantId:1" when a
+     * {@see DelegatedPermissionResolver} is wired, ":0" otherwise). Two checkers
+     * share this static cache — the delegation-aware one used by RbacMiddleware and
+     * the delegation-UNAWARE one that bounds a grantor's delegable set (WC-34). They
+     * resolve DIFFERENT sets for the same (user, tenant), so they MUST NOT collide
+     * on a single key: without the flag, the enforcement checker priming the cache
+     * for a grantor would let the bounding checker read a delegation-inclusive set
+     * and permit transitive re-delegation escalation (and, in the reverse order,
+     * mask legitimately delegated access).
+     *
      * Derived data only; invalidated via {@see self::clearCache()}.
      *
      * @var array<string, array<int, string>>
@@ -270,7 +281,11 @@ class RoleChecker
      */
     public function getEffectivePermissionsForUser(int $userId, int $tenantId): array
     {
-        $cacheKey = $userId . ':' . $tenantId;
+        // Key by delegation-awareness too: the bounding (resolver-less) checker and
+        // the enforcement (delegation-aware) checker share this static cache but
+        // resolve different sets, so they must never read each other's entries
+        // (WC-34 — see the cache property docblock).
+        $cacheKey = $userId . ':' . $tenantId . ':' . ($this->delegationResolver !== null ? '1' : '0');
         if (isset(self::$effectiveUserPermissionCache[$cacheKey])) {
             return self::$effectiveUserPermissionCache[$cacheKey];
         }

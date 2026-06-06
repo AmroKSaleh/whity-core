@@ -179,6 +179,53 @@ class DelegationsApiRbacTest extends TestCase
         $this->assertSame(422, $response->getStatusCode(), 'Delegating an unheld permission must be 422 even with delegation:manage.');
     }
 
+    public function testGrantorCannotReDelegateAPermissionHeldOnlyViaDelegation(): void
+    {
+        // Grantor holds delegation:manage through their ROLE, but NOT users:read.
+        $grantorId = $this->seedUserWithPermissions([CorePermissions::DELEGATION_MANAGE]);
+        $granteeId = $this->seedPlainUser('grantee@example.com');
+
+        // Someone ELSE delegates users:read directly TO the grantor, so the grantor
+        // now "has" users:read ONLY via delegation — never through a role.
+        $this->pdo->prepare(
+            'INSERT INTO permission_delegations
+                (tenant_id, grantor_user_id, grantee_type, grantee_id, permission, ou_id, granted_at)
+             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
+        )->execute([self::TENANT, 99999, DelegationRepository::GRANTEE_USER, $grantorId, 'users:read']);
+        RoleChecker::clearCache();
+
+        // The grantor attempts to RE-DELEGATE users:read to the grantee. This drives
+        // the real worker ordering: RbacMiddleware first resolves the grantor's
+        // delegation-INCLUSIVE set (to check delegation:manage), then the handler's
+        // DelegationService bounds the grantor with the delegation-UNAWARE checker.
+        // The two share a static cache; the bound MUST stay base-only.
+        $response = $this->dispatch(new Request(
+            'POST',
+            '/api/delegations',
+            $this->auth($grantorId),
+            (string) json_encode([
+                'granteeType' => 'user',
+                'granteeId' => $granteeId,
+                'permissions' => ['users:read'],
+            ])
+        ));
+
+        // You may delegate only what RBAC grants you, never what was delegated TO
+        // you — no transitive re-delegation escalation.
+        $this->assertSame(
+            422,
+            $response->getStatusCode(),
+            'A permission held only via delegation must NOT be re-delegable (no transitive escalation).'
+        );
+
+        // And nothing was written for the grantee.
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM permission_delegations WHERE grantee_id = ? AND permission = ?'
+        );
+        $stmt->execute([$granteeId, 'users:read']);
+        $this->assertSame(0, (int) $stmt->fetchColumn(), 'No delegation row may be created on rejection.');
+    }
+
     // ==================== Harness ====================
 
     private function dispatch(Request $request): Response
