@@ -426,6 +426,15 @@ class UsersApiHandler
                 'ou_changed' => $ouChanged,
             ]);
 
+            // Notify listeners (e.g. the audit trail, WC-34) after a successful
+            // user update. The owning tenant scopes the record.
+            $this->hookManager->dispatch('user.updated', [
+                'id' => (int)$id,
+                'tenant_id' => $ownerTenantId,
+                'role_changed' => $roleChanged,
+                'ou_changed' => $ouChanged,
+            ]);
+
             return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);
         } catch (\Exception $e) {
             return Response::error('Failed to update user: ' . $e->getMessage(), 500);
@@ -561,6 +570,12 @@ class UsersApiHandler
 
             $deleteStmt = $this->db->prepare('DELETE FROM users WHERE id = ? AND tenant_id = ?');
             $deleteStmt->execute([$id, $currentTenantId]);
+
+            // Notify listeners (e.g. the audit trail, WC-34) after deletion.
+            $this->hookManager->dispatch('user.deleted', [
+                'id' => (int)$id,
+                'tenant_id' => $currentTenantId,
+            ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'User deleted']], 200);
         } catch (\Exception $e) {

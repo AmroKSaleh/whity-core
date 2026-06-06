@@ -7,6 +7,7 @@ namespace Whity\Http\Middleware;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Auth\JwtParser;
+use Whity\Core\Audit\AuditContext;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
@@ -123,6 +124,15 @@ class EnforceTenantIsolation
         if ($payload !== null) {
             $request->user = (object) $payload;
         }
+
+        // Populate the request-scoped audit context (WC-34) so the AuditLogger —
+        // which subscribes to hooks deep inside the handlers and has no access to
+        // the Request — can stamp the acting user and client IP on every entry.
+        // Reset between requests by the kernel and the worker loop.
+        $actorUserId = ($payload !== null && isset($payload['user_id']) && is_int($payload['user_id']))
+            ? $payload['user_id']
+            : null;
+        AuditContext::set($actorUserId, $this->clientIp($request));
 
         // Determine the tenant the request is addressing, if any is declared.
         $resourceTenantId = $this->resolveResourceTenantId($request, $path);
@@ -321,5 +331,32 @@ class EnforceTenantIsolation
     private function isPublicRoute(string $path): bool
     {
         return in_array($path, self::PUBLIC_ROUTES, true);
+    }
+
+    /**
+     * Best-effort client IP extraction from forwarding headers (WC-34).
+     *
+     * Prefers the first hop in `X-Forwarded-For`, then `X-Real-IP`. Returns null
+     * when neither is present. Capped at 45 chars (IPv6 max) for the audit column.
+     *
+     * @param Request $request The incoming request.
+     * @return string|null The client IP, or null.
+     */
+    private function clientIp(Request $request): ?string
+    {
+        $forwarded = $request->getHeader('X-Forwarded-For');
+        if (is_string($forwarded) && $forwarded !== '') {
+            $first = trim(explode(',', $forwarded)[0]);
+            if ($first !== '') {
+                return substr($first, 0, 45);
+            }
+        }
+
+        $realIp = $request->getHeader('X-Real-IP');
+        if (is_string($realIp) && $realIp !== '') {
+            return substr(trim($realIp), 0, 45);
+        }
+
+        return null;
     }
 }
