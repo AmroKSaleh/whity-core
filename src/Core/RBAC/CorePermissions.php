@@ -53,6 +53,12 @@ final class CorePermissions
     // Plugin lifecycle management
     public const PLUGINS_MANAGE = 'plugins:manage';
 
+    // Permission delegation management (WC-34). Gates the delegation API; the
+    // runtime subset-of-own-permissions invariant is enforced independently in
+    // the delegation service so holding this permission never lets a grantor
+    // delegate beyond what they themselves hold.
+    public const DELEGATION_MANAGE = 'delegation:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -77,6 +83,7 @@ final class CorePermissions
             self::OUS_ASSIGN,
             self::PERMISSIONS_READ,
             self::PLUGINS_MANAGE,
+            self::DELEGATION_MANAGE,
         ];
     }
 }

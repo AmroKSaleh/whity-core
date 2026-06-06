@@ -98,6 +98,17 @@ class RoleChecker
      * AND every OU/ancestor-OU role. Because OU membership and OU role assignments
      * are tenant scoped, this cache MUST be keyed by tenant in addition to user —
      * the same user resolved under a different tenant may see a different set.
+     *
+     * The key ALSO carries a delegation-awareness flag ("userId:tenantId:1" when a
+     * {@see DelegatedPermissionResolver} is wired, ":0" otherwise). Two checkers
+     * share this static cache — the delegation-aware one used by RbacMiddleware and
+     * the delegation-UNAWARE one that bounds a grantor's delegable set (WC-34). They
+     * resolve DIFFERENT sets for the same (user, tenant), so they MUST NOT collide
+     * on a single key: without the flag, the enforcement checker priming the cache
+     * for a grantor would let the bounding checker read a delegation-inclusive set
+     * and permit transitive re-delegation escalation (and, in the reverse order,
+     * mask legitimately delegated access).
+     *
      * Derived data only; invalidated via {@see self::clearCache()}.
      *
      * @var array<string, array<int, string>>
@@ -109,19 +120,38 @@ class RoleChecker
     private ?LoggerInterface $logger;
 
     /**
+     * Optional resolver for delegated permissions (WC-34).
+     *
+     * When wired, a user's effective permission set is unioned with the LIVE
+     * (non-revoked) permissions delegated to them — directly or through any of
+     * their effective roles, within OU scope — so a delegation actually grants
+     * access through {@see self::hasPermission()}. When null (e.g. legacy tests),
+     * delegation contributes nothing and resolution behaves exactly as before.
+     */
+    private ?DelegatedPermissionResolver $delegationResolver;
+
+    /**
      * Constructor.
      *
-     * @param Database              $db       The database connection instance.
-     * @param PermissionRegistry    $registry The permission registry instance.
-     * @param LoggerInterface|null  $logger   Optional PSR-3 logger used to warn on
-     *                                         circular hierarchies. When null, no
-     *                                         output is emitted (keeps tests clean).
+     * @param Database                        $db                 The database connection instance.
+     * @param PermissionRegistry              $registry           The permission registry instance.
+     * @param LoggerInterface|null            $logger             Optional PSR-3 logger used to warn on
+     *                                                            circular hierarchies. When null, no
+     *                                                            output is emitted (keeps tests clean).
+     * @param DelegatedPermissionResolver|null $delegationResolver Optional delegated-permission
+     *                                                            resolver (WC-34). When null, delegated
+     *                                                            grants are not consulted.
      */
-    public function __construct(Database $db, PermissionRegistry $registry, ?LoggerInterface $logger = null)
-    {
+    public function __construct(
+        Database $db,
+        PermissionRegistry $registry,
+        ?LoggerInterface $logger = null,
+        ?DelegatedPermissionResolver $delegationResolver = null
+    ) {
         $this->db = $db;
         $this->registry = $registry;
         $this->logger = $logger;
+        $this->delegationResolver = $delegationResolver;
     }
 
     /**
@@ -251,14 +281,40 @@ class RoleChecker
      */
     public function getEffectivePermissionsForUser(int $userId, int $tenantId): array
     {
-        $cacheKey = $userId . ':' . $tenantId;
+        // Key by delegation-awareness too: the bounding (resolver-less) checker and
+        // the enforcement (delegation-aware) checker share this static cache but
+        // resolve different sets, so they must never read each other's entries
+        // (WC-34 — see the cache property docblock).
+        $cacheKey = $userId . ':' . $tenantId . ':' . ($this->delegationResolver !== null ? '1' : '0');
         if (isset(self::$effectiveUserPermissionCache[$cacheKey])) {
             return self::$effectiveUserPermissionCache[$cacheKey];
         }
 
         $permissions = [];
-        foreach ($this->getEffectiveRoleIdsForUser($userId, $tenantId) as $roleId) {
+
+        $effectiveRoleIds = $this->getEffectiveRoleIdsForUser($userId, $tenantId);
+        foreach ($effectiveRoleIds as $roleId) {
             foreach ($this->getEffectivePermissionsForRole($roleId, $tenantId) as $permission) {
+                $permissions[$permission] = true;
+            }
+        }
+
+        // WC-34: union in LIVE delegated permissions. A delegation made to the
+        // user directly, or to any of their effective roles, grants access too —
+        // honouring the delegation lifecycle (revoked delegations contribute
+        // nothing) and OU scope (an OU-scoped delegation applies only when the
+        // user falls within that OU subtree). Resolution stays tenant scoped
+        // because the resolver itself filters by tenant.
+        if ($this->delegationResolver !== null) {
+            $inScopeOuIds = $this->getOuChainIdsForUser($userId, $tenantId);
+            foreach (
+                $this->delegationResolver->delegatedPermissionsForUser(
+                    $userId,
+                    $tenantId,
+                    $effectiveRoleIds,
+                    $inScopeOuIds
+                ) as $permission
+            ) {
                 $permissions[$permission] = true;
             }
         }
@@ -500,6 +556,54 @@ class RoleChecker
         }
 
         return array_keys($roleIds);
+    }
+
+    /**
+     * Collect the OU ids in scope for a user: the user's own OU and every
+     * ancestor OU (walking {@see organizational_units}.parent_id up to the root),
+     * tenant scoped. Returns an empty list when the user is in no OU.
+     *
+     * This is the OU-subtree membership a user satisfies "from below": a
+     * delegation scoped to OU X applies to a user whose OU is X or any descendant
+     * of X — which is exactly when X appears in this user's OU + ancestor chain.
+     * Bounded by the same visited-set cycle detection and {@see self::MAX_HIERARCHY_DEPTH}
+     * as the role-id walk (WC-34).
+     *
+     * @param int $userId   The user ID.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return array<int, int> Distinct OU ids (own OU + ancestors), tenant scoped.
+     */
+    private function getOuChainIdsForUser(int $userId, int $tenantId): array
+    {
+        $ouId = $this->getOuIdForUser($userId, $tenantId);
+        if ($ouId === null) {
+            return [];
+        }
+
+        $ouIds = [];
+        $visited = [];
+        $currentOuId = $ouId;
+        $depth = 0;
+
+        while ($currentOuId !== null) {
+            if (isset($visited[$currentOuId])) {
+                $this->warnCircularOuChain($ouId, $currentOuId, $tenantId, array_keys($visited));
+                break;
+            }
+
+            if ($depth >= self::MAX_HIERARCHY_DEPTH) {
+                $this->warnOuMaxDepthExceeded($ouId, $tenantId);
+                break;
+            }
+
+            $visited[$currentOuId] = true;
+            $depth++;
+            $ouIds[$currentOuId] = true;
+
+            $currentOuId = $this->getParentOuId($currentOuId, $tenantId);
+        }
+
+        return array_keys($ouIds);
     }
 
     /**

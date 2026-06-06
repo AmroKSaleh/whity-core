@@ -45,6 +45,7 @@ final class MigrationSchemaTest extends TestCase
         'revoked_tokens',
         'backup_codes',
         'core_schema_migrations',
+        'permission_delegations',
     ];
 
     private static string $migrationDir;
@@ -88,6 +89,8 @@ final class MigrationSchemaTest extends TestCase
         $this->assertContains('008_create_ou_role_assignments.php', $names);
         $this->assertContains('012_create_user_roles.php', $names);
         $this->assertContains('013_grant_plugins_manage_to_admin.php', $names);
+        $this->assertContains('014_create_permission_delegations.php', $names);
+        $this->assertContains('015_grant_delegation_manage_to_admin.php', $names);
 
         // The absorbed patch migrations must be gone (folded into the creates).
         $this->assertNotContains('003_add_slug_to_tenants.php', $names);
@@ -97,7 +100,7 @@ final class MigrationSchemaTest extends TestCase
         $this->assertNotContains('017_add_role_hierarchy.php', $names);
         $this->assertNotContains('018_add_tenant_id_to_roles.php', $names);
 
-        $this->assertGreaterThanOrEqual(13, count($files), 'Expected at least 13 consolidated migration files.');
+        $this->assertGreaterThanOrEqual(15, count($files), 'Expected at least 15 consolidated migration files.');
 
         // Verify the numeric prefixes are strictly increasing so run order is deterministic.
         $prefixes = [];
@@ -577,6 +580,88 @@ final class MigrationSchemaTest extends TestCase
         $this->assertSame($dotForm, $toDot($colonForm));
         // Idempotent reverse.
         $this->assertSame($dotForm, $toDot($dotForm));
+    }
+
+    public function testPermissionDelegationsTableSchemaAndReversibility(): void
+    {
+        $sql = $this->readFile('014_create_permission_delegations.php');
+
+        // Polymorphic grantee modelled as (grantee_type discriminator + grantee_id),
+        // with a CHECK pinning the discriminator to the two legal values (WC-34).
+        $this->assertMatchesRegularExpression(
+            '/grantee_type\s+VARCHAR\(\d+\)\s+NOT\s+NULL/i',
+            $sql,
+            'permission_delegations.grantee_type must be a NOT NULL discriminator column.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/grantee_id\s+INTEGER\s+NOT\s+NULL/i',
+            $sql,
+            'permission_delegations.grantee_id must be a NOT NULL integer.'
+        );
+        // The SQL lives inside a single-quoted PHP string literal, so the inner
+        // 'role'/'user' quotes appear backslash-escaped in the source.
+        $this->assertMatchesRegularExpression(
+            "/CHECK\s*\(\s*grantee_type\s+IN\s*\(\s*\\\\?'role\\\\?'\s*,\s*\\\\?'user\\\\?'\s*\)\s*\)/i",
+            $sql,
+            'A CHECK constraint must pin grantee_type to role|user.'
+        );
+
+        // Tenant scope + grantor + permission string + optional OU scope + lifecycle.
+        $this->assertMatchesRegularExpression(
+            '/tenant_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+tenants\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'permission_delegations.tenant_id must reference tenants(id) ON DELETE CASCADE.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/grantor_user_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+users\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'permission_delegations.grantor_user_id must reference users(id) ON DELETE CASCADE.'
+        );
+        $this->assertMatchesRegularExpression('/permission\s+VARCHAR\(\d+\)\s+NOT\s+NULL/i', $sql);
+        $this->assertMatchesRegularExpression(
+            '/ou_id\s+INTEGER\s+NULL\s+REFERENCES\s+organizational_units\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'permission_delegations.ou_id must be a NULLABLE OU-scope FK with cascade.'
+        );
+        $this->assertMatchesRegularExpression('/revoked_at\s+TIMESTAMP\s+NULL/i', $sql);
+
+        // Resolution index covering (tenant_id, grantee_type, grantee_id, revoked_at).
+        $this->assertMatchesRegularExpression(
+            '/CREATE INDEX IF NOT EXISTS\s+idx_pd_resolution/i',
+            $sql,
+            'A resolution index must exist for the hot delegation lookup.'
+        );
+
+        // Reversible: down() drops the table.
+        $this->assertMatchesRegularExpression(
+            '/DROP TABLE IF EXISTS\s+permission_delegations/i',
+            $sql,
+            'permission_delegations migration must have a reversible down() that drops the table.'
+        );
+    }
+
+    public function testDelegationManageGrantMigrationIsIdempotentSeedStyle(): void
+    {
+        $sql = $this->readFile('015_grant_delegation_manage_to_admin.php');
+
+        // Seed-style inserts must guard with ON CONFLICT for idempotency.
+        $this->assertMatchesRegularExpression(
+            '/INSERT INTO permissions[\s\S]*ON CONFLICT/i',
+            $sql,
+            'The delegation:manage catalogue insert must use ON CONFLICT.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/INSERT INTO role_permissions[\s\S]*ON CONFLICT/i',
+            $sql,
+            'The delegation:manage grant insert must use ON CONFLICT.'
+        );
+
+        // down() must reverse the grant.
+        $this->assertMatchesRegularExpression(
+            '/DELETE FROM role_permissions/i',
+            $sql,
+            'down() must remove the delegation:manage grant.'
+        );
     }
 
     public function testAllMigrationFilesDeclareTheMigrationsNamespace(): void

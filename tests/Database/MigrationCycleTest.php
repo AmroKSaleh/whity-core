@@ -33,6 +33,7 @@ final class MigrationCycleTest extends TestCase
         'user_roles',
         'organizational_units',
         'ou_role_assignments',
+        'permission_delegations',
     ];
 
     private ?Database $db = null;
@@ -93,7 +94,7 @@ final class MigrationCycleTest extends TestCase
     {
         $this->runMigrate('run');
         $total = $this->migrationCount();
-        $this->assertGreaterThanOrEqual(13, $total, 'Expected the full consolidated migration set to have run.');
+        $this->assertGreaterThanOrEqual(15, $total, 'Expected the full consolidated migration set to have run.');
 
         // Roll back every migration one at a time.
         for ($i = 0; $i < $total; $i++) {
@@ -103,7 +104,7 @@ final class MigrationCycleTest extends TestCase
         $this->assertSame(0, $this->migrationCount(), 'All migrations should be rolled back.');
 
         // Structural tables created by reversible migrations must be gone.
-        foreach (['user_roles', 'ou_role_assignments', 'organizational_units', 'permissions', 'role_permissions', 'users', 'roles', 'tenants'] as $table) {
+        foreach (['permission_delegations', 'user_roles', 'ou_role_assignments', 'organizational_units', 'permissions', 'role_permissions', 'users', 'roles', 'tenants'] as $table) {
             $this->assertFalse($this->tableExists($table), "Table '{$table}' should be dropped after full rollback.");
         }
     }
