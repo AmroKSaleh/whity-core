@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -27,15 +27,28 @@ interface CreateOuModalProps {
   onClose: () => void;
   onSuccess: () => void;
   ous: OU[];
+  /** Pre-select a parent OU (used by the tree/graph "Create child OU" action). */
+  defaultParentId?: number | null;
 }
 
-export function CreateOuModal({ isOpen, onClose, onSuccess, ous }: CreateOuModalProps) {
+export function CreateOuModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  ous,
+  defaultParentId = null,
+}: CreateOuModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [parentId, setParentId] = useState<string>('null');
+  // Initialised from the (possibly pre-selected) parent. The page remounts this
+  // modal per open via a `key` tied to defaultParentId, so the initial value is
+  // always correct without a sync effect.
+  const [parentId, setParentId] = useState<string>(
+    defaultParentId !== null ? String(defaultParentId) : 'null'
+  );
 
   const handleCreate = async () => {
     if (!name.trim()) {

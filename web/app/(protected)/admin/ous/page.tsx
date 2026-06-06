@@ -1,42 +1,68 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { IconBinaryTree2, IconList, IconPlus } from '@tabler/icons-react';
 import { CreateOuModal } from './create-modal';
 import { EditOuModal } from './edit-modal';
 import { DeleteOuModal } from './delete-modal';
+import { OuTree } from './ou-tree';
+import { buildOuTree, findNode } from './ou-tree-util';
+import type { OuAction } from './ou-view';
 import type { OU } from './types';
+
+// react-flow is heavy and touches browser-only APIs, so the graph view is
+// loaded on demand and never server-rendered (ssr:false). Keeping it behind a
+// dynamic import keeps it out of the main bundle; only users who switch to the
+// graph pay for it.
+const OuGraph = dynamic(() => import('./ou-graph'), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[32rem] w-full rounded-lg" />,
+});
+
+type ViewMode = 'tree' | 'graph';
+const VIEW_STORAGE_KEY = 'wc:ous:view';
 
 export default function OUsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [ous, setOus] = useState<OU[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Lazily restore the persisted view choice. The initializer runs on the
+  // client (this is a 'use client' route); the typeof guard keeps it safe under
+  // SSR pre-render, where window is undefined.
+  const [view, setView] = useState<ViewMode>(() => {
+    if (typeof window === 'undefined') {
+      return 'tree';
+    }
+    const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
+    return stored === 'tree' || stored === 'graph' ? stored : 'tree';
+  });
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createParentId, setCreateParentId] = useState<number | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [selectedOu, setSelectedOu] = useState<OU | null>(null);
+  const [actionOu, setActionOu] = useState<OU | null>(null);
+
+  const selectView = (next: ViewMode) => {
+    setView(next);
+    window.localStorage.setItem(VIEW_STORAGE_KEY, next);
+  };
 
   const fetchOUs = async () => {
     try {
       setIsLoading(true);
       const response = await apiClient('/api/ous');
-
       if (!response.ok) {
         throw new Error('Failed to fetch organizational units');
       }
-
       const data = await response.json();
       setOus(data.data || []);
     } catch (error) {
@@ -49,129 +75,179 @@ export default function OUsPage() {
   };
 
   useEffect(() => {
-    fetchOUs();
+    void fetchOUs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleEditClick = (ou: OU) => {
-    setSelectedOu(ou);
-    setIsEditModalOpen(true);
-  };
+  const tree = useMemo(() => buildOuTree(ous), [ous]);
 
-  const handleDeleteClick = (ou: OU) => {
-    setSelectedOu(ou);
-    setIsDeleteModalOpen(true);
-  };
-
-  const columns: Column<OU>[] = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'slug', label: 'Slug', sortable: true },
-    { key: 'description', label: 'Description', sortable: false },
-    { key: 'parent_id', label: 'Parent ID', sortable: false },
-  ];
-
-  const rowActions = (ou: OU) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm">
-          <IconMenu2 size={16} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => handleEditClick(ou)}>
-          Edit
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => handleDeleteClick(ou)}
-          className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
-        >
-          Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+  // The drawer needs the live OU record for the selected id (kept in sync with
+  // refetches), looked up from the built tree.
+  const selectedOu = useMemo(
+    () => (selectedId !== null ? findNode(tree, selectedId) ?? null : null),
+    [tree, selectedId]
   );
+
+  const handleAction = (action: OuAction, ou: OU) => {
+    setActionOu(ou);
+    switch (action) {
+      case 'create-child':
+        setCreateParentId(ou.id);
+        setIsCreateModalOpen(true);
+        break;
+      case 'edit':
+      case 'move':
+        // Both open the edit modal; "move" lands on the same dialog, whose
+        // "Move to parent" picker excludes the OU and its descendants.
+        setIsEditModalOpen(true);
+        break;
+      case 'delete':
+        setIsDeleteModalOpen(true);
+        break;
+    }
+  };
+
+  const openCreateRoot = () => {
+    setCreateParentId(null);
+    setIsCreateModalOpen(true);
+  };
+
+  const ViewToggle = (
+    <div role="group" aria-label="View mode" className="inline-flex rounded-md border border-border p-0.5">
+      <Button
+        variant={view === 'tree' ? 'secondary' : 'ghost'}
+        size="sm"
+        aria-pressed={view === 'tree'}
+        onClick={() => selectView('tree')}
+        className="gap-1.5"
+      >
+        <IconList />
+        Tree
+      </Button>
+      <Button
+        variant={view === 'graph' ? 'secondary' : 'ghost'}
+        size="sm"
+        aria-pressed={view === 'graph'}
+        onClick={() => selectView('graph')}
+        className="gap-1.5"
+      >
+        <IconBinaryTree2 />
+        Graph
+      </Button>
+    </div>
+  );
+
+  const isEmpty = !isLoading && ous.length === 0;
 
   return (
     <div className="space-y-8">
       <AdminHeader
         title="Organizational Units"
-        description="Create and manage organizational units (OUs) to structure your organization"
+        description="Visualize and manage your organizational hierarchy, role assignments, and members."
         action={
-          <Button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="gap-2"
-          >
+          <Button onClick={openCreateRoot} className="gap-2">
             <IconPlus />
             Create OU
           </Button>
         }
       />
 
-      <DataTable
-        columns={columns}
-        data={ous}
-        rowActions={rowActions}
-        isLoading={isLoading}
-        emptyState={{
-          title: 'No organizational units yet',
-          description: 'Create an organizational unit to structure your organization.',
-          action: (
-            <Button
-              onClick={() => setIsCreateModalOpen(true)}
-              variant="outline"
-              className="mt-4 gap-2"
-            >
-              <IconPlus />
-              Create the first OU
-            </Button>
-          ),
-        }}
+      <div className="flex items-center justify-between">
+        {ViewToggle}
+      </div>
+
+      {isLoading ? (
+        <Skeleton className="h-64 w-full rounded-lg" />
+      ) : isEmpty ? (
+        <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
+          <h2 className="font-heading text-sm font-medium">No organizational units yet</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Create an organizational unit to structure your organization.
+          </p>
+          <Button onClick={openCreateRoot} variant="outline" className="mt-4 gap-2">
+            <IconPlus />
+            Create the first OU
+          </Button>
+        </div>
+      ) : view === 'tree' ? (
+        <OuTree
+          tree={tree}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onAction={(action, node) => handleAction(action, node)}
+        />
+      ) : (
+        <OuGraph
+          tree={tree}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onAction={(action, node) => handleAction(action, node)}
+        />
+      )}
+
+      <OuDetailDrawerLazy
+        ou={selectedOu}
+        onClose={() => setSelectedId(null)}
+        onAction={handleAction}
+        onChanged={fetchOUs}
       />
 
       <CreateOuModal
+        key={`create-${createParentId ?? 'root'}`}
         isOpen={isCreateModalOpen}
         onClose={() => {
           setIsCreateModalOpen(false);
-          setSelectedOu(null);
+          setCreateParentId(null);
         }}
         onSuccess={() => {
           setIsCreateModalOpen(false);
-          fetchOUs();
+          setCreateParentId(null);
+          void fetchOUs();
         }}
         ous={ous}
+        defaultParentId={createParentId}
       />
 
-      {selectedOu && (
+      {actionOu && (
         <EditOuModal
           isOpen={isEditModalOpen}
           onClose={() => {
             setIsEditModalOpen(false);
-            setSelectedOu(null);
+            setActionOu(null);
           }}
           onSuccess={() => {
             setIsEditModalOpen(false);
-            setSelectedOu(null);
-            fetchOUs();
+            setActionOu(null);
+            void fetchOUs();
           }}
-          ou={selectedOu}
+          ou={actionOu}
           ous={ous}
         />
       )}
 
-      {selectedOu && (
+      {actionOu && (
         <DeleteOuModal
           isOpen={isDeleteModalOpen}
           onClose={() => {
             setIsDeleteModalOpen(false);
-            setSelectedOu(null);
+            setActionOu(null);
           }}
           onSuccess={() => {
             setIsDeleteModalOpen(false);
-            setSelectedOu(null);
-            fetchOUs();
+            setActionOu(null);
+            setSelectedId((current) => (current === actionOu.id ? null : current));
+            void fetchOUs();
           }}
-          ou={selectedOu}
+          ou={actionOu}
         />
       )}
     </div>
   );
 }
+
+// The drawer fetches per-OU detail; it is a client component already, but
+// importing it lazily keeps the initial admin route lean.
+const OuDetailDrawerLazy = dynamic(
+  () => import('./ou-detail-drawer').then((m) => m.OuDetailDrawer),
+  { ssr: false }
+);
