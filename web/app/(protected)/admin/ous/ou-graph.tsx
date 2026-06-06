@@ -175,7 +175,9 @@ export default function OuGraph({ tree, selectedId, onSelect, onAction }: OuView
         id: `e-${node.parent_id}-${node.id}`,
         source: String(node.parent_id),
         target: String(node.id),
-        type: 'smoothstep',
+        // 'default' is react-flow's bezier edge: smooth curves from each
+        // parent's bottom handle to its child's top handle.
+        type: 'default',
       }));
   }, [tree]);
 
