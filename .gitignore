@@ -5,6 +5,8 @@
 *.swo
 .env
 .env.local
+# Staging secrets (WC-32); commit .env.staging.example only.
+.env.staging
 .idea/
 .vscode/
 node_modules/

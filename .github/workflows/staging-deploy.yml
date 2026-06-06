@@ -1,0 +1,128 @@
+name: Staging Deploy
+
+# WC-32: build the FrankenPHP image and deploy it to a staging host.
+#
+# There is no real staging host yet, so the deploy job is GATED: it only runs
+# when the deployment secrets/vars are configured (and never on a fork PR). The
+# build job always runs and is the meaningful CI signal today; the deploy job is
+# a valid, parameterized placeholder that activates the moment the secrets exist.
+#
+# Triggers:
+#   * push to main          -> build, then deploy IF gated checks pass
+#   * manual workflow_dispatch (with an optional ref) -> same, on demand
+#
+# Required repository configuration for the deploy step to run (documented in
+# docs/wiki/DEPLOYMENT_GUIDE.md):
+#   Variables (Settings > Secrets and variables > Actions > Variables):
+#     STAGING_DEPLOY_ENABLED   set to "true" to arm the deploy job
+#     STAGING_HOST             staging host/DNS name (informational, parameterizes deploy)
+#   Secrets:
+#     STAGING_SSH_KEY          deploy credential for the staging host
+#     STAGING_JWT_SECRET       >= 32 chars (prod-like fail-fast guard)
+#     STAGING_ENCRYPTION_KEY   TOTP encryption key
+#     STAGING_DB_PASSWORD      staging database password
+#
+# This workflow deliberately does NOT modify automated-tests.yml.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref (branch/tag/SHA) to build and deploy"
+        required: false
+        default: ""
+
+# Avoid overlapping deploys to the same environment.
+concurrency:
+  group: staging-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build staging image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build FrankenPHP image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # Build-only here (no registry push); the deploy job is the gated path
+          # that would build+push with credentials once a real host exists.
+          push: false
+          tags: whity-core:staging-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to staging
+    needs: build
+    runs-on: ubuntu-latest
+    # GATE: only on the canonical repo (not forks) AND only when explicitly armed
+    # via the STAGING_DEPLOY_ENABLED variable. Without this, the job is skipped
+    # (green), never failed — so the workflow does not break for lack of secrets.
+    if: >-
+      github.repository_owner != '' &&
+      github.event_name != 'pull_request' &&
+      vars.STAGING_DEPLOY_ENABLED == 'true'
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_HOST }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Verify required deploy secrets are present
+        env:
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_JWT_SECRET: ${{ secrets.STAGING_JWT_SECRET }}
+          STAGING_ENCRYPTION_KEY: ${{ secrets.STAGING_ENCRYPTION_KEY }}
+          STAGING_DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+        run: |
+          missing=0
+          for var in STAGING_SSH_KEY STAGING_JWT_SECRET STAGING_ENCRYPTION_KEY STAGING_DB_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Required secret $var is not set."
+              missing=1
+            fi
+          done
+          if [ "${#STAGING_JWT_SECRET}" -lt 32 ]; then
+            echo "::error::STAGING_JWT_SECRET must be at least 32 characters (prod-like guard)."
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "Deploy is armed (STAGING_DEPLOY_ENABLED=true) but secrets are incomplete."
+            exit 1
+          fi
+          echo "All required deploy secrets present."
+
+      - name: Deploy (placeholder)
+        env:
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          echo "Deploying whity-core:staging-${{ github.sha }} to ${STAGING_HOST}..."
+          echo "TODO: wire the real staging rollout here, e.g.:"
+          echo "  - push the built image to a registry, then"
+          echo "  - SSH to \$STAGING_HOST and run:"
+          echo "      docker compose -p whity-staging -f docker-compose.staging.yml \\"
+          echo "        --env-file .env.staging up -d --build"
+          echo "      ./scripts/init-staging-db.sh"
+          echo "  - smoke-check: curl -fsS http://\$STAGING_HOST/api/health"
+          echo "No real staging host is provisioned yet; this step is a gated placeholder."
