@@ -106,8 +106,11 @@ use Whity\Api\PluginsApiHandler;
 use Whity\Api\MigrationsApiHandler;
 use Whity\Api\AdminApiHandler;
 use Whity\Api\OusApiHandler;
+use Whity\Api\DelegationsApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
+use Whity\Core\Delegation\DelegationRepository;
+use Whity\Core\Delegation\DelegationService;
 use Whity\Api\TwoFactorHandler;
 use Whity\Api\AuditLogApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
@@ -247,6 +250,19 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'order' => 4,
     ];
     $items[] = [
+        'id' => 'delegations',
+        'label' => 'Delegations',
+        'href' => '/admin/delegations',
+        'icon' => 'share',
+        'group' => 'admin',
+        'order' => 6,
+        // WC-34: the delegations admin area is gated on the delegation:manage
+        // permission. The nav item carries the requirement so a
+        // permission-aware client/consumer can hide it; the page also enforces
+        // it server-side via the RBAC-protected API (403 → access-denied state).
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DELEGATION_MANAGE,
+    ];
+    $items[] = [
         'id' => 'tenants',
         'label' => 'Tenants',
         'href' => '/admin/tenants',
@@ -272,8 +288,19 @@ $hookManager->listen('navigation.register', function ($data, $context) {
     return ['items' => $items];
 });
 
-// 5. Initialize role checker
-$roleChecker = new RoleChecker($db, $permissionRegistry);
+// 5. Initialize role checker(s) and the delegation service (WC-34).
+//    The delegation service needs a RoleChecker to bound a grantor's delegable
+//    set to their BASE RBAC effective permissions (direct role + hierarchy + OU),
+//    so it is given a checker WITHOUT the delegation resolver — this both breaks
+//    the construction cycle and prevents transitive re-delegation escalation
+//    (you can only delegate what RBAC grants you, never what was delegated TO you).
+//    The RoleChecker used by the middleware IS delegation-aware, so a live,
+//    non-revoked delegation actually grants access through hasPermission().
+$baseRoleChecker = new RoleChecker($db, $permissionRegistry);
+$delegationRepository = new DelegationRepository($db->getPdo());
+$delegationService = new DelegationService($delegationRepository, $baseRoleChecker, $permissionRegistry);
+
+$roleChecker = new RoleChecker($db, $permissionRegistry, null, $delegationService);
 
 // 6. Initialize RBAC middleware
 $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
@@ -397,6 +424,15 @@ $router->register('GET', '/api/ous/{id}/roles', [$ousHandler, 'roles'], 'admin')
 $router->register('GET', '/api/ous/{id}/members', [$ousHandler, 'members'], 'admin');
 $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
 $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
+
+// 12b. Register permission delegations API handler (WC-34). Gated on the
+// delegation:manage permission (6th positional arg; requiredRole stays null so
+// RbacMiddleware enforces the permission). The runtime subset-of-own-permissions
+// invariant is enforced independently inside DelegationService.
+$delegationsHandler = new DelegationsApiHandler($db->getPdo(), $delegationService, $logger);
+$router->register('GET', '/api/delegations', [$delegationsHandler, 'list'], null, null, CorePermissions::DELEGATION_MANAGE);
+$router->register('POST', '/api/delegations', [$delegationsHandler, 'create'], null, null, CorePermissions::DELEGATION_MANAGE);
+$router->register('DELETE', '/api/delegations/{id}', [$delegationsHandler, 'revoke'], null, null, CorePermissions::DELEGATION_MANAGE);
 
 // 13. Register the audit-log read API (WC-34). Gated on the audit:read permission
 // (6th positional arg; requiredRole stays null so RbacMiddleware enforces the

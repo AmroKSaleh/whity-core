@@ -8,7 +8,7 @@ Related: [PERMISSION_SYSTEM](PERMISSION_SYSTEM.md) · [TENANT_ISOLATION](TENANT_
 
 | Component | Responsibility | File |
 | --- | --- | --- |
-| `audit_log` table | Append-only storage for audit entries. | `database/migrations/014_create_audit_log.php` |
+| `audit_log` table | Append-only storage for audit entries. | `database/migrations/016_create_audit_log.php` |
 | `AuditLogger` | The single writer. Subscribes to CRUD hooks and exposes `record()`. | `src/Core/Audit/AuditLogger.php` |
 | `AuditContext` | Request-scoped holder for the acting user id + client IP. | `src/Core/Audit/AuditContext.php` |
 | `AuditLogApiHandler` | Queryable, RBAC-protected read API. | `src/Api/AuditLogApiHandler.php` |
