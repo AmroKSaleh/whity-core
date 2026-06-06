@@ -286,10 +286,11 @@ $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage
 // 10. Register authentication handler
 // Inject the shared $totpService (built at step 3b) so the login-path 2FA validation uses the
 // SAME encryption key as the setup/confirm path (WC-95).
-$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService);
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 $router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
+$router->register('PATCH', '/api/me', [$authHandler, 'handleUpdateMe'], null);
 $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);
 $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], null);
 

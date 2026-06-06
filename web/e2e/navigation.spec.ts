@@ -53,7 +53,8 @@ test.describe('Sidebar navigation (admin)', () => {
     await adminPage.shell.clickNav('Settings');
     await page.waitForURL('**/settings');
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-    await expect(page.getByText('Account Information')).toBeVisible();
+    // The Account Information card became the editable Profile card (WC-64).
+    await expect(page.getByText('Profile', { exact: true })).toBeVisible();
     await expect(page.getByText('Security', { exact: true })).toBeVisible();
   });
 
