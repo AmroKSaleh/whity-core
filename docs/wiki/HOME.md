@@ -14,6 +14,7 @@ Welcome to the Whity Core documentation.
 - **[Permission System](PERMISSION_SYSTEM.md)** — RBAC permissions, registry, role hierarchy, enforcement.
 - **[Tenant Isolation](TENANT_ISOLATION.md)** — Multi-tenancy, `TenantContext`, query scoping.
 - **[Hook System](HOOK_SYSTEM.md)** — Plugin event/extension mechanism.
+- **[Family Relations](RELATIONS.md)** — Person-node graph, relationship types, the relations API + admin hub.
 
 ## Contributing
 

@@ -62,6 +62,14 @@ final class CorePermissions
     // delegate beyond what they themselves hold.
     public const DELEGATION_MANAGE = 'delegation:manage';
 
+    // Family relations management (WC-65). RELATIONS_READ gates the read surface
+    // (relationship-type vocabulary, persons, and a node's relations); the broader
+    // RELATIONS_MANAGE gates every write (create/edit/delete a person, add/remove a
+    // relation edge). Both are seeded and granted to the admin role by migration
+    // 019_create_relations.
+    public const RELATIONS_READ = 'relations:read';
+    public const RELATIONS_MANAGE = 'relations:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -88,6 +96,8 @@ final class CorePermissions
             self::AUDIT_READ,
             self::PLUGINS_MANAGE,
             self::DELEGATION_MANAGE,
+            self::RELATIONS_READ,
+            self::RELATIONS_MANAGE,
         ];
     }
 }
