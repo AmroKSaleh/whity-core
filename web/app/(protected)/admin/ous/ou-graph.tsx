@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -8,6 +8,7 @@ import {
   Handle,
   Position,
   ReactFlow,
+  useNodesState,
   type Edge,
   type Node,
   type NodeProps,
@@ -41,37 +42,41 @@ interface OuNodeData extends Record<string, unknown> {
 }
 
 /**
- * Hand-rolled, dependency-free layered layout.
+ * Hand-rolled, dependency-free tidy-tree layout.
  *
- * Nodes are bucketed by depth (one horizontal row per depth, y = depth * V_GAP).
- * Within a depth, nodes are spread evenly by their index in that depth's bucket
- * (x = index * (NODE_WIDTH + H_GAP)), then the whole layer is centred so the
- * tree reads top-down and roughly balanced. This is the documented v1 approach
- * (no dagre/elk).
+ * A single post-order pass assigns each node an `x`:
+ * - **Leaves** take the next free horizontal slot (left to right).
+ * - **Parents** are centred over the span of their children
+ *   (`(firstChildX + lastChildX) / 2`).
+ *
+ * `y` is driven purely by depth (`depth * V_GAP`), so every parent sits directly
+ * above its subtree and edges run cleanly top-down instead of zig-zagging across
+ * independently-centred layers. This is the documented v1 approach (no dagre/elk).
+ *
+ * Recursion is safe here: `buildOuTree` has already stripped any cyclic
+ * `parent_id` data, so the tree it returns is finite and acyclic.
  */
 function layout(tree: OuNode[]): { nodes: Array<{ node: OuNode; x: number; y: number }> } {
-  const all = flattenOuTree(tree);
-  const byDepth = new Map<number, OuNode[]>();
-  for (const node of all) {
-    const bucket = byDepth.get(node.depth) ?? [];
-    bucket.push(node);
-    byDepth.set(node.depth, bucket);
-  }
-
-  const widest = Math.max(1, ...[...byDepth.values()].map((b) => b.length));
-  const totalWidth = widest * (NODE_WIDTH + H_GAP);
-
   const positioned: Array<{ node: OuNode; x: number; y: number }> = [];
-  for (const [depth, bucket] of byDepth) {
-    const layerWidth = bucket.length * (NODE_WIDTH + H_GAP);
-    const offset = (totalWidth - layerWidth) / 2;
-    bucket.forEach((node, index) => {
-      positioned.push({
-        node,
-        x: offset + index * (NODE_WIDTH + H_GAP),
-        y: depth * V_GAP,
-      });
-    });
+  const step = NODE_WIDTH + H_GAP;
+  let nextLeafSlot = 0;
+
+  const assignX = (node: OuNode): number => {
+    const y = node.depth * V_GAP;
+    let x: number;
+    if (node.children.length === 0) {
+      x = nextLeafSlot * step;
+      nextLeafSlot += 1;
+    } else {
+      const childXs = node.children.map(assignX);
+      x = (childXs[0] + childXs[childXs.length - 1]) / 2;
+    }
+    positioned.push({ node, x, y });
+    return x;
+  };
+
+  for (const root of tree) {
+    assignX(root);
   }
   return { nodes: positioned };
 }
@@ -129,25 +134,38 @@ const nodeTypes: NodeTypes = { ouNode: OuFlowNode };
  * `OuGraph` — the opt-in, top-down node-graph view of the OU hierarchy,
  * rendered with react-flow. Interchangeable with `OuTree` (same {@link OuViewProps}).
  *
- * Nodes are **select-only** (no drag-to-reparent): dragging and connecting are
- * disabled, clicking a node selects it (opens the drawer), and structural
- * actions are reached via each node's menu. Positions come from the hand-rolled
- * layered layout above. This component is dynamically imported with `ssr:false`
- * by the page so react-flow stays out of the main bundle and never runs on the
- * server.
+ * Nodes are **freely draggable on the canvas for layout only** — clicking a node
+ * selects it (opens the drawer), structural actions are reached via each node's
+ * menu, and **connecting is disabled** (`nodesConnectable={false}` /
+ * `connectable: false`) so dragging can never create or change a parent/child
+ * relation. Re-parenting stays in the "Move to…" picker. Initial positions come
+ * from the tidy-tree layout above; positions a user drags are preserved across
+ * re-renders (selection, refetch) for the session. This component is dynamically
+ * imported with `ssr:false` by the page so react-flow stays out of the main
+ * bundle and never runs on the server.
  */
 export default function OuGraph({ tree, selectedId, onSelect, onAction }: OuViewProps) {
-  const nodes = useMemo<Array<Node<OuNodeData>>>(() => {
-    const { nodes: positioned } = layout(tree);
-    return positioned.map(({ node, x, y }) => ({
-      id: String(node.id),
-      type: 'ouNode',
-      position: { x, y },
-      data: { ou: node, selected: node.id === selectedId, onSelect, onAction },
-      draggable: false,
-      connectable: false,
-    }));
-  }, [tree, selectedId, onSelect, onAction]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<OuNodeData>>([]);
+
+  // Computed tidy-tree positions, recomputed only when the tree structure changes.
+  const layouted = useMemo(() => layout(tree).nodes, [tree]);
+
+  // Build/refresh react-flow nodes. Positions a user has dragged are kept (keyed
+  // by id) so selecting a node or a background refetch never snaps the canvas
+  // back to the computed layout; only the node `data` (selection, callbacks) and
+  // newly-appeared OUs pick up fresh values.
+  useEffect(() => {
+    setNodes((prev) => {
+      const draggedPos = new Map(prev.map((n) => [n.id, n.position]));
+      return layouted.map(({ node, x, y }) => ({
+        id: String(node.id),
+        type: 'ouNode',
+        position: draggedPos.get(String(node.id)) ?? { x, y },
+        data: { ou: node, selected: node.id === selectedId, onSelect, onAction },
+        connectable: false,
+      }));
+    });
+  }, [layouted, selectedId, onSelect, onAction, setNodes]);
 
   const edges = useMemo<Edge[]>(() => {
     const all = flattenOuTree(tree);
@@ -172,8 +190,9 @@ export default function OuGraph({ tree, selectedId, onSelect, onAction }: OuView
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
         onNodeClick={handleNodeClick}
-        nodesDraggable={false}
+        nodesDraggable
         nodesConnectable={false}
         elementsSelectable
         fitView
