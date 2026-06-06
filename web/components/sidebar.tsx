@@ -13,6 +13,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconDashboard,
+  IconUserCog,
 } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
 import type { Icon } from '@tabler/icons-react';
@@ -202,11 +203,35 @@ export function Sidebar() {
 
         {/* Footer */}
         <div className={`border-t border-border transition-all duration-300 ${isCollapsed ? 'p-2' : 'p-4'} space-y-2`}>
-          {(!isCollapsed || isMobile) && (
-            <div className="px-2 py-2 bg-background rounded-lg text-center md:text-left">
-              <p className="text-xs text-muted-foreground truncate">Logged in as</p>
-              <p className="text-sm font-medium truncate">{user?.email}</p>
-            </div>
+          {/*
+            User menu: the "logged in as" footer doubles as the entry point to the
+            self-service profile page (WC-64), which was previously orphaned (no
+            nav link pointed to /settings). Linking it here guarantees the page is
+            reachable regardless of the dynamic navigation set.
+          */}
+          {(!isCollapsed || isMobile) ? (
+            <Link
+              href="/settings"
+              onClick={() => isMobile && setIsOpen(false)}
+              aria-label="Account settings"
+              className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg text-center md:text-left hover:bg-background/70 transition-colors"
+              title="Account settings"
+            >
+              <IconUserCog size={20} className="flex-shrink-0 text-muted-foreground" />
+              <span className="min-w-0">
+                <span className="block text-xs text-muted-foreground truncate">Logged in as</span>
+                <span className="block text-sm font-medium truncate">{user?.email}</span>
+              </span>
+            </Link>
+          ) : (
+            <Link
+              href="/settings"
+              aria-label="Account settings"
+              className="flex justify-center px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors"
+              title="Account settings"
+            >
+              <IconUserCog size={20} className="flex-shrink-0 text-muted-foreground" />
+            </Link>
           )}
           <Button
             onClick={handleLogout}

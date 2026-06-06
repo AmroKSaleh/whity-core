@@ -3,6 +3,7 @@
 import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
+import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
   const auth = useAuth();
@@ -17,22 +18,19 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* Account Settings */}
+      {/* Profile — self-service edit (WC-64) */}
       <Card>
         <CardHeader>
-          <CardTitle>Account Information</CardTitle>
-          <CardDescription>Your account details</CardDescription>
+          <CardTitle>Profile</CardTitle>
+          <CardDescription>Update your email and password</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div>
-            <label className="text-sm font-medium text-muted-foreground">Email Address</label>
-            <p className="mt-2 font-mono text-sm bg-muted p-3 rounded">{auth.user?.email}</p>
-          </div>
-
           <div>
             <label className="text-sm font-medium text-muted-foreground">Role</label>
             <p className="mt-2 text-sm bg-muted p-3 rounded capitalize">{auth.user?.role}</p>
           </div>
+
+          <ProfileForm />
         </CardContent>
       </Card>
 

@@ -2,6 +2,8 @@
 
 namespace Whity\Auth;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use PDO;
@@ -55,6 +57,13 @@ class AuthHandler
     private ?object $databaseWrapper = null;
 
     /**
+     * PSR-3 logger for structured audit records (e.g. self-service profile
+     * updates). Defaults to a {@see NullLogger} so tests stay output-clean;
+     * production wires the application logger.
+     */
+    private LoggerInterface $logger;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
@@ -65,19 +74,23 @@ class AuthHandler
      *     Inject the SAME instance used by the setup/confirm path so the secret-encryption key is
      *     identical end-to-end (see WC-95). When omitted, the key is resolved from the single shared
      *     accessor TotpService::resolveEncryptionKey(), which cannot diverge from the setup path.
+     * @param LoggerInterface|null $logger Optional PSR-3 logger for structured audit records
+     *     (self-service profile updates, WC-64). Defaults to a NullLogger when omitted.
      */
     public function __construct(
         PDO $db,
         JwtParser $jwtParser,
         ?TokenValidator $tokenValidator = null,
         ?object $databaseWrapper = null,
-        ?TotpService $totpService = null
+        ?TotpService $totpService = null,
+        ?LoggerInterface $logger = null
     ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
         $this->tokenValidator = $tokenValidator ?? new TokenValidator($jwtParser, $db);
         $this->databaseWrapper = $databaseWrapper;
         $this->totpService = $totpService;
+        $this->logger = $logger ?? new NullLogger();
     }
 
     /**
@@ -211,6 +224,246 @@ class AuthHandler
                 'role' => $claims['role']
             ]
         ], 200);
+    }
+
+    /**
+     * Minimum length enforced for a new password set via self-service profile update.
+     *
+     * Mirrors the bcrypt-backed credential policy used elsewhere and keeps the
+     * self-service path from accepting trivially weak passwords.
+     */
+    private const MIN_PASSWORD_LENGTH = 8;
+
+    /**
+     * Handle PATCH /api/me - Self-service profile update (WC-64).
+     *
+     * Updates the CURRENTLY AUTHENTICATED user only. The acting user is resolved
+     * exclusively from the validated access-token claims (never from the request
+     * body), so this endpoint can never edit an arbitrary id and needs no
+     * admin/RBAC permission beyond being authenticated.
+     *
+     * Tenant scoping: `/api/me` is a public route in
+     * {@see \Whity\Http\Middleware\EnforceTenantIsolation} (it answers from the
+     * token alone and TenantContext is intentionally NOT populated here, exactly
+     * like {@see self::handleMe()}). The tenant boundary is therefore enforced
+     * directly from the JWT's `tenant_id` claim: every read/uniqueness/write query
+     * is scoped to `(id, tenant_id)` from the token, so the update can never reach
+     * across tenants.
+     *
+     * Editable fields:
+     *  - `email`    — validated for RFC format and for uniqueness WITHIN the
+     *                 caller's tenant (the schema enforces UNIQUE(tenant_id, email)).
+     *  - `password` — requires and verifies the CURRENT password before setting a
+     *                 new bcrypt hash; the new password must be at least
+     *                 {@see self::MIN_PASSWORD_LENGTH} characters.
+     *
+     * `current_password` is required whenever a change is requested. The display
+     * name is derived from the email local-part (there is no `users.name` column),
+     * so it is read-only and any `name` in the body is ignored.
+     *
+     * On a successful change the access and refresh cookies are re-issued so the
+     * (possibly new) email is reflected immediately by a subsequent `GET /api/me`,
+     * which reads from token claims. The updated user is returned via the public
+     * shape (id/email/role) and the bcrypt hash is never exposed. A structured
+     * audit record carrying `tenant_id` and the acting `user_id` is logged.
+     *
+     * @param Request              $request HTTP request with optional `email`,
+     *                                      `password` and required `current_password`.
+     * @param array<string, mixed> $params  Unused route params.
+     * @return Response Updated user (200) or an error (400/401/409).
+     */
+    public function handleUpdateMe(Request $request, array $params = []): Response
+    {
+        // Self-only: the acting user comes from the validated token, never the body.
+        $claims = $this->tokenValidator->validateAccessToken();
+        if ($claims === null) {
+            return Response::error('Unauthorized', 401);
+        }
+
+        $userId = $claims['user_id'] ?? null;
+        $tenantId = $claims['tenant_id'] ?? null;
+        if ($userId === null || $tenantId === null) {
+            return Response::error('Unauthorized', 401);
+        }
+
+        /** @var array<string, mixed>|null $body */
+        $body = json_decode($request->getBody(), true);
+        if (!is_array($body)) {
+            $body = [];
+        }
+
+        $emailProvided = array_key_exists('email', $body) && is_string($body['email']);
+        $passwordProvided = isset($body['password']) && is_string($body['password']) && $body['password'] !== '';
+
+        // Nothing genuinely editable was supplied.
+        if (!$emailProvided && !$passwordProvided) {
+            return Response::error('No changes provided', 400);
+        }
+
+        // Load the current user, strictly scoped to the token's tenant. A missing
+        // row (e.g. deleted account) is reported as 401 so no tenant/account
+        // existence is leaked on this self-service path.
+        $stmt = $this->db->prepare(
+            'SELECT id, email, password, role_id, tenant_id FROM users WHERE id = ? AND tenant_id = ?'
+        );
+        $stmt->execute([$userId, $tenantId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$user) {
+            return Response::error('Unauthorized', 401);
+        }
+
+        // The current password must be supplied and verified for ANY change.
+        $currentPassword = isset($body['current_password']) && is_string($body['current_password'])
+            ? $body['current_password']
+            : '';
+        if ($currentPassword === '' || !password_verify($currentPassword, (string) $user['password'])) {
+            return Response::error('Current password is incorrect', 401);
+        }
+
+        $updates = [];
+        $updateParams = [];
+        $newEmail = (string) $user['email'];
+
+        if ($emailProvided) {
+            $email = trim((string) $body['email']);
+            if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                return Response::error('Invalid email format', 400);
+            }
+
+            if ($email !== (string) $user['email']) {
+                // Uniqueness is scoped to the caller's own tenant (matches the
+                // UNIQUE(tenant_id, email) constraint).
+                $checkStmt = $this->db->prepare(
+                    'SELECT id FROM users WHERE email = ? AND tenant_id = ? AND id != ?'
+                );
+                $checkStmt->execute([$email, $tenantId, $userId]);
+                if ($checkStmt->fetch()) {
+                    return Response::error('Email already exists for this tenant', 409);
+                }
+
+                $updates[] = 'email = ?';
+                $updateParams[] = $email;
+                $newEmail = $email;
+            }
+        }
+
+        if ($passwordProvided) {
+            $newPassword = (string) $body['password'];
+            if (strlen($newPassword) < self::MIN_PASSWORD_LENGTH) {
+                return Response::error(
+                    'Password must be at least ' . self::MIN_PASSWORD_LENGTH . ' characters',
+                    400
+                );
+            }
+
+            $updates[] = 'password = ?';
+            $updateParams[] = password_hash($newPassword, PASSWORD_BCRYPT);
+        }
+
+        // A request that only re-sends the same email (no real change) is a no-op:
+        // return the current record without touching the row.
+        if ($updates === []) {
+            return Response::json(['user' => $this->shapeSelf($user)], 200);
+        }
+
+        $updateParams[] = $userId;
+        $updateParams[] = $tenantId;
+        $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ? AND tenant_id = ?';
+        $this->db->prepare($sql)->execute($updateParams);
+
+        // Re-issue auth cookies so a subsequent GET /api/me (which reads token
+        // claims) reflects the new email immediately. The role is unchanged.
+        $role = isset($claims['role']) ? (string) $claims['role'] : '';
+        $this->reissueAuthCookies((int) $userId, (int) $tenantId, $newEmail, $role);
+
+        $this->logProfileUpdate((int) $tenantId, (int) $userId, $emailProvided, $passwordProvided);
+
+        $user['email'] = $newEmail;
+
+        return Response::json(['user' => $this->shapeSelf($user)], 200);
+    }
+
+    /**
+     * Shape a raw users row into the public self profile contract.
+     *
+     * Returns only id/email/role (resolved by name) and never the password hash,
+     * mirroring the {@see self::handleMe()} response shape.
+     *
+     * @param array<string, mixed> $user Raw users row (must include id, email, role_id).
+     * @return array{id: int, email: string, role: string}
+     */
+    private function shapeSelf(array $user): array
+    {
+        $roleName = '';
+        if (isset($user['role_id'])) {
+            $roleStmt = $this->db->prepare('SELECT name FROM roles WHERE id = ?');
+            $roleStmt->execute([$user['role_id']]);
+            $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
+            if (is_array($roleRow) && isset($roleRow['name'])) {
+                $roleName = (string) $roleRow['name'];
+            }
+        }
+
+        return [
+            'id' => (int) ($user['id'] ?? 0),
+            'email' => (string) ($user['email'] ?? ''),
+            'role' => $roleName,
+        ];
+    }
+
+    /**
+     * Re-issue the access and refresh token cookies for the acting user.
+     *
+     * Used after a self-service profile change so the new email propagates to the
+     * token-derived {@see self::handleMe()} response without requiring a re-login.
+     *
+     * @param int    $userId   The acting user id.
+     * @param int    $tenantId The acting tenant id.
+     * @param string $email    The (possibly updated) email to embed in the tokens.
+     * @param string $role     The user's role name (unchanged by this endpoint).
+     * @return void
+     */
+    private function reissueAuthCookies(int $userId, int $tenantId, string $email, string $role): void
+    {
+        $accessToken = $this->jwtParser->create([
+            'user_id' => $userId,
+            'tenant_id' => $tenantId,
+            'email' => $email,
+            'role' => $role,
+        ], 900, 'access');
+
+        $refreshToken = $this->jwtParser->create([
+            'user_id' => $userId,
+            'tenant_id' => $tenantId,
+            'email' => $email,
+            'role' => $role,
+        ], 604800, 'refresh');
+
+        CookieManager::setAccessToken($accessToken, 900);
+        CookieManager::setRefreshToken($refreshToken, 604800);
+    }
+
+    /**
+     * Emit a structured audit record for a self-service profile update.
+     *
+     * Always includes the tenant id and the acting user id; never includes the
+     * new email or any credential material.
+     *
+     * @param int  $tenantId       The acting tenant id.
+     * @param int  $userId         The acting user id.
+     * @param bool $emailChanged   Whether the email was changed.
+     * @param bool $passwordChanged Whether the password was changed.
+     * @return void
+     */
+    private function logProfileUpdate(int $tenantId, int $userId, bool $emailChanged, bool $passwordChanged): void
+    {
+        $this->logger->info('Self-service profile updated', [
+            'event' => 'auth.me.update',
+            'tenant_id' => $tenantId,
+            'user_id' => $userId,
+            'email_changed' => $emailChanged,
+            'password_changed' => $passwordChanged,
+        ]);
     }
 
     /**
