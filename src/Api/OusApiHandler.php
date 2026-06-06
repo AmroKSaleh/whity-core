@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use Whity\Api\Exception\OuHierarchyCycleException;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -265,9 +266,18 @@ class OusApiHandler
                 $params_array[] = $body['description'];
             }
 
-            // Handle parent_id update
-            if (isset($body['parent_id']) && $body['parent_id'] !== $ou['parent_id']) {
-                $newParentId = $body['parent_id'];
+            // Handle parent_id update. Use array_key_exists (not isset) so an
+            // explicit `null` — "move to root" from the picker — is honoured;
+            // isset() is false for null and would silently drop the change.
+            // Compare as nullable ints so the int (JSON body) vs string (PDO
+            // column) representations of the same parent are not seen as a diff.
+            $currentParentId = $ou['parent_id'] === null ? null : (int)$ou['parent_id'];
+            $requestedParentId = array_key_exists('parent_id', $body) && $body['parent_id'] !== null
+                ? (int)$body['parent_id']
+                : null;
+
+            if (array_key_exists('parent_id', $body) && $requestedParentId !== $currentParentId) {
+                $newParentId = $requestedParentId;
 
                 // Validate parent exists in same tenant
                 if ($newParentId !== null) {
@@ -279,9 +289,12 @@ class OusApiHandler
                         return Response::error('Parent organizational unit does not belong to current tenant', 403);
                     }
 
-                    // Detect cycle: if new parent is this OU or a descendant, reject
-                    if ($this->detectCycle($this->db, (int)$id, (int)$newParentId, $tenantId)) {
-                        return Response::error('Setting this parent would create a cycle in the hierarchy', 400);
+                    // Detect cycle: if the new parent is this OU or one of its
+                    // descendants, reject the move with a typed domain error
+                    // (translated to 422 below). This guards the hierarchy
+                    // independently of the UI's move-picker (defense in depth).
+                    if ($this->wouldCreateCycle((int)$id, (int)$newParentId, $tenantId)) {
+                        throw OuHierarchyCycleException::forMove((int)$id, (int)$newParentId);
                     }
                 }
 
@@ -308,6 +321,16 @@ class OusApiHandler
             ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Organizational unit updated']], 200);
+        } catch (OuHierarchyCycleException $e) {
+            // Re-parenting under self/descendant: a client error, not a server
+            // fault. 422 (Unprocessable Entity) — the request is well-formed but
+            // semantically invalid; no row was changed.
+            error_log(sprintf(
+                '[ous] rejected cyclic re-parent: tenant_id=%s ou_id=%s',
+                var_export(TenantContext::getTenantId(), true),
+                var_export($params['id'] ?? null, true)
+            ));
+            return Response::error('Setting this parent would create a cycle in the hierarchy', 422);
         } catch (\Exception $e) {
             return Response::error('Failed to update organizational unit: ' . $e->getMessage(), 500);
         }
@@ -529,6 +552,147 @@ class OusApiHandler
     }
 
     /**
+     * GET /api/ous/{id}/roles - List the roles assigned to an organizational unit.
+     *
+     * Joins `ou_role_assignments` to `roles` and returns the assigned roles as
+     * `{id, name, description}`. Tenant-scoped: the OU must be visible to the
+     * caller (system tenant 0 sees every tenant's OU; any other tenant sees only
+     * its own), otherwise a 404 is returned so an OU's existence in another
+     * tenant is never disclosed.
+     */
+    public function roles(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('Organizational unit ID is required', 400);
+            }
+
+            $tenantId = TenantContext::getTenantId();
+
+            if (!$this->ouIsVisible((int)$id, $tenantId)) {
+                return Response::error('Organizational unit not found', 404);
+            }
+
+            // The OU's tenant scopes the assignment lookup. For a non-system
+            // tenant this equals $tenantId; for the system tenant we read the
+            // OU's own tenant so assignments are matched on the same tenant_id
+            // they were written with.
+            $assignmentStmt = $this->db->prepare('
+                SELECT r.id, r.name, r.description
+                FROM ou_role_assignments ora
+                JOIN roles r ON r.id = ora.role_id
+                WHERE ora.ou_id = ?
+                ORDER BY r.name
+            ');
+            $assignmentStmt->execute([$id]);
+            $rows = $assignmentStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $data = array_map(
+                static fn (array $row): array => [
+                    'id' => (int)$row['id'],
+                    'name' => (string)$row['name'],
+                    'description' => (string)($row['description'] ?? ''),
+                ],
+                $rows
+            );
+
+            return Response::json(['data' => $data], 200);
+        } catch (\Exception $e) {
+            return Response::error('Failed to fetch organizational unit roles: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * GET /api/ous/{id}/members - List the users assigned to an organizational unit.
+     *
+     * Returns the users whose `ou_id` is this OU, shaped to the public user
+     * contract ({id, name, email, role, tenantId, createdAt}) — the password hash
+     * is never included. Tenant-scoped exactly like {@see self::roles()}: a caller
+     * that cannot see the OU receives a 404.
+     */
+    public function members(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('Organizational unit ID is required', 400);
+            }
+
+            $tenantId = TenantContext::getTenantId();
+
+            if (!$this->ouIsVisible((int)$id, $tenantId)) {
+                return Response::error('Organizational unit not found', 404);
+            }
+
+            $stmt = $this->db->prepare('
+                SELECT u.id, u.email, u.created_at, u.tenant_id, r.name AS role
+                FROM users u
+                JOIN roles r ON u.role_id = r.id
+                WHERE u.ou_id = ?
+                ORDER BY u.created_at DESC
+            ');
+            $stmt->execute([$id]);
+            /** @var array<int, array<string, mixed>> $rows */
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $data = array_map(fn (array $row): array => $this->toPublicUser($row), $rows);
+
+            return Response::json(['data' => $data], 200);
+        } catch (\Exception $e) {
+            return Response::error('Failed to fetch organizational unit members: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Whether an OU is visible to the acting tenant.
+     *
+     * The system tenant (id 0) can see every tenant's OU; any other tenant sees
+     * only OUs it owns. Used by the read endpoints to return 404 (rather than
+     * leaking existence) for OUs the caller may not access.
+     */
+    private function ouIsVisible(int $ouId, int $tenantId): bool
+    {
+        if ($tenantId === 0) {
+            $stmt = $this->db->prepare('SELECT 1 FROM organizational_units WHERE id = ?');
+            $stmt->execute([$ouId]);
+        } else {
+            $stmt = $this->db->prepare(
+                'SELECT 1 FROM organizational_units WHERE id = ? AND tenant_id = ?'
+            );
+            $stmt->execute([$ouId, $tenantId]);
+        }
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Map a raw users row to the public API contract consumed by the web UI.
+     *
+     * Mirrors {@see \Whity\Api\UsersApiHandler::toPublicUser()}: the `users`
+     * table has no `name` column, so `name` is derived from the email local-part;
+     * snake_case columns are aliased to the camelCase keys the frontend binds; and
+     * the password hash is never included.
+     *
+     * @param array<string, mixed> $row Raw row from the members SELECT.
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, createdAt: string|null}
+     */
+    private function toPublicUser(array $row): array
+    {
+        $email = (string)($row['email'] ?? '');
+        $localPart = strstr($email, '@', true);
+
+        return [
+            'id' => (int)($row['id'] ?? 0),
+            'name' => $localPart !== false && $localPart !== '' ? $localPart : $email,
+            'email' => $email,
+            'role' => (string)($row['role'] ?? ''),
+            'tenantId' => (int)($row['tenant_id'] ?? 0),
+            'createdAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
+        ];
+    }
+
+    /**
      * Generate a URL-friendly slug from a string
      */
     private function generateSlug(string $text): string
@@ -547,50 +711,59 @@ class OusApiHandler
     }
 
     /**
-     * Detect if setting a parent would create a cycle in the hierarchy
+     * Determine whether setting `$newParentId` as the parent of `$ouId` would
+     * create a cycle in the hierarchy.
      *
-     * Walks up the parent chain starting from newParentId. If the OU being updated
-     * is encountered in the chain, returns true (cycle detected). Otherwise returns false.
+     * Walks up the ancestor chain starting from the proposed new parent. If the
+     * OU being moved is encountered anywhere in that chain — including being the
+     * proposed parent itself — the move would form a loop and is rejected.
      *
-     * @param PDO $db Database connection
-     * @param int $ouId The OU being updated
-     * @param int $newParentId The proposed new parent
-     * @param int $tenantId The current tenant ID
-     * @return bool True if cycle would be created, false otherwise
+     * Type discipline: parent ids are read back from the database (which under
+     * PostgreSQL's PDO driver yields integer columns as PHP strings), so each id
+     * is normalised to `int` before comparison. The earlier implementation
+     * compared a string id against the int `$ouId` with `===`, which never
+     * matched a deeper descendant against real Postgres and let cyclic moves
+     * through (it happened to pass on SQLite, which returns native ints — the
+     * mocked/SQLite-vs-Postgres gap this guard now closes).
+     *
+     * A visited set bounds the walk so any pre-existing data corruption cannot
+     * spin into an infinite loop.
+     *
+     * @param int $ouId        The OU being moved.
+     * @param int $newParentId The proposed new parent.
+     * @param int $tenantId    The acting tenant (scopes the traversal).
+     * @return bool True if the move would create a cycle, false otherwise.
      */
-    private function detectCycle(PDO $db, int $ouId, int $newParentId, int $tenantId): bool
+    private function wouldCreateCycle(int $ouId, int $newParentId, int $tenantId): bool
     {
-        $currentParentId = $newParentId;
+        $currentId = $newParentId;
         $visited = [];
 
-        while ($currentParentId !== null) {
-            // Prevent infinite loops
-            if (isset($visited[$currentParentId])) {
-                return true;
-            }
-            $visited[$currentParentId] = true;
+        $stmt = $this->db->prepare(
+            'SELECT parent_id FROM organizational_units WHERE id = ? AND tenant_id = ?'
+        );
 
-            // If we encounter the OU being updated in the parent chain, cycle detected
-            if ($currentParentId === $ouId) {
+        while (true) {
+            if ($currentId === $ouId) {
                 return true;
             }
 
-            // Get parent of current parent
-            $stmt = $db->prepare('
-                SELECT parent_id FROM organizational_units
-                WHERE id = ? AND tenant_id = ?
-            ');
-            $stmt->execute([$currentParentId, $tenantId]);
+            // A repeated node means the existing data already contains a loop;
+            // stop rather than spin forever.
+            if (isset($visited[$currentId])) {
+                return true;
+            }
+            $visited[$currentId] = true;
+
+            $stmt->execute([$currentId, $tenantId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if (!$row) {
-                // Parent not found, stop traversal
-                break;
+            // Reached a root (NULL parent) or an id outside the tenant: no cycle.
+            if ($row === false || $row['parent_id'] === null) {
+                return false;
             }
 
-            $currentParentId = $row['parent_id'];
+            $currentId = (int)$row['parent_id'];
         }
-
-        return false;
     }
 }

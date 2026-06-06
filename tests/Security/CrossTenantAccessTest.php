@@ -178,8 +178,11 @@ class CrossTenantAccessTest extends TestCase
         $request = new Request('PATCH', '/api/ous/' . self::OU_ENGINEERING_ID, [], $body);
         $response = $this->ousHandler->update($request, ['id' => self::OU_ENGINEERING_ID]);
 
-        // Verify: Response must be 400
-        $this->assertSame(400, $response->getStatusCode());
+        // Verify: a cyclic re-parent is rejected as a semantic (not server)
+        // error. WC-44 hardened the guard (the prior int/string `===` mismatch
+        // let descendant-moves through against PostgreSQL) and surfaces the
+        // rejection as 422 Unprocessable Entity via a typed domain exception.
+        $this->assertSame(422, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
         $this->assertStringContainsString('cycle', strtolower($responseData['error']));
     }
@@ -540,8 +543,10 @@ class CrossTenantAccessTest extends TestCase
         $request = new Request('PATCH', '/api/ous/1', [], $body);
         $response = $this->ousHandler->update($request, ['id' => 1]);
 
-        // Verify: Response must be 400
-        $this->assertSame(400, $response->getStatusCode());
+        // Verify: a deep-hierarchy cyclic re-parent is rejected as 422
+        // Unprocessable Entity (WC-44 typed domain exception), consistent with
+        // the shallow-cycle case above.
+        $this->assertSame(422, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
         $this->assertStringContainsString('cycle', strtolower($responseData['error']));
     }

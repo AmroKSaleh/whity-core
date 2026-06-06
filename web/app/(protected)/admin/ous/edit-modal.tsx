@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { OU } from './types';
+import { buildOuTree, getDescendantIds } from './ou-tree-util';
 
 interface EditOuModalProps {
   isOpen: boolean;
@@ -57,8 +58,13 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
         description: description.trim(),
       };
 
-      if (parentId && parentId !== 'null') {
-        payload.parent_id = parseInt(parentId, 10);
+      // Move-to-parent: send the chosen parent (or null for "root"). Only
+      // include parent_id when it actually changed so an unrelated rename does
+      // not also re-assert the parent.
+      const nextParentId = parentId === 'null' ? null : parseInt(parentId, 10);
+      const currentParentId = ou.parent_id ?? null;
+      if (nextParentId !== currentParentId) {
+        payload.parent_id = nextParentId;
       }
 
       const response = await apiClient(`/api/ous/${ou.id}`, {
@@ -88,7 +94,11 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
     }
   };
 
-  const availableParents = ous.filter((o) => o.id !== ou.id);
+  // Eligible move targets exclude the OU itself and all of its descendants, so
+  // the picker can never form a cycle (the backend rejects cycles too — defense
+  // in depth). getDescendantIds(tree, ou.id) returns ou.id + every descendant.
+  const excludedIds = new Set(getDescendantIds(buildOuTree(ous), ou.id));
+  const availableParents = ous.filter((o) => !excludedIds.has(o.id));
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
@@ -123,20 +133,23 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
           </div>
 
           <div>
-            <label className="text-sm font-medium">Parent OU</label>
+            <label className="text-sm font-medium">Move to parent</label>
             <Select value={parentId} onValueChange={setParentId} disabled={isLoading}>
-              <SelectTrigger>
+              <SelectTrigger aria-label="Move to parent">
                 <SelectValue placeholder="Select a parent OU (optional)" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="null">None (Root OU)</SelectItem>
-                {availableParents.map((ou) => (
-                  <SelectItem key={ou.id} value={ou.id.toString()}>
-                    {ou.name}
+                {availableParents.map((parent) => (
+                  <SelectItem key={parent.id} value={parent.id.toString()}>
+                    {parent.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              The OU itself and its descendants are excluded to prevent cycles.
+            </p>
           </div>
 
           <div className="flex justify-end gap-3">
