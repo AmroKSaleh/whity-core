@@ -17,7 +17,7 @@ class TokenValidatorTest extends TestCase
     private TokenValidator $validator;
     private JwtParser $jwtParser;
     private PDO $mockDb;
-    private string $secret = 'test-secret-key';
+    private string $secret = 'test-secret-key-padded-for-hs256-min-32-byte-key';
 
     protected function setUp(): void
     {
@@ -95,12 +95,9 @@ class TokenValidatorTest extends TestCase
     {
         $payload = ['sub' => 'user123'];
 
-        // Create token that expires immediately
-        $token = $this->jwtParser->create($payload, 0, 'access');
+        // Create a token whose exp is firmly in the past (beyond the leeway).
+        $token = $this->jwtParser->create($payload, -3600, 'access');
         $_COOKIE['access_token'] = $token;
-
-        // Wait for token to expire
-        sleep(1);
 
         $result = $this->validator->validateAccessToken();
 
@@ -192,12 +189,9 @@ class TokenValidatorTest extends TestCase
     {
         $payload = ['sub' => 'user123'];
 
-        // Create token that expires immediately
-        $token = $this->jwtParser->create($payload, 0, 'refresh');
+        // Create a token whose exp is firmly in the past (beyond the leeway).
+        $token = $this->jwtParser->create($payload, -3600, 'refresh');
         $_COOKIE['refresh_token'] = $token;
-
-        // Wait for token to expire
-        sleep(1);
 
         $result = $this->validator->validateRefreshToken();
 
@@ -219,7 +213,7 @@ class TokenValidatorTest extends TestCase
         $mockDb = $this->createMock(PDO::class);
         $mockStatement = $this->createMock(PDOStatement::class);
         $mockStatement->method('execute')->willReturn(true);
-        $mockStatement->method('rowCount')->willReturn(1); // Token is revoked
+        $mockStatement->method('fetchColumn')->willReturn('1'); // Token is revoked
 
         $mockDb->method('prepare')
             ->willReturn($mockStatement);
@@ -319,7 +313,7 @@ class TokenValidatorTest extends TestCase
         $payload = ['sub' => 'user123'];
 
         // Create parser with different secret
-        $differentParser = new JwtParser('different-secret');
+        $differentParser = new JwtParser('different-secret-padded-for-hs256-min-32-byte-key');
         $token = $differentParser->create($payload, 3600, 'access');
 
         $_COOKIE['access_token'] = $token;
@@ -338,7 +332,7 @@ class TokenValidatorTest extends TestCase
         $payload = ['sub' => 'user123'];
 
         // Create parser with different secret
-        $differentParser = new JwtParser('different-secret');
+        $differentParser = new JwtParser('different-secret-padded-for-hs256-min-32-byte-key');
         $token = $differentParser->create($payload, 604800, 'refresh');
 
         $_COOKIE['refresh_token'] = $token;
@@ -400,10 +394,10 @@ class TokenValidatorTest extends TestCase
                 $lastJti = $params[0];
                 return true;
             });
-        $mockStatement->method('rowCount')
+        $mockStatement->method('fetchColumn')
             ->willReturnCallback(function () use (&$lastJti, $revokedJti) {
-                // Return 1 (revoked) for token1, 0 (not revoked) for token2
-                return ($lastJti === $revokedJti) ? 1 : 0;
+                // Revoked (truthy) for token1, not revoked (false) for token2.
+                return ($lastJti === $revokedJti) ? '1' : false;
             });
 
         $mockDb->method('prepare')

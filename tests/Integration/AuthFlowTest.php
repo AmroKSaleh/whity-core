@@ -133,9 +133,9 @@ class AuthFlowTest extends TestCase
                 $checkedJti = $params[0] ?? null;
                 return true;
             });
-        $mockCheckStatement->method('rowCount')
+        $mockCheckStatement->method('fetchColumn')
             ->willReturnCallback(function() use (&$checkedJti, &$revokedTokensRef) {
-                return (isset($revokedTokensRef[$checkedJti]) && $revokedTokensRef[$checkedJti]) ? 1 : 0;
+                return (isset($revokedTokensRef[$checkedJti]) && $revokedTokensRef[$checkedJti]) ? '1' : false;
             });
 
         // Create the database mock

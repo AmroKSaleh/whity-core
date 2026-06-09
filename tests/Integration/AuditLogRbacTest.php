@@ -29,7 +29,7 @@ use Whity\Http\RbacMiddleware;
  */
 final class AuditLogRbacTest extends TestCase
 {
-    private const SECRET = 'test-secret-key';
+    private const SECRET = 'test-secret-key-padded-for-hs256-min-32-byte-key';
     private const TENANT_ID = 3;
 
     private JwtParser $jwtParser;

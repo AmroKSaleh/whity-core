@@ -45,7 +45,7 @@ use Whity\Http\RbacMiddleware;
  */
 class RbacLifecycleTest extends TestCase
 {
-    private const SECRET = 'wc17-lifecycle-secret';
+    private const SECRET = 'wc17-lifecycle-secret-padded-for-hs256-min-32-byte-key';
     private const TENANT = 1;
 
     protected function setUp(): void

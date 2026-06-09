@@ -38,7 +38,7 @@ use Whity\Http\RbacMiddleware;
  */
 class PluginsApiRbacTest extends TestCase
 {
-    private const SECRET = 'test-secret-key';
+    private const SECRET = 'test-secret-key-padded-for-hs256-min-32-byte-key';
     private const TENANT = 1;
 
     private JwtParser $jwtParser;

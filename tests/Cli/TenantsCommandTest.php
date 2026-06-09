@@ -19,7 +19,7 @@ class TenantsCommandTest extends TestCase
         $this->runner = new CliRunner();
 
         // Set up environment variables for testing
-        $_ENV['JWT_SECRET'] = 'test_secret';
+        $_ENV['JWT_SECRET'] = 'test_secret-padded-for-hs256-min-32-byte-key';
         $_ENV['DB_USER'] = 'test';
         $_ENV['DB_PASSWORD'] = 'test';
     }

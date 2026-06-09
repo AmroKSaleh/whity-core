@@ -51,7 +51,7 @@ class PermissionAssignmentTest extends TestCase
         $this->pdo = $this->makeSchema();
         $this->db = $this->wrapSqlite($this->pdo);
         $this->roleChecker = new RoleChecker($this->db, $this->permissionRegistry);
-        $this->jwtParser = new JwtParser('test-secret-key');
+        $this->jwtParser = new JwtParser('test-secret-key-padded-for-hs256-min-32-byte-key');
         $this->rbacMiddleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
     }
 
