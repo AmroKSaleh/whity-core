@@ -175,4 +175,41 @@ class TotpServiceTest extends TestCase
             $this->assertTrue(true);
         }
     }
+
+    /**
+     * Tampering with stored ciphertext MUST be detected (authenticated encryption),
+     * not silently decrypted to a corrupted secret.
+     *
+     * Mutating an early byte of an unauthenticated AES-256-CBC blob lands in the IV
+     * region, so OpenSSL decrypts it to a corrupted-but-unsignalled plaintext and never
+     * raises — that is the integrity gap (WC-158). Authenticated encryption must reject
+     * any modification.
+     */
+    public function testDecryptRejectsTamperedCiphertext(): void
+    {
+        $secret = $this->totpService->generateSecret();
+        $encrypted = $this->totpService->encryptSecret($secret);
+
+        // Mutate one character near the start of the stored blob (IV/header region).
+        $tampered = $encrypted;
+        $tampered[5] = $tampered[5] === 'A' ? 'B' : 'A';
+        $this->assertNotSame($encrypted, $tampered, 'tamper mutation must change the blob');
+
+        $this->expectException(\Throwable::class);
+        $this->totpService->decryptSecret($tampered);
+    }
+
+    /**
+     * verifyPlainCode validates a code against a PLAINTEXT secret — used during enrollment
+     * confirmation, where the caller still holds the plaintext and must not round-trip it
+     * through encrypt()+decrypt() just to validate (WC-158).
+     */
+    public function testVerifyPlainCodeValidatesAgainstPlaintextSecret(): void
+    {
+        $secret = $this->totpService->generateSecret();
+        $validCode = \OTPHP\TOTP::create($secret)->now();
+
+        $this->assertTrue($this->totpService->verifyPlainCode($secret, $validCode));
+        $this->assertFalse($this->totpService->verifyPlainCode($secret, '000000'));
+    }
 }
