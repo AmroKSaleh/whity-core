@@ -66,7 +66,7 @@ final class CorePermissions
     // (relationship-type vocabulary, persons, and a node's relations); the broader
     // RELATIONS_MANAGE gates every write (create/edit/delete a person, add/remove a
     // relation edge). Both are seeded and granted to the admin role by migration
-    // 019_create_relations.
+    // 020_create_relations.
     public const RELATIONS_READ = 'relations:read';
     public const RELATIONS_MANAGE = 'relations:manage';
 

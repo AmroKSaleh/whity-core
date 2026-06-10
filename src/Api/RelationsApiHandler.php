@@ -72,7 +72,8 @@ class RelationsApiHandler
 
             return Response::json(['data' => $types], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch relationship types: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch relationship types', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
+            return Response::error('Failed to fetch relationship types', 500);
         }
     }
 
@@ -95,7 +96,8 @@ class RelationsApiHandler
 
             return Response::json(['data' => $this->relations->listEdges($tenantId)], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch relations: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch relations', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
+            return Response::error('Failed to fetch relations', 500);
         }
     }
 
@@ -185,7 +187,8 @@ class RelationsApiHandler
         } catch (PersonNotFoundException $e) {
             return Response::error('Person or relationship type not found', 404);
         } catch (\Exception $e) {
-            return Response::error('Failed to create relation: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to create relation', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
+            return Response::error('Failed to create relation', 500);
         }
     }
 
@@ -222,7 +225,8 @@ class RelationsApiHandler
 
             return Response::json([], 204);
         } catch (\Exception $e) {
-            return Response::error('Failed to delete relation: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to delete relation', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
+            return Response::error('Failed to delete relation', 500);
         }
     }
 
@@ -230,8 +234,9 @@ class RelationsApiHandler
      * GET /api/users/{id}/relations — sugar: resolve a user → their shadow person
      * and return that node's relations (reciprocal-derived).
      *
-     * Auto-provisions the user's shadow person on first call, consistent with the
-     * relation create path. A user outside the acting tenant is not-found.
+     * Read-only: resolves the user's EXISTING shadow person without provisioning one
+     * (a relations:read path must never write). A user with no shadow yet simply has
+     * no relations; a user outside the acting tenant is not-found.
      *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
@@ -250,9 +255,15 @@ class RelationsApiHandler
                 return Response::error('Tenant context is required', 400);
             }
 
-            // Resolve user → person (auto-provisioning the shadow). A missing /
-            // cross-tenant user surfaces as 404.
-            $personId = $this->resolver->resolveRef(RelationResolver::KIND_USER, (int) $id, $tenantId);
+            // Resolve user → EXISTING shadow person WITHOUT provisioning (read path
+            // must not write). Missing / cross-tenant user → 404; a user with no
+            // shadow yet simply has no relations.
+            $personId = $this->resolver->resolveExistingUserPerson((int) $id, $tenantId);
+            if ($personId === null) {
+                return Response::json([
+                    'data' => ['personId' => null, 'relations' => []],
+                ], 200);
+            }
 
             $relations = $this->relations->listForPerson($personId, $tenantId);
 
@@ -265,7 +276,8 @@ class RelationsApiHandler
         } catch (CrossTenantReferenceException | PersonNotFoundException $e) {
             return Response::error('User not found', 404);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch user relations: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch user relations', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
+            return Response::error('Failed to fetch user relations', 500);
         }
     }
 

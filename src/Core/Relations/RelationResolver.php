@@ -114,10 +114,58 @@ class RelationResolver
      * Resolve a user id to its shadow person within the acting tenant,
      * auto-provisioning the shadow when the user has none yet.
      *
+     * Provisioning is a WRITE, so this is only used on write paths (e.g. creating a
+     * relation). Read paths must use {@see resolveExistingUserPerson()} instead so a
+     * read permission never triggers an insert.
+     *
      * @throws PersonNotFoundException       When the user is absent / not visible.
      * @throws CrossTenantReferenceException When the user exists in another tenant.
      */
     private function resolveUser(int $userId, int $tenantId): int
+    {
+        $user = $this->requireUserVisible($userId, $tenantId);
+
+        // The shadow person lives in the user's own tenant (matters for the
+        // system tenant, which acts across tenants but must store the shadow with
+        // the user's real tenant_id so isolation stays correct).
+        $shadowTenant = (int) $user['tenant_id'];
+
+        $existing = $this->persons->findByUserId($userId, $shadowTenant);
+        if ($existing !== null) {
+            return (int) $existing['id'];
+        }
+
+        // Auto-provision: create the user's invisible shadow person on demand.
+        return $this->persons->insert($shadowTenant, $this->displayNameForUser($user), $userId);
+    }
+
+    /**
+     * Resolve a user's EXISTING shadow person WITHOUT provisioning one.
+     *
+     * Read-only counterpart to {@see resolveUser()}: returns null when the user has
+     * no shadow yet, so a `relations:read` path can report "no relations" without
+     * performing a write.
+     *
+     * @return int|null The shadow person id, or null when the user has none.
+     * @throws PersonNotFoundException       When the user is absent / not visible.
+     * @throws CrossTenantReferenceException When the user exists in another tenant.
+     */
+    public function resolveExistingUserPerson(int $userId, int $tenantId): ?int
+    {
+        $user = $this->requireUserVisible($userId, $tenantId);
+        $existing = $this->persons->findByUserId($userId, (int) $user['tenant_id']);
+
+        return $existing === null ? null : (int) $existing['id'];
+    }
+
+    /**
+     * Fetch a user row and assert it is visible to the acting tenant.
+     *
+     * @return array{id: int, tenant_id: int, email: string}
+     * @throws PersonNotFoundException       When the user is absent.
+     * @throws CrossTenantReferenceException When the user exists in another tenant.
+     */
+    private function requireUserVisible(int $userId, int $tenantId): array
     {
         $user = $this->findUser($userId);
         if ($user === null) {
@@ -129,20 +177,7 @@ class RelationResolver
             throw CrossTenantReferenceException::forPerson($userId, $userTenant, $tenantId);
         }
 
-        // The shadow person lives in the user's own tenant (matters for the
-        // system tenant, which acts across tenants but must store the shadow with
-        // the user's real tenant_id so isolation stays correct).
-        $shadowTenant = $userTenant;
-
-        $existing = $this->persons->findByUserId($userId, $shadowTenant);
-        if ($existing !== null) {
-            return (int) $existing['id'];
-        }
-
-        // Auto-provision: create the user's invisible shadow person on demand.
-        $displayName = $this->displayNameForUser($user);
-
-        return $this->persons->insert($shadowTenant, $displayName, $userId);
+        return $user;
     }
 
     /**
@@ -175,9 +210,18 @@ class RelationResolver
             throw SelfRelationException::forPerson($fromPersonId);
         }
 
-        // The edge is stored under the acting tenant (for the system tenant the
-        // resolved persons share a tenant; use that to keep the edge consistent).
-        $storeTenant = $tenantId === 0 ? $this->tenantOfPerson($fromPersonId) : $tenantId;
+        // Both persons MUST live in the same tenant; the edge belongs to that
+        // tenant. A normal caller already had both refs pinned to $tenantId, so this
+        // is a no-op for them. For the system tenant (which may reference any
+        // tenant's persons) it prevents forging a cross-tenant edge that would
+        // otherwise surface a foreign tenant's person in that tenant's reads.
+        $fromTenant = $this->tenantOfPerson($fromPersonId);
+        $toTenant = $this->tenantOfPerson($toPersonId);
+        if ($fromTenant !== $toTenant) {
+            throw CrossTenantReferenceException::forPerson($toPersonId, $toTenant, $fromTenant);
+        }
+
+        $storeTenant = $tenantId === 0 ? $fromTenant : $tenantId;
 
         if ($this->relations->exists($storeTenant, $fromPersonId, $toPersonId, $relationshipTypeId)) {
             throw DuplicateRelationException::forEdge($fromPersonId, $toPersonId, $relationshipTypeId);

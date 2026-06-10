@@ -10,7 +10,7 @@ use PDO;
  * Shared real-engine (in-memory SQLite) schema builder for the WC-65 family
  * relations tests.
  *
- * The schema mirrors the WC-65 migrations (017/018/019) closely enough to
+ * The schema mirrors the WC-65 migrations (018/019/020) closely enough to
  * exercise the real SQL the repositories/resolver emit, and turns on
  * `PDO::ATTR_STRINGIFY_FETCHES` so integer/boolean columns come back as PHP
  * STRINGS exactly as PostgreSQL's PDO driver returns them — the int-vs-string

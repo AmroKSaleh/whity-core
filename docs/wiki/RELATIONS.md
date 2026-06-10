@@ -14,9 +14,9 @@ The user's shadow person is created **on demand** — the first time the user is
 
 | Component | Responsibility | File |
 | --- | --- | --- |
-| `persons` table | The one and only graph node. | `database/migrations/017_create_persons.php` |
-| `relationship_types` table | Seeded vocabulary with inverses (`inverse_type_id`, `symmetric`). | `database/migrations/018_create_relationship_types.php` |
-| `relations` table | The edges + the `relations:*` RBAC seed. | `database/migrations/019_create_relations.php` |
+| `persons` table | The one and only graph node. | `database/migrations/018_create_persons.php` |
+| `relationship_types` table | Seeded vocabulary with inverses (`inverse_type_id`, `symmetric`). | `database/migrations/019_create_relationship_types.php` |
+| `relations` table | The edges + the `relations:*` RBAC seed. | `database/migrations/020_create_relations.php` |
 | `PersonRepository` | All `persons` SQL; tenant-scoped; `(int)` casts for Postgres parity. | `src/Core/Relations/PersonRepository.php` |
 | `RelationRepository` | All `relations`/`relationship_types` SQL; reciprocal-aware reads. | `src/Core/Relations/RelationRepository.php` |
 | `RelationResolver` | Resolve `{kind,id}` refs → person ids (auto-provision shadows) + integrity rules. | `src/Core/Relations/RelationResolver.php` |

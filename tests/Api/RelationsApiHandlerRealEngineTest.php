@@ -106,9 +106,9 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
     public function testDeletingAUserLinkedPersonIsGuarded(): void
     {
         $userId = RelationsSchema::seedUser($this->pdo, 1, 'dave@example.com');
-        // Auto-provision the shadow via the user-relations sugar path.
-        $this->relations->userRelations(new Request('GET', "/api/users/{$userId}/relations"), ['id' => (string) $userId]);
-        $shadow = $this->personRepo->findByUserId($userId, 1);
+        // A user-linked shadow person (as a write path would provision).
+        $shadowId = $this->personRepo->insert(1, 'dave', $userId);
+        $shadow = $this->personRepo->findById($shadowId, 1);
         $this->assertNotNull($shadow);
 
         $response = $this->persons->delete(
@@ -122,8 +122,8 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
     public function testUpdatingAUserLinkedPersonIsGuarded(): void
     {
         $userId = RelationsSchema::seedUser($this->pdo, 1, 'dave@example.com');
-        $this->relations->userRelations(new Request('GET', "/api/users/{$userId}/relations"), ['id' => (string) $userId]);
-        $shadow = $this->personRepo->findByUserId($userId, 1);
+        $shadowId = $this->personRepo->insert(1, 'dave', $userId);
+        $shadow = $this->personRepo->findById($shadowId, 1);
         $this->assertNotNull($shadow);
 
         $response = $this->persons->update(
@@ -183,6 +183,28 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
         ])));
         $this->assertSame(404, $response->getStatusCode(), 'Cross-tenant ref must be 404, not disclosed.');
         $this->assertSame('Person not found', json_decode($response->getBody(), true)['error']);
+    }
+
+    public function testSystemTenantCannotCreateCrossTenantEdge(): void
+    {
+        // The system tenant (0) may reference any tenant's persons, but BOTH ends of
+        // an edge must still live in the same tenant — otherwise a forged cross-tenant
+        // edge would surface a foreign person in a tenant's reads (WC-65 review).
+        $alice = RelationsSchema::seedPerson($this->pdo, 1, 'Alice');
+        $carol = RelationsSchema::seedPerson($this->pdo, 2, 'Carol');
+
+        TenantContext::reset();
+        TenantContext::setTenantId(0);
+
+        $response = $this->relations->create(new Request('POST', '/api/relations', [], (string) json_encode([
+            'from' => ['kind' => 'person', 'id' => $alice],
+            'to' => ['kind' => 'person', 'id' => $carol],
+            'relationshipTypeId' => RelationsSchema::TYPE_SIBLING,
+        ])));
+
+        $this->assertSame(404, $response->getStatusCode(), 'System tenant must not forge a cross-tenant edge.');
+        $this->assertSame([], $this->relationRepo->listEdges(1), 'No edge created in tenant 1.');
+        $this->assertSame([], $this->relationRepo->listEdges(2), 'No edge created in tenant 2.');
     }
 
     public function testCreateWithUnknownTypeReturns404(): void
@@ -254,8 +276,10 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
 
     // ==================== users/{id}/relations sugar ====================
 
-    public function testUserRelationsResolvesUserToPersonAndAutoProvisions(): void
+    public function testUserRelationsForUserWithoutShadowDoesNotProvision(): void
     {
+        // GET is a relations:read path and must NOT write. A user with no shadow
+        // person yet has no relations, and none is created as a side effect.
         $userId = RelationsSchema::seedUser($this->pdo, 1, 'dave@example.com');
 
         $response = $this->relations->userRelations(
@@ -264,8 +288,12 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
         );
         $this->assertSame(200, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
-        $this->assertArrayHasKey('personId', $data);
-        $this->assertNotNull($this->personRepo->findByUserId($userId, 1), 'Shadow auto-provisioned.');
+        $this->assertNull($data['personId']);
+        $this->assertSame([], $data['relations']);
+        $this->assertNull(
+            $this->personRepo->findByUserId($userId, 1),
+            'A relations:read GET must not auto-provision a shadow person (no write on read).'
+        );
     }
 
     public function testUserRelationsForCrossTenantUserIs404(): void

@@ -68,7 +68,8 @@ class PersonsApiHandler
 
             return Response::json(['data' => $data], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch persons: ' . $e->getMessage(), 500);
+            error_log('[PersonsApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch persons', 500);
         }
     }
 
@@ -121,7 +122,8 @@ class PersonsApiHandler
 
             return Response::json(['data' => $this->toPublic($person, [])], 201);
         } catch (\Exception $e) {
-            return Response::error('Failed to create person: ' . $e->getMessage(), 500);
+            error_log('[PersonsApiHandler] create failed: ' . $e->getMessage());
+            return Response::error('Failed to create person', 500);
         }
     }
 
@@ -154,7 +156,8 @@ class PersonsApiHandler
 
             return Response::json(['data' => $this->toPublic($person, $relations)], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch person: ' . $e->getMessage(), 500);
+            error_log('[PersonsApiHandler] get failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch person', 500);
         }
     }
 
@@ -227,7 +230,8 @@ class PersonsApiHandler
 
             return Response::json(['data' => $this->toPublic($updated, [])], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to update person: ' . $e->getMessage(), 500);
+            error_log('[PersonsApiHandler] update failed: ' . $e->getMessage());
+            return Response::error('Failed to update person', 500);
         }
     }
 
@@ -271,7 +275,8 @@ class PersonsApiHandler
 
             return Response::json([], 204);
         } catch (\Exception $e) {
-            return Response::error('Failed to delete person: ' . $e->getMessage(), 500);
+            error_log('[PersonsApiHandler] delete failed: ' . $e->getMessage());
+            return Response::error('Failed to delete person', 500);
         }
     }
 
@@ -305,7 +310,8 @@ class PersonsApiHandler
 
             return Response::json(['data' => array_map([$this, 'toPublicRelation'], $relations)], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch relations: ' . $e->getMessage(), 500);
+            error_log('[PersonsApiHandler] relations failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch relations', 500);
         }
     }
 

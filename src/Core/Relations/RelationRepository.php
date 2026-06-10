@@ -242,7 +242,7 @@ class RelationRepository
                    rt.name AS type_name,
                    'outgoing' AS direction
             FROM relations r
-            JOIN persons p ON p.id = r.to_person_id
+            JOIN persons p ON p.id = r.to_person_id AND p.tenant_id = r.tenant_id
             JOIN relationship_types rt ON rt.id = r.relationship_type_id
             WHERE r.from_person_id = :person_id";
 
@@ -258,7 +258,7 @@ class RelationRepository
                    COALESCE(inv.name, rt.name) AS type_name,
                    'incoming' AS direction
             FROM relations r
-            JOIN persons p ON p.id = r.from_person_id
+            JOIN persons p ON p.id = r.from_person_id AND p.tenant_id = r.tenant_id
             JOIN relationship_types rt ON rt.id = r.relationship_type_id
             LEFT JOIN relationship_types inv ON inv.id = rt.inverse_type_id
             WHERE r.to_person_id = :person_id";

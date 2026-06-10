@@ -13,7 +13,7 @@ use Whity\Core\RBAC\CorePermissions;
  * Creates the `relations` edge table and seeds the feature's RBAC permissions
  * (ADR 0002). An edge is always `person → person`; the reciprocal direction is
  * NEVER persisted — it is derived at read time through the relationship type's
- * `inverse_type_id` (see 018_create_relationship_types). This single-row-per-
+ * `inverse_type_id` (see 019_create_relationship_types). This single-row-per-
  * relationship design avoids the dual-row drift that duplicated state has
  * repeatedly caused in this codebase.
  *
