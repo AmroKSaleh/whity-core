@@ -85,7 +85,9 @@ flowchart TD
 
 ## The query layer — explicit predicates, proven by tests
 
-Every handler/repository statement that touches a tenant-owned table carries an explicit, parameterised `tenant_id` predicate bound from `TenantContext`. **This hand-written predicate IS the query-level isolation mechanism** — there is no automatic query-rewriting layer. (The `ScopesToTenant` trait that previously advertised one was removed by WC-161: a full audit found zero production call sites, its rewriter refused the JOINs most list endpoints need, and it had no concept of the system tenant's cross-tenant visibility. An advertised guarantee that does not run is worse than none.)
+Every handler/repository statement that runs **after tenant resolution** and touches a tenant-owned table carries an explicit, parameterised `tenant_id` predicate bound from `TenantContext`. **This hand-written predicate IS the query-level isolation mechanism** — there is no automatic query-rewriting layer. (The `ScopesToTenant` trait that previously advertised one was removed by WC-161: a full audit found zero production call sites, its rewriter refused the JOINs most list endpoints need, and it had no concept of the system tenant's cross-tenant visibility. An advertised guarantee that does not run is worse than none.)
+
+One pre-resolution exception is known and tracked: the login path looks a user up by email *before* any tenant context exists (`AuthHandler`), while the schema's `UNIQUE(tenant_id, email)` permits the same email in different tenants — see issue #181 for the cross-tenant login-ambiguity fix.
 
 The conventions every query follows:
 

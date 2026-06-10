@@ -178,7 +178,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         TenantContext::setTenantId(self::TENANT_A);
         $response = $this->ousHandler()->get($this->req('GET', '/api/ous/20'), ['id' => '20']);
 
-        $this->assertContains($response->getStatusCode(), [403, 404], 'A foreign OU must be refused');
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign OU read reports not-found');
         $this->assertStringNotContainsString(
             'B-Sales',
             $response->getBody(),
@@ -194,7 +194,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             ['id' => '20']
         );
 
-        $this->assertContains($response->getStatusCode(), [403, 404]);
+        $this->assertSame(403, $response->getStatusCode());
         $this->assertSame(
             'B-Sales',
             $this->pdo->query('SELECT name FROM organizational_units WHERE id = 20')->fetchColumn()
@@ -206,7 +206,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         TenantContext::setTenantId(self::TENANT_A);
         $response = $this->ousHandler()->delete($this->req('DELETE', '/api/ous/20'), ['id' => '20']);
 
-        $this->assertContains($response->getStatusCode(), [403, 404]);
+        $this->assertSame(403, $response->getStatusCode());
         $this->assertSame(
             1,
             (int) $this->pdo->query('SELECT COUNT(*) FROM organizational_units WHERE id = 20')->fetchColumn()
