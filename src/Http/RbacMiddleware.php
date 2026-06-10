@@ -13,9 +13,11 @@ use Whity\Core\Tenant\TenantContext;
 /**
  * RBAC Middleware for enforcing role-based access control
  *
- * Validates JWT tokens from the Authorization header (or `access_token` cookie),
- * parses their payload, and enforces the role and/or permission required by the
- * matched route before the downstream handler runs. On success the decoded JWT
+ * Validates JWT tokens from the Authorization header (or `access_token` cookie)
+ * and enforces the role and/or permission required by the matched route before
+ * the downstream handler runs. In the kernel pipeline the claims decoded once by
+ * EnforceTenantIsolation are reused via {@see Request::ATTR_JWT_CLAIMS} (WC-159);
+ * the token is parsed here only in standalone use. On success the decoded JWT
  * payload is attached to the request as {@see Request::$user} for use by handlers.
  *
  * Authorization decisions are always made against the authoritative server-side
@@ -76,8 +78,20 @@ class RbacMiddleware
             return Response::error('Missing or invalid Authorization header', 401);
         }
 
-        // Parse and validate the JWT (signature + expiry handled by the parser).
-        $payload = $this->jwtParser->parse($token);
+        // Single decode (WC-159): reuse the claims stashed by the upstream
+        // EnforceTenantIsolation middleware when present (a stashed null means
+        // the token was already checked and rejected). Parse only when the
+        // attribute is absent, i.e. standalone use outside the kernel pipeline.
+        if ($request->hasAttribute(Request::ATTR_JWT_CLAIMS)) {
+            // Fail closed on any non-array stash (defense-in-depth against a
+            // buggy writer): treat it exactly like an invalid token.
+            $stashed = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
+            /** @var array<string, mixed>|null $payload */
+            $payload = is_array($stashed) ? $stashed : null;
+        } else {
+            // Parse and validate the JWT (signature + expiry handled by the parser).
+            $payload = $this->jwtParser->parse($token);
+        }
         if ($payload === null) {
             return Response::error('Invalid or expired token', 401);
         }
@@ -139,7 +153,10 @@ class RbacMiddleware
      * Extract the bearer token from the request.
      *
      * Prefers the `Authorization: Bearer <token>` header and falls back to the
-     * `access_token` cookie when the header is absent or malformed.
+     * `access_token` cookie when the header is absent or malformed. Uses the
+     * same capture as EnforceTenantIsolation/TenantContext so the stasher and
+     * every consumer derive the identical token from the identical header
+     * (WC-159 review: substr(7) diverged on extra whitespace).
      *
      * @param Request $request The incoming HTTP request.
      * @return string|null The token string, or null when none is present.
@@ -147,9 +164,8 @@ class RbacMiddleware
     private function extractTokenFromRequest(Request $request): ?string
     {
         $authHeader = $request->getHeader('Authorization');
-        if ($authHeader !== null && $this->isValidBearerFormat($authHeader)) {
-            // Strip the "Bearer " prefix (7 characters).
-            return substr($authHeader, 7);
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $matches) === 1) {
+            return $matches[1];
         }
 
         $cookieHeader = $request->getHeader('Cookie');
@@ -166,16 +182,5 @@ class RbacMiddleware
         }
 
         return null;
-    }
-
-    /**
-     * Check if an Authorization header has the "Bearer <token>" format.
-     *
-     * @param string $authHeader The Authorization header value.
-     * @return bool True if the format is "Bearer <token>", false otherwise.
-     */
-    private function isValidBearerFormat(string $authHeader): bool
-    {
-        return preg_match('/^Bearer\s+\S+$/', $authHeader) === 1;
     }
 }

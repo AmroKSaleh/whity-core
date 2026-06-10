@@ -10,11 +10,28 @@ namespace Whity\Core;
  */
 class Request
 {
+    /**
+     * Well-known attribute name under which the first auth middleware stashes
+     * the decoded JWT claims (array<string, mixed>|null) for the request, so
+     * downstream consumers read them instead of re-decoding the token (WC-159).
+     */
+    public const ATTR_JWT_CLAIMS = 'jwt.claims';
+
     private string $method;
     private string $path;
     private array $headers;
     private string $body;
     public ?object $user = null;
+
+    /**
+     * Per-request attribute bag for values derived during middleware processing.
+     *
+     * Lives on the Request instance (never in statics) so persistent FrankenPHP
+     * workers cannot leak attributes across requests.
+     *
+     * @var array<string, mixed>
+     */
+    private array $attributes = [];
 
     /**
      * Constructor
@@ -82,6 +99,48 @@ class Request
     public function getBody(): string
     {
         return $this->body;
+    }
+
+    /**
+     * Stash a derived value on the request for downstream consumers.
+     *
+     * @param string $name Attribute name (e.g. {@see self::ATTR_JWT_CLAIMS}).
+     * @param mixed $value Attribute value; null is a valid, distinct value.
+     * @return void
+     */
+    public function setAttribute(string $name, mixed $value): void
+    {
+        $this->attributes[$name] = $value;
+    }
+
+    /**
+     * Read a previously stashed attribute.
+     *
+     * A stashed null is returned as null (not as $default); use
+     * {@see self::hasAttribute()} to distinguish "absent" from "stashed null".
+     *
+     * @param string $name Attribute name.
+     * @param mixed $default Value returned when the attribute is absent.
+     * @return mixed The attribute value, or $default when absent.
+     */
+    public function getAttribute(string $name, mixed $default = null): mixed
+    {
+        if (!array_key_exists($name, $this->attributes)) {
+            return $default;
+        }
+
+        return $this->attributes[$name];
+    }
+
+    /**
+     * Whether an attribute has been stashed (a stashed null counts as present).
+     *
+     * @param string $name Attribute name.
+     * @return bool True when the attribute exists.
+     */
+    public function hasAttribute(string $name): bool
+    {
+        return array_key_exists($name, $this->attributes);
     }
 
     /**
