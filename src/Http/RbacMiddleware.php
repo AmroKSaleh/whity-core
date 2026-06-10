@@ -6,8 +6,8 @@ namespace Whity\Http;
 
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
-use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Tenant\TenantContext;
 
 /**

@@ -31,7 +31,7 @@ jobs:
         run: vendor/bin/phpunit
 
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse src tests plugins
+        run: vendor/bin/phpstan analyse src tests plugins sdk
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php

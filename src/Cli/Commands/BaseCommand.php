@@ -3,8 +3,8 @@
 namespace Whity\Cli\Commands;
 
 use Whity\Core\Request;
-use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Sdk\Http\Response;
 use Whity\Core\PluginLoader;
 use Whity\Http\HttpKernel;
 use Whity\Http\RbacMiddleware;

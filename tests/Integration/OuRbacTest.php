@@ -10,7 +10,7 @@ use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Http\RbacMiddleware;

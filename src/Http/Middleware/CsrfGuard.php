@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Http\Middleware;
 
-use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
 
 /**
  * CSRF defense-in-depth for cookie-authenticated state changes (WC-160).

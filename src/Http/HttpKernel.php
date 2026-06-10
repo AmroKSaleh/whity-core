@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Http;
 
-use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 

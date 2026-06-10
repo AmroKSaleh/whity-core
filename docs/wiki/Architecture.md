@@ -28,6 +28,7 @@ The runtime is built from small, explicit components wired together in `public/i
 | Permission catalogue | `PermissionRegistry`, `CorePermissions` | `src/Core/RBAC/` |
 | Role + permission resolution | `RoleChecker` | `src/Auth/RoleChecker.php` |
 | Plugin discovery + lifecycle | `PluginLoader`, `PluginLifecycle`, `PluginState` | `src/Core/` |
+| Plugin contract (standalone SDK) | `Whity\Sdk\PluginInterface`, `MigrationInterface`, `Http\Request`/`Response`, `Hooks\Events` — `whity/plugin-sdk` 1.0.0 via composer path repo | `sdk/` |
 | Event hooks | `HookManager` | `src/Core/Hooks/HookManager.php` |
 
 ## Request lifecycle

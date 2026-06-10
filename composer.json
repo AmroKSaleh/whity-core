@@ -2,11 +2,17 @@
   "name": "amroksaleh/whity-core",
   "description": "Open-source white-labeled multi-tenant platform framework",
   "type": "library",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "authors": [
     {
       "name": "Amro K. Saleh",
       "email": "amroksaleh@gmail.com"
+    }
+  ],
+  "repositories": [
+    {
+      "type": "path",
+      "url": "sdk"
     }
   ],
   "require": {
@@ -14,7 +20,8 @@
     "psr/log": "^1.0 || ^2.0 || ^3.0",
     "spomky-labs/otphp": "^11.4",
     "defuse/php-encryption": "^2.4",
-    "firebase/php-jwt": "^7"
+    "firebase/php-jwt": "^7",
+    "whity/plugin-sdk": "^1.0"
   },
   "require-dev": {
     "phpunit/phpunit": "^10.0",

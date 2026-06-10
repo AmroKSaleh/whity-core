@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace HelloWorld;
 
 use HelloWorld\Migrations\CreateHelloGreetingsTable;
-use Whity\Core\PluginInterface;
-use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Hooks\Events;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginInterface;
 
 /**
  * HelloWorldPlugin
@@ -25,6 +26,10 @@ use Whity\Core\Response;
  * It lives in its own directory (`plugins/HelloWorld/`) so the PluginLoader
  * resolves it under the `HelloWorld` namespace prefix (directory name) and
  * auto-discovers it without any manual registration.
+ *
+ * Since WC-162 the plugin depends ONLY on the standalone `whity/plugin-sdk`
+ * package — never on whity-core — which is what makes it distributable to
+ * any Whity-based host application.
  */
 final class HelloWorldPlugin implements PluginInterface
 {
@@ -83,11 +88,11 @@ final class HelloWorldPlugin implements PluginInterface
      */
     public function getHooks(): array
     {
-        // `user.creating` is the real filter hook dispatched by
-        // Whity\Api\UsersApiHandler immediately before a user row is inserted.
-        // Listeners receive the (mutable) user payload and must return it.
+        // Events::USER_CREATING is the real filter hook dispatched by the host
+        // immediately before a user row is inserted. Listeners receive the
+        // (mutable) user payload and must return it.
         return [
-            'user.creating' => [
+            Events::USER_CREATING => [
                 'callback' => [$this, 'onUserCreating'],
                 'priority' => 10,
             ],

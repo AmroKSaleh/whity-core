@@ -2,6 +2,8 @@
 
 namespace Whity\Core;
 
+use Whity\Sdk\Http\Request;
+
 /**
  * HTTP route matcher
  *

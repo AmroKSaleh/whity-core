@@ -17,7 +17,7 @@ use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Relations\RelationResolver;
 use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;

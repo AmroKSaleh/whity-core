@@ -9,7 +9,7 @@ use Whity\Core\PluginLoader;
 use Whity\Core\PluginState;
 use Whity\Core\Router;
 use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Hooks\HookManager;
 
 /**

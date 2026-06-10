@@ -6,7 +6,7 @@ namespace Tests\Core;
 
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Plugins\ExamplePlugin;
 
 /**

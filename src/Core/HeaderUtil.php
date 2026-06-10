@@ -1,26 +1,15 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Core;
 
 /**
- * HTTP header normalization utility
+ * HTTP header normalization utility — host-side alias of the SDK helper.
  *
- * Provides static methods for normalizing header names to a consistent format.
- * All headers are normalized to lowercase with hyphens as separators.
+ * The implementation moved to the standalone `whity/plugin-sdk` package
+ * (WC-162) together with the Request/Response shapes that use it.
  */
-class HeaderUtil
+class HeaderUtil extends \Whity\Sdk\Http\HeaderUtil
 {
-    /**
-     * Normalize a header name to a consistent format (lowercase with hyphens)
-     *
-     * Converts underscores to hyphens and converts to lowercase for consistent
-     * header key storage and retrieval.
-     *
-     * @param string $name Header name (e.g., 'Content-Type', 'content_type', 'CONTENT_TYPE')
-     * @return string Normalized header name (e.g., 'content-type')
-     */
-    public static function normalize(string $name): string
-    {
-        return strtolower(str_replace('_', '-', $name));
-    }
 }

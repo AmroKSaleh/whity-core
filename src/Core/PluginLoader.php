@@ -11,12 +11,17 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
 use Psr\Log\LoggerInterface;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginInterface;
 
 /**
  * Plugin loader for dynamic discovery and registration
  *
  * Scans a directory for PHP files, uses reflection to check if they implement
- * PluginInterface, and registers their routes, permissions, and hooks.
+ * the SDK plugin contract ({@see \Whity\Sdk\PluginInterface}, WC-162 — the
+ * deprecated {@see \Whity\Core\PluginInterface} alias extends it, so pre-SDK
+ * plugins keep loading), and registers their routes, permissions, and hooks.
  */
 class PluginLoader
 {
