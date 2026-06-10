@@ -17,7 +17,7 @@ use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Relations\RelationResolver;
 use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
@@ -25,7 +25,7 @@ use Whity\Http\RbacMiddleware;
 
 /**
  * Integration test proving the WC-65 family-relations endpoints are RBAC
- * route-gated AND tenant-isolated end-to-end — driving the real
+ * route-gated AND tenant-isolated end-to-end â€” driving the real
  * {@see RbacMiddleware}, {@see RoleChecker}, {@see Router}, the resolver and both
  * handlers together, exactly as the HTTP kernel does.
  *

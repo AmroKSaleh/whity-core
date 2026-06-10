@@ -8,12 +8,12 @@ use HelloWorld\HelloWorldPlugin;
 use HelloWorld\Migrations\CreateHelloGreetingsTable;
 use PHPUnit\Framework\TestCase;
 use Whity\Core\Hooks\HookManager;
-use Whity\Core\PluginInterface;
 use Whity\Core\PluginLoader;
 use Whity\Core\RBAC\PermissionRegistry;
-use Whity\Core\Request;
-use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginInterface;
 
 require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/HelloWorldPlugin.php';
 require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/Migrations/CreateHelloGreetingsTable.php';
@@ -22,9 +22,9 @@ require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/Migrations/CreateHelloGr
  * Tests for the HelloWorld reference plugin shipped with the
  * Plugin-Development tutorial.
  *
- * Verifies that the plugin satisfies PluginInterface, that the PluginLoader
- * discovers it and registers GET /api/hello, and that its `user.creating`
- * hook runs the documented custom logic.
+ * Verifies that the plugin satisfies the SDK plugin contract (WC-162), that
+ * the PluginLoader discovers it and registers GET /api/hello, and that its
+ * `user.creating` hook runs the documented custom logic.
  */
 final class HelloWorldPluginTest extends TestCase
 {

@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 /**
  * CI smoke: prove the plugin system discovers and loads its drop-in plugins
- * without a fatal error (e.g. the bundled HelloWorld example). Runs the real
- * PluginLoader against the /plugins directory — no HTTP/RBAC, no database — so a
- * regression in plugin discovery/loading fails CI directly.
- *
- * This is the pre-SDK plugin-load gate (WC-163). Once the versioned SDK lands
- * (WC-162) it should additionally assert load through the SDK contract + version
- * gate (WC-165).
+ * through the SDK contract (WC-162/WC-163). Runs the real PluginLoader against
+ * the /plugins directory — no HTTP/RBAC, no database — and asserts that at
+ * least one plugin implements Whity\Sdk\PluginInterface and reaches the ACTIVE
+ * lifecycle state, so a regression in SDK-path discovery/loading fails CI
+ * directly. The version gate (WC-165) will extend this further.
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -26,11 +24,27 @@ use Whity\Core\Router;
 $loader = new PluginLoader(dirname(__DIR__) . '/plugins', new Router());
 $loader->load();
 
-$count = count($loader->getPlugins());
-if ($count < 1) {
+$plugins = $loader->getPlugins();
+if (count($plugins) < 1) {
     fwrite(STDERR, "FAIL: PluginLoader discovered/loaded no plugins.\n");
     exit(1);
 }
 
-echo "OK: PluginLoader loaded {$count} plugin(s).\n";
+// SDK path: every loaded plugin satisfies the standalone SDK contract.
+foreach ($plugins as $plugin) {
+    if (!$plugin instanceof \Whity\Sdk\PluginInterface) {
+        fwrite(STDERR, 'FAIL: ' . get_class($plugin) . " does not implement Whity\\Sdk\\PluginInterface.\n");
+        exit(1);
+    }
+}
+
+// Lifecycle: at least one plugin must have reached the ACTIVE state.
+$states = array_column($loader->getPluginStatuses(), 'state', 'name');
+$active = array_keys(array_filter($states, static fn (string $state): bool => $state === 'active'));
+if ($active === []) {
+    fwrite(STDERR, "FAIL: no plugin reached the active lifecycle state.\n");
+    exit(1);
+}
+
+echo 'OK: ' . count($plugins) . ' SDK plugin(s) loaded; active: ' . implode(', ', $active) . ".\n";
 exit(0);

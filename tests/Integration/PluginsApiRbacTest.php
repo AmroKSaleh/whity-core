@@ -13,7 +13,7 @@ use Whity\Core\PluginLoader;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
@@ -23,8 +23,8 @@ use Whity\Http\RbacMiddleware;
  * Integration tests for the WC-10 plugin management API (issue #8).
  *
  * Drives the real {@see RbacMiddleware}, {@see RoleChecker}, {@see Router},
- * {@see PluginLoader}, and {@see PluginsApiHandler} together — resolving the
- * route's required permission exactly as the HTTP kernel does — to prove:
+ * {@see PluginLoader}, and {@see PluginsApiHandler} together â€” resolving the
+ * route's required permission exactly as the HTTP kernel does â€” to prove:
  *
  *  1. Every plugin endpoint (list/enable/disable) is gated by
  *     {@see CorePermissions::PLUGINS_MANAGE}; a user granted it reaches the

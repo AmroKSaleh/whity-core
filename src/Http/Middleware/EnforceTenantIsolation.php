@@ -8,8 +8,8 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Auth\JwtParser;
 use Whity\Core\Audit\AuditContext;
-use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Core\Tenant\TenantResolutionException;
 

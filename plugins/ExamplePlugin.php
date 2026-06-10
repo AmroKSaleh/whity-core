@@ -4,16 +4,17 @@ declare(strict_types=1);
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
-use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginInterface;
 
 /**
  * ExamplePlugin
  *
- * A sample reference implementation of the PluginInterface.
- * Declares routes, custom permissions, and hooks to demonstrate
- * plugin integration capabilities with Whity-Core.
+ * A sample reference implementation of the SDK plugin contract
+ * ({@see PluginInterface}, WC-162). Declares routes, custom permissions, and
+ * hooks to demonstrate plugin integration capabilities — depending only on
+ * `whity/plugin-sdk`, never on whity-core.
  */
 class ExamplePlugin implements PluginInterface
 {

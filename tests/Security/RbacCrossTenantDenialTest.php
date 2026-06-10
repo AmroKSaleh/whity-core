@@ -11,7 +11,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Http\Response;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
@@ -24,8 +24,8 @@ use Whity\Http\RbacMiddleware;
  * Scope note: WC-22 owns the data-leakage / query-scoping angle of tenant
  * isolation. THIS file approaches cross-tenant access from the RBAC angle: it
  * proves that the authoritative {@see RoleChecker} authorizes against the
- * caller's OWN grants — so a user in tenant B whose role lacks `users:read` is
- * denied even though a tenant-A user's role grants it — and that every denial
+ * caller's OWN grants â€” so a user in tenant B whose role lacks `users:read` is
+ * denied even though a tenant-A user's role grants it â€” and that every denial
  * response leaks ZERO internal data (no user id, role, tenant id, SQL, or query
  * result), satisfying AC2.
  *
@@ -34,8 +34,8 @@ use Whity\Http\RbacMiddleware;
  * realised by the two tenants' users holding DIFFERENT roles. The OU-inherited
  * grant path IS tenant-partitioned and is covered exhaustively by
  * {@see \Tests\Auth\OuRoleInheritanceRealEngineTest}. The full real pipeline is
- * exercised here: real {@see JwtParser} → real {@see RbacMiddleware} → real
- * {@see RoleChecker} → in-memory SQLite seeded with the production schema, with
+ * exercised here: real {@see JwtParser} â†’ real {@see RbacMiddleware} â†’ real
+ * {@see RoleChecker} â†’ in-memory SQLite seeded with the production schema, with
  * the resolved tenant locked into {@see TenantContext} ahead of RBAC.
  */
 class RbacCrossTenantDenialTest extends TestCase
@@ -168,8 +168,8 @@ class RbacCrossTenantDenialTest extends TestCase
 
     /**
      * AC2 (zero leakage): the 403 denial body for a foreign-tenant caller exposes
-     * only the documented contract — `error` plus the missing `required`
-     * permission — and NOTHING about the caller, their tenant, the resource, or
+     * only the documented contract â€” `error` plus the missing `required`
+     * permission â€” and NOTHING about the caller, their tenant, the resource, or
      * the database.
      */
     public function testCrossTenantDenialLeaksNoInternalData(): void

@@ -6,7 +6,7 @@ namespace Whity\Core\Tenant;
 
 use Psr\Log\LoggerInterface;
 use Whity\Auth\JwtParser;
-use Whity\Core\Request;
+use Whity\Sdk\Http\Request;
 
 /**
  * Request-scoped tenant context holder.

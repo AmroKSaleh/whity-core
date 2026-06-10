@@ -27,10 +27,13 @@ Forks" principle and the request runtime flow), see
 ## How plugins work (the 60-second version)
 
 A plugin is a PHP class that implements
-[`Whity\Core\PluginInterface`](../../src/Core/PluginInterface.php). At startup
-(and on a hot reload), [`PluginLoader`](../../src/Core/PluginLoader.php) scans
-the `plugins/` directory, uses reflection to find every class that implements
-the interface, instantiates it, and registers its capabilities:
+[`Whity\Sdk\PluginInterface`](../../sdk/src/PluginInterface.php) — the contract
+from the standalone [`whity/plugin-sdk`](../../sdk/README.md) package (WC-162).
+A plugin depends ONLY on the SDK, never on whity-core, which is what makes it
+distributable across Whity-based applications. At startup (and on a hot
+reload), [`PluginLoader`](../../src/Core/PluginLoader.php) scans the `plugins/`
+directory, uses reflection to find every class that implements the interface,
+instantiates it, and registers its capabilities:
 
 - **routes** go into the `Router`,
 - **permissions** go into the `PermissionRegistry`,
@@ -97,9 +100,10 @@ declare(strict_types=1);
 namespace HelloWorld;
 
 use HelloWorld\Migrations\CreateHelloGreetingsTable;
-use Whity\Core\PluginInterface;
-use Whity\Core\Request;
-use Whity\Core\Response;
+use Whity\Sdk\Hooks\Events;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginInterface;
 
 final class HelloWorldPlugin implements PluginInterface
 {
@@ -142,7 +146,7 @@ final class HelloWorldPlugin implements PluginInterface
     public function getHooks(): array
     {
         return [
-            'user.creating' => [
+            Events::USER_CREATING => [
                 'callback' => [$this, 'onUserCreating'],
                 'priority' => 10,
             ],
@@ -357,10 +361,11 @@ Key points (all enforced by the real
 
 ## Step 5 — Ship a migration
 
-`getMigrations()` returns migration class FQCNs. A migration mirrors the core
-migrations under `database/migrations/`: a class with static `up()` and
-`down()` methods that each receive a
-[`Whity\Database\Database`](../../src/Database/Database.php) instance.
+`getMigrations()` returns migration class FQCNs. A migration implements the
+SDK contract [`Whity\Sdk\MigrationInterface`](../../sdk/src/MigrationInterface.php)
+(WC-162): instance `up()` and `down()` methods that each receive a live `\PDO`
+connection — so the migration, like the rest of the plugin, depends only on
+the SDK.
 
 Create `plugins/HelloWorld/Migrations/CreateHelloGreetingsTable.php`:
 
@@ -371,13 +376,13 @@ declare(strict_types=1);
 
 namespace HelloWorld\Migrations;
 
-use Whity\Database\Database;
+use Whity\Sdk\MigrationInterface;
 
-final class CreateHelloGreetingsTable
+final class CreateHelloGreetingsTable implements MigrationInterface
 {
-    public static function up(Database $db): void
+    public function up(\PDO $pdo): void
     {
-        $db->exec('
+        $pdo->exec('
             CREATE TABLE IF NOT EXISTS hello_greetings (
                 id SERIAL PRIMARY KEY,
                 tenant_id INTEGER NOT NULL,
@@ -386,14 +391,14 @@ final class CreateHelloGreetingsTable
             )
         ');
 
-        $db->exec(
+        $pdo->exec(
             'CREATE INDEX IF NOT EXISTS idx_hello_greetings_tenant_id ON hello_greetings(tenant_id)'
         );
     }
 
-    public static function down(Database $db): void
+    public function down(\PDO $pdo): void
     {
-        $db->exec('DROP TABLE IF EXISTS hello_greetings');
+        $pdo->exec('DROP TABLE IF EXISTS hello_greetings');
     }
 }
 ```
@@ -422,11 +427,11 @@ namespace Tests\Plugins;
 use HelloWorld\HelloWorldPlugin;
 use PHPUnit\Framework\TestCase;
 use Whity\Core\Hooks\HookManager;
-use Whity\Core\PluginInterface;
 use Whity\Core\PluginLoader;
 use Whity\Core\RBAC\PermissionRegistry;
-use Whity\Core\Request;
 use Whity\Core\Router;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\PluginInterface;
 
 require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/HelloWorldPlugin.php';
 

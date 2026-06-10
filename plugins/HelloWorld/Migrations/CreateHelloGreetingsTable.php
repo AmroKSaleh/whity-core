@@ -4,32 +4,31 @@ declare(strict_types=1);
 
 namespace HelloWorld\Migrations;
 
-use Whity\Database\Database;
+use Whity\Sdk\MigrationInterface;
 
 /**
  * CreateHelloGreetingsTable migration
  *
- * Reference migration for the HelloWorld plugin. Plugin migrations follow the
- * same shape as the core migrations under `database/migrations/`: a class with
- * static `up()` and `down()` methods that each receive a {@see Database}
- * instance. The class FQCN is returned from
- * {@see \HelloWorld\HelloWorldPlugin::getMigrations()} so the platform
+ * Reference migration for the HelloWorld plugin, implementing the SDK
+ * migration contract ({@see MigrationInterface}, WC-162): instance `up()` /
+ * `down()` methods receiving a live PDO connection. The class FQCN is returned
+ * from {@see \HelloWorld\HelloWorldPlugin::getMigrations()} so the platform
  * migration runner can apply it.
  *
  * The statements are idempotent (`IF NOT EXISTS`) so the migration is safe to
- * re-run.
+ * re-run, and `down()` cleanly reverts everything `up()` created.
  */
-final class CreateHelloGreetingsTable
+final class CreateHelloGreetingsTable implements MigrationInterface
 {
     /**
      * Apply the migration.
      *
-     * @param Database $db The database abstraction.
+     * @param \PDO $pdo Live database connection.
      * @return void
      */
-    public static function up(Database $db): void
+    public function up(\PDO $pdo): void
     {
-        $db->exec('
+        $pdo->exec('
             CREATE TABLE IF NOT EXISTS hello_greetings (
                 id SERIAL PRIMARY KEY,
                 tenant_id INTEGER NOT NULL,
@@ -38,7 +37,7 @@ final class CreateHelloGreetingsTable
             )
         ');
 
-        $db->exec(
+        $pdo->exec(
             'CREATE INDEX IF NOT EXISTS idx_hello_greetings_tenant_id ON hello_greetings(tenant_id)'
         );
     }
@@ -46,11 +45,11 @@ final class CreateHelloGreetingsTable
     /**
      * Revert the migration.
      *
-     * @param Database $db The database abstraction.
+     * @param \PDO $pdo Live database connection.
      * @return void
      */
-    public static function down(Database $db): void
+    public function down(\PDO $pdo): void
     {
-        $db->exec('DROP TABLE IF EXISTS hello_greetings');
+        $pdo->exec('DROP TABLE IF EXISTS hello_greetings');
     }
 }
