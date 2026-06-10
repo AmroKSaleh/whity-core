@@ -97,9 +97,9 @@ final class MigrationSchemaTest extends TestCase
         $this->assertContains('015_grant_delegation_manage_to_admin.php', $names);
         // WC-65 family relations: persons graph node, relationship-type
         // vocabulary, and the relations edge table (which also seeds relations:*).
-        $this->assertContains('017_create_persons.php', $names);
-        $this->assertContains('018_create_relationship_types.php', $names);
-        $this->assertContains('019_create_relations.php', $names);
+        $this->assertContains('018_create_persons.php', $names);
+        $this->assertContains('019_create_relationship_types.php', $names);
+        $this->assertContains('020_create_relations.php', $names);
 
         // The absorbed patch migrations must be gone (folded into the creates).
         $this->assertNotContains('003_add_slug_to_tenants.php', $names);
@@ -454,7 +454,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testPersonsTableSchemaAndReversibility(): void
     {
-        $sql = $this->readFile('017_create_persons.php');
+        $sql = $this->readFile('018_create_persons.php');
 
         // Tenant scope cascades with the tenant, like every scoped table.
         $this->assertMatchesRegularExpression(
@@ -504,7 +504,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testRelationshipTypesTableSchemaSeedsAndReversibility(): void
     {
-        $sql = $this->readFile('018_create_relationship_types.php');
+        $sql = $this->readFile('019_create_relationship_types.php');
 
         // Unique vocabulary name + the reciprocal-derivation columns.
         $this->assertMatchesRegularExpression(
@@ -543,7 +543,7 @@ final class MigrationSchemaTest extends TestCase
 
     public function testRelationsTableSchemaSeedsPermissionsAndReversibility(): void
     {
-        $sql = $this->readFile('019_create_relations.php');
+        $sql = $this->readFile('020_create_relations.php');
 
         // Tenant scope cascades with the tenant.
         $this->assertMatchesRegularExpression(
