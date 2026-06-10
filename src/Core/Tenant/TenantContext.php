@@ -90,9 +90,12 @@ class TenantContext
     /**
      * Resolve the current tenant from an authenticated request.
      *
-     * Extracts the JWT from the Authorization header ("Bearer <token>") or the
-     * access_token cookie, validates it via {@see JwtParser}, and locks the
-     * resolved tenant id into the context for the rest of the request.
+     * When an upstream middleware has already decoded the token and stashed the
+     * claims on the request ({@see Request::ATTR_JWT_CLAIMS}, WC-159), those
+     * claims are reused without re-decoding. Otherwise the JWT is extracted from
+     * the Authorization header ("Bearer <token>") or the access_token cookie and
+     * validated via {@see JwtParser}. Either way the resolved tenant id is locked
+     * into the context for the rest of the request.
      *
      * There is NO silent fallback: a missing token, an invalid/expired token,
      * or a token without a valid integer tenant_id claim all throw a
@@ -109,6 +112,21 @@ class TenantContext
      */
     public static function resolve(Request $request, JwtParser $jwtParser): int
     {
+        // Single decode (WC-159): when an upstream middleware has already
+        // decoded the token and stashed the claims on the request, reuse them.
+        // A stashed null means the token was checked and rejected upstream.
+        if ($request->hasAttribute(Request::ATTR_JWT_CLAIMS)) {
+            /** @var array<string, mixed>|null $payload */
+            $payload = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
+            if ($payload === null) {
+                throw self::extractToken($request) === null
+                    ? TenantResolutionException::missingToken()
+                    : TenantResolutionException::invalidToken();
+            }
+
+            return self::lockTenantFromPayload($payload);
+        }
+
         $token = self::extractToken($request);
         if ($token === null) {
             throw TenantResolutionException::missingToken();
@@ -119,6 +137,19 @@ class TenantContext
             throw TenantResolutionException::invalidToken();
         }
 
+        return self::lockTenantFromPayload($payload);
+    }
+
+    /**
+     * Validate the tenant_id claim of a decoded payload and lock it in.
+     *
+     * @param array<string, mixed> $payload The decoded JWT claims.
+     * @return int The resolved tenant id (0 = system tenant).
+     * @throws TenantResolutionException If the tenant_id claim is missing/invalid.
+     * @throws \RuntimeException If the context is already locked.
+     */
+    private static function lockTenantFromPayload(array $payload): int
+    {
         if (!array_key_exists('tenant_id', $payload)) {
             throw TenantResolutionException::invalidTenantClaim('missing tenant_id claim');
         }

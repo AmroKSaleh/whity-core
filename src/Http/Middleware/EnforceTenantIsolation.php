@@ -19,10 +19,12 @@ use Whity\Core\Tenant\TenantResolutionException;
  * Runs early in the request pipeline (before routing, RBAC and any database
  * access) and performs two jobs:
  *
- * 1. Resolution — delegates token -> tenant extraction to
- *    {@see TenantContext::resolve()}, which validates the JWT and locks the
- *    resolved tenant id into the request-scoped context. There is no duplicated
- *    extraction logic here; the context is the single source of truth.
+ * 1. Resolution — decodes the request's JWT exactly once, stashes the claims on
+ *    the Request as {@see Request::ATTR_JWT_CLAIMS} (WC-159), and delegates
+ *    tenant extraction to {@see TenantContext::resolve()}, which reads the
+ *    stashed claims, validates the tenant claim and locks the resolved tenant
+ *    id into the request-scoped context. Downstream middleware (RBAC) and
+ *    handlers consume the stashed claims instead of re-decoding the token.
  * 2. Enforcement — when the request addresses a resource that declares a tenant
  *    (a `/api/tenants/{id}` path segment, a `tenant_id` query parameter, or an
  *    `X-Tenant-Id` header), the caller's tenant is compared against it. A
@@ -109,6 +111,14 @@ class EnforceTenantIsolation
             return $next($request);
         }
 
+        // Single decode (WC-159): parse the JWT exactly once per request and
+        // stash the claims (array|null) on the Request. Downstream consumers —
+        // TenantContext::resolve() below, RbacMiddleware, handlers — read the
+        // stashed claims instead of re-decoding the token.
+        $token = $this->extractToken($request);
+        $payload = $token === null ? null : $this->jwtParser->parse($token);
+        $request->setAttribute(Request::ATTR_JWT_CLAIMS, $payload);
+
         // Delegate token -> tenant extraction and validation to the context. Any
         // failure (missing/invalid token, missing/invalid tenant claim) collapses
         // to a generic 401 so internals are never leaked to the client.
@@ -118,9 +128,8 @@ class EnforceTenantIsolation
             return Response::error('Authentication required', 401);
         }
 
-        // Re-parse the (now validated) token only to expose the decoded payload to
-        // downstream handlers via Request::$user, mirroring the prior contract.
-        $payload = $this->decodePayload($request);
+        // Expose the decoded payload to downstream handlers via Request::$user,
+        // mirroring the prior contract.
         if ($payload !== null) {
             $request->user = (object) $payload;
         }
@@ -274,30 +283,10 @@ class EnforceTenantIsolation
     }
 
     /**
-     * Decode the request's JWT payload for downstream consumption.
-     *
-     * The token has already been validated by {@see TenantContext::resolve()};
-     * this re-parse only exposes the claims as {@see Request::$user}. Returns null
-     * when no token is recoverable (should not happen post-resolution).
-     *
-     * @param Request $request The incoming HTTP request.
-     * @return array<string, mixed>|null The decoded payload, or null.
-     */
-    private function decodePayload(Request $request): ?array
-    {
-        $token = $this->extractToken($request);
-        if ($token === null) {
-            return null;
-        }
-
-        return $this->jwtParser->parse($token);
-    }
-
-    /**
      * Extract a JWT from the Authorization Bearer header or access_token cookie.
      *
      * Mirrors the extraction performed inside {@see TenantContext::resolve()} so
-     * the decoded payload can be re-derived without changing the context API.
+     * the claims can be decoded once here and stashed for the whole pipeline.
      *
      * @param Request $request The incoming HTTP request.
      * @return string|null The token, or null when none is present.

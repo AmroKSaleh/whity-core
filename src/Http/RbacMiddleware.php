@@ -13,9 +13,11 @@ use Whity\Core\Tenant\TenantContext;
 /**
  * RBAC Middleware for enforcing role-based access control
  *
- * Validates JWT tokens from the Authorization header (or `access_token` cookie),
- * parses their payload, and enforces the role and/or permission required by the
- * matched route before the downstream handler runs. On success the decoded JWT
+ * Validates JWT tokens from the Authorization header (or `access_token` cookie)
+ * and enforces the role and/or permission required by the matched route before
+ * the downstream handler runs. In the kernel pipeline the claims decoded once by
+ * EnforceTenantIsolation are reused via {@see Request::ATTR_JWT_CLAIMS} (WC-159);
+ * the token is parsed here only in standalone use. On success the decoded JWT
  * payload is attached to the request as {@see Request::$user} for use by handlers.
  *
  * Authorization decisions are always made against the authoritative server-side
@@ -76,8 +78,17 @@ class RbacMiddleware
             return Response::error('Missing or invalid Authorization header', 401);
         }
 
-        // Parse and validate the JWT (signature + expiry handled by the parser).
-        $payload = $this->jwtParser->parse($token);
+        // Single decode (WC-159): reuse the claims stashed by the upstream
+        // EnforceTenantIsolation middleware when present (a stashed null means
+        // the token was already checked and rejected). Parse only when the
+        // attribute is absent, i.e. standalone use outside the kernel pipeline.
+        if ($request->hasAttribute(Request::ATTR_JWT_CLAIMS)) {
+            /** @var array<string, mixed>|null $payload */
+            $payload = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
+        } else {
+            // Parse and validate the JWT (signature + expiry handled by the parser).
+            $payload = $this->jwtParser->parse($token);
+        }
         if ($payload === null) {
             return Response::error('Invalid or expired token', 401);
         }
