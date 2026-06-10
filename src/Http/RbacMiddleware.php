@@ -83,8 +83,11 @@ class RbacMiddleware
         // the token was already checked and rejected). Parse only when the
         // attribute is absent, i.e. standalone use outside the kernel pipeline.
         if ($request->hasAttribute(Request::ATTR_JWT_CLAIMS)) {
+            // Fail closed on any non-array stash (defense-in-depth against a
+            // buggy writer): treat it exactly like an invalid token.
+            $stashed = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
             /** @var array<string, mixed>|null $payload */
-            $payload = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
+            $payload = is_array($stashed) ? $stashed : null;
         } else {
             // Parse and validate the JWT (signature + expiry handled by the parser).
             $payload = $this->jwtParser->parse($token);
@@ -150,7 +153,10 @@ class RbacMiddleware
      * Extract the bearer token from the request.
      *
      * Prefers the `Authorization: Bearer <token>` header and falls back to the
-     * `access_token` cookie when the header is absent or malformed.
+     * `access_token` cookie when the header is absent or malformed. Uses the
+     * same capture as EnforceTenantIsolation/TenantContext so the stasher and
+     * every consumer derive the identical token from the identical header
+     * (WC-159 review: substr(7) diverged on extra whitespace).
      *
      * @param Request $request The incoming HTTP request.
      * @return string|null The token string, or null when none is present.
@@ -158,9 +164,8 @@ class RbacMiddleware
     private function extractTokenFromRequest(Request $request): ?string
     {
         $authHeader = $request->getHeader('Authorization');
-        if ($authHeader !== null && $this->isValidBearerFormat($authHeader)) {
-            // Strip the "Bearer " prefix (7 characters).
-            return substr($authHeader, 7);
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $matches) === 1) {
+            return $matches[1];
         }
 
         $cookieHeader = $request->getHeader('Cookie');
@@ -177,16 +182,5 @@ class RbacMiddleware
         }
 
         return null;
-    }
-
-    /**
-     * Check if an Authorization header has the "Bearer <token>" format.
-     *
-     * @param string $authHeader The Authorization header value.
-     * @return bool True if the format is "Bearer <token>", false otherwise.
-     */
-    private function isValidBearerFormat(string $authHeader): bool
-    {
-        return preg_match('/^Bearer\s+\S+$/', $authHeader) === 1;
     }
 }

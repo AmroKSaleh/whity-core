@@ -116,8 +116,11 @@ class TenantContext
         // decoded the token and stashed the claims on the request, reuse them.
         // A stashed null means the token was checked and rejected upstream.
         if ($request->hasAttribute(Request::ATTR_JWT_CLAIMS)) {
+            // Fail closed on any non-array stash (defense-in-depth against a
+            // buggy writer): treat it exactly like an invalid token.
+            $stashed = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
             /** @var array<string, mixed>|null $payload */
-            $payload = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
+            $payload = is_array($stashed) ? $stashed : null;
             if ($payload === null) {
                 throw self::extractToken($request) === null
                     ? TenantResolutionException::missingToken()

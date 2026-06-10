@@ -9,7 +9,10 @@ use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Core\Tenant\TenantResolutionException;
+use Whity\Http\HttpKernel;
 use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Http\RbacMiddleware;
 
@@ -229,6 +232,106 @@ class JwtSingleDecodeTest extends TestCase
         $responseData = json_decode($response->getBody(), true);
         $this->assertSame('Invalid or expired token', $responseData['error']);
         $this->assertSame(0, $parser->parseCalls, 'A stashed null must not trigger a re-parse');
+    }
+
+    /**
+     * The PRODUCTION wiring decodes once too: a real HttpKernel with
+     * EnforceTenantIsolation registered ahead of the built-in RBAC stage must
+     * not fall back to per-middleware parsing.
+     */
+    public function testKernelPipelineDecodesExactlyOnce(): void
+    {
+        $parser = $this->countingParser();
+        $token = $parser->create(['user_id' => 7, 'tenant_id' => 1], 3600, 'access');
+        $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
+
+        $roleChecker = $this->createMock(RoleChecker::class);
+        $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
+
+        $router = new Router();
+        $router->register(
+            'GET',
+            '/api/users',
+            fn(Request $req): Response => new Response(200, 'ok'),
+            null,
+            null,
+            'users:read'
+        );
+
+        $kernel = new HttpKernel($router, new RbacMiddleware($parser, $roleChecker));
+        $kernel->use(new EnforceTenantIsolation($parser));
+
+        $response = $kernel->handle($request);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(1, $parser->parseCalls, 'Kernel pipeline must decode the JWT exactly once');
+    }
+
+    /**
+     * Bearer extraction is uniform across stasher and consumers: a header with
+     * extra whitespace ("Bearer  <token>") yields the same token everywhere,
+     * including standalone RbacMiddleware use (parse fallback).
+     */
+    public function testRbacMiddlewareExtractsBearerTokenWithExtraWhitespace(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $parser = $this->countingParser();
+        $token = $parser->create(['user_id' => 7, 'tenant_id' => 1], 3600, 'access');
+        $request = new Request('GET', '/api/users', ['Authorization' => "Bearer  {$token}"]);
+
+        $roleChecker = $this->createMock(RoleChecker::class);
+        $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
+
+        $middleware = new RbacMiddleware($parser, $roleChecker);
+        $response = $middleware->handle(
+            $request,
+            fn(Request $req): Response => new Response(200, 'ok'),
+            null,
+            'users:read'
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(1, $parser->parseCalls);
+    }
+
+    /**
+     * Defense-in-depth: a non-array stashed value (a buggy or hostile writer)
+     * must fail CLOSED as an invalid token in both consumers — never bubble a
+     * TypeError into a 500.
+     */
+    public function testNonArrayStashedClaimsFailClosed(): void
+    {
+        $parser = $this->countingParser();
+
+        // TenantContext::resolve(): garbage stash -> TenantResolutionException.
+        $request = new Request('GET', '/api/users', ['Authorization' => 'Bearer some.token.value']);
+        $request->setAttribute(Request::ATTR_JWT_CLAIMS, 'garbage-not-claims');
+
+        try {
+            TenantContext::resolve($request, $parser);
+            $this->fail('Expected TenantResolutionException for a non-array stash');
+        } catch (TenantResolutionException $e) {
+            $this->assertSame(0, $parser->parseCalls);
+        }
+
+        // RbacMiddleware: garbage stash -> same generic 401 as an invalid token.
+        TenantContext::reset();
+        TenantContext::setTenantId(1);
+        $request = new Request('GET', '/api/users', ['Authorization' => 'Bearer some.token.value']);
+        $request->setAttribute(Request::ATTR_JWT_CLAIMS, 'garbage-not-claims');
+
+        $middleware = new RbacMiddleware($parser, $this->createMock(RoleChecker::class));
+        $response = $middleware->handle(
+            $request,
+            fn(Request $req): Response => new Response(200, 'ok'),
+            null,
+            'users:read'
+        );
+
+        $this->assertSame(401, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame('Invalid or expired token', $responseData['error']);
     }
 
     /**
