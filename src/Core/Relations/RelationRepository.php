@@ -48,7 +48,7 @@ class RelationRepository
     public function listTypes(): array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, name, inverse_type_id, symmetric FROM relationship_types ORDER BY name ASC'
+            'SELECT id, name, inverse_type_id, is_symmetric FROM relationship_types ORDER BY name ASC'
         );
         $stmt->execute();
 
@@ -62,7 +62,7 @@ class RelationRepository
                 'inverseTypeId' => isset($row['inverse_type_id']) && $row['inverse_type_id'] !== null
                     ? (int) $row['inverse_type_id']
                     : null,
-                'symmetric' => self::toBool($row['symmetric'] ?? false),
+                'symmetric' => self::toBool($row['is_symmetric'] ?? false),
             ],
             $rows
         );
@@ -77,7 +77,7 @@ class RelationRepository
     public function findType(int $id): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, name, inverse_type_id, symmetric FROM relationship_types WHERE id = :id'
+            'SELECT id, name, inverse_type_id, is_symmetric FROM relationship_types WHERE id = :id'
         );
         $stmt->execute([':id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
