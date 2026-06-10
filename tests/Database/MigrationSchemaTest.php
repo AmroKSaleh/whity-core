@@ -47,6 +47,9 @@ final class MigrationSchemaTest extends TestCase
         'audit_log',
         'core_schema_migrations',
         'permission_delegations',
+        'persons',
+        'relationship_types',
+        'relations',
     ];
 
     private static string $migrationDir;
@@ -92,6 +95,11 @@ final class MigrationSchemaTest extends TestCase
         $this->assertContains('013_grant_plugins_manage_to_admin.php', $names);
         $this->assertContains('014_create_permission_delegations.php', $names);
         $this->assertContains('015_grant_delegation_manage_to_admin.php', $names);
+        // WC-65 family relations: persons graph node, relationship-type
+        // vocabulary, and the relations edge table (which also seeds relations:*).
+        $this->assertContains('018_create_persons.php', $names);
+        $this->assertContains('019_create_relationship_types.php', $names);
+        $this->assertContains('020_create_relations.php', $names);
 
         // The absorbed patch migrations must be gone (folded into the creates).
         $this->assertNotContains('003_add_slug_to_tenants.php', $names);
@@ -441,6 +449,156 @@ final class MigrationSchemaTest extends TestCase
             '/INSERT INTO role_permissions[\s\S]+ON CONFLICT \(role_id, permission_id\) DO NOTHING/i',
             $sql,
             'audit:read must be granted to admin idempotently.'
+        );
+    }
+
+    public function testPersonsTableSchemaAndReversibility(): void
+    {
+        $sql = $this->readFile('018_create_persons.php');
+
+        // Tenant scope cascades with the tenant, like every scoped table.
+        $this->assertMatchesRegularExpression(
+            '/tenant_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+tenants\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'persons.tenant_id must be NOT NULL and cascade-delete with its tenant.'
+        );
+
+        // display_name is the required human label.
+        $this->assertMatchesRegularExpression(
+            '/display_name\s+VARCHAR\(\d+\)\s+NOT\s+NULL/i',
+            $sql,
+            'persons.display_name must be a NOT NULL string.'
+        );
+
+        // user_id is the nullable, UNIQUE link to a platform user with SET NULL on
+        // user deletion (the person survives as a now-account-less relative).
+        $this->assertMatchesRegularExpression(
+            '/user_id\s+INTEGER\s+NULL\s+UNIQUE\s+REFERENCES\s+users\s*\(\s*id\s*\)\s+ON DELETE SET NULL/i',
+            $sql,
+            'persons.user_id must be a NULLABLE, UNIQUE FK to users(id) ON DELETE SET NULL.'
+        );
+
+        // Optional genealogy fields.
+        foreach (['birth_date', 'deceased', 'notes', 'created_at'] as $column) {
+            $this->assertMatchesRegularExpression(
+                '/\b' . $column . '\b/i',
+                $sql,
+                "persons must define the {$column} column."
+            );
+        }
+
+        // Tenant listing index.
+        $this->assertMatchesRegularExpression(
+            '/CREATE INDEX IF NOT EXISTS\s+\w+\s+ON\s+persons\s*\(\s*tenant_id\s*\)/i',
+            $sql,
+            'persons.tenant_id must be indexed for tenant listing.'
+        );
+
+        // Reversible.
+        $this->assertMatchesRegularExpression(
+            '/DROP TABLE IF EXISTS\s+persons/i',
+            $sql,
+            'persons migration down() must drop the table.'
+        );
+    }
+
+    public function testRelationshipTypesTableSchemaSeedsAndReversibility(): void
+    {
+        $sql = $this->readFile('019_create_relationship_types.php');
+
+        // Unique vocabulary name + the reciprocal-derivation columns.
+        $this->assertMatchesRegularExpression(
+            '/name\s+VARCHAR\(\d+\)\s+NOT\s+NULL\s+UNIQUE/i',
+            $sql,
+            'relationship_types.name must be a NOT NULL UNIQUE string.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/inverse_type_id\s+INTEGER\s+NULL\s+REFERENCES\s+relationship_types\s*\(\s*id\s*\)/i',
+            $sql,
+            'relationship_types.inverse_type_id must self-reference relationship_types(id).'
+        );
+        $this->assertMatchesRegularExpression(
+            '/symmetric\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT/i',
+            $sql,
+            'relationship_types.symmetric must be a NOT NULL boolean with a default.'
+        );
+
+        // The fixed v1 vocabulary is seeded idempotently.
+        foreach (['Parent', 'Child', 'Spouse', 'Sibling'] as $type) {
+            $this->assertStringContainsString($type, $sql, "The {$type} relationship type must be seeded.");
+        }
+        $this->assertMatchesRegularExpression(
+            '/INSERT INTO relationship_types[\s\S]+ON CONFLICT \(name\) DO NOTHING/i',
+            $sql,
+            'relationship types must be seeded idempotently.'
+        );
+
+        // Reversible.
+        $this->assertMatchesRegularExpression(
+            '/DROP TABLE IF EXISTS\s+relationship_types/i',
+            $sql,
+            'relationship_types migration down() must drop the table.'
+        );
+    }
+
+    public function testRelationsTableSchemaSeedsPermissionsAndReversibility(): void
+    {
+        $sql = $this->readFile('020_create_relations.php');
+
+        // Tenant scope cascades with the tenant.
+        $this->assertMatchesRegularExpression(
+            '/tenant_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+tenants\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'relations.tenant_id must be NOT NULL and cascade-delete with its tenant.'
+        );
+
+        // Both endpoints FK persons with cascade so deleting a person clears edges.
+        foreach (['from_person_id', 'to_person_id'] as $column) {
+            $this->assertMatchesRegularExpression(
+                '/' . $column . '\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+persons\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+                $sql,
+                "relations.{$column} must reference persons(id) ON DELETE CASCADE."
+            );
+        }
+
+        // The edge carries its relationship type.
+        $this->assertMatchesRegularExpression(
+            '/relationship_type_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+relationship_types\s*\(\s*id\s*\)/i',
+            $sql,
+            'relations.relationship_type_id must reference relationship_types(id).'
+        );
+
+        // No-duplicate integrity at the DB level.
+        $this->assertMatchesRegularExpression(
+            '/UNIQUE\s*\(\s*tenant_id\s*,\s*from_person_id\s*,\s*to_person_id\s*,\s*relationship_type_id\s*\)/i',
+            $sql,
+            'relations must enforce a unique (tenant_id, from_person_id, to_person_id, relationship_type_id).'
+        );
+
+        // Seeds + grants relations:read and relations:manage idempotently.
+        $this->assertStringContainsString('relations:read', $sql);
+        $this->assertStringContainsString('relations:manage', $sql);
+        $this->assertMatchesRegularExpression(
+            '/INSERT INTO permissions[\s\S]+ON CONFLICT \(name\) DO NOTHING/i',
+            $sql,
+            'relations:* permissions must be seeded idempotently.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/INSERT INTO role_permissions[\s\S]+ON CONFLICT \(role_id, permission_id\) DO NOTHING/i',
+            $sql,
+            'relations:* permissions must be granted to admin idempotently.'
+        );
+
+        // down() reverses the grant and drops the table.
+        $this->assertMatchesRegularExpression(
+            '/DELETE FROM role_permissions/i',
+            $sql,
+            'down() must remove the relations:* grants.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/DROP TABLE IF EXISTS\s+relations/i',
+            $sql,
+            'relations migration down() must drop the table.'
         );
     }
 

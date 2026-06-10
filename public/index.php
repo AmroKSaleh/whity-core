@@ -111,6 +111,11 @@ use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
 use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Delegation\DelegationService;
+use Whity\Core\Relations\PersonRepository;
+use Whity\Core\Relations\RelationRepository;
+use Whity\Core\Relations\RelationResolver;
+use Whity\Api\PersonsApiHandler;
+use Whity\Api\RelationsApiHandler;
 use Whity\Api\TwoFactorHandler;
 use Whity\Api\AuditLogApiHandler;
 use Whity\Core\RBAC\PermissionRegistry;
@@ -261,6 +266,19 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // permission-aware client/consumer can hide it; the page also enforces
         // it server-side via the RBAC-protected API (403 → access-denied state).
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DELEGATION_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'relations',
+        'label' => 'Family Relations',
+        'href' => '/admin/relations',
+        'icon' => 'users-group',
+        'group' => 'admin',
+        'order' => 7,
+        // WC-65: the relations admin area is gated on relations:read. The nav
+        // item carries the requirement so a permission-aware client can hide it;
+        // the page also enforces it server-side via the RBAC-protected API (a 403
+        // renders the access-denied state), matching the delegations pattern.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::RELATIONS_READ,
     ];
     $items[] = [
         'id' => 'tenants',
@@ -440,6 +458,31 @@ $router->register('DELETE', '/api/delegations/{id}', [$delegationsHandler, 'revo
 // tenants, every other tenant sees only its own entries.
 $auditLogHandler = new AuditLogApiHandler($db->getPdo(), $roleChecker);
 $router->register('GET', '/api/audit-logs', [$auditLogHandler, 'list'], null, null, CorePermissions::AUDIT_READ);
+
+// 14. Register the family relations API (WC-65). Reads are gated on
+// relations:read, writes on relations:manage (6th positional arg; requiredRole
+// stays null so RbacMiddleware enforces the permission). All routes are
+// tenant-scoped in the handlers: the SYSTEM tenant (id 0) sees all tenants,
+// every other tenant sees only its own. Storage is uniform person→person; the
+// resolver is the only unit that knows about user-vs-person refs and
+// auto-provisions a user's shadow person on demand.
+$personRepository = new PersonRepository($db->getPdo());
+$relationRepository = new RelationRepository($db->getPdo());
+$relationResolver = new RelationResolver($db->getPdo(), $personRepository, $relationRepository);
+$personsHandler = new PersonsApiHandler($personRepository, $relationRepository);
+$relationsHandler = new RelationsApiHandler($personRepository, $relationRepository, $relationResolver, $logger);
+
+$router->register('GET', '/api/relationship-types', [$relationsHandler, 'listTypes'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('GET', '/api/persons', [$personsHandler, 'list'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('POST', '/api/persons', [$personsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
+$router->register('GET', '/api/persons/{id}', [$personsHandler, 'get'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('PATCH', '/api/persons/{id}', [$personsHandler, 'update'], null, null, CorePermissions::RELATIONS_MANAGE);
+$router->register('DELETE', '/api/persons/{id}', [$personsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
+$router->register('GET', '/api/persons/{id}/relations', [$personsHandler, 'relations'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('GET', '/api/relations', [$relationsHandler, 'listEdges'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('GET', '/api/users/{id}/relations', [$relationsHandler, 'userRelations'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('POST', '/api/relations', [$relationsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
+$router->register('DELETE', '/api/relations/{id}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
 
 // Handle requests (persistent worker mode or fallback single-request mode)
 $isWorker = function_exists('frankenphp_handle_request');

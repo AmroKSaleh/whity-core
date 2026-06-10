@@ -32,9 +32,12 @@ permissions:read
 audit:read
 plugins:manage
 delegation:manage
+relations:read   relations:manage
 ```
 
 > `audit:read` (WC-34) gates the read-only security audit trail (`GET /api/audit-logs`). Migration `016_create_audit_log` seeds it into the `permissions` catalogue and grants it to the seeded `admin` role, so administrators can read the trail out of the box. See [AUDIT_TRAIL](AUDIT_TRAIL.md).
+
+> `relations:read` / `relations:manage` (WC-65) gate the family relations feature: `relations:read` covers the read surface (relationship-type vocabulary, persons, a node's relations) and `relations:manage` covers every write (create/edit/delete a person, add/remove a relation edge). Migration `020_create_relations` seeds both into the `permissions` catalogue and grants them to the seeded `admin` role. See [RELATIONS](RELATIONS.md).
 
 ## PermissionRegistry — the in-memory catalogue
 
