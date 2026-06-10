@@ -10,7 +10,7 @@ Whity Core is a foundation for building data-driven, multi-tenant applications. 
 
 ## What it is
 
-A single Whity Core deployment serves many tenants from **one shared PostgreSQL database with logical isolation**: every tenant-scoped row carries a `tenant_id`, and isolation is enforced at three layers — the `EnforceTenantIsolation` HTTP middleware (rejects cross-tenant requests before they reach a handler), the `ScopesToTenant` query trait (fails closed if the tenant context is unresolved), and the `TenantContext` request lifecycle (resolved from the JWT, locked for the request, reset between requests on persistent workers). A reserved **system tenant** (`tenant_id = 0`) holds platform-level authority.
+A single Whity Core deployment serves many tenants from **one shared PostgreSQL database with logical isolation**: every tenant-scoped row carries a `tenant_id`, and isolation is enforced at three layers — the `EnforceTenantIsolation` HTTP middleware (rejects cross-tenant requests before they reach a handler), explicit `tenant_id` predicates bound from `TenantContext` in every handler/repository query (proven per table by a real-engine cross-tenant rejection suite), and the `TenantContext` request lifecycle (resolved from the JWT, locked for the request, reset between requests on persistent workers). A reserved **system tenant** (`tenant_id = 0`) holds platform-level authority.
 
 Domain logic ships as **plugins** dropped into `/plugins/` — discovered, loaded, and (de)registered on the next request with no restart, each wrapped in an error boundary and lifecycle state machine so a faulty plugin can't take down the host.
 
@@ -41,7 +41,7 @@ Domain logic ships as **plugins** dropped into `/plugins/` — discovered, loade
                        │
                        ▼
         PostgreSQL 15  — single shared DB, logical tenant_id isolation
-          (worker-scoped connection pool · ScopesToTenant query scoping)
+          (worker-scoped connection pool · explicit tenant_id query predicates)
 ```
 
 See **[docs/wiki/Architecture.md](docs/wiki/Architecture.md)** for the full request lifecycle, ER diagram, and deployment topology.
@@ -119,7 +119,7 @@ php bin/whity-cli migrate|plugin|tenant # status/manage migrations, plugins, ten
 whity-core/
 ├── public/index.php          Entry point + FrankenPHP worker loop + route wiring
 ├── src/
-│   ├── Core/                 PluginLoader, lifecycle, Router, Hooks, RBAC registry, TenantContext, ScopesToTenant
+│   ├── Core/                 PluginLoader, lifecycle, Router, Hooks, RBAC registry, TenantContext
 │   ├── Auth/                 JWT, RoleChecker, TOTP/2FA, cookies
 │   ├── Http/                 HttpKernel, RbacMiddleware, EnforceTenantIsolation
 │   ├── Api/                  REST handlers (users, roles, permissions, tenants, OUs, plugins, health, 2FA)

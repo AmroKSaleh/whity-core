@@ -5,6 +5,15 @@
 **Total Effort:** 19 tasks across 2 major implementation sessions  
 **Team Effort:** 2-engineer team collaboration
 
+> **Correction (2026-06-10, WC-161):** this historical report's claims about the
+> `ScopesToTenant` trait were inaccurate — the trait was never wired into any
+> production query path and has been **removed**. Query-level tenant isolation
+> is (and in practice always was) enforced by explicit `tenant_id` predicates
+> in every handler/repository statement, now proven per table on a real SQL
+> engine by `tests/Integration/CrossTenantRejectionRealEngineTest.php`. See
+> [TENANT_ISOLATION](TENANT_ISOLATION.md) for the current model. The rest of
+> this document is kept as a point-in-time record.
+
 ---
 
 ## Executive Summary
@@ -30,9 +39,9 @@ Plugins register permissions in-memory at startup; permissions are never persist
 **Eliminates sync nightmares:** No deprecation columns, no database bloat, single source of truth.
 
 #### 3. **Tenant Isolation** (JWT-Based Context + Global Scope)
-JWT tokens carry `tenant_id`, extracted by middleware and locked into `TenantContext` for the request. The `ScopesToTenant` trait automatically injects `WHERE tenant_id = ?` into all queries, eliminating code drift where developers might forget tenant filtering.
+JWT tokens carry `tenant_id`, extracted by middleware and locked into `TenantContext` for the request. *(Corrected by WC-161: queries are tenant-scoped by explicit `tenant_id` predicates in every handler/repository — the `ScopesToTenant` trait described here never ran in production and was removed; the guarantee is enforced by the real-engine cross-tenant rejection suite.)*
 
-**Security guarantee:** No cross-tenant data possible at any layer.
+**Security guarantee:** cross-tenant access is rejected at the HTTP layer and by every query's tenant predicate, proven per table by tests.
 
 #### 4. **Update Architecture** (Versioned Core + Plugin Safety)
 Framework defines a safe upgrade path: `/core/` is overwritten on update; `/plugins/` and `/uploads/` are never touched. Core migrations are tracked in a separate `core_schema_migrations` table to prevent collision with plugin migrations.
@@ -51,7 +60,7 @@ API Handler (receives request with TenantContext set)
 Before DB write: HookManager::dispatch('user.creating', $data)
   → Plugins filter $data + read-only context
   ↓
-Insert user (ScopesToTenant trait auto-sets tenant_id)
+Insert user (handler sets tenant_id explicitly from TenantContext — corrected by WC-161)
   ↓
 After insert: HookManager::dispatch('user.created', $userData)
   ↓
@@ -226,15 +235,14 @@ docs/wiki/
 
 ## Security Guarantees
 
-✅ **Bulletproof Multi-Tenant Isolation**
-- All queries automatically scoped to tenant_id via ScopesToTenant trait
-- No code path can return data from another tenant
-- Validated at database layer, not application layer
+✅ **Multi-Tenant Isolation** *(corrected by WC-161)*
+- Every handler/repository query carries an explicit, bound `tenant_id` predicate derived from TenantContext
+- Cross-tenant read AND write rejection proven per table on a real SQL engine (`CrossTenantRejectionRealEngineTest`)
+- The HTTP layer (`EnforceTenantIsolation`) refuses cross-tenant requests before any handler runs
 
-✅ **Automatic Query Scoping**
-- ScopesToTenant trait injects WHERE tenant_id = ? into all queries
-- Eliminates developer error: "forgot the WHERE clause"
-- Trait is mandatory on all models
+✅ **Query Scoping Discipline** *(corrected by WC-161)*
+- There is no automatic rewriting layer; "forgot the WHERE clause" is caught by the per-table real-engine test suite, which fails when a predicate is dropped
+- New tenant-owned tables must extend that suite (see CONTRIBUTING.md)
 
 ✅ **Permission Enforcement at API Layer**
 - RoleChecker validates permission exists AND is assigned to user
@@ -413,7 +421,7 @@ php vendor/bin/phpunit --coverage-text
 - [ ] TenantContext::reset() called in finally block
 - [ ] Hook payloads contain only scalars, no object references
 - [ ] Migration registry table matches context (core vs. plugin)
-- [ ] All API handlers use ScopesToTenant trait on queries
+- [ ] Every query on a tenant-owned table has an explicit TenantContext-derived tenant_id predicate (WC-161; extend CrossTenantRejectionRealEngineTest for new tables)
 - [ ] Permission checks happen before handler execution
 
 **Extending Phase 2**

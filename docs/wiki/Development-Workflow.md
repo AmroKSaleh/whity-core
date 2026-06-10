@@ -53,7 +53,7 @@ has ten entries:
 |----------|----------|
 | **Git & Commit Workflow** | Branch `type/WC-XX-short-description`; commit `WC-XX: verb + what changed`; **never** add `Co-authored-by`/AI attribution; PR titled `WC-XX: …` via `gh pr create`. |
 | **PHP & TypeScript Coding Standards** | PHP: `declare(strict_types=1)`, PSR-12, PHPStan, PHPDoc. TS: strict types, no `any`, ESLint, React 19/Next.js 16. |
-| **Architectural Rules & FrankenPHP Safety** | No request state in statics/globals (persistent workers); never bypass `TenantContext`/`ScopesToTenant`; no direct DB in API handlers. |
+| **Architectural Rules & FrankenPHP Safety** | No request state in statics/globals (persistent workers); never bypass `TenantContext` — every query on a tenant-owned table carries an explicit `tenant_id` predicate (extend `CrossTenantRejectionRealEngineTest` for new tables); no direct DB in API handlers. |
 | **Testing Guidelines & Pass Rates** | Unit tests mandatory; integration tests verify RBAC route protection **and** tenant isolation; 100% green before merge. |
 | **Design System Token Governance** | All styling comes from the token pipeline (`base.json` → CSS/JSON/Dart); no raw hex/inline spacing. |
 | **API Documentation & OpenAPI Specs** | PHPDoc/JSDoc on public APIs; regenerate the OpenAPI schema when endpoints change; keep wiki docs current. |

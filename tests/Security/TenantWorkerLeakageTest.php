@@ -8,7 +8,6 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
-use Whity\Core\Database\ScopesToTenant;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
@@ -40,9 +39,11 @@ use Whity\Http\RbacMiddleware;
  * This file closes that gap: two sequential requests (Tenant A then Tenant B) are
  * driven through the REAL {@see HttpKernel} + REAL {@see EnforceTenantIsolation}
  * middleware + REAL signed JWTs, with each request's handler reading a shared
- * SQLite table through the REAL {@see ScopesToTenant} trait. There is NO manual
- * reset between requests — only the kernel's own lifecycle runs — proving that a
- * reused worker serves each tenant only its own rows.
+ * SQLite table using the production data-access pattern — an explicit
+ * `tenant_id` predicate derived from {@see TenantContext}, failing closed when
+ * no tenant is resolved (WC-161). There is NO manual reset between requests —
+ * only the kernel's own lifecycle runs — proving that a reused worker serves
+ * each tenant only its own rows.
  */
 class TenantWorkerLeakageTest extends TestCase
 {
@@ -220,7 +221,7 @@ class TenantWorkerLeakageTest extends TestCase
     /**
      * Build a real HttpKernel wired with the real EnforceTenantIsolation
      * middleware and a single GET /api/users route whose handler reads the shared
-     * SQLite table through the real ScopesToTenant trait.
+     * SQLite table with an explicit TenantContext-derived tenant predicate.
      */
     private function buildKernel(Database $db): HttpKernel
     {
@@ -286,15 +287,14 @@ class TenantWorkerLeakageTest extends TestCase
 
 /**
  * Repository sharing the worker's connection, scoping reads to the current tenant
- * via {@see ScopesToTenant}. Defined in this uniquely-named file to avoid any
- * collision with shared support fixtures a concurrent agent might touch.
+ * with the production data-access pattern: an explicit `tenant_id` predicate
+ * bound from {@see TenantContext}, refusing to run unscoped when no tenant is
+ * resolved (WC-161 — there is no query-rewriting layer; the predicate IS the
+ * boundary). Defined in this uniquely-named file to avoid any collision with
+ * shared support fixtures a concurrent agent might touch.
  */
 class WorkerScopedUserRepository
 {
-    use ScopesToTenant;
-
-    public ?int $tenant_id = null;
-
     public function __construct(private Database $db)
     {
     }
@@ -304,8 +304,15 @@ class WorkerScopedUserRepository
      */
     public function listNames(): array
     {
+        // Fail closed: never run the query without a resolved tenant.
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            throw new \RuntimeException('No tenant resolved; refusing to run an unscoped query');
+        }
+
         /** @var list<string> $names */
-        $names = $this->tenantScopedQuery($this->db, 'SELECT name FROM users ORDER BY id')
+        $names = $this->db
+            ->query('SELECT name FROM users WHERE tenant_id = :tenant_id ORDER BY id', ['tenant_id' => $tenantId])
             ->fetchAll(PDO::FETCH_COLUMN);
 
         return $names;

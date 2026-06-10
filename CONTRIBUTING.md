@@ -201,9 +201,12 @@ rebase (`git push --force-with-lease`).
   **Never** hold request state in `static` properties or other process-global
   state; it will leak between requests (and across tenants). Build a fresh
   instance per request.
-- **Never bypass `TenantContext` / `ScopesToTenant`** — all tenant-scoped data
-  access must go through them. `TenantContext` is read-only in handler code and
-  is reset by the framework after each response; do not call `reset()` yourself.
+- **Never bypass `TenantContext`** — every SQL statement touching a
+  tenant-owned table must carry an explicit `tenant_id` predicate derived from
+  `TenantContext` (there is no query-rewriting layer; the predicate IS the
+  boundary, and `CrossTenantRejectionRealEngineTest` proves it per table).
+  `TenantContext` is read-only in handler code and is reset by the framework
+  after each response; do not call `reset()` yourself.
 - **No direct database access in API handlers** beyond the sanctioned
   query/repository layer, and every query must be tenant-scoped (see
   [Tenant Isolation](docs/wiki/TENANT_ISOLATION.md)).
@@ -337,8 +340,10 @@ seeded accounts and shared-database discipline.
    - [ ] `declare(strict_types=1)` in new PHP files; PSR-12 followed.
    - [ ] No `static`/process-global request state (FrankenPHP worker safety).
    - [ ] RBAC permission checks included for any data operation.
-   - [ ] Tenant isolation preserved (all queries scoped via `TenantContext` /
-         `ScopesToTenant`; no cross-tenant leakage).
+   - [ ] Tenant isolation preserved (every query on a tenant-owned table has
+         an explicit `TenantContext`-derived `tenant_id` predicate; no
+         cross-tenant leakage — extend `CrossTenantRejectionRealEngineTest`
+         for new tables).
    - [ ] Unit + integration tests added/updated and passing locally.
    - [ ] Integration tests cover RBAC route protection and tenant isolation
          where relevant; data-layer logic uses real-engine tests.
@@ -408,7 +413,9 @@ if (!$roleChecker->hasPermission($userId, 'tasks:update', $tenantId)) {
 
 ### 3. Tenant isolation
 
-All queries filter by tenant, via `TenantContext` or the `ScopesToTenant` trait:
+All queries filter by tenant with an explicit predicate bound from
+`TenantContext` — this hand-written predicate is the query-level isolation
+mechanism (WC-161 removed the never-wired `ScopesToTenant` rewriter):
 
 ```php
 // CORRECT — explicit tenant scope
@@ -419,9 +426,13 @@ $db->query($sql, [$id, TenantContext::getTenantId()]);
 $db->query('SELECT * FROM tasks WHERE id = ?', [$id]);
 ```
 
-`INSERT`s call `setTenantIdBeforePersist()`; `UPDATE`/`DELETE` include
-`WHERE tenant_id = ?`. Never query or write `core_schema_migrations` from a
-plugin — plugins use the standard `schema_migrations` table.
+`INSERT`s set `tenant_id` explicitly from `TenantContext`; `UPDATE`/`DELETE`
+include `WHERE tenant_id = ?`. The system tenant (id 0) follows the
+platform-wide `if ($tenantId === 0) { unscoped } else { scoped }` convention.
+Cross-tenant rejection is proven per table on a real engine by
+`tests/Integration/CrossTenantRejectionRealEngineTest.php` — extend it when
+adding a tenant-owned table. Never query or write `core_schema_migrations`
+from a plugin — plugins use the standard `schema_migrations` table.
 
 ### 4. Plugins, not forks
 

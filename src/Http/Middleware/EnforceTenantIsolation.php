@@ -147,7 +147,9 @@ class EnforceTenantIsolation
         $resourceTenantId = $this->resolveResourceTenantId($request, $path);
 
         // No tenant-scoped target: defer finer-grained checks to the route
-        // handler and the query-level ScopesToTenant layer.
+        // handler, whose queries carry explicit TenantContext-derived tenant_id
+        // predicates (WC-161 — there is no query-rewriting layer; isolation is
+        // proven per table by CrossTenantRejectionRealEngineTest).
         if ($resourceTenantId === null) {
             return $next($request);
         }

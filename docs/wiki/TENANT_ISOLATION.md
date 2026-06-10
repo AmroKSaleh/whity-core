@@ -10,7 +10,7 @@ Related: [Architecture](Architecture.md) · [PERMISSION_SYSTEM](PERMISSION_SYSTE
 | --- | --- | --- | --- |
 | HTTP | Middleware (runs first) | Resolves tenant from JWT; refuses cross-tenant requests before routing/DB. | `src/Http/Middleware/EnforceTenantIsolation.php` |
 | Context | Request-scoped static | Holds + locks the current tenant id for the request's lifetime. | `src/Core/Tenant/TenantContext.php` |
-| Query | Model/repository trait | Injects a `tenant_id` predicate / auto-populates it; fails closed when unresolved. | `src/Core/Database/ScopesToTenant.php` |
+| Query | Explicit predicates in handlers/repositories | Every statement on a tenant-owned table binds a `tenant_id` predicate from `TenantContext`; proven per table by a real-engine test suite. | `src/Api/*`, `src/Core/*/…Repository.php`, `tests/Integration/CrossTenantRejectionRealEngineTest.php` |
 
 ## TenantContext — the request-scoped holder
 
@@ -83,43 +83,30 @@ flowchart TD
     H -- no --> J["403 forbidden (before handler/DB)"]
 ```
 
-## ScopesToTenant — the query layer
+## The query layer — explicit predicates, proven by tests
 
-`ScopesToTenant` (`src/Core/Database/ScopesToTenant.php`) is a trait a model or repository `use`s to get automatic tenant filtering, so developers don't have to remember to filter every query.
+Every handler/repository statement that runs **after tenant resolution** and touches a tenant-owned table carries an explicit, parameterised `tenant_id` predicate bound from `TenantContext`. **This hand-written predicate IS the query-level isolation mechanism** — there is no automatic query-rewriting layer. (The `ScopesToTenant` trait that previously advertised one was removed by WC-161: a full audit found zero production call sites, its rewriter refused the JOINs most list endpoints need, and it had no concept of the system tenant's cross-tenant visibility. An advertised guarantee that does not run is worse than none.)
+
+One pre-resolution exception is known and tracked: the login path looks a user up by email *before* any tenant context exists (`AuthHandler`), while the schema's `UNIQUE(tenant_id, email)` permits the same email in different tenants — see issue #181 for the cross-tenant login-ambiguity fix.
+
+The conventions every query follows:
 
 ```php
-class UserRepository
-{
-    use ScopesToTenant;
+// Regular tenant: scoped read/write
+$sql = 'SELECT ... FROM users u JOIN roles r ON u.role_id = r.id WHERE u.tenant_id = ?';
 
-    public function __construct(private \Whity\Database\Database $db) {}
+// System tenant (id 0): sees across tenants — the platform-wide convention
+if ($tenantId === 0) { /* unscoped variant */ } else { /* scoped variant */ }
 
-    public function all(): array
-    {
-        // With TenantContext set to N: SELECT * FROM users WHERE tenant_id = :whity_scope_tenant_id
-        return $this->tenantScopedQuery($this->db, 'SELECT * FROM users')->fetchAll();
-    }
-}
+// Roles: a tenant sees its OWN roles plus GLOBAL (NULL-tenant) roles
+'... WHERE r.id = ? AND (r.tenant_id = ? OR r.tenant_id IS NULL)'
 ```
 
-`tenantScopedQuery()` / `applyTenantScope()` rewrite SQL according to a strict, fail-closed security model:
+- The tenant id is **always bound**, never string-interpolated.
+- JOINed statements qualify the predicate with the owning table's alias (`u.tenant_id = ?`), so joined rows cannot under-scope it.
+- `INSERT`s set `tenant_id` explicitly from the context; cross-tenant `UPDATE`/`DELETE` attempts match zero rows and surface as 404.
 
-- **System mode ON** → the statement runs unchanged (trusted cross-tenant operation).
-- **System mode OFF, tenant unresolved (`null`)** → the query is **refused** with `TenantScopeException` (fail closed). Running unscoped would leak every tenant's rows, so it never guesses a default.
-- **System mode OFF, tenant resolved** → a `tenant_id` predicate is injected via a **bound parameter** (`:whity_scope_tenant_id`) — the tenant id is **never** string-interpolated into SQL.
-
-Statement handling (`statementType()`):
-
-- **SELECT / UPDATE / DELETE** → `injectWherePredicate()`. An existing `WHERE` is wrapped (`WHERE (<existing>) AND tenant_id = :param`) so operator precedence cannot weaken the filter; otherwise a `WHERE` is inserted before any trailing `GROUP BY/HAVING/ORDER BY/LIMIT/...`. Statements containing a **JOIN** or a **subquery** are refused (an unqualified `tenant_id` predicate would be ambiguous or under-scope them) — write those with an explicit, table-qualified predicate instead.
-- **INSERT** → `injectInsertTenant()`. For `INSERT INTO t (cols) VALUES (...)`, if the tenant column isn't already listed it is appended (column + bound param on every tuple). `INSERT ... SELECT`, columnless INSERTs, and `INSERT ... SET` are **refused** rather than silently mis-scoped.
-
-The trait also provides record-level helpers:
-
-- `setTenantIdBeforePersist()` — fills an unset `tenant_id` from the context before save; fails closed if unresolved (system mode leaves it null = system-owned).
-- `validateTenantBoundary()` — throws if a record's `tenant_id` differs from the current context (system mode bypasses).
-- `bootScopesToTenant()` — a no-op kept so reflection-driven model boot (the WC-7 loader) doesn't break; there is no global query-scope registry, so explicit `tenantScopedQuery()` is the active enforcement path.
-
-> Reality check on core handlers: most core API handlers (e.g. `UsersApiHandler`, `RolesApiHandler`) take a raw `PDO` and write explicit tenant-scoped SQL (e.g. `RolesApiHandler` filters roles by `roles.tenant_id`) rather than using this trait. The trait is the reusable enforcement primitive for model/repository code; the HTTP layer + explicit handler queries are what protect the core endpoints today.
+**Because the predicates are hand-written, they are enforced by tests rather than by structure:** `tests/Integration/CrossTenantRejectionRealEngineTest.php` drives the real handlers/repositories against a real SQL engine and proves, per tenant-owned table (users, roles, organizational units, audit log, delegations — persons/relations have the same proof in their own real-engine suites): list/read scoping, cross-tenant read rejection, cross-tenant **write** rejection with the row verified untouched, and system-tenant visibility. Dropping a single predicate makes the suite fail. **When you add a tenant-owned table, extend that suite.**
 
 ## The system tenant (id 0)
 
@@ -159,6 +146,6 @@ Tenant safety also depends on the shared worker connection not carrying state be
 - One shared PostgreSQL DB; isolation is a `tenant_id` column + request-scoped context, **not** separate databases.
 - `TenantContext` resolves the tenant from the JWT, locks it, and is reset between requests (no silent fallback; tenant 0 = system).
 - `EnforceTenantIsolation` resolves + refuses cross-tenant requests at the HTTP layer before routing/DB; public routes bypass it.
-- `ScopesToTenant` injects a bound `tenant_id` predicate and fails closed when the tenant is unresolved; unsafe statement shapes are refused, not run unscoped.
+- Query-level isolation is the explicit, bound `tenant_id` predicate every handler/repository statement carries (no rewriting layer); `CrossTenantRejectionRealEngineTest` proves read AND write rejection per table on a real engine and fails if a predicate is dropped.
 - The system tenant (id 0) and `isSystemMode()` are the audited cross-tenant bypass; `DISCARD ALL` keeps the shared worker connection clean between requests.
 </content>
