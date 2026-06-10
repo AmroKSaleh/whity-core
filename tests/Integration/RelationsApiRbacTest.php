@@ -25,7 +25,7 @@ use Whity\Http\RbacMiddleware;
 
 /**
  * Integration test proving the WC-65 family-relations endpoints are RBAC
- * route-gated AND tenant-isolated end-to-end â€” driving the real
+ * route-gated AND tenant-isolated end-to-end — driving the real
  * {@see RbacMiddleware}, {@see RoleChecker}, {@see Router}, the resolver and both
  * handlers together, exactly as the HTTP kernel does.
  *

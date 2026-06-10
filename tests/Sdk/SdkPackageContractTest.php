@@ -42,19 +42,16 @@ final class SdkPackageContractTest extends TestCase
         );
     }
 
-    public function testSdkDoesNotRequireWhityCore(): void
+    public function testSdkRequiresOnlyPhp(): void
     {
         $composer = json_decode((string) file_get_contents(self::SDK_DIR . '/composer.json'), true);
         $this->assertIsArray($composer);
 
-        $require = array_keys($composer['require'] ?? []);
-        foreach ($require as $package) {
-            $this->assertStringNotContainsString(
-                'whity-core',
-                (string) $package,
-                'The SDK must not require the whity-core package'
-            );
-        }
+        $this->assertSame(
+            ['php'],
+            array_keys($composer['require'] ?? []),
+            'The SDK must require ONLY php — not whity-core, not any library'
+        );
     }
 
     /**

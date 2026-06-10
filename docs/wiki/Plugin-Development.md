@@ -367,6 +367,11 @@ SDK contract [`Whity\Sdk\MigrationInterface`](../../sdk/src/MigrationInterface.p
 connection — so the migration, like the rest of the plugin, depends only on
 the SDK.
 
+> **Not executed yet:** the host currently collects plugin migrations but does
+> not run them — execution through the migration runner lands with
+> whity-core [#164](https://github.com/AmroKSaleh/whity-core/issues/164).
+> Declare migrations in this shape now so your plugin is ready when it ships.
+
 Create `plugins/HelloWorld/Migrations/CreateHelloGreetingsTable.php`:
 
 ```php

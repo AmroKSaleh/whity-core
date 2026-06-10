@@ -18,7 +18,7 @@ use Whity\Http\RbacMiddleware;
 /**
  * RBAC tests for organizational units (WC-54).
  *
- * Drives the REAL {@see RbacMiddleware} â†’ {@see RoleChecker} pipeline against an
+ * Drives the REAL {@see RbacMiddleware} → {@see RoleChecker} pipeline against an
  * in-memory SQLite engine seeded with the production OU schema, with the resolved
  * tenant locked into {@see TenantContext} ahead of RBAC. Two concerns:
  *
@@ -127,7 +127,7 @@ class OuRbacTest extends TestCase
 
     /**
      * A user whose DIRECT role is plain `user` but whose OU has `admin` assigned
-     * gains admin access via OU inheritance â€” proving OU role assignments are
+     * gains admin access via OU inheritance — proving OU role assignments are
      * wired into the gating decision (WC-54), not merely advisory.
      */
     public function testUserInheritsAdminAccessViaOuRoleAssignment(): void

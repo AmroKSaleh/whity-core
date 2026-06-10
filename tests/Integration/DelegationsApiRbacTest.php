@@ -23,7 +23,7 @@ use Whity\Http\RbacMiddleware;
 /**
  * Integration tests proving the WC-34 delegation endpoints are RBAC route-gated
  * AND that a live delegation actually grants access through a real
- * permission-gated route â€” driving the real {@see RbacMiddleware},
+ * permission-gated route — driving the real {@see RbacMiddleware},
  * {@see RoleChecker}, {@see Router}, {@see DelegationService} and
  * {@see DelegationsApiHandler} together, exactly as the HTTP kernel does.
  *
@@ -186,7 +186,7 @@ class DelegationsApiRbacTest extends TestCase
         $granteeId = $this->seedPlainUser('grantee@example.com');
 
         // Someone ELSE delegates users:read directly TO the grantor, so the grantor
-        // now "has" users:read ONLY via delegation â€” never through a role.
+        // now "has" users:read ONLY via delegation — never through a role.
         $this->pdo->prepare(
             'INSERT INTO permission_delegations
                 (tenant_id, grantor_user_id, grantee_type, grantee_id, permission, ou_id, granted_at)
@@ -211,7 +211,7 @@ class DelegationsApiRbacTest extends TestCase
         ));
 
         // You may delegate only what RBAC grants you, never what was delegated TO
-        // you â€” no transitive re-delegation escalation.
+        // you — no transitive re-delegation escalation.
         $this->assertSame(
             422,
             $response->getStatusCode(),

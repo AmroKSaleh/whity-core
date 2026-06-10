@@ -39,9 +39,11 @@ interface PluginInterface
      *
      * Each route should be an associative array with:
      * - 'method' (string): HTTP method (e.g., 'GET', 'POST')
-     * - 'path' (string): Request path (e.g., '/api/plugin/hello')
+     * - 'path' (string): Request path; `{param}` placeholders (optionally
+     *   constrained, e.g. `{id:\d+}`) capture path segments
      * - 'handler' (callable): Handler callback:
-     *   function(\Whity\Sdk\Http\Request $request): \Whity\Sdk\Http\Response
+     *   function(\Whity\Sdk\Http\Request $request, array $params = []): \Whity\Sdk\Http\Response
+     *   where $params holds the captured path parameters (name => value)
      * - 'requiredRole' (string|null, optional): Required role name or null
      *
      * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string}>

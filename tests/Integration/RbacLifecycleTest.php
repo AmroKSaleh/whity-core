@@ -21,9 +21,9 @@ use Whity\Http\RbacMiddleware;
  * End-to-end RBAC lifecycle integration tests (WC-17, issue #13).
  *
  * These tests fill the gaps left by the earlier RBAC suites by driving the FULL
- * request lifecycle â€” real {@see JwtParser} â†’ real {@see RbacMiddleware} â†’ real
- * {@see RoleChecker} â†’ real {@see PermissionRegistry} â†’ a mocked {@see Database}
- * seam â€” exactly the way the HTTP kernel wires a matched {@see Router} entry.
+ * request lifecycle — real {@see JwtParser} → real {@see RbacMiddleware} → real
+ * {@see RoleChecker} → real {@see PermissionRegistry} → a mocked {@see Database}
+ * seam — exactly the way the HTTP kernel wires a matched {@see Router} entry.
  *
  * Existing coverage NOT duplicated here:
  *  - {@see \Tests\Http\RbacMiddlewareTest} unit-tests the middleware against a
@@ -145,7 +145,7 @@ class RbacLifecycleTest extends TestCase
      * Hierarchy (parent chain expresses "higher inherits lower"):
      *   admin(2) -> editor(3) -> viewer(4 root)
      * viewer grants users:read; admin should reach the /api/users route because
-     * it inherits viewer's grant up the chain â€” even though admin has NO direct
+     * it inherits viewer's grant up the chain — even though admin has NO direct
      * users:read grant.
      */
     public function testInheritedPermissionReachesProtectedRouteThroughMiddleware(): void

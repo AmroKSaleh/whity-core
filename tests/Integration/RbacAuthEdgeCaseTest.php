@@ -20,15 +20,15 @@ use Whity\Http\RbacMiddleware;
 /**
  * RBAC authentication edge-case integration tests (WC-17, issue #13).
  *
- * Drives the FULL stack â€” real {@see JwtParser} â†’ real {@see RbacMiddleware} â†’
- * real {@see RoleChecker} â†’ mocked {@see Database} â€” to prove the RBAC layer
+ * Drives the FULL stack — real {@see JwtParser} → real {@see RbacMiddleware} →
+ * real {@see RoleChecker} → mocked {@see Database} — to prove the RBAC layer
  * behaves correctly when the credential itself is degraded: expired, revoked
  * (wrong signing secret), tampered, malformed, supplied via cookie rather than
  * header, or carrying a forged role claim.
  *
  * The middleware-unit suite ({@see \Tests\Http\RbacMiddlewareTest}) covers these
  * with a STUBBED parser returning null; this file instead uses REAL signed/expired
- * tokens so the JwtParser â†’ middleware boundary is exercised authentically, and
+ * tokens so the JwtParser → middleware boundary is exercised authentically, and
  * additionally asserts the authoritative store is never consulted once
  * authentication fails (no DB query on a bad credential).
  */
@@ -85,7 +85,7 @@ class RbacAuthEdgeCaseTest extends TestCase
 
     /**
      * Build a RoleChecker over a Database mock that fails the test if it is ever
-     * queried â€” proving authentication short-circuits before any authorization
+     * queried — proving authentication short-circuits before any authorization
      * lookup.
      */
     private function roleCheckerThatMustNotBeQueried(): RoleChecker
@@ -202,7 +202,7 @@ class RbacAuthEdgeCaseTest extends TestCase
 
     /**
      * A valid token presented via the `access_token` cookie (no Authorization
-     * header) authenticates and authorizes end-to-end â€” the cookie fallback path.
+     * header) authenticates and authorizes end-to-end — the cookie fallback path.
      */
     public function testValidTokenViaAccessTokenCookieIsAccepted(): void
     {
@@ -225,7 +225,7 @@ class RbacAuthEdgeCaseTest extends TestCase
 
     /**
      * An expired token delivered via cookie is rejected exactly like a header
-     * token â€” the cookie path is not a bypass for expiry.
+     * token — the cookie path is not a bypass for expiry.
      */
     public function testExpiredTokenViaCookieIsRejected(): void
     {
@@ -244,7 +244,7 @@ class RbacAuthEdgeCaseTest extends TestCase
 
     /**
      * When both a (malformed) Authorization header and a valid cookie are present,
-     * the header is preferred â€” a malformed Bearer value must NOT silently fall
+     * the header is preferred — a malformed Bearer value must NOT silently fall
      * through to the cookie. This guards the documented header-precedence rule.
      */
     public function testMalformedHeaderDoesNotFallThroughToValidCookie(): void

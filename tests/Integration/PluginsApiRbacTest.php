@@ -23,8 +23,8 @@ use Whity\Http\RbacMiddleware;
  * Integration tests for the WC-10 plugin management API (issue #8).
  *
  * Drives the real {@see RbacMiddleware}, {@see RoleChecker}, {@see Router},
- * {@see PluginLoader}, and {@see PluginsApiHandler} together â€” resolving the
- * route's required permission exactly as the HTTP kernel does â€” to prove:
+ * {@see PluginLoader}, and {@see PluginsApiHandler} together — resolving the
+ * route's required permission exactly as the HTTP kernel does — to prove:
  *
  *  1. Every plugin endpoint (list/enable/disable) is gated by
  *     {@see CorePermissions::PLUGINS_MANAGE}; a user granted it reaches the
