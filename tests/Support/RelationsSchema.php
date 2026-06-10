@@ -77,7 +77,7 @@ final class RelationsSchema
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 inverse_type_id INTEGER NULL REFERENCES relationship_types(id),
-                symmetric INTEGER NOT NULL DEFAULT 0,
+                is_symmetric INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT
             )
         ');
@@ -94,7 +94,7 @@ final class RelationsSchema
         ');
 
         // Seed the vocabulary with the same ids/inverses the migration produces.
-        $pdo->exec("INSERT INTO relationship_types (id, name, symmetric, created_at) VALUES
+        $pdo->exec("INSERT INTO relationship_types (id, name, is_symmetric, created_at) VALUES
             (1,'Parent',0,NOW()),
             (2,'Child',0,NOW()),
             (3,'Spouse',1,NOW()),

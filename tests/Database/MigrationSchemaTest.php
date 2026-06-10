@@ -518,9 +518,10 @@ final class MigrationSchemaTest extends TestCase
             'relationship_types.inverse_type_id must self-reference relationship_types(id).'
         );
         $this->assertMatchesRegularExpression(
-            '/symmetric\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT/i',
+            '/is_symmetric\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT/i',
             $sql,
-            'relationship_types.symmetric must be a NOT NULL boolean with a default.'
+            'relationship_types.is_symmetric must be a NOT NULL boolean with a default ' .
+            '("symmetric" is a reserved word in PostgreSQL, so the column is is_symmetric).'
         );
 
         // The fixed v1 vocabulary is seeded idempotently.

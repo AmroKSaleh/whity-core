@@ -56,7 +56,7 @@ class CreateRelationshipTypes
                 id SERIAL PRIMARY KEY,
                 name VARCHAR(64) NOT NULL UNIQUE,
                 inverse_type_id INTEGER NULL REFERENCES relationship_types(id) ON DELETE SET NULL,
-                symmetric BOOLEAN NOT NULL DEFAULT false,
+                is_symmetric BOOLEAN NOT NULL DEFAULT false,
                 created_at TIMESTAMP NOT NULL DEFAULT NOW()
             )
         ');
@@ -64,10 +64,10 @@ class CreateRelationshipTypes
         // Pass 1: seed the rows (idempotent on the UNIQUE name).
         foreach (self::SEED as $name => $meta) {
             $db->query(
-                'INSERT INTO relationship_types (name, symmetric, created_at)
-                 VALUES (:name, :symmetric, NOW())
+                'INSERT INTO relationship_types (name, is_symmetric, created_at)
+                 VALUES (:name, :is_symmetric, NOW())
                  ON CONFLICT (name) DO NOTHING',
-                [':name' => $name, ':symmetric' => $meta['symmetric'] ? 1 : 0]
+                [':name' => $name, ':is_symmetric' => $meta['symmetric'] ? 1 : 0]
             );
         }
 
