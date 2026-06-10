@@ -20,6 +20,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: whity-core:dev
     container_name: whity_frankenphp
     ports:
       - "8000:80"
@@ -59,7 +60,50 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     working_dir: /app
+
+  # Dev-only one-shot bootstrap (#174): on `docker compose up`, wait for Postgres then —
+  # only when APP_ENV=development — run migrations + seed so a fresh/empty dev DB is
+  # immediately usable (no manual `make setup`). Idempotent: migrations are IF NOT EXISTS
+  # and seed is ON CONFLICT, so re-running `up` on a populated DB is a no-op (seed-if-empty,
+  # never overwrite). Runs in its own container before the worker pool starts, so it never
+  # races the 8 FrankenPHP workers. Staging/production do NOT use this file (see
+  # docker-compose.staging.yml) and bootstrap via an explicit migrate+seed deploy step.
+  db-init:
+    image: whity-core:dev
+    container_name: whity_db_init
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+      # Deterministic dev credentials (development only; override via env if desired).
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-admin123}
+      INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD:-user123}
+      INITIAL_SYSTEM_ADMIN_PASSWORD: ${INITIAL_SYSTEM_ADMIN_PASSWORD:-systemadmin123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - |
+        if [ "$$APP_ENV" = "development" ]; then
+          echo "[db-init] bootstrapping development database...";
+          php public/index.php migrate run && php public/index.php seed;
+        else
+          echo "[db-init] skipped (APP_ENV=$$APP_ENV, not development)";
+        fi
 
 volumes:
   postgres_data:

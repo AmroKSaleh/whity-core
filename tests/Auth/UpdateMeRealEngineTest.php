@@ -39,7 +39,7 @@ use Whity\Core\Request;
  */
 final class UpdateMeRealEngineTest extends TestCase
 {
-    private const SECRET = 'test-secret-key-for-update-me';
+    private const SECRET = 'test-secret-key-for-update-me-padded-for-hs256-min-32-byte-key';
 
     private PDO $pdo;
     private JwtParser $jwtParser;

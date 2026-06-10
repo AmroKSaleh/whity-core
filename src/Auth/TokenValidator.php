@@ -113,7 +113,10 @@ class TokenValidator
         try {
             $stmt = $this->db->prepare('SELECT 1 FROM revoked_tokens WHERE jti = ? LIMIT 1');
             $stmt->execute([$jti]);
-            return $stmt->rowCount() > 0;
+            // rowCount() is unreliable for SELECTs across drivers (e.g. returns 0 on
+            // SQLite), so a revoked token could slip through. fetchColumn() returns the
+            // selected `1` when a row matches (truthy) or false when none does.
+            return (bool) $stmt->fetchColumn();
         } catch (\Exception) {
             // If database query fails, err on the side of caution and reject the token
             return true;

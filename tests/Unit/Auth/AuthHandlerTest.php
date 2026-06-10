@@ -27,7 +27,7 @@ class AuthHandlerTest extends TestCase
     {
         // Create mock PDO and prepare test data
         $this->mockDb = $this->createMock(PDO::class);
-        $this->jwtParser = new JwtParser('test-secret-key');
+        $this->jwtParser = new JwtParser('test-secret-key-padded-for-hs256-min-32-byte-key');
         $this->mockTokenValidator = $this->createMock(TokenValidator::class);
         $this->authHandler = new AuthHandler($this->mockDb, $this->jwtParser, $this->mockTokenValidator);
     }

@@ -170,8 +170,8 @@ class TwoFactorHandler
             $code = $body['code'];
             $secret = $body['secret'];
 
-            // Validate the code against the unencrypted secret
-            if (!$this->totpService->validateCode($this->totpService->encryptSecret($secret), $code)) {
+            // Validate the code against the plaintext secret the client just submitted.
+            if (!$this->totpService->verifyPlainCode($secret, $code)) {
                 return Response::error('Invalid authentication code', 401);
             }
 

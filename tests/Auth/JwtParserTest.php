@@ -11,7 +11,7 @@ use Whity\Auth\JwtParser;
 class JwtParserTest extends TestCase
 {
     private JwtParser $parser;
-    private string $secret = 'test-secret-key';
+    private string $secret = 'test-secret-key-padded-for-hs256-min-32-byte-key';
 
     protected function setUp(): void
     {
@@ -62,11 +62,9 @@ class JwtParserTest extends TestCase
     public function testExpiredTokenReturnsNull(): void
     {
         $payload = ['sub' => 'user123'];
-        // Create token that expires immediately
-        $token = $this->parser->create($payload, 0);
-
-        // Wait a small amount to ensure expiration
-        sleep(1);
+        // Create a token whose exp is firmly in the past (well beyond the
+        // clock-skew leeway), so it is unambiguously expired.
+        $token = $this->parser->create($payload, -3600);
 
         $parsed = $this->parser->parse($token);
         $this->assertNull($parsed);
@@ -102,7 +100,7 @@ class JwtParserTest extends TestCase
         $payload = ['sub' => 'user123'];
         $token = $this->parser->create($payload);
 
-        $differentParser = new JwtParser('different-secret');
+        $differentParser = new JwtParser('different-secret-padded-for-hs256-min-32-byte-key');
         $parsed = $differentParser->parse($token);
 
         $this->assertNull($parsed);
@@ -366,5 +364,53 @@ class JwtParserTest extends TestCase
         $this->assertArrayHasKey('jti', $parsed);
         $this->assertArrayHasKey('type', $parsed);
         $this->assertSame('refresh', $parsed['type']);
+    }
+
+    /**
+     * Craft a correctly HMAC-SHA256-signed token for the configured secret, so
+     * the parser accepts the signature and we can assert on claim validation.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function craftSignedToken(array $payload): string
+    {
+        $header = ['alg' => 'HS256', 'typ' => 'JWT'];
+        $h = strtr(base64_encode((string) json_encode($header)), '+/', '-_');
+        $p = strtr(base64_encode((string) json_encode($payload)), '+/', '-_');
+        $sig = strtr(base64_encode(hash_hmac('sha256', "{$h}.{$p}", $this->secret, true)), '+/', '-_');
+
+        return "{$h}.{$p}.{$sig}";
+    }
+
+    /**
+     * A token with a valid signature, jti and type but NO exp claim must be
+     * rejected (exp is required). The hand-rolled parser accepted these.
+     */
+    public function testParseRejectsTokenWithoutExpiration(): void
+    {
+        $token = $this->craftSignedToken([
+            'sub' => 'user123',
+            'jti' => 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+            'type' => 'access',
+        ]);
+
+        $this->assertNull($this->parser->parse($token));
+    }
+
+    /**
+     * A token whose nbf (not-before) is in the future must be rejected. The
+     * hand-rolled parser ignored nbf and accepted such tokens.
+     */
+    public function testParseRejectsNotYetValidToken(): void
+    {
+        $token = $this->craftSignedToken([
+            'sub' => 'user123',
+            'jti' => 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+            'type' => 'access',
+            'exp' => time() + 3600,
+            'nbf' => time() + 3600,
+        ]);
+
+        $this->assertNull($this->parser->parse($token));
     }
 }

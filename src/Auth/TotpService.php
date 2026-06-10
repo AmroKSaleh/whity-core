@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Auth;
 
+use Defuse\Crypto\Crypto;
+use Defuse\Crypto\Exception\CryptoException;
 use OTPHP\TOTP;
 use ParagonieConstantTime\Encoding;
 
@@ -14,7 +16,7 @@ use ParagonieConstantTime\Encoding;
  * for two-factor authentication.
  *
  * Uses spomky-labs/otphp for TOTP generation and validation (RFC 6238).
- * Encrypts secrets using AES-256-CBC with random IV for storage.
+ * Encrypts secrets with authenticated encryption (defuse/php-encryption) for storage.
  */
 class TotpService
 {
@@ -83,60 +85,37 @@ class TotpService
     }
 
     /**
-     * Encrypt a TOTP secret using AES-256-CBC
+     * Encrypt a TOTP secret with authenticated encryption.
      *
-     * Uses random IV for each encryption to prevent pattern analysis.
+     * Uses defuse/php-encryption (AES-256-CTR + HMAC-SHA256, Encrypt-then-MAC) with a key
+     * derived from the configured passphrase via PBKDF2. A fresh random salt/IV is used per
+     * call, and the authentication tag lets {@see decryptSecret()} detect any tampering —
+     * closing the integrity gap of the previous unauthenticated AES-256-CBC scheme (WC-158).
      *
      * @param string $secret The TOTP secret to encrypt
-     * @return string Base64-encoded encrypted secret with IV prepended
+     * @return string Opaque authenticated-ciphertext token safe for storage
      */
     public function encryptSecret(string $secret): string
     {
-        $algorithm = 'aes-256-cbc';
-        $key = hash('sha256', $this->encryptionKey, true);
-        $iv = openssl_random_pseudo_bytes(openssl_cipher_iv_length($algorithm));
-
-        $encrypted = openssl_encrypt($secret, $algorithm, $key, OPENSSL_RAW_DATA, $iv);
-
-        // Prepend IV to encrypted data and base64 encode
-        return base64_encode($iv . $encrypted);
+        return Crypto::encryptWithPassword($secret, $this->encryptionKey);
     }
 
     /**
-     * Decrypt a TOTP secret encrypted with encryptSecret()
+     * Decrypt a TOTP secret produced by {@see encryptSecret()}.
      *
-     * @param string $encrypted Base64-encoded encrypted secret with IV prepended
+     * The ciphertext is authenticated: a wrong key, a corrupted blob, or any tampering
+     * raises rather than returning a corrupted secret.
+     *
+     * @param string $encrypted The authenticated-ciphertext token from encryptSecret()
      * @return string The decrypted TOTP secret
-     * @throws \Exception If decryption fails
+     * @throws \RuntimeException If the ciphertext is invalid, tampered, or the key is wrong
      */
     public function decryptSecret(string $encrypted): string
     {
-        $algorithm = 'aes-256-cbc';
-        $key = hash('sha256', $this->encryptionKey, true);
-        $ivLength = openssl_cipher_iv_length($algorithm);
-
         try {
-            $data = base64_decode($encrypted, true);
-            if ($data === false) {
-                throw new \Exception('Invalid base64 encoding');
-            }
-
-            if (strlen($data) < $ivLength) {
-                throw new \Exception('Encrypted data too short');
-            }
-
-            $iv = substr($data, 0, $ivLength);
-            $ciphertext = substr($data, $ivLength);
-
-            $decrypted = openssl_decrypt($ciphertext, $algorithm, $key, OPENSSL_RAW_DATA, $iv);
-
-            if ($decrypted === false) {
-                throw new \Exception('Decryption failed');
-            }
-
-            return $decrypted;
-        } catch (\Exception $e) {
-            throw new \Exception('Failed to decrypt secret: ' . $e->getMessage());
+            return Crypto::decryptWithPassword($encrypted, $this->encryptionKey);
+        } catch (CryptoException $e) {
+            throw new \RuntimeException('Failed to decrypt TOTP secret', 0, $e);
         }
     }
 
@@ -158,6 +137,27 @@ class TotpService
             // Verify with ±1 window (current time ± 30 seconds)
             return $totp->verify($code, null, 1);
         } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Validate a TOTP code against a PLAINTEXT secret.
+     *
+     * Used during enrollment confirmation, where the caller already holds the freshly
+     * generated (not-yet-stored) secret. Mirrors {@see validateCode()} but skips the
+     * decrypt step, so the secret is never needlessly round-tripped through
+     * encrypt()/decrypt() merely to validate a code.
+     *
+     * @param string $secret The plaintext (Base32) TOTP secret
+     * @param string $code The TOTP code to validate (6 digits)
+     * @return bool True if the code is valid, false otherwise
+     */
+    public function verifyPlainCode(string $secret, string $code): bool
+    {
+        try {
+            return TOTP::create($secret)->verify($code, null, 1);
+        } catch (\Throwable $e) {
             return false;
         }
     }

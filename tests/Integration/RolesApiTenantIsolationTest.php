@@ -37,7 +37,7 @@ use Whity\Http\RbacMiddleware;
  */
 class RolesApiTenantIsolationTest extends TestCase
 {
-    private const SECRET = 'test-secret-key';
+    private const SECRET = 'test-secret-key-padded-for-hs256-min-32-byte-key';
 
     protected function setUp(): void
     {

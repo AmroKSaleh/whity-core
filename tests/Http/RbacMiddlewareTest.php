@@ -26,7 +26,7 @@ class RbacMiddlewareTest extends TestCase
     private RbacMiddleware $middleware;
     private JwtParser $mockJwtParser;
     private RoleChecker $mockRoleChecker;
-    private string $secret = 'test-secret-key';
+    private string $secret = 'test-secret-key-padded-for-hs256-min-32-byte-key';
 
     protected function setUp(): void
     {

@@ -40,7 +40,7 @@ use Whity\Http\RbacMiddleware;
  */
 class RbacCrossTenantDenialTest extends TestCase
 {
-    private const SECRET = 'wc17-xtenant-secret';
+    private const SECRET = 'wc17-xtenant-secret-padded-for-hs256-min-32-byte-key';
 
     private PDO $pdo;
     private Database $db;
@@ -210,7 +210,7 @@ class RbacCrossTenantDenialTest extends TestCase
     {
         $jwtParser = new JwtParser(self::SECRET);
         // Token signed by a different secret -> signature failure -> 401.
-        $foreignToken = (new JwtParser('some-other-secret'))->create(['user_id' => 200, 'tenant_id' => 2]);
+        $foreignToken = (new JwtParser('some-other-secret-padded-for-hs256-min-32-byte-key'))->create(['user_id' => 200, 'tenant_id' => 2]);
         $middleware = new RbacMiddleware($jwtParser, $this->roleChecker());
 
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$foreignToken}"]);

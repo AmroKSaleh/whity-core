@@ -190,7 +190,7 @@ JwtSecretGuard::assertValid(
     isset($_ENV['JWT_SECRET']) ? (string)$_ENV['JWT_SECRET'] : null,
     $appEnv
 );
-$jwtSecret = $_ENV['JWT_SECRET'] ?? 'dev_secret';
+$jwtSecret = $_ENV['JWT_SECRET'] ?? 'dev_secret_key_change_in_production';
 $jwtParser = new JwtParser($jwtSecret);
 
 // 3b. Resolve the TOTP secret-encryption key (WC-95).
