@@ -93,6 +93,8 @@ export default function LoginPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // CSRF defense (WC-160): required on the auth POSTs.
+          'X-Requested-With': 'XMLHttpRequest',
         },
         body: JSON.stringify({ email, password }),
         credentials: 'include',
@@ -157,6 +159,8 @@ export default function LoginPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // CSRF defense (WC-160): required on the auth POSTs.
+          'X-Requested-With': 'XMLHttpRequest',
         },
         body: JSON.stringify({ code: twoFactorCode }),
         credentials: 'include',

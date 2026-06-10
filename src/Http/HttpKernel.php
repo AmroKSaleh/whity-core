@@ -255,8 +255,21 @@ class HttpKernel
             // Attempt to match the request to a registered route
             $matchedRoute = $this->router->match($request);
 
-            // Return 404 if no route matches
+            // No route matches: distinguish "path unknown" (404) from "path
+            // registered under other methods" (405 + Allow, RFC 9110) — WC-160.
             if ($matchedRoute === null) {
+                $allowed = $this->router->allowedMethods($request->getPath());
+                if ($allowed !== []) {
+                    return new Response(
+                        405,
+                        (string) json_encode(['error' => 'Method Not Allowed']),
+                        [
+                            'Content-Type' => 'application/json',
+                            'Allow' => implode(', ', $allowed),
+                        ]
+                    );
+                }
+
                 return Response::error('Not Found', 404);
             }
 

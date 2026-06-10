@@ -10,10 +10,79 @@ use Whity\Auth\CookieManager;
  */
 class CookieManagerTest extends TestCase
 {
+    /** Backup of the APP_ENV value so Secure-flag tests can toggle it safely. */
+    private mixed $previousAppEnv = null;
+    private bool $hadAppEnv = false;
+
     protected function setUp(): void
     {
         // Clear $_COOKIE before each test
         $_COOKIE = [];
+
+        $this->hadAppEnv = array_key_exists('APP_ENV', $_ENV);
+        $this->previousAppEnv = $_ENV['APP_ENV'] ?? null;
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->hadAppEnv) {
+            $_ENV['APP_ENV'] = $this->previousAppEnv;
+        } else {
+            unset($_ENV['APP_ENV']);
+        }
+    }
+
+    /**
+     * WC-160: in development the Secure flag is omitted (localhost HTTP), but
+     * HttpOnly and SameSite=Lax are always present.
+     */
+    public function testCookieHeaderOmitsSecureInDevelopment(): void
+    {
+        $_ENV['APP_ENV'] = 'development';
+
+        $header = CookieManager::buildCookieHeader('access_token', 'tok123', 900, '/api');
+
+        $this->assertSame('access_token=tok123; Max-Age=900; Path=/api; HttpOnly; SameSite=Lax', $header);
+        $this->assertStringNotContainsString('; Secure', $header);
+    }
+
+    /**
+     * WC-160: outside development the Secure flag MUST be emitted.
+     */
+    public function testCookieHeaderEmitsSecureInProduction(): void
+    {
+        $_ENV['APP_ENV'] = 'production';
+
+        $header = CookieManager::buildCookieHeader('access_token', 'tok123', 900, '/api');
+
+        $this->assertStringContainsString('; Secure', $header);
+        $this->assertStringContainsString('; HttpOnly', $header);
+        $this->assertStringContainsString('; SameSite=Lax', $header);
+    }
+
+    /**
+     * WC-160: any non-development env (e.g. staging) gets Secure too.
+     */
+    public function testCookieHeaderEmitsSecureInStaging(): void
+    {
+        $_ENV['APP_ENV'] = 'staging';
+
+        $header = CookieManager::buildCookieHeader('refresh_token', 'r1', 604800, '/api');
+
+        $this->assertStringContainsString('; Secure', $header);
+    }
+
+    /**
+     * WC-160 fail-safe: when APP_ENV is unset the cookie defaults to Secure
+     * (an unconfigured environment must not silently drop the flag).
+     */
+    public function testCookieHeaderEmitsSecureWhenAppEnvUnset(): void
+    {
+        unset($_ENV['APP_ENV']);
+
+        $header = CookieManager::buildCookieHeader('temp_auth_token', 't1', 300, '/api');
+
+        $this->assertStringContainsString('; Secure', $header);
     }
 
     /**

@@ -251,4 +251,72 @@ class RouterTest extends TestCase
         $this->assertSame(0, $removed);
         $this->assertNotNull($this->router->match(new Request('GET', '/api/core')));
     }
+
+    /**
+     * WC-160: a {param:regex} constraint restricts what the segment matches.
+     */
+    public function testMatchesPathParamWithRegexConstraint(): void
+    {
+        $this->router->register('GET', '/api/users/{id:\d+}', static fn() => 'response');
+
+        $match = $this->router->match(new Request('GET', '/api/users/123'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('123', $match['params']['id']);
+    }
+
+    /**
+     * WC-160: a segment violating the {id:\d+} constraint does NOT match.
+     */
+    public function testRejectsPathParamViolatingRegexConstraint(): void
+    {
+        $this->router->register('GET', '/api/users/{id:\d+}', static fn() => 'response');
+
+        $this->assertNull($this->router->match(new Request('GET', '/api/users/abc')));
+        $this->assertNull($this->router->match(new Request('GET', '/api/users/12abc')));
+    }
+
+    /**
+     * WC-160: unconstrained {param} placeholders keep their permissive
+     * single-segment behavior alongside constrained ones.
+     */
+    public function testMixedConstrainedAndUnconstrainedParams(): void
+    {
+        $this->router->register('GET', '/api/tenants/{tenant:\d+}/users/{name}', static fn() => 'r');
+
+        $match = $this->router->match(new Request('GET', '/api/tenants/7/users/jane'));
+
+        $this->assertNotNull($match);
+        $this->assertSame('7', $match['params']['tenant']);
+        $this->assertSame('jane', $match['params']['name']);
+
+        $this->assertNull($this->router->match(new Request('GET', '/api/tenants/acme/users/jane')));
+    }
+
+    /**
+     * WC-160: allowedMethods() reports which methods are registered for a path
+     * so the kernel can answer 405 (with Allow) instead of 404.
+     */
+    public function testAllowedMethodsForKnownPath(): void
+    {
+        $this->router->register('GET', '/api/users', static fn() => 'list');
+        $this->router->register('POST', '/api/users', static fn() => 'create');
+        $this->router->register('DELETE', '/api/users/{id:\d+}', static fn() => 'delete');
+
+        $this->assertSame(['GET', 'POST'], $this->router->allowedMethods('/api/users'));
+        $this->assertSame(['DELETE'], $this->router->allowedMethods('/api/users/42'));
+    }
+
+    /**
+     * WC-160: an unknown path has no allowed methods (kernel keeps 404).
+     */
+    public function testAllowedMethodsForUnknownPathIsEmpty(): void
+    {
+        $this->router->register('GET', '/api/users', static fn() => 'list');
+
+        $this->assertSame([], $this->router->allowedMethods('/api/nothing'));
+        // A constraint-violating path is "unknown", not method-mismatched.
+        $this->router->register('DELETE', '/api/users/{id:\d+}', static fn() => 'delete');
+        $this->assertSame([], $this->router->allowedMethods('/api/users/abc'));
+    }
 }

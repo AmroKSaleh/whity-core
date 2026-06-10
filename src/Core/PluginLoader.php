@@ -840,6 +840,22 @@ class PluginLoader
             return $fqcn;
         }
 
+        // WC-160: the eval()-based reload below is an arbitrary-code-execution
+        // primitive — anyone who can write a plugin file gets code running in
+        // the worker without a deploy. It is hard-gated to development; in any
+        // other (or unset) APP_ENV the already-loaded definition keeps serving
+        // and the change only takes effect via a real deployment/restart.
+        if (($_ENV['APP_ENV'] ?? 'production') !== 'development') {
+            $gateMsg = "Plugin {$fqcn} changed on disk, but eval-based hot-reload is "
+                . "development-only (WC-160); keeping the loaded version.";
+            if ($this->logger !== null) {
+                $this->logger->warning($gateMsg);
+            } else {
+                error_log($gateMsg);
+            }
+            return class_exists($fqcn) ? $fqcn : null;
+        }
+
         // Content changed since the last registration. The original class is
         // locked into memory, so re-evaluate the source under a fresh,
         // content-addressed namespace so the updated code runs.

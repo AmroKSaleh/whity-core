@@ -26,6 +26,9 @@ async function refreshAccessToken(): Promise<boolean> {
     const response = await fetch('/api/auth/refresh', {
       method: 'POST',
       credentials: 'include',
+      // CSRF defense (WC-160): the backend rejects auth POSTs without this
+      // custom header, which cross-site forms cannot set.
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
     });
 
     // Refresh successful if response is 200-399
@@ -73,10 +76,13 @@ export async function apiClient(
   // Extract skipRefresh from options and remove it before passing to fetch
   const { skipRefresh = false, ...fetchOptions } = options || {};
 
-  // Always include credentials for httpOnly cookies
+  // Always include credentials for httpOnly cookies, and always send the
+  // CSRF defense header (WC-160) — harmless on unprotected routes, required
+  // on the state-changing auth POSTs. Caller-supplied headers win on clash.
   const requestInit: RequestInit = {
     ...fetchOptions,
     credentials: 'include',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', ...fetchOptions.headers },
   };
 
   // Make the initial request
@@ -99,6 +105,7 @@ export async function apiClient(
   const retryInit: RequestInit = {
     ...fetchOptions,
     credentials: 'include',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', ...fetchOptions.headers },
   };
 
   const retryResponse = await fetch(fullUrl, retryInit);

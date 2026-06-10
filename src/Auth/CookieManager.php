@@ -1,14 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Auth;
 
 /**
  * Static helper class for secure cookie management
  *
  * Provides methods to set and clear JWT tokens in HTTP-only cookies. Cookies are
- * issued with HttpOnly and SameSite=Lax. The Secure flag is intentionally omitted
- * so cookies work over localhost HTTP during development; production deployments
- * served over HTTPS should add Secure (see SECURE_FLAGS).
+ * issued with HttpOnly and SameSite=Lax always, plus the Secure flag whenever
+ * APP_ENV is not 'development' (WC-160). Development omits Secure so cookies
+ * work over localhost HTTP; every other (or unset) environment is treated as
+ * HTTPS-served and gets Secure — fail safe.
  *
  * Token cookies are stored separately with different expiration times:
  * - access_token: 15 minutes (path=/api)
@@ -16,8 +19,32 @@ namespace Whity\Auth;
  */
 class CookieManager
 {
-    // Remove Secure flag for development (localhost HTTP). Production should use HTTPS.
-    private const SECURE_FLAGS = '; HttpOnly; SameSite=Lax';
+    /** Flags every auth cookie always carries. */
+    private const BASE_FLAGS = '; HttpOnly; SameSite=Lax';
+
+    /**
+     * Build a Set-Cookie header value with the environment-appropriate flags.
+     *
+     * Always emits HttpOnly and SameSite=Lax; appends Secure unless
+     * APP_ENV === 'development' (an unset APP_ENV counts as non-development,
+     * so misconfigured deployments still mark cookies Secure).
+     *
+     * @param string $name Cookie name.
+     * @param string $value Cookie value (empty string when clearing).
+     * @param int $maxAge Max-Age in seconds (0 clears the cookie).
+     * @param string $path Cookie Path attribute.
+     * @return string The full Set-Cookie header value.
+     */
+    public static function buildCookieHeader(string $name, string $value, int $maxAge, string $path): string
+    {
+        $header = sprintf('%s=%s; Max-Age=%d; Path=%s%s', $name, $value, $maxAge, $path, self::BASE_FLAGS);
+
+        if (($_ENV['APP_ENV'] ?? 'production') !== 'development') {
+            $header .= '; Secure';
+        }
+
+        return $header;
+    }
 
     /**
      * Set access token cookie
@@ -31,13 +58,7 @@ class CookieManager
      */
     public static function setAccessToken(string $token, int $expirySeconds = 900): void
     {
-        $cookieHeader = sprintf(
-            'access_token=%s; Max-Age=%d; Path=/api%s',
-            $token,
-            $expirySeconds,
-            self::SECURE_FLAGS
-        );
-        header('Set-Cookie: ' . $cookieHeader, false);
+        header('Set-Cookie: ' . self::buildCookieHeader('access_token', $token, $expirySeconds, '/api'), false);
     }
 
     /**
@@ -52,13 +73,7 @@ class CookieManager
      */
     public static function setRefreshToken(string $token, int $expirySeconds = 604800): void
     {
-        $cookieHeader = sprintf(
-            'refresh_token=%s; Max-Age=%d; Path=/api%s',
-            $token,
-            $expirySeconds,
-            self::SECURE_FLAGS
-        );
-        header('Set-Cookie: ' . $cookieHeader, false);
+        header('Set-Cookie: ' . self::buildCookieHeader('refresh_token', $token, $expirySeconds, '/api'), false);
     }
 
     /**
@@ -71,11 +86,7 @@ class CookieManager
      */
     public static function clearAccessToken(): void
     {
-        $cookieHeader = sprintf(
-            'access_token=; Max-Age=0; Path=/api%s',
-            self::SECURE_FLAGS
-        );
-        header('Set-Cookie: ' . $cookieHeader, false);
+        header('Set-Cookie: ' . self::buildCookieHeader('access_token', '', 0, '/api'), false);
     }
 
     /**
@@ -88,11 +99,7 @@ class CookieManager
      */
     public static function clearRefreshToken(): void
     {
-        $cookieHeader = sprintf(
-            'refresh_token=; Max-Age=0; Path=/api%s',
-            self::SECURE_FLAGS
-        );
-        header('Set-Cookie: ' . $cookieHeader, false);
+        header('Set-Cookie: ' . self::buildCookieHeader('refresh_token', '', 0, '/api'), false);
     }
 
     /**
@@ -132,13 +139,7 @@ class CookieManager
      */
     public static function setTempToken(string $token, int $expiresIn = 300): void
     {
-        $cookieHeader = sprintf(
-            'temp_auth_token=%s; Max-Age=%d; Path=/api%s',
-            $token,
-            $expiresIn,
-            self::SECURE_FLAGS
-        );
-        header('Set-Cookie: ' . $cookieHeader, false);
+        header('Set-Cookie: ' . self::buildCookieHeader('temp_auth_token', $token, $expiresIn, '/api'), false);
     }
 
     /**
@@ -164,10 +165,6 @@ class CookieManager
      */
     public static function clearTempToken(): void
     {
-        $cookieHeader = sprintf(
-            'temp_auth_token=; Max-Age=0; Path=/api%s',
-            self::SECURE_FLAGS
-        );
-        header('Set-Cookie: ' . $cookieHeader, false);
+        header('Set-Cookie: ' . self::buildCookieHeader('temp_auth_token', '', 0, '/api'), false);
     }
 }

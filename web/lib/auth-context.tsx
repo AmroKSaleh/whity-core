@@ -89,6 +89,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // CSRF defense (WC-160): required on the auth POSTs.
+          'X-Requested-With': 'XMLHttpRequest',
         },
         body: JSON.stringify({ email, password }),
         credentials: 'include',
@@ -133,6 +135,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'include',
+        // CSRF defense (WC-160): required on the auth POSTs.
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
       });
     } catch (error) {
       console.error('Logout request failed:', error);
