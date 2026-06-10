@@ -108,7 +108,11 @@ final class CsrfGuard
      */
     private function usesAmbientCookieAuth(Request $request): bool
     {
-        if ($request->getHeader('Authorization') !== null) {
+        // Only a WELL-FORMED bearer header counts as non-ambient — RBAC falls
+        // back to the cookie on a malformed one, so the exemption must match
+        // RbacMiddleware's extraction exactly.
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && preg_match('/^Bearer\s+\S+$/', $authHeader) === 1) {
             return false;
         }
 

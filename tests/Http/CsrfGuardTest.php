@@ -210,6 +210,25 @@ class CsrfGuardTest extends TestCase
     }
 
     /**
+     * A MALFORMED Authorization header does not earn the bearer exemption:
+     * RbacMiddleware would fall back to the cookie, so the guard must treat
+     * the request as cookie-authenticated and still demand the header.
+     */
+    public function testMalformedAuthorizationWithCookieStillGuarded(): void
+    {
+        $request = new Request('POST', '/api/users', [
+            'Authorization' => 'Basic dXNlcjpwYXNz',
+            'Cookie' => 'access_token=some.jwt.value',
+        ]);
+
+        $reached = false;
+        $response = $this->guard->handle($request, $this->nextHandler($reached));
+
+        $this->assertFalse($reached);
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    /**
      * Cookie-authenticated GETs are never blocked (nothing to forge).
      */
     public function testCookieAuthenticatedGetPasses(): void
