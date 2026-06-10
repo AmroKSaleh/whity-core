@@ -10,23 +10,93 @@ on:
 
 jobs:
   test:
+    name: Unit, static analysis & plugin smoke (SQLite)
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v5
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-    - name: Setup PHP
-      uses: shivammathur/setup-php@v2
-      with:
-        php-version: '8.4'
-        coverage: none
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite
+          coverage: none
 
-    - name: Install Dependencies
-      run: composer install --prefer-dist --no-progress --no-interaction
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
 
-    - name: Run PHPUnit
-      run: vendor/bin/phpunit
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit
 
-    - name: Run PHPStan
-      run: vendor/bin/phpstan analyse src tests
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse src tests plugins
+
+      - name: Plugin-load smoke
+        run: php scripts/ci-plugin-smoke.php
+
+  postgres-integration:
+    name: Migrations + seed on real PostgreSQL
+    runs-on: ubuntu-latest
+
+    # A real PostgreSQL service so migrations/seed run against the actual engine.
+    # This catches Postgres-specific bugs the SQLite test suite cannot — e.g. use
+    # of a reserved keyword as an identifier (WC-65: `symmetric`), which only
+    # fails on PostgreSQL.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: whity
+          POSTGRES_PASSWORD: whity_dev
+          POSTGRES_DB: whity_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U whity -d whity_core"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          coverage: none
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # The app reads configuration from $_ENV (not getenv); the CLI bootstrap
+      # loads a .env file into $_ENV, so write one rather than rely on the runner's
+      # variables_order including 'E'.
+      - name: Write .env for the CLI bootstrap
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=development
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=whity_core
+          DB_USER=whity
+          DB_PASSWORD=whity_dev
+          JWT_SECRET=ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY=ci_encryption_key_min_32_chars_bbbbbbbb
+          INITIAL_ADMIN_PASSWORD=admin123
+          INITIAL_USER_PASSWORD=user123
+          INITIAL_SYSTEM_ADMIN_PASSWORD=systemadmin123
+          EOF
+
+      - name: Run migrations on real PostgreSQL
+        run: php public/index.php migrate run
+
+      - name: Seed on real PostgreSQL
+        run: php public/index.php seed
+
+      - name: Re-run migrations (idempotency on PostgreSQL)
+        run: php public/index.php migrate run
