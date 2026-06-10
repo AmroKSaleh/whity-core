@@ -319,4 +319,21 @@ class RouterTest extends TestCase
         $this->router->register('DELETE', '/api/users/{id:\d+}', static fn() => 'delete');
         $this->assertSame([], $this->router->allowedMethods('/api/users/abc'));
     }
+
+    /**
+     * WC-160: constraints containing characters that would corrupt the compiled
+     * pattern (parentheses, '#' — the pattern delimiter) are rejected loudly at
+     * registration time instead of producing per-request preg warnings.
+     */
+    public function testRegisterRejectsUnsupportedConstraintCharacters(): void
+    {
+        foreach (['/api/x/{id:(\d+)}', '/api/x/{tag:[a-z#]+}'] as $path) {
+            try {
+                $this->router->register('GET', $path, static fn() => 'r');
+                $this->fail("Registering {$path} should throw");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('constraint', $e->getMessage());
+            }
+        }
+    }
 }

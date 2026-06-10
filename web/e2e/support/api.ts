@@ -18,7 +18,12 @@ export async function createAuthedApi(
   baseURL: string,
   creds: Credentials = ADMIN
 ): Promise<APIRequestContext> {
-  const context = await request.newContext({ baseURL });
+  const context = await request.newContext({
+    baseURL,
+    // CSRF defense (WC-160): the backend rejects cookie-authenticated
+    // state-changing requests (and the auth POSTs) without this header.
+    extraHTTPHeaders: { 'X-Requested-With': 'XMLHttpRequest' },
+  });
   const response = await context.post('/api/login', {
     data: { email: creds.email, password: creds.password },
   });

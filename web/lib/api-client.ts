@@ -78,11 +78,21 @@ export async function apiClient(
 
   // Always include credentials for httpOnly cookies, and always send the
   // CSRF defense header (WC-160) — harmless on unprotected routes, required
-  // on the state-changing auth POSTs. Caller-supplied headers win on clash.
+  // on cookie-authenticated state changes. Caller-supplied headers win on
+  // clash; the Headers wrapper accepts every HeadersInit shape (plain object,
+  // Headers instance, tuple array) without corruption.
+  const withCsrfHeader = (init?: HeadersInit): Headers => {
+    const headers = new Headers(init);
+    if (!headers.has('X-Requested-With')) {
+      headers.set('X-Requested-With', 'XMLHttpRequest');
+    }
+    return headers;
+  };
+
   const requestInit: RequestInit = {
     ...fetchOptions,
     credentials: 'include',
-    headers: { 'X-Requested-With': 'XMLHttpRequest', ...fetchOptions.headers },
+    headers: withCsrfHeader(fetchOptions.headers),
   };
 
   // Make the initial request
@@ -105,7 +115,7 @@ export async function apiClient(
   const retryInit: RequestInit = {
     ...fetchOptions,
     credentials: 'include',
-    headers: { 'X-Requested-With': 'XMLHttpRequest', ...fetchOptions.headers },
+    headers: withCsrfHeader(fetchOptions.headers),
   };
 
   const retryResponse = await fetch(fullUrl, retryInit);

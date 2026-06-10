@@ -510,7 +510,13 @@ if ($isWorker) {
                 // worker. This is a cheap no-op when the plugin tree is unchanged,
                 // and runs before the kernel handles the request so the new routes
                 // are live for this iteration.
-                $pluginLoader->reload();
+                // WC-160: development only. In any other env a file dropped into
+                // plugins/ must NOT start executing on the next request (deploy-
+                // less code execution); changes take effect via restart/deploy or
+                // an explicit, RBAC-protected admin action.
+                if (($_ENV['APP_ENV'] ?? 'production') === 'development') {
+                    $pluginLoader->reload();
+                }
 
                 // Create request from PHP superglobals
                 $request = Request::fromGlobals();

@@ -163,7 +163,12 @@ test.describe('Self-service profile management (WC-64)', () => {
     await fresh.close();
 
     // 3) The OLD password is now rejected (direct API login through the proxy).
-    const probe = await request.newContext({ baseURL: baseURL as string });
+    // The CSRF header (WC-160) is required so the request reaches the auth
+    // layer at all — without it the guard answers 403 before credentials run.
+    const probe = await request.newContext({
+      baseURL: baseURL as string,
+      extraHTTPHeaders: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
     try {
       const loginRes = await probe.post('/api/login', {
         data: { email: throwaway.email, password: throwaway.password },

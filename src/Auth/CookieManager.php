@@ -14,8 +14,8 @@ namespace Whity\Auth;
  * HTTPS-served and gets Secure — fail safe.
  *
  * Token cookies are stored separately with different expiration times:
- * - access_token: 15 minutes (path=/api)
- * - refresh_token: 7 days (path=/api/auth/refresh)
+ * - access_token: 15 minutes (Path=/api)
+ * - refresh_token: 7 days (Path=/api)
  */
 class CookieManager
 {

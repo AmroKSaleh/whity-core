@@ -172,22 +172,32 @@ class Router
      * Converts path patterns like /users/{id}/posts/{postId} to regex patterns
      * that can match requests and capture parameters. A placeholder may carry
      * an inline regex constraint — `{id:\d+}` only matches digit segments
-     * (WC-160). Constraints must not contain `{`, `}` or parentheses; without
-     * a constraint the parameter matches any single segment ([^/]+).
+     * (WC-160). Constraints must not contain `{`, `}`, parentheses or `#`
+     * (the pattern delimiter) — such constraints are rejected at registration
+     * time. Without a constraint the parameter matches any single segment
+     * ([^/]+).
      *
      * @param string $path Path pattern with {param} or {param:regex} placeholders
      * @return string Regex pattern
+     * @throws \InvalidArgumentException When a constraint contains unsupported characters.
      */
     private function pathToPattern(string $path): string
     {
         // Replace {param} / {param:regex} placeholders with named capture groups
         $pattern = preg_replace_callback(
             '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^{}]+))?\}#',
-            static function (array $matches): string {
+            static function (array $matches) use ($path): string {
                 $paramName = $matches[1];
                 $constraint = $matches[2] ?? '';
                 if ($constraint === '') {
                     $constraint = '[^/]+';
+                } elseif (preg_match('/[()#]/', $constraint) === 1) {
+                    // These would corrupt the compiled pattern (capture-group
+                    // protection stops at ')'; '#' is the delimiter) and emit
+                    // preg warnings on EVERY match() call — fail loudly now.
+                    throw new \InvalidArgumentException(
+                        "Route '{$path}': constraint for {{$paramName}} must not contain '(', ')' or '#'"
+                    );
                 }
                 return "(?P<{$paramName}>{$constraint})";
             },

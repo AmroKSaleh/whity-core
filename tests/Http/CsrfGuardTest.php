@@ -136,13 +136,85 @@ class CsrfGuardTest extends TestCase
     }
 
     /**
-     * Non-protected paths are untouched — the guard is scoped to the auth
-     * endpoints; RBAC-protected routes already require a non-cookie bearer
-     * context validated upstream.
+     * An UNAUTHENTICATED state-changing request to a non-auth path carries no
+     * ambient credential an attacker could ride, so the guard stays out of the
+     * way (the route's own auth will 401 it).
      */
-    public function testNonAuthPostPassesWithoutHeader(): void
+    public function testUnauthenticatedNonAuthPostPassesWithoutHeader(): void
     {
         $request = new Request('POST', '/api/users');
+
+        $reached = false;
+        $this->guard->handle($request, $this->nextHandler($reached));
+
+        $this->assertTrue($reached);
+    }
+
+    /**
+     * A COOKIE-authenticated state-changing request (the CSRF-able shape:
+     * ambient credential, no custom header) is rejected on ANY path — RBAC and
+     * the 2FA management endpoints fall back to the access_token cookie, so
+     * admin mutations and 2FA disable are forgeable targets without this.
+     */
+    public function testCookieAuthenticatedMutationWithoutHeaderRejected(): void
+    {
+        foreach (
+            [
+                ['POST', '/api/users'],
+                ['PATCH', '/api/me'],
+                ['POST', '/api/auth/2fa/disable'],
+                ['DELETE', '/api/roles/7'],
+            ] as [$method, $path]
+        ) {
+            $request = new Request($method, $path, ['Cookie' => 'access_token=some.jwt.value']);
+
+            $reached = false;
+            $response = $this->guard->handle($request, $this->nextHandler($reached));
+
+            $this->assertFalse($reached, "Cookie-authed {$method} {$path} without header must be rejected");
+            $this->assertSame(403, $response->getStatusCode());
+        }
+    }
+
+    /**
+     * The same cookie-authenticated mutations WITH the header pass through.
+     */
+    public function testCookieAuthenticatedMutationWithHeaderPasses(): void
+    {
+        $request = new Request('POST', '/api/auth/2fa/disable', [
+            'Cookie' => 'access_token=some.jwt.value',
+            'X-Requested-With' => 'XMLHttpRequest',
+        ]);
+
+        $reached = false;
+        $response = $this->guard->handle($request, $this->nextHandler($reached));
+
+        $this->assertTrue($reached);
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * Bearer-authenticated requests (Authorization header, e.g. API scripts)
+     * are exempt: a cross-site attacker cannot attach an Authorization header
+     * without triggering a CORS preflight, so there is no forgeable ambient
+     * credential and non-browser clients keep working unchanged.
+     */
+    public function testBearerAuthenticatedMutationPassesWithoutHeader(): void
+    {
+        $request = new Request('POST', '/api/users', ['Authorization' => 'Bearer some.jwt.value']);
+
+        $reached = false;
+        $this->guard->handle($request, $this->nextHandler($reached));
+
+        $this->assertTrue($reached);
+    }
+
+    /**
+     * Cookie-authenticated GETs are never blocked (nothing to forge).
+     */
+    public function testCookieAuthenticatedGetPasses(): void
+    {
+        $request = new Request('GET', '/api/users', ['Cookie' => 'access_token=some.jwt.value']);
 
         $reached = false;
         $this->guard->handle($request, $this->nextHandler($reached));

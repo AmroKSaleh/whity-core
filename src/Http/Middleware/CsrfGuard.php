@@ -8,29 +8,35 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 
 /**
- * CSRF defense-in-depth for the state-changing auth endpoints (WC-160).
+ * CSRF defense-in-depth for cookie-authenticated state changes (WC-160).
  *
- * The auth model is httpOnly-cookie based, so the auth POSTs are the routes a
- * cross-site attacker could try to forge: login CSRF (logging the victim into
- * an attacker account) and forced refresh/logout. SameSite=Lax already blocks
+ * The auth model is httpOnly-cookie based, and both RBAC and the 2FA
+ * management endpoints fall back to the access_token cookie — an AMBIENT
+ * credential a cross-site attacker can ride. SameSite=Lax already blocks
  * cookie-bearing cross-site POSTs in modern browsers; this guard adds an
  * explicit, browser-enforced second layer:
  *
- * POSTs to the protected paths must carry `X-Requested-With: XMLHttpRequest`.
- * A cross-site HTML form cannot set custom headers at all, and a cross-origin
- * fetch/XHR that sets one triggers a CORS preflight, which the strict origin
- * allowlist ({@see \Whity\Http\Cors}) refuses for foreign origins. Same-origin
- * callers and allowlisted CORS-credentialed frontends simply send the header
- * (see web/lib/api-client.ts).
+ * A state-changing request (POST/PUT/PATCH/DELETE) must carry
+ * `X-Requested-With: XMLHttpRequest` when it either (a) targets one of the
+ * always-protected auth POSTs — login CSRF needs no cookies at all — or
+ * (b) authenticates ambiently via an auth cookie without an Authorization
+ * header. A cross-site HTML form cannot set custom headers, and a
+ * cross-origin fetch/XHR that sets one triggers a CORS preflight, which the
+ * strict origin allowlist ({@see \Whity\Http\Cors}) refuses for foreign
+ * origins. Same-origin callers and allowlisted CORS-credentialed frontends
+ * simply send the header (see web/lib/api-client.ts).
  *
- * The guard is method- and path-scoped: non-POST requests and unprotected
- * paths pass through untouched, and OPTIONS preflights are never blocked.
- * Rejections return a generic 403 without internal detail.
+ * Exemptions, deliberately: reads (GET/HEAD/OPTIONS) have nothing to forge;
+ * Authorization-header (bearer) clients carry no ambient credential — an
+ * attacker cannot attach that header cross-site — so API scripts keep working
+ * unchanged; unauthenticated mutations to non-auth paths fail at their own
+ * auth layer. Rejections return a generic 403 without internal detail.
  */
 final class CsrfGuard
 {
     /**
-     * State-changing auth endpoints requiring the custom header on POST.
+     * Auth endpoints requiring the custom header on POST even without any
+     * cookie — they CREATE the session (login CSRF) or revoke/rotate it.
      *
      * @var list<string>
      */
@@ -41,6 +47,20 @@ final class CsrfGuard
         '/api/auth/logout',
     ];
 
+    /**
+     * HTTP methods that change state and therefore need the check.
+     *
+     * @var list<string>
+     */
+    private const STATE_CHANGING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+
+    /**
+     * Cookies that act as ambient credentials for this platform.
+     *
+     * @var list<string>
+     */
+    private const AUTH_COOKIES = ['access_token', 'refresh_token', 'temp_auth_token'];
+
     /** The custom header cross-site forms cannot set. */
     private const HEADER_NAME = 'X-Requested-With';
 
@@ -48,7 +68,7 @@ final class CsrfGuard
     private const REQUIRED_VALUE = 'XMLHttpRequest';
 
     /**
-     * Enforce the custom-header CSRF check on protected auth POSTs.
+     * Enforce the custom-header CSRF check on forgeable state changes.
      *
      * @param Request  $request The incoming HTTP request.
      * @param callable $next    The next middleware/handler in the pipeline.
@@ -56,11 +76,15 @@ final class CsrfGuard
      */
     public function handle(Request $request, callable $next): Response
     {
-        if ($request->getMethod() !== 'POST') {
+        $method = $request->getMethod();
+        if (!in_array($method, self::STATE_CHANGING_METHODS, true)) {
             return $next($request);
         }
 
-        if (!in_array($this->pathWithoutQuery($request->getPath()), self::PROTECTED_POSTS, true)) {
+        $alwaysProtected = $method === 'POST'
+            && in_array($this->pathWithoutQuery($request->getPath()), self::PROTECTED_POSTS, true);
+
+        if (!$alwaysProtected && !$this->usesAmbientCookieAuth($request)) {
             return $next($request);
         }
 
@@ -70,6 +94,41 @@ final class CsrfGuard
         }
 
         return Response::error('Cross-site request rejected', 403);
+    }
+
+    /**
+     * Whether the request authenticates ambiently via an auth cookie.
+     *
+     * Requests carrying an Authorization header are NOT ambient: a cross-site
+     * attacker cannot set that header without triggering a CORS preflight, so
+     * CSRF does not apply regardless of which credential the backend prefers.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return bool True when an auth cookie is the only credential present.
+     */
+    private function usesAmbientCookieAuth(Request $request): bool
+    {
+        if ($request->getHeader('Authorization') !== null) {
+            return false;
+        }
+
+        $cookieHeader = $request->getHeader('Cookie');
+        if ($cookieHeader === null) {
+            return false;
+        }
+
+        foreach (explode(';', $cookieHeader) as $cookie) {
+            $parts = explode('=', trim($cookie), 2);
+            if (
+                count($parts) === 2
+                && $parts[1] !== ''
+                && in_array($parts[0], self::AUTH_COOKIES, true)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
