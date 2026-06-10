@@ -34,7 +34,7 @@ use Whity\Http\RbacMiddleware;
  */
 class RbacAuthEdgeCaseTest extends TestCase
 {
-    private const SECRET = 'wc17-edge-secret';
+    private const SECRET = 'wc17-edge-secret-padded-for-hs256-min-32-byte-key';
     private const TENANT = 1;
 
     protected function setUp(): void
@@ -136,8 +136,9 @@ class RbacAuthEdgeCaseTest extends TestCase
         $jwtParser = new JwtParser(self::SECRET);
         $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerThatMustNotBeQueried());
 
-        // expiresIn = -10 puts exp 10s in the past; the parser rejects on expiry.
-        $expired = $jwtParser->create(['user_id' => 5, 'email' => 'stale@example.com'], -10);
+        // expiresIn = -3600 puts exp firmly in the past (beyond the clock-skew
+        // leeway); the parser rejects on expiry.
+        $expired = $jwtParser->create(['user_id' => 5, 'email' => 'stale@example.com'], -3600);
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$expired}"]);
 
         $handlerReached = null;
@@ -155,7 +156,7 @@ class RbacAuthEdgeCaseTest extends TestCase
      */
     public function testRevokedTokenSignedWithRotatedSecretIsRejected(): void
     {
-        $issuingParser = new JwtParser('previous-rotated-out-secret');
+        $issuingParser = new JwtParser('previous-rotated-out-secret-padded-for-hs256-min-32-byte-key');
         $token = $issuingParser->create(['user_id' => 6, 'email' => 'revoked@example.com']);
 
         // The server now validates with the CURRENT secret; the old token's
@@ -231,7 +232,7 @@ class RbacAuthEdgeCaseTest extends TestCase
         $jwtParser = new JwtParser(self::SECRET);
         $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerThatMustNotBeQueried());
 
-        $expired = $jwtParser->create(['user_id' => 9, 'email' => 'stale-cookie@example.com'], -10);
+        $expired = $jwtParser->create(['user_id' => 9, 'email' => 'stale-cookie@example.com'], -3600);
         $request = new Request('GET', '/api/users', ['Cookie' => "access_token={$expired}"]);
 
         $handlerReached = null;

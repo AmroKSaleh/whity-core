@@ -26,7 +26,7 @@ class TenantIsolationTest extends TestCase
     protected function setUp(): void
     {
         // Initialize JWT parser with test secret
-        $this->jwtParser = new JwtParser('test_secret');
+        $this->jwtParser = new JwtParser('test_secret-padded-for-hs256-min-32-byte-key');
 
         // Initialize middleware
         $this->middleware = new EnforceTenantIsolation($this->jwtParser);

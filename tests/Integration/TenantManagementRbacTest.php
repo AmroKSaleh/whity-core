@@ -35,7 +35,7 @@ class TenantManagementRbacTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->jwtParser = new JwtParser('test_secret');
+        $this->jwtParser = new JwtParser('test_secret-padded-for-hs256-min-32-byte-key');
         TenantContext::reset();
     }
 

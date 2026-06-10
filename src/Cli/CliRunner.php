@@ -16,6 +16,7 @@ class CliRunner
         'migrate' => 'Whity\Cli\Commands\MigrationsCommand',
         'plugin'  => 'Whity\Cli\Commands\PluginsCommand',
         'tenant'  => 'Whity\Cli\Commands\TenantsCommand',
+        'totp'    => 'Whity\Cli\Commands\TotpCommand',
     ];
 
     /**
@@ -70,7 +71,8 @@ class CliRunner
         echo "Available Commands:\n";
         echo "  migrate    Manage database migrations (status, run, rollback)\n";
         echo "  plugin     Manage plugins (list, enable, disable, reload)\n";
-        echo "  tenant     Manage tenants (list, create, update, delete)\n\n";
+        echo "  tenant     Manage tenants (list, create, update, delete)\n";
+        echo "  totp       TOTP secret maintenance (reencrypt legacy secrets)\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }

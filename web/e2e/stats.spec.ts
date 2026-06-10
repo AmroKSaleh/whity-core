@@ -20,15 +20,13 @@ test.describe('System Statistics (admin)', () => {
     await expect(page.getByText('Permissions', { exact: true })).toBeVisible();
 
     // The "Permissions" card resolves to a concrete number from the live stats
-    // endpoint (the catalogue exposes 24 permissions: the 17 legacy-seeded ones
-    // plus the 7 core permissions WC-54's migration 019 reconciles into the
-    // catalogue to match CorePermissions::all() — e.g. plugins:manage), proving
-    // the fetch succeeded rather than leaving the "--" loading placeholder. Scope
-    // to the bold value node of the Permissions card to avoid matching unrelated
-    // substrings elsewhere on the page.
+    // endpoint (the seed catalogue currently exposes 26 permissions after the
+    // migration consolidation), proving the fetch succeeded rather than leaving the
+    // "--" loading placeholder. Scope to the bold value node of the Permissions card
+    // to avoid matching unrelated substrings elsewhere on the page.
     const permsValue = page
       .locator('div.text-2xl.font-bold')
-      .filter({ hasText: /^24$/ });
+      .filter({ hasText: /^26$/ });
     await expect(permsValue).toBeVisible();
   });
 

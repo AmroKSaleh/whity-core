@@ -36,7 +36,7 @@ class TwoFactorFlowTest extends TestCase
 {
     private JwtParser $jwtParser;
     private TotpService $totpService;
-    private const TEST_SECRET_KEY = 'test-secret-key-for-2fa-tests';
+    private const TEST_SECRET_KEY = 'test-secret-key-for-2fa-tests-padded-for-hs256-min-32-byte-key';
     private const TEST_USER_ID = 1;
     private const TEST_USER_EMAIL = 'testuser@example.com';
     private const TEST_TENANT_ID = 1;

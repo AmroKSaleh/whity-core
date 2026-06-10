@@ -46,7 +46,7 @@ use Whity\Http\RbacMiddleware;
  */
 class TenantWorkerLeakageTest extends TestCase
 {
-    private const SECRET = 'worker-leakage-test-secret';
+    private const SECRET = 'worker-leakage-test-secret-padded-for-hs256-min-32-byte-key';
 
     private const TENANT_A = 1;
     private const TENANT_B = 2;
