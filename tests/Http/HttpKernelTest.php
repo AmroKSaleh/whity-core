@@ -73,6 +73,39 @@ class HttpKernelTest extends TestCase
     }
 
     /**
+     * WC-160: a registered path requested with the wrong method returns 405
+     * (Method Not Allowed) with an Allow header — not a misleading 404.
+     */
+    public function testReturns405WithAllowHeaderOnMethodMismatch(): void
+    {
+        $this->router->register('GET', '/hello', static fn(Request $req) => Response::json([]));
+        $this->router->register('POST', '/hello', static fn(Request $req) => Response::json([]));
+
+        $response = $this->kernel->handle(new Request('DELETE', '/hello'));
+
+        $this->assertSame(405, $response->getStatusCode());
+        $this->assertStringContainsString('Method Not Allowed', $response->getBody());
+        $headers = $response->getHeaders();
+        $allow = $headers['Allow'] ?? $headers['allow'] ?? null;
+        $this->assertNotNull($allow, 'A 405 response must carry an Allow header');
+        $this->assertStringContainsString('GET', $allow);
+        $this->assertStringContainsString('POST', $allow);
+    }
+
+    /**
+     * WC-160: a path violating a route's {id:\d+} constraint is a 404 (the
+     * resource does not exist), not a 405.
+     */
+    public function testConstraintViolationIs404NotMethodMismatch(): void
+    {
+        $this->router->register('GET', '/users/{id:\d+}', static fn(Request $req) => Response::json([]));
+
+        $response = $this->kernel->handle(new Request('POST', '/users/abc'));
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
      * Test handling a request with path parameters
      */
     public function testHandlesRequestWithPathParameters(): void

@@ -92,6 +92,28 @@ class Router
     }
 
     /**
+     * List the HTTP methods registered for a path (WC-160)
+     *
+     * Matches the path against every route pattern regardless of method, so the
+     * kernel can answer a method mismatch with 405 + Allow instead of 404. An
+     * empty result means no route knows the path at all (a true 404).
+     *
+     * @param string $path Request path (no query string)
+     * @return list<string> Unique methods in registration order
+     */
+    public function allowedMethods(string $path): array
+    {
+        $methods = [];
+        foreach ($this->routes as $route) {
+            if (preg_match($route['pattern'], $path) === 1 && !in_array($route['method'], $methods, true)) {
+                $methods[] = $route['method'];
+            }
+        }
+
+        return $methods;
+    }
+
+    /**
      * Get all registered routes
      *
      * @return array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string}>
@@ -148,19 +170,36 @@ class Router
      * Convert a path pattern to a regex pattern
      *
      * Converts path patterns like /users/{id}/posts/{postId} to regex patterns
-     * that can match requests and capture parameters.
+     * that can match requests and capture parameters. A placeholder may carry
+     * an inline regex constraint — `{id:\d+}` only matches digit segments
+     * (WC-160). Constraints must not contain `{`, `}`, parentheses or `#`
+     * (the pattern delimiter) — such constraints are rejected at registration
+     * time. Without a constraint the parameter matches any single segment
+     * ([^/]+).
      *
-     * @param string $path Path pattern with {param} placeholders
+     * @param string $path Path pattern with {param} or {param:regex} placeholders
      * @return string Regex pattern
+     * @throws \InvalidArgumentException When a constraint contains unsupported characters.
      */
     private function pathToPattern(string $path): string
     {
-        // Replace {param} placeholders with regex named capture groups first
+        // Replace {param} / {param:regex} placeholders with named capture groups
         $pattern = preg_replace_callback(
-            '#\{([a-zA-Z_][a-zA-Z0-9_]*)\}#',
-            static function (array $matches): string {
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^{}]+))?\}#',
+            static function (array $matches) use ($path): string {
                 $paramName = $matches[1];
-                return "(?P<{$paramName}>[^/]+)";
+                $constraint = $matches[2] ?? '';
+                if ($constraint === '') {
+                    $constraint = '[^/]+';
+                } elseif (preg_match('/[()#]/', $constraint) === 1) {
+                    // These would corrupt the compiled pattern (capture-group
+                    // protection stops at ')'; '#' is the delimiter) and emit
+                    // preg warnings on EVERY match() call — fail loudly now.
+                    throw new \InvalidArgumentException(
+                        "Route '{$path}': constraint for {{$paramName}} must not contain '(', ')' or '#'"
+                    );
+                }
+                return "(?P<{$paramName}>{$constraint})";
             },
             $path
         );

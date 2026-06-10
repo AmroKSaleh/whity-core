@@ -840,6 +840,24 @@ class PluginLoader
             return $fqcn;
         }
 
+        // WC-160: the eval() below re-executes MODIFIED plugin source in-place
+        // and is hard-gated to development; in any other (or unset) APP_ENV the
+        // already-loaded definition keeps serving. Note this gate alone does not
+        // cover brand-new files (first load uses require_once above) — that
+        // runtime vector is closed by gating the per-request reload() loop to
+        // development in public/index.php; boot-time load() and explicit admin
+        // actions still load plugins in every env.
+        if (($_ENV['APP_ENV'] ?? 'production') !== 'development') {
+            $gateMsg = "Plugin {$fqcn} changed on disk, but eval-based hot-reload is "
+                . "development-only (WC-160); keeping the loaded version.";
+            if ($this->logger !== null) {
+                $this->logger->warning($gateMsg);
+            } else {
+                error_log($gateMsg);
+            }
+            return class_exists($fqcn) ? $fqcn : null;
+        }
+
         // Content changed since the last registration. The original class is
         // locked into memory, so re-evaluate the source under a fresh,
         // content-addressed namespace so the updated code runs.

@@ -87,7 +87,13 @@ export default function () {
     const loginRes = http.post(
       `${BASE_URL}/api/login`,
       JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
-      { headers: { 'Content-Type': 'application/json' } }
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          // CSRF defense (WC-160): required on the auth POSTs.
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      }
     );
     loginDuration.add(loginRes.timings.duration);
 

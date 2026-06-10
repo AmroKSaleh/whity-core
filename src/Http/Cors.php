@@ -20,7 +20,9 @@ final class Cors
 {
     private const DEFAULT_ALLOWED_ORIGINS = 'http://localhost:3000';
     private const ALLOWED_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
-    private const ALLOWED_HEADERS = 'Content-Type, Authorization';
+    // X-Requested-With is the CSRF defense header required on the auth POSTs
+    // (WC-160); it must be preflight-approved for credentialed CORS clients.
+    private const ALLOWED_HEADERS = 'Content-Type, Authorization, X-Requested-With';
 
     /**
      * Build the CORS response headers for a given request Origin.

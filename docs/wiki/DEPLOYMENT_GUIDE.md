@@ -112,6 +112,18 @@ image (no repo dependency). It exercises `GET /api/health`, the
 `POST /api/login` -> authenticated `GET /api/admin/stats` flow, and the
 RBAC-gated `GET /api/roles`.
 
+Auth-flow notes (WC-160):
+
+- `POST /api/login` (and the other auth POSTs) require the CSRF defense header
+  `X-Requested-With: XMLHttpRequest`; the same header is required on any
+  cookie-authenticated state-changing request. The k6 script already sends it —
+  add it to any hand-rolled `curl` login flow.
+- Outside `APP_ENV=development` auth cookies carry the `Secure` flag, so
+  cookie-based auth flows only work over HTTPS. The staging stack serves plain
+  HTTP on :8100, which means strict cookie jars (k6, `curl -c/-b`) will not
+  replay the auth cookie against it — run cookie-auth flows against an
+  HTTPS-terminated deployment, or a stack started with `APP_ENV=development`.
+
 ```bash
 VUS=10 DURATION=30s ADMIN_PASSWORD='<staging-admin-pw>' ./load-tests/run.sh
 #  or:  make load-test

@@ -237,14 +237,30 @@ class PluginsApiHandler
     }
 
     /**
-     * POST /api/plugins/reload - Reload plugins (just a success message for now as they hotload)
+     * POST /api/plugins/reload - Explicitly rescan the plugins directory.
+     *
+     * This RBAC-protected admin action is the sanctioned way to pick up
+     * added/removed plugin files outside development, where the per-request
+     * hot-reload loop is disabled (WC-160). In development the worker loop
+     * already reloads each request, so this is usually a no-op there.
      *
      * @param Request $request The incoming request.
      * @return Response
      */
     public function reload(Request $request): Response
     {
-        return Response::json(['data' => ['message' => 'Plugins reloaded']], 200);
+        if ($this->pluginLoader === null) {
+            return Response::json(['data' => ['message' => 'Plugin loader unavailable; no reload performed']], 200);
+        }
+
+        $changed = $this->pluginLoader->reload();
+
+        return Response::json([
+            'data' => [
+                'message' => $changed ? 'Plugins reloaded' : 'No plugin changes detected',
+                'changed' => $changed,
+            ],
+        ], 200);
     }
 
     /**

@@ -96,6 +96,7 @@ use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
 use Whity\Http\Cors;
+use Whity\Http\Middleware\CsrfGuard;
 use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Api\UsersApiHandler;
 use Whity\Api\RolesApiHandler;
@@ -329,7 +330,9 @@ $tenantIsolationMiddleware = new EnforceTenantIsolation($jwtParser, $logger);
 
 // 8. Initialize HTTP kernel and register middleware
 $kernel = new HttpKernel($router, $rbacMiddleware);
-// Register middleware in order (tenant isolation BEFORE RBAC)
+// Register middleware in order: CSRF guard first (cheap header check on the
+// state-changing auth POSTs, WC-160), then tenant isolation BEFORE RBAC.
+$kernel->use(new CsrfGuard());
 $kernel->use($tenantIsolationMiddleware);
 
 // 9. Initialize plugin loader and load plugins
@@ -375,22 +378,22 @@ $router->register('GET', '/api/auth/2fa/status', [$twoFactorHandler, 'status'], 
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/users', [$usersHandler, 'list'], 'admin');
 $router->register('POST', '/api/users', [$usersHandler, 'create'], 'admin');
-$router->register('PATCH', '/api/users/{id}', [$usersHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/users/{id}', [$usersHandler, 'delete'], 'admin');
+$router->register('PATCH', '/api/users/{id:\d+}', [$usersHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/users/{id:\d+}', [$usersHandler, 'delete'], 'admin');
 
 $rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
 $router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
-$router->register('GET', '/api/roles/{id}', [$rolesHandler, 'get'], 'admin');
-$router->register('PATCH', '/api/roles/{id}', [$rolesHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/roles/{id}', [$rolesHandler, 'delete'], 'admin');
-$router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
+$router->register('GET', '/api/roles/{id:\d+}', [$rolesHandler, 'get'], 'admin');
+$router->register('PATCH', '/api/roles/{id:\d+}', [$rolesHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/roles/{id:\d+}', [$rolesHandler, 'delete'], 'admin');
+$router->register('GET', '/api/roles/{id:\d+}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
 
 $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
 $router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], 'admin');
-$router->register('PATCH', '/api/tenants/{id}', [$tenantsHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'admin');
+$router->register('PATCH', '/api/tenants/{id:\d+}', [$tenantsHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/tenants/{id:\d+}', [$tenantsHandler, 'delete'], 'admin');
 
 $permissionsHandler = new PermissionsApiHandler($db->getPdo());
 $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
@@ -435,13 +438,13 @@ $router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
 $ousHandler = new OusApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/ous', [$ousHandler, 'list'], 'admin');
 $router->register('POST', '/api/ous', [$ousHandler, 'create'], 'admin');
-$router->register('GET', '/api/ous/{id}', [$ousHandler, 'get'], 'admin');
-$router->register('PATCH', '/api/ous/{id}', [$ousHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/ous/{id}', [$ousHandler, 'delete'], 'admin');
-$router->register('GET', '/api/ous/{id}/roles', [$ousHandler, 'roles'], 'admin');
-$router->register('GET', '/api/ous/{id}/members', [$ousHandler, 'members'], 'admin');
-$router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
-$router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
+$router->register('GET', '/api/ous/{id:\d+}', [$ousHandler, 'get'], 'admin');
+$router->register('PATCH', '/api/ous/{id:\d+}', [$ousHandler, 'update'], 'admin');
+$router->register('DELETE', '/api/ous/{id:\d+}', [$ousHandler, 'delete'], 'admin');
+$router->register('GET', '/api/ous/{id:\d+}/roles', [$ousHandler, 'roles'], 'admin');
+$router->register('GET', '/api/ous/{id:\d+}/members', [$ousHandler, 'members'], 'admin');
+$router->register('POST', '/api/ous/{id:\d+}/roles', [$ousHandler, 'assignRole'], 'admin');
+$router->register('DELETE', '/api/ous/{ouId:\d+}/roles/{roleId:\d+}', [$ousHandler, 'removeRole'], 'admin');
 
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so
@@ -450,7 +453,7 @@ $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'rem
 $delegationsHandler = new DelegationsApiHandler($db->getPdo(), $delegationService, $logger);
 $router->register('GET', '/api/delegations', [$delegationsHandler, 'list'], null, null, CorePermissions::DELEGATION_MANAGE);
 $router->register('POST', '/api/delegations', [$delegationsHandler, 'create'], null, null, CorePermissions::DELEGATION_MANAGE);
-$router->register('DELETE', '/api/delegations/{id}', [$delegationsHandler, 'revoke'], null, null, CorePermissions::DELEGATION_MANAGE);
+$router->register('DELETE', '/api/delegations/{id:\d+}', [$delegationsHandler, 'revoke'], null, null, CorePermissions::DELEGATION_MANAGE);
 
 // 13. Register the audit-log read API (WC-34). Gated on the audit:read permission
 // (6th positional arg; requiredRole stays null so RbacMiddleware enforces the
@@ -475,14 +478,14 @@ $relationsHandler = new RelationsApiHandler($personRepository, $relationReposito
 $router->register('GET', '/api/relationship-types', [$relationsHandler, 'listTypes'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('GET', '/api/persons', [$personsHandler, 'list'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('POST', '/api/persons', [$personsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
-$router->register('GET', '/api/persons/{id}', [$personsHandler, 'get'], null, null, CorePermissions::RELATIONS_READ);
-$router->register('PATCH', '/api/persons/{id}', [$personsHandler, 'update'], null, null, CorePermissions::RELATIONS_MANAGE);
-$router->register('DELETE', '/api/persons/{id}', [$personsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
-$router->register('GET', '/api/persons/{id}/relations', [$personsHandler, 'relations'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('GET', '/api/persons/{id:\d+}', [$personsHandler, 'get'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('PATCH', '/api/persons/{id:\d+}', [$personsHandler, 'update'], null, null, CorePermissions::RELATIONS_MANAGE);
+$router->register('DELETE', '/api/persons/{id:\d+}', [$personsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
+$router->register('GET', '/api/persons/{id:\d+}/relations', [$personsHandler, 'relations'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('GET', '/api/relations', [$relationsHandler, 'listEdges'], null, null, CorePermissions::RELATIONS_READ);
-$router->register('GET', '/api/users/{id}/relations', [$relationsHandler, 'userRelations'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('GET', '/api/users/{id:\d+}/relations', [$relationsHandler, 'userRelations'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('POST', '/api/relations', [$relationsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
-$router->register('DELETE', '/api/relations/{id}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
+$router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
 
 // Handle requests (persistent worker mode or fallback single-request mode)
 $isWorker = function_exists('frankenphp_handle_request');
@@ -507,7 +510,13 @@ if ($isWorker) {
                 // worker. This is a cheap no-op when the plugin tree is unchanged,
                 // and runs before the kernel handles the request so the new routes
                 // are live for this iteration.
-                $pluginLoader->reload();
+                // WC-160: development only. In any other env a file dropped into
+                // plugins/ must NOT start executing on the next request (deploy-
+                // less code execution); changes take effect via restart/deploy or
+                // an explicit, RBAC-protected admin action.
+                if (($_ENV['APP_ENV'] ?? 'production') === 'development') {
+                    $pluginLoader->reload();
+                }
 
                 // Create request from PHP superglobals
                 $request = Request::fromGlobals();

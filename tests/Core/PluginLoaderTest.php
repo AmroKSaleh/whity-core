@@ -18,17 +18,29 @@ class PluginLoaderTest extends TestCase
 {
     private string $tempDir;
     private Router $router;
+    /** Backup of APP_ENV so eval-gate tests can toggle it safely (WC-160). */
+    private mixed $previousAppEnv = null;
+    private bool $hadAppEnv = false;
 
     protected function setUp(): void
     {
         $this->tempDir = sys_get_temp_dir() . '/whity_plugins_' . uniqid();
         mkdir($this->tempDir, 0755, true);
         $this->router = new Router();
+
+        $this->hadAppEnv = array_key_exists('APP_ENV', $_ENV);
+        $this->previousAppEnv = $_ENV['APP_ENV'] ?? null;
     }
 
     protected function tearDown(): void
     {
         $this->removeDirectory($this->tempDir);
+
+        if ($this->hadAppEnv) {
+            $_ENV['APP_ENV'] = $this->previousAppEnv;
+        } else {
+            unset($_ENV['APP_ENV']);
+        }
     }
 
     /**
@@ -776,6 +788,9 @@ PHP;
      */
     public function testReloadPicksUpModifiedPluginCode(): void
     {
+        // The eval()-based reload of modified code is gated to development (WC-160).
+        $_ENV['APP_ENV'] = 'development';
+
         $pluginSubDir = $this->tempDir . '/MutablePlugin';
         mkdir($pluginSubDir, 0755, true);
         $pluginFile = $pluginSubDir . '/Plugin.php';
@@ -822,6 +837,111 @@ PHP;
             '2.0.0',
             $plugins[0]->getVersion(),
             'reload() must instantiate the UPDATED plugin code, not the cached class'
+        );
+    }
+
+    /**
+     * WC-160: the eval()-based hot-reload of MODIFIED plugin code is an
+     * arbitrary-code-execution primitive and must be unreachable outside
+     * APP_ENV=development — the stale in-memory class keeps serving.
+     */
+    public function testModifiedCodeIsNotEvaluatedOutsideDevelopment(): void
+    {
+        $_ENV['APP_ENV'] = 'production';
+
+        $pluginSubDir = $this->tempDir . '/GatedPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginFile = $pluginSubDir . '/Plugin.php';
+
+        $makeCode = static function (string $version): string {
+            return <<<PHP
+<?php
+
+namespace GatedPlugin;
+
+use Whity\\Core\\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'GatedPlugin'; }
+    public function getVersion(): string { return '{$version}'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+        };
+
+        file_put_contents($pluginFile, $makeCode('1.0.0'));
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+        $this->assertCount(1, $loader->getPlugins());
+        $this->assertSame('1.0.0', $loader->getPlugins()[0]->getVersion());
+
+        file_put_contents($pluginFile, $makeCode('2.0.0'));
+        touch($pluginFile, time() + 5);
+        clearstatcache();
+
+        $loader->reload();
+
+        $plugins = $loader->getPlugins();
+        $this->assertCount(1, $plugins);
+        $this->assertSame(
+            '1.0.0',
+            $plugins[0]->getVersion(),
+            'Outside development, modified plugin code must NOT be eval()d — the loaded class stays'
+        );
+    }
+
+    /**
+     * WC-160 fail-safe: with APP_ENV unset the gate treats the environment as
+     * non-development and refuses the eval() reload path.
+     */
+    public function testModifiedCodeIsNotEvaluatedWhenAppEnvUnset(): void
+    {
+        unset($_ENV['APP_ENV']);
+
+        $pluginSubDir = $this->tempDir . '/UnsetEnvPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginFile = $pluginSubDir . '/Plugin.php';
+
+        $makeCode = static function (string $version): string {
+            return <<<PHP
+<?php
+
+namespace UnsetEnvPlugin;
+
+use Whity\\Core\\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'UnsetEnvPlugin'; }
+    public function getVersion(): string { return '{$version}'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+        };
+
+        file_put_contents($pluginFile, $makeCode('1.0.0'));
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        file_put_contents($pluginFile, $makeCode('2.0.0'));
+        touch($pluginFile, time() + 5);
+        clearstatcache();
+
+        $loader->reload();
+
+        $this->assertSame(
+            '1.0.0',
+            $loader->getPlugins()[0]->getVersion(),
+            'With APP_ENV unset the eval() reload path must be refused (fail safe)'
         );
     }
 
