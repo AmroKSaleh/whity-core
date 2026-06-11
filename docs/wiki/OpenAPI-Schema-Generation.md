@@ -27,7 +27,10 @@ This generates `public/openapi.json` containing the complete API specification.
 ### Output
 
 The generated `openapi.json` includes:
-- **Paths:** All registered endpoints (read from the Router, so core and plugin routes alike)
+- **Paths:** All routes registered with the Router the generator is given. The
+  `generate:openapi` command currently registers PLUGIN routes only; the core
+  admin resources join the spec with #167 (the mechanism — `Router::register`
+  with a `schema` argument — is already in place for them)
 - **Methods:** HTTP method for each endpoint (GET, POST, PATCH, DELETE, etc.)
 - **Security:** Bearer token authentication configuration
 - **Typed bodies (WC-166):** routes that declare a `schema` get a `requestBody` and per-status `responses` referencing named `components.schemas` via `$ref`
