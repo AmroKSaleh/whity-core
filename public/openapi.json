@@ -942,6 +942,16 @@
                             }
                         }
                     },
+                    "400": {
+                        "description": "role_id missing",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Organizational unit or role not found",
                         "content": {
@@ -1709,6 +1719,16 @@
                             }
                         }
                     },
+                    "400": {
+                        "description": "Validation failed (e.g. invalid slug format)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Tenant not found",
                         "content": {
@@ -2089,7 +2109,13 @@
                 "required": [
                     "id",
                     "tenantId",
-                    "action"
+                    "actorUserId",
+                    "action",
+                    "targetType",
+                    "targetId",
+                    "metadata",
+                    "ipAddress",
+                    "createdAt"
                 ]
             },
             "AuditLogListResponse": {
@@ -2154,7 +2180,10 @@
                     "grantorUserId",
                     "granteeType",
                     "granteeId",
-                    "permission"
+                    "permission",
+                    "ouId",
+                    "grantedAt",
+                    "revokedAt"
                 ]
             },
             "DelegationCreateRequest": {
@@ -2320,7 +2349,8 @@
                         "type": "string"
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     },
                     "created_at": {
                         "type": "string",
@@ -2330,8 +2360,11 @@
                 "required": [
                     "id",
                     "tenant_id",
+                    "parent_id",
                     "name",
-                    "slug"
+                    "slug",
+                    "description",
+                    "created_at"
                 ]
             },
             "OuCreateRequest": {
@@ -2372,7 +2405,8 @@
                         "type": "string"
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     },
                     "created_at": {
                         "type": "string",
@@ -2396,8 +2430,11 @@
                 "required": [
                     "id",
                     "tenant_id",
+                    "parent_id",
                     "name",
                     "slug",
+                    "description",
+                    "created_at",
                     "children"
                 ]
             },
@@ -2563,7 +2600,8 @@
                         "type": "string"
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     },
                     "parent_id": {
                         "type": "integer",
@@ -2579,7 +2617,11 @@
                 },
                 "required": [
                     "id",
-                    "name"
+                    "name",
+                    "description",
+                    "parent_id",
+                    "created_at",
+                    "permissionCount"
                 ]
             },
             "RoleCreateRequest": {
@@ -2648,7 +2690,8 @@
                         "type": "string"
                     },
                     "description": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     },
                     "parent_id": {
                         "type": "integer",
@@ -2668,6 +2711,9 @@
                 "required": [
                     "id",
                     "name",
+                    "description",
+                    "parent_id",
+                    "created_at",
                     "permissions"
                 ]
             },
@@ -2775,7 +2821,10 @@
                 },
                 "required": [
                     "id",
-                    "name"
+                    "name",
+                    "slug",
+                    "userCount",
+                    "createdAt"
                 ]
             },
             "TenantCreateRequest": {
@@ -2855,9 +2904,11 @@
                 },
                 "required": [
                     "id",
+                    "name",
                     "email",
                     "role",
-                    "tenantId"
+                    "tenantId",
+                    "createdAt"
                 ]
             },
             "UserCreateRequest": {
@@ -2879,9 +2930,6 @@
                                 "type": "string"
                             }
                         ]
-                    },
-                    "tenantId": {
-                        "type": "integer"
                     }
                 },
                 "required": [

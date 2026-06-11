@@ -15,8 +15,9 @@ use Whity\OpenAPI\SchemaGenerator;
  * WC-167: the admin resources (users, roles, tenants, organizational units,
  * delegations, audit logs) publish typed request/response shapes through the
  * WC-166 engine, and the committed public/openapi.json is the SNAPSHOT —
- * regenerating must reproduce it byte-for-byte, so any route/schema change
- * that skips `generate:openapi` fails loudly here.
+ * regenerating must reproduce it byte-for-byte (modulo line endings on
+ * autocrlf checkouts), so any route/schema change that skips
+ * `generate:openapi` fails loudly here.
  */
 final class AdminSchemasTest extends TestCase
 {
@@ -154,6 +155,37 @@ final class AdminSchemasTest extends TestCase
         $second = SchemaGenerator::encode(self::regenerate()['spec']);
 
         $this->assertSame($first, $second);
+    }
+
+    /**
+     * Drift alarm: every catalogue route must exist VERBATIM (method + path,
+     * constraint syntax included) among the live registrations in
+     * public/index.php — the catalogue documents real routes, not aspirations.
+     */
+    public function testCatalogueRoutesMatchTheLiveRegistrations(): void
+    {
+        $source = (string) file_get_contents(__DIR__ . '/../../public/index.php');
+        preg_match_all(
+            "/\\\$router->register\\(\\s*'(GET|POST|PATCH|PUT|DELETE)',\\s*'([^']+)'/",
+            $source,
+            $matches,
+            PREG_SET_ORDER
+        );
+
+        $live = [];
+        foreach ($matches as $match) {
+            $live[$match[1] . ' ' . $match[2]] = true;
+        }
+        $this->assertNotSame([], $live, 'The live registrations must be extractable');
+
+        foreach (CoreApiSchemas::routes() as $route) {
+            $key = $route['method'] . ' ' . $route['path'];
+            $this->assertArrayHasKey(
+                $key,
+                $live,
+                "Catalogue route '{$key}' is not registered in public/index.php — the published contract would lie"
+            );
+        }
     }
 
     public function testCommittedSpecHasNoDanglingRefs(): void

@@ -199,6 +199,10 @@ final class AuditLogApiHandler
             }
         }
 
+        // The published contract (WC-167) declares metadata: object. An empty
+        // PHP array would JSON-encode as [] — emit a real empty OBJECT instead.
+        $publicMetadata = $metadata === [] ? new \stdClass() : $metadata;
+
         return [
             'id' => (int) ($row['id'] ?? 0),
             'tenantId' => isset($row['tenant_id']) ? (int) $row['tenant_id'] : null,
@@ -212,7 +216,7 @@ final class AuditLogApiHandler
             'targetId' => isset($row['target_id']) && $row['target_id'] !== null
                 ? (int) $row['target_id']
                 : null,
-            'metadata' => $metadata,
+            'metadata' => $publicMetadata,
             'ipAddress' => isset($row['ip_address']) && $row['ip_address'] !== null
                 ? (string) $row['ip_address']
                 : null,

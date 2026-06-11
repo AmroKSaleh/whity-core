@@ -211,6 +211,7 @@ final class CoreApiSchemas
                 'request' => 'TenantUpdateRequest',
                 'responses' => [
                     200 => self::jsonResponse('Update confirmation', 'MutationResponse'),
+                    400 => self::errorResponse('Validation failed (e.g. invalid slug format)'),
                     404 => self::errorResponse('Tenant not found'),
                     409 => self::errorResponse('Tenant name or slug already exists'),
                 ] + self::authErrors(),
@@ -298,6 +299,7 @@ final class CoreApiSchemas
                 'request' => 'OuRoleAssignRequest',
                 'responses' => [
                     201 => self::jsonResponse('The created assignment', 'OuRoleAssignmentResponse'),
+                    400 => self::errorResponse('role_id missing'),
                     404 => self::errorResponse('Organizational unit or role not found'),
                     409 => self::errorResponse('Assignment already exists'),
                 ] + self::authErrors(),
@@ -394,7 +396,7 @@ final class CoreApiSchemas
             'role' => self::str(),
             'tenantId' => self::int(),
             'createdAt' => self::str(true),
-        ], ['id', 'email', 'role', 'tenantId']);
+        ], ['id', 'name', 'email', 'role', 'tenantId', 'createdAt']);
 
         $permission = self::object([
             'id' => self::int(),
@@ -405,11 +407,11 @@ final class CoreApiSchemas
         $role = self::object([
             'id' => self::int(),
             'name' => self::str(),
-            'description' => self::str(),
+            'description' => self::str(true),
             'parent_id' => self::int(true),
             'created_at' => self::str(true),
             'permissionCount' => self::int(),
-        ], ['id', 'name']);
+        ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissionCount']);
 
         $tenant = self::object([
             'id' => self::int(),
@@ -417,7 +419,7 @@ final class CoreApiSchemas
             'slug' => self::str(true),
             'userCount' => self::int(),
             'createdAt' => self::str(true),
-        ], ['id', 'name']);
+        ], ['id', 'name', 'slug', 'userCount', 'createdAt']);
 
         $ou = self::object([
             'id' => self::int(),
@@ -425,9 +427,9 @@ final class CoreApiSchemas
             'parent_id' => self::int(true),
             'name' => self::str(),
             'slug' => self::str(),
-            'description' => self::str(),
+            'description' => self::str(true),
             'created_at' => self::str(true),
-        ], ['id', 'tenant_id', 'name', 'slug']);
+        ], ['id', 'tenant_id', 'parent_id', 'name', 'slug', 'description', 'created_at']);
 
         $delegation = self::object([
             'id' => self::int(),
@@ -439,7 +441,7 @@ final class CoreApiSchemas
             'ouId' => self::int(true),
             'grantedAt' => self::str(true),
             'revokedAt' => self::str(true),
-        ], ['id', 'tenantId', 'grantorUserId', 'granteeType', 'granteeId', 'permission']);
+        ], ['id', 'tenantId', 'grantorUserId', 'granteeType', 'granteeId', 'permission', 'ouId', 'grantedAt', 'revokedAt']);
 
         $auditEntry = self::object([
             'id' => self::int(),
@@ -451,7 +453,7 @@ final class CoreApiSchemas
             'metadata' => ['type' => 'object'],
             'ipAddress' => self::str(true),
             'createdAt' => self::str(true),
-        ], ['id', 'tenantId', 'action']);
+        ], ['id', 'tenantId', 'actorUserId', 'action', 'targetType', 'targetId', 'metadata', 'ipAddress', 'createdAt']);
 
         $roleSummary = self::object([
             'id' => self::int(),
@@ -476,11 +478,13 @@ final class CoreApiSchemas
             'User' => $user,
             'UserListResponse' => self::listEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
+            // NOTE: no tenantId field — the handler always creates the user in
+            // the caller's TenantContext (a declared field with zero runtime
+            // effect would be a contract lie).
             'UserCreateRequest' => self::object([
                 'email' => self::str(),
                 'password' => ['type' => 'string', 'minLength' => 6],
                 'role' => $permissionRef,
-                'tenantId' => self::int(),
             ], ['email', 'password']),
             'UserUpdateRequest' => self::object([
                 'email' => self::str(),
@@ -496,11 +500,11 @@ final class CoreApiSchemas
             'RoleDetail' => self::object([
                 'id' => self::int(),
                 'name' => self::str(),
-                'description' => self::str(),
+                'description' => self::str(true),
                 'parent_id' => self::int(true),
                 'created_at' => self::str(true),
                 'permissions' => ['type' => 'array', 'items' => SchemaBuilder::ref('Permission')],
-            ], ['id', 'name', 'permissions']),
+            ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissions']),
             'RoleDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('RoleDetail')),
             'RoleCreateRequest' => self::object([
                 'name' => self::str(),
@@ -542,13 +546,13 @@ final class CoreApiSchemas
                 'parent_id' => self::int(true),
                 'name' => self::str(),
                 'slug' => self::str(),
-                'description' => self::str(),
+                'description' => self::str(true),
                 'created_at' => self::str(true),
                 'children' => [
                     'type' => 'array',
                     'items' => self::object(['id' => self::int()], ['id']),
                 ],
-            ], ['id', 'tenant_id', 'name', 'slug', 'children']),
+            ], ['id', 'tenant_id', 'parent_id', 'name', 'slug', 'description', 'created_at', 'children']),
             'OuDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('OuDetail')),
             'OuCreateRequest' => self::object([
                 'name' => self::str(),

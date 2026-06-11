@@ -39,12 +39,51 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
         $this->pdo = self::makeSqliteSchema();
         $this->db = self::wrapSqlite($this->pdo);
         MockRequestFactory::setTestTenant(1);
+        $_GET = [];
     }
 
     protected function tearDown(): void
     {
         RoleChecker::clearCache();
         TenantContext::reset();
+        $_GET = [];
+    }
+
+    /**
+     * WC-167 review BLOCKER regression: at runtime FrankenPHP strips the query
+     * string from the path, so filters MUST be read from $_GET (the path-query
+     * form below only ever existed in tests). A revoked delegation appears
+     * when includeRevoked arrives via the superglobal.
+     */
+    public function testFiltersAreReadFromTheGetSuperglobal(): void
+    {
+        $this->pdo->exec("
+            INSERT INTO permission_delegations
+                (tenant_id, grantor_user_id, grantee_type, grantee_id, permission, granted_at, revoked_at)
+            VALUES (1, 10, 'user', 11, 'users:read', datetime('now'), datetime('now'))
+        ");
+
+        $_GET = ['includeRevoked' => '1'];
+        $response = $this->handler()->list(new Request('GET', '/api/delegations'));
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertCount(
+            1,
+            $body['data'] ?? [],
+            'includeRevoked supplied via $_GET (the runtime shape) must surface the revoked delegation'
+        );
+    }
+
+    /**
+     * The documented 400 for an invalid granteeType must fire when the filter
+     * arrives via $_GET, not silently return 200 with wrong data.
+     */
+    public function testInvalidGranteeTypeFromGetSuperglobalReturns400(): void
+    {
+        $_GET = ['granteeType' => 'bogus'];
+        $response = $this->handler()->list(new Request('GET', '/api/delegations'));
+
+        $this->assertSame(400, $response->getStatusCode());
     }
 
     public function testCreateRejectsPermissionGrantorDoesNotHoldWith422(): void
