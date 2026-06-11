@@ -1067,6 +1067,52 @@
                 ]
             }
         },
+        "/api/permissions": {
+            "get": {
+                "operationId": "get_api_permissions",
+                "summary": "List the permission catalogue",
+                "tags": [
+                    "roles"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "All known permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PermissionCatalogueResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/roles": {
             "get": {
                 "operationId": "get_api_roles",
@@ -2574,6 +2620,44 @@
                 "required": [
                     "id",
                     "name"
+                ]
+            },
+            "PermissionCatalogueEntry": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "source": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "name",
+                    "description"
+                ]
+            },
+            "PermissionCatalogueResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PermissionCatalogueEntry"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "PermissionListResponse": {

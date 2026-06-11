@@ -34,8 +34,10 @@ describe('apiClient', () => {
     await apiClient('/api/users');
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
+    // /api paths stay RELATIVE so they go through the Next.js proxy (which
+    // forwards the httpOnly cookies to the backend).
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/users',
+      '/api/users',
       expect.objectContaining({
         credentials: 'include',
       })
@@ -102,11 +104,11 @@ describe('apiClient', () => {
     expect(response.status).toBe(200);
     expect(mockFetch).toHaveBeenCalledTimes(3);
 
-    // First call: original request
-    expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:8000/api/protected');
+    // First call: original request (proxy-relative)
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/protected');
 
-    // Second call: refresh endpoint
-    expect(mockFetch.mock.calls[1][0]).toBe('http://localhost:8000/api/auth/refresh');
+    // Second call: refresh endpoint (also proxy-relative)
+    expect(mockFetch.mock.calls[1][0]).toBe('/api/auth/refresh');
     expect(mockFetch.mock.calls[1][1]).toEqual(
       expect.objectContaining({
         method: 'POST',
@@ -115,7 +117,7 @@ describe('apiClient', () => {
     );
 
     // Third call: retry original request
-    expect(mockFetch.mock.calls[2][0]).toBe('http://localhost:8000/api/protected');
+    expect(mockFetch.mock.calls[2][0]).toBe('/api/protected');
   });
 
   test('returns 401 if refresh fails', async () => {
@@ -225,17 +227,14 @@ describe('apiClient', () => {
     );
   });
 
-  test('constructs full URL from relative path', async () => {
+  test('keeps /api paths relative (Next.js proxy handles them)', async () => {
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true }), { status: 200 })
     );
 
     await apiClient('/api/users');
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/users',
-      expect.any(Object)
-    );
+    expect(mockFetch).toHaveBeenCalledWith('/api/users', expect.any(Object));
   });
 
   test('accepts absolute URLs', async () => {
@@ -251,17 +250,19 @@ describe('apiClient', () => {
     );
   });
 
-  test('uses custom API URL from environment', async () => {
+  test('uses custom API URL from environment for non-/api paths', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'https://custom.api.com';
 
     mockFetch.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true }), { status: 200 })
     );
 
-    await apiClient('/api/users');
+    // Only non-/api paths hit the backend directly; /api paths always go
+    // through the Next.js proxy regardless of the env var.
+    await apiClient('/health');
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'https://custom.api.com/api/users',
+      'https://custom.api.com/health',
       expect.any(Object)
     );
   });
@@ -279,13 +280,22 @@ describe('apiClient', () => {
     await apiClient('/api/users', options);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://localhost:8000/api/users',
+      '/api/users',
       expect.objectContaining({
         method: 'POST',
         credentials: 'include',
-        headers: { 'X-Custom-Header': 'value' },
       })
     );
+
+    // Headers are normalized into a Headers instance that preserves the
+    // caller's entries and adds the CSRF defense header (WC-160).
+    const init = mockFetch.mock.calls[0][1];
+    const headers = init?.headers;
+    if (!(headers instanceof Headers)) {
+      throw new Error('expected a Headers instance');
+    }
+    expect(headers.get('X-Custom-Header')).toBe('value');
+    expect(headers.get('X-Requested-With')).toBe('XMLHttpRequest');
   });
 
   test('handles 3xx success responses', async () => {

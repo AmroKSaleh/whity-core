@@ -459,12 +459,19 @@ function writeTargets(targets) {
 
 /**
  * Return the list of targets whose on-disk content differs from generated.
+ *
+ * The comparison is line-ending agnostic: on Windows checkouts with
+ * core.autocrlf the committed outputs materialize as CRLF while the
+ * generator emits LF — that is not drift, only content differences are.
  */
 function findStaleTargets(targets) {
+  const normalize = (s) => s.replace(/\r\n/g, '\n');
   const stale = [];
   for (const { path: p, content } of targets) {
     const current = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
-    if (current !== content) stale.push(p);
+    if (current === null || normalize(current) !== normalize(content)) {
+      stale.push(p);
+    }
   }
   return stale;
 }

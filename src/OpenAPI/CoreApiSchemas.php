@@ -179,6 +179,13 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not visible'),
                 ] + self::authErrors(),
             ]),
+            self::adminRoute('GET', '/api/permissions', [
+                'summary' => 'List the permission catalogue',
+                'tags' => ['roles'],
+                'responses' => [
+                    200 => self::jsonResponse('All known permissions', 'PermissionCatalogueResponse'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -495,6 +502,16 @@ final class CoreApiSchemas
 
             'Permission' => $permission,
             'PermissionListResponse' => self::listEnvelope('Permission'),
+            // The catalogue (GET /api/permissions) merges database rows with
+            // registry-only entries, which carry NO database id and a `source`
+            // tag instead — a distinct shape from the role-scoped Permission.
+            'PermissionCatalogueEntry' => self::object([
+                'id' => self::int(true),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'source' => self::str(),
+            ], ['id', 'name', 'description']),
+            'PermissionCatalogueResponse' => self::listEnvelope('PermissionCatalogueEntry'),
             'Role' => $role,
             'RoleListResponse' => self::listEnvelope('Role'),
             'RoleDetail' => self::object([

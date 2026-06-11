@@ -134,3 +134,27 @@ The schema generator is in `src/OpenAPI/`:
 - `SchemaBuilder.php` — OpenAPI spec builder helper
 
 Tests are in `tests/OpenAPI/` and `tests/Console/`.
+
+## Typed Frontend Client (WC-168)
+
+The spec is the generation input for the frontend's typed API client:
+
+- `cd web && npm run generate:api` regenerates `web/lib/api/schema.d.ts` from
+  `public/openapi.json` via **openapi-typescript**. The committed file must
+  match a fresh generation — CI fails otherwise (`web` job drift check).
+- `web/lib/api/client.ts` wraps the schema with **openapi-fetch** and
+  preserves the platform auth behavior as middleware: `credentials: 'include'`,
+  the `X-Requested-With` CSRF header (WC-160), and the 401 → silent refresh →
+  single retry flow. The retry bypasses the middleware, so refresh loops are
+  structurally impossible. `web/__tests__/typed-api-client.test.ts` pins this
+  contract.
+- Screens import the singleton: `import { api } from '@/lib/api/client'` and
+  call `api.GET('/api/users')`, `api.POST('/api/delegations', { body })`,
+  `api.PATCH('/api/users/{id}', { params: { path: { id } }, body })` — request
+  bodies, path params, query params and responses are all typed from the spec.
+- Feature `types.ts` files derive their shapes from the schema
+  (`components['schemas']['Delegation']`) instead of hand-mirroring the API.
+
+Changing an endpoint therefore means: update the handler + `CoreApiSchemas`,
+run `php public/index.php generate:openapi`, then `npm run generate:api`, and
+commit all three artifacts together.

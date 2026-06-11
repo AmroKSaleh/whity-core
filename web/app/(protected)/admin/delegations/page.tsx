@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
@@ -27,7 +27,6 @@ interface DelegationRow {
 }
 
 export default function DelegationsPage() {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
 
   const [delegations, setDelegations] = useState<Delegation[]>([]);
@@ -41,7 +40,7 @@ export default function DelegationsPage() {
   const fetchDelegations = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient('/api/delegations');
+      const { data, response } = await api.GET('/api/delegations');
 
       if (response.status === 403) {
         // The acting user lacks delegation:manage — show an access-denied state
@@ -52,12 +51,11 @@ export default function DelegationsPage() {
       }
       setIsForbidden(false);
 
-      if (!response.ok) {
+      if (data === undefined) {
         throw new Error('Failed to fetch delegations');
       }
 
-      const data = await response.json();
-      setDelegations(data.data ?? []);
+      setDelegations(data.data);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to fetch delegations';
@@ -65,7 +63,7 @@ export default function DelegationsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [apiClient, addToast]);
+  }, [addToast]);
 
   useEffect(() => {
     void fetchDelegations();

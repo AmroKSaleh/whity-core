@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
@@ -34,20 +34,18 @@ export function RevokeDelegationModal({
   delegation,
   onSuccess,
 }: RevokeDelegationModalProps) {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isRevoking, setIsRevoking] = useState(false);
 
   const handleRevoke = async () => {
     try {
       setIsRevoking(true);
-      const response = await apiClient(`/api/delegations/${delegation.id}`, {
-        method: 'DELETE',
+      const { error, response } = await api.DELETE('/api/delegations/{id}', {
+        params: { path: { id: delegation.id } },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error ?? 'Failed to revoke delegation');
+      if (error !== undefined || !response.ok) {
+        throw new Error(error?.error ?? 'Failed to revoke delegation');
       }
 
       addToast('Delegation revoked successfully', 'success');

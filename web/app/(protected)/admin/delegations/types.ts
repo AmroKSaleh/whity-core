@@ -1,47 +1,30 @@
 /**
  * Types for the permission delegations admin area (WC-34).
  *
- * Mirrors the API contract exposed by `DelegationsApiHandler`: camelCase keys,
- * a polymorphic grantee modelled as `granteeType` + `granteeId`, an optional OU
- * scope, and a revocable lifecycle (`revokedAt` is null while live).
+ * Since WC-168 these are DERIVED from the OpenAPI schema generated off
+ * `public/openapi.json` (`npm run generate:api`), so they track the published
+ * API contract instead of hand-mirroring it. The aliases keep the feature's
+ * import surface stable.
  */
 
-export type GranteeType = 'role' | 'user';
+import type { components } from '@/lib/api/schema';
 
-export interface Delegation {
-  id: number;
-  tenantId: number;
-  grantorUserId: number;
-  granteeType: GranteeType;
-  granteeId: number;
-  permission: string;
-  ouId: number | null;
-  grantedAt: string | null;
-  revokedAt: string | null;
-}
+export type Delegation = components['schemas']['Delegation'];
 
-/** A permission as returned by `GET /api/permissions`. */
-export interface Permission {
-  id: number;
-  name: string;
-  description: string;
-}
+export type GranteeType = Delegation['granteeType'];
+
+/**
+ * A permission catalogue entry as returned by `GET /api/permissions`. Note:
+ * registry-only permissions carry `id: null` and a `source` tag — use `name`
+ * as the stable identity.
+ */
+export type Permission = components['schemas']['PermissionCatalogueEntry'];
 
 /** A role as returned by `GET /api/roles` (grantee picker). */
-export interface RoleOption {
-  id: number;
-  name: string;
-}
+export type RoleOption = components['schemas']['Role'];
 
 /** A user as returned by `GET /api/users` (grantee picker). */
-export interface UserOption {
-  id: number;
-  name: string;
-  email: string;
-}
+export type UserOption = components['schemas']['User'];
 
 /** An organizational unit as returned by `GET /api/ous` (scope picker). */
-export interface OuOption {
-  id: number;
-  name: string;
-}
+export type OuOption = components['schemas']['OrganizationalUnit'];
