@@ -18,6 +18,10 @@ namespace Whity\Sdk;
  * - Statements should be idempotent (`IF NOT EXISTS` / `IF EXISTS`) so re-runs
  *   are safe; the host additionally records applied migrations per plugin.
  * - {@see down()} must cleanly revert everything {@see up()} created.
+ * - Do NOT manage transactions inside {@see up()} / {@see down()} — the host
+ *   wraps each migration (and its tracking record) in its own transaction; a
+ *   migration that calls beginTransaction/commit/rollBack fails the run and
+ *   is not recorded.
  * - Tenant-owned tables carry a `tenant_id` column; queries against them must
  *   be tenant-scoped by the plugin's handlers.
  */

@@ -36,16 +36,141 @@ final class PluginMigrationsRealEngineTest extends TestCase
     private PDO $pdo;
     private Database $db;
 
+    private static string $hijackDir;
+    private static string $mixedDir;
+
     public static function setUpBeforeClass(): void
     {
         // One shared fixture tree per process: plugin classes can only be
         // require'd once, so every test reuses the same namespaces/paths.
         self::$pluginsDir = sys_get_temp_dir() . '/whity_migrunner_' . uniqid();
         self::$explodingDir = sys_get_temp_dir() . '/whity_migexploder_' . uniqid();
+        self::$hijackDir = sys_get_temp_dir() . '/whity_mighijack_' . uniqid();
+        self::$mixedDir = sys_get_temp_dir() . '/whity_migmixed_' . uniqid();
         self::$emptyCoreDir = sys_get_temp_dir() . '/whity_migcore_' . uniqid();
         mkdir(self::$pluginsDir . '/MigRunnerPlugin/Migrations', 0755, true);
         mkdir(self::$explodingDir . '/MigRunnerExploder/Migrations', 0755, true);
+        mkdir(self::$hijackDir . '/MigRunnerHijacker/Migrations', 0755, true);
+        mkdir(self::$mixedDir . '/AAThrowingDecl', 0755, true);
+        mkdir(self::$mixedDir . '/ZzGoodDecl/Migrations', 0755, true);
         mkdir(self::$emptyCoreDir, 0755, true);
+
+        file_put_contents(self::$hijackDir . '/MigRunnerHijacker/Plugin.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace MigRunnerHijacker;
+
+use Whity\Sdk\PluginInterface;
+
+final class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MigRunnerHijacker'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array
+    {
+        return [Migrations\HijacksTransaction::class];
+    }
+}
+PHP);
+
+        file_put_contents(self::$hijackDir . '/MigRunnerHijacker/Migrations/HijacksTransaction.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace MigRunnerHijacker\Migrations;
+
+use Whity\Sdk\MigrationInterface;
+
+final class HijacksTransaction implements MigrationInterface
+{
+    public function up(\PDO $pdo): void
+    {
+        $pdo->exec('CREATE TABLE first_half (id INTEGER PRIMARY KEY)');
+        // Misbehaving migration: ends the HOST's transaction itself.
+        $pdo->rollBack();
+        $pdo->exec('CREATE TABLE second_half (id INTEGER PRIMARY KEY)');
+    }
+
+    public function down(\PDO $pdo): void
+    {
+    }
+}
+PHP);
+
+        file_put_contents(self::$mixedDir . '/AAThrowingDecl/Plugin.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace AAThrowingDecl;
+
+use Whity\Sdk\PluginInterface;
+
+final class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'AAThrowingDecl'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array
+    {
+        throw new \RuntimeException('intentional getMigrations() explosion');
+    }
+}
+PHP);
+
+        file_put_contents(self::$mixedDir . '/ZzGoodDecl/Plugin.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace ZzGoodDecl;
+
+use Whity\Sdk\PluginInterface;
+
+final class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'ZzGoodDecl'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array
+    {
+        return [Migrations\CreateGoodTable::class];
+    }
+}
+PHP);
+
+        file_put_contents(self::$mixedDir . '/ZzGoodDecl/Migrations/CreateGoodTable.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace ZzGoodDecl\Migrations;
+
+use Whity\Sdk\MigrationInterface;
+
+final class CreateGoodTable implements MigrationInterface
+{
+    public function up(\PDO $pdo): void
+    {
+        $pdo->exec('CREATE TABLE IF NOT EXISTS good_tbl (id INTEGER PRIMARY KEY)');
+    }
+
+    public function down(\PDO $pdo): void
+    {
+        $pdo->exec('DROP TABLE IF EXISTS good_tbl');
+    }
+}
+PHP);
 
         file_put_contents(self::$pluginsDir . '/MigRunnerPlugin/Plugin.php', <<<'PHP'
 <?php
@@ -146,7 +271,7 @@ PHP);
 
     public static function tearDownAfterClass(): void
     {
-        foreach ([self::$pluginsDir, self::$explodingDir, self::$emptyCoreDir] as $dir) {
+        foreach ([self::$pluginsDir, self::$explodingDir, self::$hijackDir, self::$mixedDir, self::$emptyCoreDir] as $dir) {
             self::removeDirectory($dir);
         }
     }
@@ -244,7 +369,70 @@ PHP);
         $this->assertNotContains('plugin:MigRunnerExploder:ExplodesMidway', $this->recordedNames());
     }
 
+    /**
+     * Review BLOCKER regression: a migration that ends the HOST's transaction
+     * itself (rollBack/commit inside up()) must NOT leave a phantom tracking
+     * row behind — a recorded-but-unapplied migration would be masked from
+     * every future re-run, silently diverging schema from the record.
+     */
+    public function testTransactionHijackingMigrationLeavesNoPhantomRecord(): void
+    {
+        $loader = new PluginLoader(self::$hijackDir, new Router(), null, new HookManager());
+        $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
+
+        $exit = $this->runQuiet($command, ['run']);
+
+        $this->assertSame(1, $exit, 'A transaction-hijacking migration must fail the run');
+        $this->assertNotContains(
+            'plugin:MigRunnerHijacker:HijacksTransaction',
+            $this->recordedNames(),
+            'No tracking row may be recorded when the migration broke the host transaction'
+        );
+        // NOTE: statements the hijacker ran AFTER its own rollBack() executed
+        // in autocommit and cannot be undone by the runner — that damage is the
+        // forbidden behaviour's own doing. The invariant the runner protects is
+        // the RECORD: never a phantom "executed" row masking unapplied schema.
+    }
+
+    /**
+     * Review MAJOR regression: one plugin whose getMigrations() throws must be
+     * warned about and SKIPPED — core migrations and every other plugin's
+     * migrations still run (AAThrowingDecl loads before ZzGoodDecl).
+     */
+    public function testThrowingGetMigrationsIsSkippedAndOthersStillRun(): void
+    {
+        $loader = new PluginLoader(self::$mixedDir, new Router(), null, new HookManager());
+        $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
+
+        $exit = $this->runQuiet($command, ['run']);
+
+        $this->assertSame(0, $exit, 'One broken declaration must not fail the whole run');
+        $this->assertTrue($this->tableExists('good_tbl'), "The well-behaved plugin's migration must still run");
+        $this->assertContains('plugin:ZzGoodDecl:CreateGoodTable', $this->recordedNames());
+    }
+
     // ==================== rollback ====================
+
+    /**
+     * Review MAJOR regression: with identical executed_at timestamps (one
+     * batch run), rollback must pick the genuinely LAST migration — the
+     * highest id — not whichever row the engine happens to return first.
+     */
+    public function testRollbackBreaksTimestampTiesByIdDescending(): void
+    {
+        // Same executed_at for both rows; the plugin row is the later insert.
+        $this->pdo->exec("INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
+            VALUES ('000_fake_core', '2030-01-01 00:00:00', 1)");
+        $this->pdo->exec("INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
+            VALUES ('plugin:MigRunnerPlugin:CreateProbeTable', '2030-01-01 00:00:00', 1)");
+        $this->pdo->exec('CREATE TABLE probe_items (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL, label VARCHAR(255))');
+
+        $exit = $this->runQuiet($this->command(), ['rollback']);
+
+        $this->assertSame(0, $exit, 'Rollback must target the later row (the plugin migration), not the tied core row');
+        $this->assertFalse($this->tableExists('probe_items'), 'The plugin migration must be the one rolled back');
+        $this->assertContains('000_fake_core', $this->recordedNames(), 'The tied earlier row must remain untouched');
+    }
 
     public function testRollbackRunsPluginDownAndRemovesRecord(): void
     {

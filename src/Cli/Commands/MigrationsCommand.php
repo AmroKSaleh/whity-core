@@ -68,7 +68,10 @@ class MigrationsCommand
                 '--help', '-h', 'help' => $this->showHelp(),
                 default => $this->unknownAction($action),
             };
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            // \Throwable, not \Exception: a malformed plugin file raises a
+            // ParseError (an \Error) from the loader's require_once, and the
+            // migrate command must degrade to exit 1, not a fatal.
             echo "\033[0;31m✗ Error: " . $e->getMessage() . "\033[0m\n";
             return 1;
         }
@@ -102,7 +105,9 @@ class MigrationsCommand
             }
 
             // Plugin-declared migrations (WC-164), listed after core ones.
+            $declaredRecords = [];
             foreach ($this->pluginMigrations() as $entry) {
+                $declaredRecords[$entry['record']] = true;
                 $isExecuted = isset($executed[$entry['record']]);
 
                 if (!$isExecuted) {
@@ -114,6 +119,18 @@ class MigrationsCommand
                     $isExecuted ? 'Executed' : 'Pending',
                     $isExecuted ? ($executed[$entry['record']]['executed_at'] ?? 'N/A') : 'N/A'
                 ];
+            }
+
+            // Executed plugin records whose declaring plugin/class is gone
+            // (renamed, uninstalled): surface them instead of hiding them.
+            foreach ($executed as $name => $row) {
+                if (str_starts_with((string) $name, self::PLUGIN_PREFIX) && !isset($declaredRecords[$name])) {
+                    $migrations[] = [
+                        (string) $name,
+                        'Orphaned (plugin not loaded)',
+                        $row['executed_at'] ?? 'N/A'
+                    ];
+                }
             }
 
             echo "\n\033[1;33mMigration Status\033[0m\n";
@@ -192,9 +209,12 @@ class MigrationsCommand
     private function rollback(): int
     {
         try {
+            // id is the tiebreaker: a batch run records many migrations with
+            // (near-)identical executed_at values, and rolling back the wrong
+            // one would corrupt schema state.
             $stmt = $this->db->getPdo()->prepare('
                 SELECT migration_name FROM core_schema_migrations
-                ORDER BY executed_at DESC LIMIT 1
+                ORDER BY executed_at DESC, id DESC LIMIT 1
             ');
             $stmt->execute();
             $last = $stmt->fetch();
@@ -404,7 +424,14 @@ class MigrationsCommand
         foreach ($this->pluginLoader()->getPlugins() as $plugin) {
             $pluginName = $plugin->getName();
 
-            foreach ($plugin->getMigrations() as $fqcn) {
+            try {
+                $declared = $plugin->getMigrations();
+            } catch (\Throwable $e) {
+                echo "\033[1;33m⚠ Skipping {$pluginName}: getMigrations() threw " . get_class($e) . "\033[0m\n";
+                continue;
+            }
+
+            foreach ($declared as $fqcn) {
                 if (!is_string($fqcn) || !class_exists($fqcn)) {
                     $shown = is_string($fqcn) ? $fqcn : gettype($fqcn);
                     echo "\033[1;33m⚠ Skipping unknown migration class {$shown} declared by {$pluginName}\033[0m\n";
@@ -472,7 +499,21 @@ class MigrationsCommand
         try {
             if ($direction === 'up') {
                 $migration->up($pdo);
+            } else {
+                $migration->down($pdo);
+            }
 
+            // The migration must NOT manage the transaction itself: if it
+            // committed or rolled back our transaction, recording the tracking
+            // row now would run in autocommit and create a phantom record for
+            // schema that may not exist (masked from every future re-run).
+            if (!$pdo->inTransaction()) {
+                throw new \Exception(
+                    'the migration ended the host transaction itself; migrations must not call beginTransaction/commit/rollBack'
+                );
+            }
+
+            if ($direction === 'up') {
                 $stmt = $pdo->prepare('
                     INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
                     VALUES (?, NOW(), ?)
@@ -480,8 +521,6 @@ class MigrationsCommand
                 ');
                 $stmt->execute([$entry['record'], (int)((microtime(true) - $start) * 1000)]);
             } else {
-                $migration->down($pdo);
-
                 $stmt = $pdo->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
                 $stmt->execute([$entry['record']]);
             }
