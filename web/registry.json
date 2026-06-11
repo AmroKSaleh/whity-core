@@ -1,0 +1,161 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "whity",
+  "homepage": "https://github.com/AmroKSaleh/whity-core",
+  "items": [
+    {
+      "name": "alert",
+      "type": "registry:ui",
+      "title": "Alert",
+      "description": "Callout for user attention with variant styles.",
+      "dependencies": ["class-variance-authority"],
+      "files": [{ "path": "components/ui/alert.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "badge",
+      "type": "registry:ui",
+      "title": "Badge",
+      "description": "Small status descriptor with variant styles.",
+      "dependencies": ["class-variance-authority", "radix-ui"],
+      "files": [{ "path": "components/ui/badge.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "button",
+      "type": "registry:ui",
+      "title": "Button",
+      "description": "Button with variants, sizes and icon support.",
+      "dependencies": ["class-variance-authority", "radix-ui", "@tabler/icons-react"],
+      "files": [{ "path": "components/ui/button.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "card",
+      "type": "registry:ui",
+      "title": "Card",
+      "description": "Container with header, content and footer sections.",
+      "files": [{ "path": "components/ui/card.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "dialog",
+      "type": "registry:ui",
+      "title": "Dialog",
+      "description": "Modal dialog over the page content.",
+      "dependencies": ["radix-ui", "@tabler/icons-react"],
+      "registryDependencies": ["@whity/button"],
+      "files": [{ "path": "components/ui/dialog.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "dropdown-menu",
+      "type": "registry:ui",
+      "title": "Dropdown Menu",
+      "description": "Menu of actions opened from a trigger.",
+      "dependencies": ["radix-ui", "@tabler/icons-react"],
+      "files": [{ "path": "components/ui/dropdown-menu.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "form",
+      "type": "registry:ui",
+      "title": "Form",
+      "description": "react-hook-form wiring with accessible field primitives.",
+      "dependencies": ["@radix-ui/react-label", "@radix-ui/react-slot", "react-hook-form"],
+      "files": [{ "path": "components/ui/form.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "input",
+      "type": "registry:ui",
+      "title": "Input",
+      "description": "Styled text input.",
+      "files": [{ "path": "components/ui/input.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "select",
+      "type": "registry:ui",
+      "title": "Select",
+      "description": "Listbox-style select with keyboard navigation.",
+      "dependencies": ["radix-ui", "@tabler/icons-react"],
+      "files": [{ "path": "components/ui/select.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "sheet",
+      "type": "registry:ui",
+      "title": "Sheet",
+      "description": "Slide-in panel anchored to a screen edge.",
+      "dependencies": ["radix-ui", "@tabler/icons-react"],
+      "registryDependencies": ["@whity/button"],
+      "files": [{ "path": "components/ui/sheet.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "skeleton",
+      "type": "registry:ui",
+      "title": "Skeleton",
+      "description": "Loading placeholder block.",
+      "files": [{ "path": "components/ui/skeleton.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "tabs",
+      "type": "registry:ui",
+      "title": "Tabs",
+      "description": "Tabbed sections with variant styles.",
+      "dependencies": ["class-variance-authority", "radix-ui"],
+      "files": [{ "path": "components/ui/tabs.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "textarea",
+      "type": "registry:ui",
+      "title": "Textarea",
+      "description": "Styled multi-line text input.",
+      "files": [{ "path": "components/ui/textarea.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "toast",
+      "type": "registry:ui",
+      "title": "Toast",
+      "description": "Toast notifications: provider context plus the rendering container.",
+      "dependencies": ["@tabler/icons-react"],
+      "files": [
+        { "path": "components/ui/toast-container.tsx", "type": "registry:ui" },
+        { "path": "lib/toast-context.tsx", "type": "registry:lib" }
+      ]
+    },
+    {
+      "name": "admin-header",
+      "type": "registry:component",
+      "title": "Admin Header",
+      "description": "Admin page header with title, description and action slot.",
+      "files": [
+        {
+          "path": "components/admin/admin-header.tsx",
+          "type": "registry:component",
+          "target": "components/admin/admin-header.tsx"
+        }
+      ]
+    },
+    {
+      "name": "data-table",
+      "type": "registry:component",
+      "title": "Data Table",
+      "description": "Generic sortable data table with loading skeletons and row actions.",
+      "dependencies": ["@tabler/icons-react"],
+      "registryDependencies": ["@whity/skeleton"],
+      "files": [
+        {
+          "path": "components/admin/data-table.tsx",
+          "type": "registry:component",
+          "target": "components/admin/data-table.tsx"
+        }
+      ]
+    },
+    {
+      "name": "stats-chart",
+      "type": "registry:component",
+      "title": "Stats Chart",
+      "description": "Lightweight dependency-free bar chart for admin dashboards.",
+      "files": [
+        {
+          "path": "components/admin/stats-chart.tsx",
+          "type": "registry:component",
+          "target": "components/admin/stats-chart.tsx"
+        }
+      ]
+    }
+  ]
+}

@@ -84,6 +84,7 @@ final class AdminSchemasTest extends TestCase
             ['/api/tenants', 'get', 'responses', '200', 'TenantListResponse'],
             ['/api/ous', 'get', 'responses', '200', 'OuListResponse'],
             ['/api/ous/{id}', 'get', 'responses', '200', 'OuDetailResponse'],
+            ['/api/permissions', 'get', 'responses', '200', 'PermissionCatalogueResponse'],
             ['/api/delegations', 'get', 'responses', '200', 'DelegationListResponse'],
             ['/api/delegations', 'post', 'requestBody', null, 'DelegationCreateRequest'],
             ['/api/audit-logs', 'get', 'responses', '200', 'AuditLogListResponse'],

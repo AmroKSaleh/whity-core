@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
@@ -57,7 +57,6 @@ export function EditUserModal({
   user,
   onSuccess,
 }: EditUserModalProps) {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Role dropdown options come from the live tenant-visible role list, so only
@@ -90,25 +89,19 @@ export function EditUserModal({
       // local-part (there is no users.name column) and `tenant` moves are out
       // of scope server-side (WC-113), so both are shown read-only and never
       // submitted — sending them would be ignored anyway.
-      const response = await apiClient(`/api/users/${user.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          role: data.role,
-        }),
+      const { data: payload, error, response } = await api.PATCH('/api/users/{id}', {
+        params: { path: { id: user.id } },
+        body: { role: data.role },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || errorData.message || 'Failed to update user');
+      if (error !== undefined || !response.ok) {
+        throw new Error(error?.error ?? 'Failed to update user');
       }
 
       // Confirm the change actually persisted before claiming success: the
       // backend returns the updated user, so we assert the role it reports back
       // matches what we asked for rather than trusting a bare 200 (WC-113).
-      const payload = (await response.json().catch(() => null)) as
-        | { data?: { role?: string } }
-        | null;
-      const persistedRole = payload?.data?.role;
+      const persistedRole = payload?.data.role;
       if (persistedRole !== undefined && persistedRole !== data.role) {
         throw new Error('User update did not persist the selected role');
       }
@@ -167,7 +160,7 @@ export function EditUserModal({
             </div>
 
             <FormField
-              control={form.control as any}
+              control={form.control}
               name="role"
               render={({ field }) => (
                 <FormItem>

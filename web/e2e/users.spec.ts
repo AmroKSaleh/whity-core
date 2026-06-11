@@ -54,12 +54,13 @@ test.describe('Users (admin)', () => {
     const createDialog = page.getByRole('dialog');
     await expect(createDialog.getByText('Create New User')).toBeVisible();
 
-    await createDialog.getByLabel('Name').fill(`E2E User ${suffix}`);
+    // WC-168: the form carries only the fields the API reads (email, password,
+    // role) — name is server-derived from the email and tenant comes from the
+    // caller's tenant context.
     await createDialog.getByLabel('Email').fill(createdEmail);
     await createDialog.getByLabel('Password').fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
-    await createDialog.getByLabel('Tenant').fill('1');
     await createDialog.getByRole('button', { name: 'Create User' }).click();
 
     await expect(page.getByText('User created successfully')).toBeVisible();
@@ -118,12 +119,10 @@ test.describe('Users (admin)', () => {
     // Seed a user in the `user` role through the API used by the app proxy.
     await page.getByRole('button', { name: 'Create User' }).click();
     const createDialog = page.getByRole('dialog');
-    await createDialog.getByLabel('Name').fill(`Role Persist ${suffix}`);
     await createDialog.getByLabel('Email').fill(createdEmail);
     await createDialog.getByLabel('Password').fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
-    await createDialog.getByLabel('Tenant').fill('1');
     await createDialog.getByRole('button', { name: 'Create User' }).click();
     await expect(page.getByText('User created successfully')).toBeVisible();
 
@@ -175,13 +174,11 @@ test.describe('Users (admin)', () => {
     const createDialog = page.getByRole('dialog');
     await expect(createDialog.getByText('Create New User')).toBeVisible();
 
-    await createDialog.getByLabel('Name').fill(`Create Admin ${suffix}`);
     await createDialog.getByLabel('Email').fill(createdEmail);
     await createDialog.getByLabel('Password').fill('e2e-password-123');
     // Pick the non-default `admin` role at creation time.
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'Admin' }).click();
-    await createDialog.getByLabel('Tenant').fill('1');
     await createDialog.getByRole('button', { name: 'Create User' }).click();
 
     await expect(page.getByText('User created successfully')).toBeVisible();
@@ -234,12 +231,10 @@ test.describe('Edit User pre-fill (WC-100)', () => {
 
     await page.getByRole('button', { name: 'Create User' }).click();
     const createDialog = page.getByRole('dialog');
-    await createDialog.getByLabel('Name').fill('Prefill Probe');
     await createDialog.getByLabel('Email').fill(createdEmail);
     await createDialog.getByLabel('Password').fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
-    await createDialog.getByLabel('Tenant').fill('1');
     await createDialog.getByRole('button', { name: 'Create User' }).click();
     await expect(page.getByText('User created successfully')).toBeVisible();
 
@@ -269,9 +264,10 @@ test.describe('Edit User pre-fill (WC-100)', () => {
 /**
  * Create User form: client-side validation and dialog lifecycle.
  *
- * The create form is zod-validated (name required, valid email, password >= 8,
- * role + tenant required). These tests assert the field-level errors surface
- * and that no user is created, so they never touch the database.
+ * The create form is zod-validated (valid email, password >= 8, role required —
+ * WC-168 removed the dead Name/Tenant inputs the API never read). These tests
+ * assert the field-level errors surface and that no user is created, so they
+ * never touch the database.
  */
 test.describe('Create User validation + dialog (admin)', () => {
   test('shows validation errors and does not submit when fields are empty/invalid', async ({
@@ -285,21 +281,19 @@ test.describe('Create User validation + dialog (admin)', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByText('Create New User')).toBeVisible();
 
-    // Submit fully empty: name/email/password/role/tenant errors appear.
+    // Submit fully empty: email/password/role errors appear.
     await dialog.getByRole('button', { name: 'Create User' }).click();
-    await expect(dialog.getByText('Name is required')).toBeVisible();
     await expect(dialog.getByText('Invalid email address')).toBeVisible();
     await expect(dialog.getByText('Password must be at least 8 characters')).toBeVisible();
+    await expect(dialog.getByText('Role is required')).toBeVisible();
 
-    // Now provide an invalid email + too-short password; those specific errors
-    // remain while the name error clears.
-    await dialog.getByLabel('Name').fill('Validation Probe');
+    // Invalid email + too-short password keep their field errors after another
+    // submit attempt.
     await dialog.getByLabel('Email').fill('not-an-email');
     await dialog.getByLabel('Password').fill('short');
     await dialog.getByRole('button', { name: 'Create User' }).click();
     await expect(dialog.getByText('Invalid email address')).toBeVisible();
     await expect(dialog.getByText('Password must be at least 8 characters')).toBeVisible();
-    await expect(dialog.getByText('Name is required')).toHaveCount(0);
 
     // Nothing was created.
     await expect(page.getByText('User created successfully')).toHaveCount(0);
@@ -373,12 +367,10 @@ test.describe('Users role dropdown is driven from real roles (WC-121)', () => {
 
     await page.getByRole('button', { name: 'Create User' }).click();
     const createDialog = page.getByRole('dialog');
-    await createDialog.getByLabel('Name').fill(`Dropdown Probe ${suffix}`);
     await createDialog.getByLabel('Email').fill(probeEmail);
     await createDialog.getByLabel('Password').fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
-    await createDialog.getByLabel('Tenant').fill('1');
     await createDialog.getByRole('button', { name: 'Create User' }).click();
     await expect(page.getByText('User created successfully')).toBeVisible();
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 
 /**
@@ -46,7 +46,6 @@ export function useRoleOptions(enabled: boolean): {
   roleOptions: RoleOption[];
   isLoadingRoles: boolean;
 } {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([]);
   const [isLoadingRoles, setIsLoadingRoles] = useState(false);
@@ -62,21 +61,18 @@ export function useRoleOptions(enabled: boolean): {
     const fetchRoles = async (): Promise<void> => {
       try {
         setIsLoadingRoles(true);
-        const response = await apiClient('/api/roles');
+        const { data } = await api.GET('/api/roles');
 
-        if (!response.ok) {
+        if (data === undefined) {
           throw new Error('Failed to fetch roles');
         }
 
-        const payload = (await response.json()) as {
-          data?: Array<{ name?: unknown }>;
-        };
-        const options = (payload.data ?? [])
-          .map((role) => (typeof role.name === 'string' ? role.name : ''))
-          .filter((name): name is string => name.length > 0)
-          .map((name) => ({ value: name, label: toLabel(name) }));
-
-        setRoleOptions(options);
+        setRoleOptions(
+          data.data.map((role) => ({
+            value: role.name,
+            label: toLabel(role.name),
+          }))
+        );
       } catch (error) {
         const message =
           error instanceof Error ? error.message : 'Failed to fetch roles';
@@ -87,7 +83,7 @@ export function useRoleOptions(enabled: boolean): {
     };
 
     void fetchRoles();
-  }, [enabled, apiClient, addToast]);
+  }, [enabled, addToast]);
 
   return { roleOptions, isLoadingRoles };
 }

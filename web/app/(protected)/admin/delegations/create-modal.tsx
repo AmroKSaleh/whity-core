@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
@@ -48,7 +48,6 @@ export function CreateDelegationModal({
   onOpenChange,
   onSuccess,
 }: CreateDelegationModalProps) {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
 
   // Starts true: the dialog remounts on open (parent `key`) and immediately
@@ -73,34 +72,30 @@ export function CreateDelegationModal({
   const loadOptions = useCallback(async () => {
     try {
       const [permsRes, rolesRes, usersRes, ousRes] = await Promise.all([
-        apiClient('/api/permissions'),
-        apiClient('/api/roles'),
-        apiClient('/api/users'),
-        apiClient('/api/ous'),
+        api.GET('/api/permissions'),
+        api.GET('/api/roles'),
+        api.GET('/api/users'),
+        api.GET('/api/ous'),
       ]);
 
-      if (permsRes.ok) {
-        const data = await permsRes.json();
-        setPermissions(data.data ?? []);
+      if (permsRes.data !== undefined) {
+        setPermissions(permsRes.data.data);
       }
-      if (rolesRes.ok) {
-        const data = await rolesRes.json();
-        setRoles(data.data ?? []);
+      if (rolesRes.data !== undefined) {
+        setRoles(rolesRes.data.data);
       }
-      if (usersRes.ok) {
-        const data = await usersRes.json();
-        setUsers(data.data ?? []);
+      if (usersRes.data !== undefined) {
+        setUsers(usersRes.data.data);
       }
-      if (ousRes.ok) {
-        const data = await ousRes.json();
-        setOus(data.data ?? []);
+      if (ousRes.data !== undefined) {
+        setOus(ousRes.data.data);
       }
     } catch {
       addToast('Failed to load delegation options', 'error');
     } finally {
       setIsLoadingOptions(false);
     }
-  }, [apiClient, addToast]);
+  }, [addToast]);
 
   // Load the picker options when the dialog opens. Fetching external data is a
   // legitimate effect (synchronising with an external system); no React state
@@ -131,21 +126,20 @@ export function CreateDelegationModal({
 
     try {
       setIsSubmitting(true);
-      const response = await apiClient('/api/delegations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { error, response } = await api.POST('/api/delegations', {
+        body: {
           granteeType,
           granteeId: Number(granteeId),
           permissions: selectedPermissions,
           ouId: ouId === '' ? null : Number(ouId),
-        }),
+        },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+      // `error` is undefined for body-less failures too — also gate on the
+      // status so a 5xx without a JSON body can never toast success.
+      if (error !== undefined || !response.ok) {
         // 422 = subset-invariant violation (a permission the grantor lacks).
-        throw new Error(errorData.error ?? 'Failed to create delegation');
+        throw new Error(error?.error ?? 'Failed to create delegation');
       }
 
       addToast('Delegation created successfully', 'success');
@@ -263,7 +257,9 @@ export function CreateDelegationModal({
                 ) : (
                   permissions.map((permission) => (
                     <label
-                      key={permission.id}
+                      // Registry-only permissions carry id: null — the name is
+                      // the stable identity (it is the catalogue's merge key).
+                      key={permission.name}
                       className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted"
                     >
                       <input

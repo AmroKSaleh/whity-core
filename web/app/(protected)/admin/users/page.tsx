@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '@/lib/api/client';
+import type { components } from '@/lib/api/schema';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
@@ -17,17 +18,13 @@ import { CreateUserModal } from './create-modal';
 import { EditUserModal } from './edit-modal';
 import { DeleteUserModal } from './delete-modal';
 
-export interface User {
-  id: number;
-  name: string;
-  email: string;
-  role: string;
-  tenantId: number;
-  createdAt: string;
-}
+/**
+ * The user row shape, derived from the OpenAPI schema (WC-168) so it tracks
+ * the published `GET /api/users` contract instead of hand-mirroring it.
+ */
+export type User = components['schemas']['User'];
 
 export default function UsersPage() {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -36,17 +33,16 @@ export default function UsersPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient('/api/users');
+      const { data } = await api.GET('/api/users');
 
-      if (!response.ok) {
+      if (data === undefined) {
         throw new Error('Failed to fetch users');
       }
 
-      const data = await response.json();
-      setUsers(data.data || []);
+      setUsers(data.data);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to fetch users';
@@ -54,11 +50,11 @@ export default function UsersPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [addToast]);
 
   useEffect(() => {
-    fetchUsers();
-  }, []);
+    void fetchUsers();
+  }, [fetchUsers]);
 
   const handleEditClick = (user: User) => {
     setSelectedUser(user);

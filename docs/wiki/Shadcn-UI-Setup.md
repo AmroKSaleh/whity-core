@@ -345,3 +345,37 @@ export function ConfirmDialog({ open, onConfirm, onCancel }) {
 - **Installation Guide:** https://ui.shadcn.com/docs/installation/next
 - **Accessibility:** https://www.radix-ui.com/docs/primitives/overview/accessibility
 - **Tailwind CSS:** https://tailwindcss.com/docs
+
+## Sharing Components via the Whity Registry (WC-168)
+
+`web/registry.json` declares every `components/ui/*` and `components/admin/*`
+component as a shadcn registry item (with its npm and intra-registry
+dependencies). The registry build output is **generated, never committed**:
+
+- `npm run registry:build` (also runs automatically as `prebuild` before
+  `next build`) writes the distributable item JSONs to `web/public/r/`, so any
+  built deployment serves its registry at `https://<host>/r/{name}.json`.
+- A consuming app adds to its own `components.json`:
+
+  ```json
+  "registries": { "@whity": "https://<whity-host>/r/{name}.json" }
+  ```
+
+  and pulls components by copy-in: `npx shadcn add @whity/data-table`. The CLI
+  resolves intra-registry dependencies (e.g. `data-table` brings
+  `@whity/skeleton`) and installs the npm packages the item declares.
+
+This is deliberate copy-in distribution — no published npm package — per the
+Option C decision (#168): no publish/version burden until a real second
+consumer demands it.
+
+Notes:
+
+- The `@whity` mapping committed in whity's own `components.json` points at
+  `http://localhost:3000` as a local-dev default: pulling from it requires
+  `npm run registry:build` first AND the dev server running (`/public/r/` is
+  gitignored; `prebuild` only fires on `next build`). Deployed hosts serve it
+  out of the box.
+- Always consume via the `@whity` namespace mapping, not raw item URLs — the
+  items' `registryDependencies` (e.g. `@whity/skeleton`) only resolve through
+  the configured namespace.

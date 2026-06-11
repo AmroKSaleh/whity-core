@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
@@ -27,7 +27,6 @@ export function DeleteUserModal({
   user,
   onSuccess,
 }: DeleteUserModalProps) {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -35,15 +34,12 @@ export function DeleteUserModal({
     try {
       setIsDeleting(true);
 
-      const response = await apiClient(`/api/users/${user.id}`, {
-        method: 'DELETE',
+      const { error, response } = await api.DELETE('/api/users/{id}', {
+        params: { path: { id: user.id } },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || 'Failed to delete user'
-        );
+      if (error !== undefined || !response.ok) {
+        throw new Error(error?.error ?? 'Failed to delete user');
       }
 
       addToast('User deleted successfully', 'success');

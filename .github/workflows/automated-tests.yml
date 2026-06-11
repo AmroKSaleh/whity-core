@@ -100,3 +100,49 @@ jobs:
 
       - name: Re-run migrations (idempotency on PostgreSQL)
         run: php public/index.php migrate run
+
+  web:
+    name: Frontend types, tests & generated-artifact drift
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The committed lib/api/schema.d.ts must match a fresh generation from
+      # public/openapi.json — API changes that skip `npm run generate:api`
+      # would ship a typed client that lies about the contract (WC-168).
+      - name: Typed-client schema drift check
+        run: |
+          npm run generate:api
+          git diff --exit-code -- lib/api/schema.d.ts
+
+      # The committed design-token outputs must match the generator (base.json
+      # is the single source of truth for styling variables).
+      - name: Design-token drift check
+        run: npm run tokens:check
+
+      # The shadcn registry manifest must stay buildable; its output is
+      # generated at build time (prebuild) and never committed.
+      - name: Registry build smoke
+        run: npm run registry:build
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run Jest
+        run: npx jest

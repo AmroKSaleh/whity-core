@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
   Dialog,
@@ -33,12 +33,14 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRoleOptions } from './use-role-options';
 
+// Only the fields the API actually reads (UserCreateRequest): the server
+// derives `name` from the email local-part and always creates the user in the
+// caller's tenant context, so the form offers neither (WC-168 — the previous
+// Name/Tenant inputs were silently ignored server-side).
 const createUserSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
   email: z.string().email('Invalid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   role: z.string().min(1, 'Role is required'),
-  tenantId: z.string().min(1, 'Tenant is required'),
 });
 
 type CreateUserFormData = z.infer<typeof createUserSchema>;
@@ -54,7 +56,6 @@ export function CreateUserModal({
   onOpenChange,
   onSuccess,
 }: CreateUserModalProps) {
-  const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Role dropdown options come from the live tenant-visible role list, so only
@@ -64,11 +65,9 @@ export function CreateUserModal({
   const form = useForm<CreateUserFormData>({
     resolver: zodResolver(createUserSchema),
     defaultValues: {
-      name: '',
       email: '',
       password: '',
       role: '',
-      tenantId: '',
     },
   });
 
@@ -76,22 +75,16 @@ export function CreateUserModal({
     try {
       setIsSubmitting(true);
 
-      const response = await apiClient('/api/users', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: data.name,
+      const { error, response } = await api.POST('/api/users', {
+        body: {
           email: data.email,
           password: data.password,
           role: data.role,
-          tenantId: parseInt(data.tenantId, 10),
-        }),
+        },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || 'Failed to create user'
-        );
+      if (error !== undefined || !response.ok) {
+        throw new Error(error?.error ?? 'Failed to create user');
       }
 
       addToast('User created successfully', 'success');
@@ -119,21 +112,7 @@ export function CreateUserModal({
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
-              control={form.control as any}
-              name="name"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Name</FormLabel>
-                  <FormControl>
-                    <Input placeholder="John Doe" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control as any}
+              control={form.control}
               name="email"
               render={({ field }) => (
                 <FormItem>
@@ -151,7 +130,7 @@ export function CreateUserModal({
             />
 
             <FormField
-              control={form.control as any}
+              control={form.control}
               name="password"
               render={({ field }) => (
                 <FormItem>
@@ -169,7 +148,7 @@ export function CreateUserModal({
             />
 
             <FormField
-              control={form.control as any}
+              control={form.control}
               name="role"
               render={({ field }) => (
                 <FormItem>
@@ -192,24 +171,6 @@ export function CreateUserModal({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control as any}
-              name="tenantId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Tenant</FormLabel>
-                  <FormControl>
-                    <Input
-                      type="number"
-                      placeholder="1"
-                      {...field}
-                    />
-                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}
