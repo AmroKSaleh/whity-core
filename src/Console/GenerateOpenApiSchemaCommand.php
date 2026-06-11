@@ -52,6 +52,10 @@ class GenerateOpenApiSchemaCommand
             // Load plugins - plugin metadata is available without database connection
             $pluginLoader->load();
 
+            // Register the core admin resources' typed declarations (WC-167)
+            // so the spec carries the full contract, not just plugin routes.
+            \Whity\OpenAPI\CoreApiSchemas::registerRoutes($router);
+
             // Generate from the ROUTER (carries every registered route with
             // its typed schema declaration, WC-166) and validate before
             // anything is written: an invalid contract must never be published.

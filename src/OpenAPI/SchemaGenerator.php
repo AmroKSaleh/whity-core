@@ -90,7 +90,7 @@ class SchemaGenerator
                 $builder,
                 $route['method'],
                 $route['path'],
-                $route['requiredRole'],
+                $route['requiredRole'] ?? $route['requiredPermission'],
                 $route['schema']
             );
         }
@@ -141,6 +141,7 @@ class SchemaGenerator
                     'method' => $route['method'],
                     'path' => $route['path'],
                     'requiredRole' => $route['requiredRole'] ?? null,
+                    'requiredPermission' => $route['requiredPermission'] ?? null,
                     'schema' => $route['schema'] ?? null,
                 ];
             }
@@ -156,6 +157,7 @@ class SchemaGenerator
                     'method' => $route['method'],
                     'path' => $route['path'],
                     'requiredRole' => $route['requiredRole'] ?? null,
+                    'requiredPermission' => null,
                     'schema' => $schema,
                 ];
             }
@@ -217,6 +219,13 @@ class SchemaGenerator
                 ? array_values($schema['tags'])
                 : [$this->getTag($path)],
         ];
+
+        // Declared (query/header) parameters are appended after the
+        // auto-declared path parameters.
+        $declaredParameters = $schema['parameters'] ?? null;
+        if (is_array($declaredParameters)) {
+            $pathParameters = array_merge($pathParameters, array_values($declaredParameters));
+        }
 
         if ($pathParameters !== []) {
             $operation['parameters'] = $pathParameters;
