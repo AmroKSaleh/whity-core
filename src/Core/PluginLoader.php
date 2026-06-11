@@ -11,9 +11,12 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
 use Psr\Log\LoggerInterface;
+use Composer\Semver\Semver;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginRequirementsInterface;
+use Whity\Sdk\Sdk;
 
 /**
  * Plugin loader for dynamic discovery and registration
@@ -250,13 +253,44 @@ class PluginLoader
      */
     public function load(): void
     {
-        $discovered = $this->discover();
-        foreach ($discovered as $fqcn => $filePath) {
-            $this->loadPluginClass($fqcn, $filePath);
-        }
+        $this->loadDiscovered($this->discover());
 
         $this->fingerprint = $this->computeFingerprint();
         $this->loaded = true;
+    }
+
+    /**
+     * Instantiate, gate, order, and register a discovered plugin set (WC-165).
+     *
+     * Two-phase loading: every plugin is instantiated first (no capability
+     * registration), then the SDK-constraint and inter-plugin dependency
+     * gates run via composer/semver, satisfied plugins are topologically
+     * ordered by dependency, and only then registered. Unsatisfied plugins
+     * are quarantined: PluginState::Failed with an admin-visible reason and
+     * ZERO capabilities registered.
+     *
+     * @param array<string, string> $discovered Map of FQCN to file path.
+     * @return void
+     */
+    private function loadDiscovered(array $discovered): void
+    {
+        $candidates = [];
+        foreach ($discovered as $fqcn => $filePath) {
+            $candidate = $this->instantiatePlugin($fqcn, $filePath);
+            if ($candidate !== null) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        [$ordered, $quarantined] = $this->gateAndOrder($candidates);
+
+        foreach ($ordered as $candidate) {
+            $this->registerPlugin($candidate['plugin'], $candidate['namespacePrefix'], $candidate['fqcn']);
+        }
+
+        foreach ($quarantined as $entry) {
+            $this->quarantinePlugin($entry['candidate'], $entry['reason']);
+        }
     }
 
     /**
@@ -296,13 +330,11 @@ class PluginLoader
         $this->clearCache();
 
         // Unregister everything currently loaded, then rebuild from disk. This
-        // uniformly handles additions, modifications, and removals.
+        // uniformly handles additions, modifications, and removals — and runs
+        // the same WC-165 gate/ordering as the initial load.
         $this->unregisterAll();
 
-        $discovered = $this->discover();
-        foreach ($discovered as $fqcn => $filePath) {
-            $this->loadPluginClass($fqcn, $filePath);
-        }
+        $this->loadDiscovered($this->discover());
 
         $this->fingerprint = $current;
 
@@ -767,9 +799,27 @@ class PluginLoader
      */
     private function loadPluginClass(string $fqcn, string $filePath): void
     {
+        $candidate = $this->instantiatePlugin($fqcn, $filePath);
+        if ($candidate === null) {
+            return;
+        }
+
+        // Register the plugin under its original FQCN identity
+        $this->registerPlugin($candidate['plugin'], $candidate['namespacePrefix'], $candidate['fqcn']);
+    }
+
+    /**
+     * Materialize and instantiate a plugin class WITHOUT registering it.
+     *
+     * @param string $fqcn Original fully qualified class name
+     * @param string $filePath Plugin file path
+     * @return array{fqcn: string, plugin: PluginInterface, namespacePrefix: string}|null
+     */
+    private function instantiatePlugin(string $fqcn, string $filePath): ?array
+    {
         $effectiveFqcn = $this->materializeClass($fqcn, $filePath);
         if ($effectiveFqcn === null) {
-            return;
+            return null;
         }
 
         // Use reflection to validate and get instance
@@ -782,7 +832,7 @@ class PluginLoader
                 } else {
                     error_log($warningMsg);
                 }
-                return;
+                return null;
             }
 
             // Extract namespace prefix
@@ -797,11 +847,231 @@ class PluginLoader
             } else {
                 error_log($errorMsg);
             }
-            return;
+            return null;
         }
 
-        // Register the plugin under its original FQCN identity
-        $this->registerPlugin($plugin, $namespacePrefix, $fqcn);
+        return ['fqcn' => $fqcn, 'plugin' => $plugin, 'namespacePrefix' => $namespacePrefix];
+    }
+
+    /**
+     * Evaluate the WC-165 compatibility gates and order plugins by dependency.
+     *
+     * Gates, evaluated with composer/semver:
+     *  - duplicate plugin names (the later discovery is quarantined);
+     *  - the SDK constraint ({@see PluginRequirementsInterface::getSdkConstraint()})
+     *    against {@see Sdk::VERSION};
+     *  - inter-plugin dependencies (existence + version range), iterated to a
+     *    fixpoint so quarantine CASCADES to dependents of failed plugins;
+     *  - dependency cycles (every member quarantined).
+     *
+     * Plugins without a {@see PluginRequirementsInterface} declaration load
+     * unconditionally (backward compatible). Ordering is Kahn's algorithm,
+     * stable with respect to discovery order among unconstrained peers.
+     *
+     * @param list<array{fqcn: string, plugin: PluginInterface, namespacePrefix: string}> $candidates
+     * @return array{
+     *   0: list<array{fqcn: string, plugin: PluginInterface, namespacePrefix: string}>,
+     *   1: list<array{candidate: array{fqcn: string, plugin: PluginInterface, namespacePrefix: string}, reason: string}>
+     * }
+     */
+    private function gateAndOrder(array $candidates): array
+    {
+        $quarantined = [];
+
+        // Index by declared plugin name; duplicates are quarantined.
+        /** @var array<string, array{fqcn: string, plugin: PluginInterface, namespacePrefix: string}> $byName */
+        $byName = [];
+        foreach ($candidates as $candidate) {
+            $name = $candidate['plugin']->getName();
+            if (isset($byName[$name])) {
+                $quarantined[] = [
+                    'candidate' => $candidate,
+                    'reason' => "duplicate plugin name '{$name}' (already provided by {$byName[$name]['fqcn']})",
+                ];
+                continue;
+            }
+            $byName[$name] = $candidate;
+        }
+
+        // SDK-constraint gate.
+        foreach ($byName as $name => $candidate) {
+            $constraint = $this->sdkConstraintOf($candidate['plugin']);
+            if ($constraint === '') {
+                continue;
+            }
+
+            try {
+                $satisfied = Semver::satisfies(Sdk::VERSION, $constraint);
+            } catch (\UnexpectedValueException) {
+                $quarantined[] = [
+                    'candidate' => $candidate,
+                    'reason' => "declares an unparseable SDK constraint '{$constraint}'",
+                ];
+                unset($byName[$name]);
+                continue;
+            }
+
+            if (!$satisfied) {
+                $quarantined[] = [
+                    'candidate' => $candidate,
+                    'reason' => "requires plugin SDK '{$constraint}', but the host provides " . Sdk::VERSION,
+                ];
+                unset($byName[$name]);
+            }
+        }
+
+        // Dependency gate, iterated to a fixpoint so removal cascades.
+        do {
+            $removed = false;
+            foreach ($byName as $name => $candidate) {
+                foreach ($this->dependenciesOf($candidate['plugin']) as $depName => $depConstraint) {
+                    if (!isset($byName[$depName])) {
+                        $quarantined[] = [
+                            'candidate' => $candidate,
+                            'reason' => "depends on plugin '{$depName}' ({$depConstraint}), which is missing or failed",
+                        ];
+                        unset($byName[$name]);
+                        $removed = true;
+                        break;
+                    }
+
+                    $depVersion = $byName[$depName]['plugin']->getVersion();
+                    try {
+                        $satisfied = Semver::satisfies($depVersion, $depConstraint);
+                    } catch (\UnexpectedValueException) {
+                        $quarantined[] = [
+                            'candidate' => $candidate,
+                            'reason' => "dependency on '{$depName}' is unevaluable (constraint '{$depConstraint}', found version '{$depVersion}')",
+                        ];
+                        unset($byName[$name]);
+                        $removed = true;
+                        break;
+                    }
+
+                    if (!$satisfied) {
+                        $quarantined[] = [
+                            'candidate' => $candidate,
+                            'reason' => "requires plugin '{$depName}' {$depConstraint}, found {$depVersion}",
+                        ];
+                        unset($byName[$name]);
+                        $removed = true;
+                        break;
+                    }
+                }
+            }
+        } while ($removed);
+
+        // Topological sort (Kahn), stable by discovery order.
+        $inDegree = [];
+        $dependents = [];
+        foreach ($byName as $name => $candidate) {
+            $inDegree[$name] = 0;
+        }
+        foreach ($byName as $name => $candidate) {
+            foreach (array_keys($this->dependenciesOf($candidate['plugin'])) as $depName) {
+                $inDegree[$name]++;
+                $dependents[$depName][] = $name;
+            }
+        }
+
+        $queue = [];
+        foreach ($inDegree as $name => $degree) {
+            if ($degree === 0) {
+                $queue[] = $name;
+            }
+        }
+
+        $ordered = [];
+        while ($queue !== []) {
+            $name = array_shift($queue);
+            $ordered[] = $byName[$name];
+            foreach ($dependents[$name] ?? [] as $dependent) {
+                if (isset($inDegree[$dependent]) && --$inDegree[$dependent] === 0) {
+                    $queue[] = $dependent;
+                }
+            }
+        }
+
+        // Anything not ordered sits on a dependency cycle.
+        if (count($ordered) < count($byName)) {
+            $orderedNames = array_map(static fn (array $c): string => $c['plugin']->getName(), $ordered);
+            foreach ($byName as $name => $candidate) {
+                if (!in_array($name, $orderedNames, true)) {
+                    $quarantined[] = [
+                        'candidate' => $candidate,
+                        'reason' => "is part of a plugin dependency cycle and cannot be ordered",
+                    ];
+                }
+            }
+        }
+
+        return [$ordered, $quarantined];
+    }
+
+    /**
+     * The plugin's declared SDK constraint, or '' when undeclared.
+     */
+    private function sdkConstraintOf(PluginInterface $plugin): string
+    {
+        if (!$plugin instanceof PluginRequirementsInterface) {
+            return '';
+        }
+
+        try {
+            return $plugin->getSdkConstraint();
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
+    /**
+     * The plugin's declared inter-plugin dependencies, or [] when undeclared.
+     *
+     * @return array<string, string>
+     */
+    private function dependenciesOf(PluginInterface $plugin): array
+    {
+        if (!$plugin instanceof PluginRequirementsInterface) {
+            return [];
+        }
+
+        try {
+            $dependencies = $plugin->getPluginDependencies();
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $valid = [];
+        foreach ($dependencies as $name => $constraint) {
+            if (is_string($name) && is_string($constraint)) {
+                $valid[$name] = $constraint;
+            }
+        }
+
+        return $valid;
+    }
+
+    /**
+     * Quarantine a gated plugin: Failed lifecycle with an admin-visible
+     * reason, no capabilities registered.
+     *
+     * @param array{fqcn: string, plugin: PluginInterface, namespacePrefix: string} $candidate
+     * @param string $reason Why the plugin was refused.
+     */
+    private function quarantinePlugin(array $candidate, string $reason): void
+    {
+        $name = $candidate['plugin']->getName();
+        $message = "Plugin {$name} quarantined: {$reason}";
+        if ($this->logger !== null) {
+            $this->logger->warning($message);
+        } else {
+            error_log($message);
+        }
+
+        $lifecycle = new PluginLifecycle($candidate['fqcn'], $name);
+        $lifecycle->markLoaded();
+        $lifecycle->quarantine($reason);
+        $this->lifecycles[$candidate['fqcn']] = $lifecycle;
     }
 
     /**

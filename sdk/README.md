@@ -6,18 +6,54 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications (KeyHub, Elmak, …) without
 dragging a host framework along.
 
-## Contract surface (v1.0.0)
+## Contract surface (v1.1.0)
 
-| Type | Purpose |
-| --- | --- |
-| `Whity\Sdk\PluginInterface` | The plugin contract: name/version, routes, permissions, hooks, migrations. |
-| `Whity\Sdk\MigrationInterface` | Plugin schema migrations: `up(\PDO)` / `down(\PDO)`, idempotent statements, tested rollback. |
-| `Whity\Sdk\Http\Request` | The request shape route handlers receive (headers, body, per-request attribute bag incl. `ATTR_JWT_CLAIMS`). |
-| `Whity\Sdk\Http\Response` | The response shape handlers return; `Response::json()` / `Response::error()` factories. |
-| `Whity\Sdk\Hooks\Events` | Catalogue of hook event names (`user.creating`, `tenant.deleted`, `worker.request.start`, …). |
+| Type | Since | Purpose |
+| --- | --- | --- |
+| `Whity\Sdk\PluginInterface` | 1.0 | The plugin contract: name/version, routes, permissions, hooks, migrations. |
+| `Whity\Sdk\MigrationInterface` | 1.0 | Plugin schema migrations: `up(\PDO)` / `down(\PDO)`, idempotent statements, tested rollback; executed by the host's `migrate run`. |
+| `Whity\Sdk\Http\Request` | 1.0 | The request shape route handlers receive (headers, body, per-request attribute bag incl. `ATTR_JWT_CLAIMS`). |
+| `Whity\Sdk\Http\Response` | 1.0 | The response shape handlers return; `Response::json()` / `Response::error()` factories. |
+| `Whity\Sdk\Hooks\Events` | 1.0 | Catalogue of hook event names (`user.creating`, `tenant.deleted`, `worker.request.start`, …). |
+| `Whity\Sdk\Sdk` | 1.1 | SDK identity: `Sdk::VERSION`, what hosts evaluate plugin SDK-constraints against. |
+| `Whity\Sdk\PluginRequirementsInterface` | 1.1 | OPTIONAL declaration of a required SDK constraint + inter-plugin dependencies (composer constraint syntax). Unsatisfied plugins are quarantined (`PluginState::Failed` + reason); satisfied ones load in topological dependency order. |
 
-Versioning is semantic and **additive**: new events/optional capabilities land
-in minor versions (1.1, 1.2, …); breaking contract changes require a major.
+## Versioning policy
+
+Semantic and **additive**: new capabilities land in minor versions, each an
+optional surface existing plugins can ignore —
+
+- **1.0** — contract extraction (plugin/migration interfaces, HTTP shapes, events).
+- **1.1** — requirements declaration + version gate (this release).
+- **1.2** — frontend feature descriptor (planned).
+
+Breaking contract changes require a new major. A plugin declares the range it
+supports via `getSdkConstraint()` (e.g. `'^1.1'`) and the host refuses to load
+it when its own `Sdk::VERSION` falls outside that range — with the reason
+visible in the admin plugin list.
+
+### Declaring requirements
+
+```php
+use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginRequirementsInterface;
+
+final class MyPlugin implements PluginInterface, PluginRequirementsInterface
+{
+    public function getSdkConstraint(): string
+    {
+        return '^1.1';
+    }
+
+    /** @return array<string, string> plugin name => version constraint */
+    public function getPluginDependencies(): array
+    {
+        return ['HelloWorld' => '^1.0'];
+    }
+
+    // ... PluginInterface methods ...
+}
+```
 
 ## Minimal plugin
 

@@ -9,6 +9,7 @@ use Whity\Sdk\Hooks\Events;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginRequirementsInterface;
 
 /**
  * HelloWorldPlugin
@@ -31,7 +32,7 @@ use Whity\Sdk\PluginInterface;
  * package — never on whity-core — which is what makes it distributable to
  * any Whity-based host application.
  */
-final class HelloWorldPlugin implements PluginInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface
 {
     /**
      * @inheritDoc
@@ -39,6 +40,26 @@ final class HelloWorldPlugin implements PluginInterface
     public function getName(): string
     {
         return 'HelloWorld';
+    }
+
+    /**
+     * The SDK range this plugin supports (WC-165 version gate).
+     *
+     * @inheritDoc
+     */
+    public function getSdkConstraint(): string
+    {
+        return '^1.1';
+    }
+
+    /**
+     * HelloWorld depends on no other plugin.
+     *
+     * @inheritDoc
+     */
+    public function getPluginDependencies(): array
+    {
+        return [];
     }
 
     /**
