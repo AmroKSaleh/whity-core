@@ -43,6 +43,19 @@ instantiates it, and registers its capabilities:
 There is **no manual registration step** — dropping a well-formed plugin into
 `plugins/` is enough for the loader to discover it.
 
+A plugin MAY additionally implement
+[`Whity\Sdk\PluginRequirementsInterface`](../../sdk/src/PluginRequirementsInterface.php)
+(SDK 1.1, WC-165) to declare a required SDK constraint and inter-plugin
+dependencies in composer constraint syntax (`getSdkConstraint(): '^1.1'`,
+`getPluginDependencies(): ['HelloWorld' => '^1.0']`). The loader evaluates
+these with composer/semver against `Whity\Sdk\Sdk::VERSION` and the other
+plugins' versions: satisfied plugins load in **topological dependency order**;
+unsatisfied ones are **quarantined** (`failed` state, no routes/permissions/
+hooks registered) with the reason visible in `GET /api/plugins`. Plugins that
+declare nothing keep loading exactly as before. See the
+[SDK README](../../sdk/README.md) for the versioning policy (1.0 → 1.1 → 1.2,
+additive minors).
+
 The interface is small and explicit. These are the exact signatures you must
 implement:
 

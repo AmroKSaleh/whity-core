@@ -2,7 +2,7 @@
   "name": "whity/plugin-sdk",
   "description": "Standalone plugin contract package for the Whity platform: plugin/migration interfaces, HTTP shapes, and hook event constants. Depends on nothing but PHP.",
   "type": "library",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "authors": [
     {

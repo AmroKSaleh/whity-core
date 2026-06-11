@@ -33,7 +33,16 @@ final class SdkPackageContractTest extends TestCase
         $this->assertIsArray($composer);
 
         $this->assertSame('whity/plugin-sdk', $composer['name'] ?? null);
-        $this->assertSame('1.0.0', $composer['version'] ?? null, 'The SDK carries an independent 1.0.0 semver');
+        $this->assertMatchesRegularExpression(
+            '/^1\.\d+\.\d+$/',
+            (string) ($composer['version'] ?? ''),
+            'The SDK carries an independent 1.x semver (additive policy: minors add capabilities)'
+        );
+        $this->assertSame(
+            \Whity\Sdk\Sdk::VERSION,
+            $composer['version'] ?? null,
+            'composer.json and Sdk::VERSION must agree'
+        );
         $this->assertArrayHasKey('autoload', $composer);
         $this->assertSame(
             'src/',

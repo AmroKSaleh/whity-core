@@ -202,6 +202,48 @@ class PluginLifecycle
     }
 
     /**
+     * Quarantine the plugin: transition straight to Failed with a reason.
+     *
+     * Used by the WC-165 SDK/version compatibility gate when a plugin's
+     * declared requirements (SDK constraint, inter-plugin dependencies) are
+     * unsatisfied — the plugin is never registered, and the reason is exposed
+     * through {@see toArray()} so the admin API can show WHY it failed.
+     *
+     * @param string $reason Admin-visible explanation of the quarantine.
+     * @return void
+     */
+    public function quarantine(string $reason): void
+    {
+        if ($this->state === PluginState::Failed || $this->state === PluginState::Disabled) {
+            return;
+        }
+
+        $this->lastError = [
+            'message' => $reason,
+            'type' => 'quarantine',
+            'trace' => '',
+            'at' => time(),
+        ];
+
+        $this->transitionTo(PluginState::Failed);
+    }
+
+    /**
+     * Whether the plugin sits in WC-165 quarantine (Failed with a gate reason).
+     *
+     * Distinct from auto-failure via consecutive errors: a quarantined plugin
+     * has unsatisfied requirements and must not be re-enabled — only a disk
+     * change (and the re-gating reload it triggers) can clear the condition.
+     *
+     * @return bool True when quarantined.
+     */
+    public function isQuarantined(): bool
+    {
+        return $this->state === PluginState::Failed
+            && ($this->lastError['type'] ?? null) === 'quarantine';
+    }
+
+    /**
      * Administratively disable the plugin.
      *
      * @return void
