@@ -9,13 +9,12 @@ namespace Whity\Sdk;
  *
  * A plugin declares its schema by returning migration class FQCNs from
  * {@see PluginInterface::getMigrations()}; each class implements this
- * interface. NOTE: host-side EXECUTION of plugin migrations is not wired yet —
- * it lands with the migration-runner work (whity-core #164), which will
- * instantiate the class and invoke {@see up()} / {@see down()} with a live PDO
- * connection. Until then, declared migrations are collected but not run; the
- * interface ships in 1.0 so plugin authors target the final shape now.
+ * interface. The host's migration runner (whity-core `migrate run`, WC-164)
+ * instantiates the class and invokes {@see up()} / {@see down()} with a live
+ * PDO connection, inside an explicit transaction, recording it under the
+ * per-plugin namespace `plugin:<PluginName>:<MigrationClass>`.
  *
- * Rules the host will enforce (and plugin authors must respect):
+ * Rules the host enforces (and plugin authors must respect):
  * - Statements should be idempotent (`IF NOT EXISTS` / `IF EXISTS`) so re-runs
  *   are safe; the host additionally records applied migrations per plugin.
  * - {@see down()} must cleanly revert everything {@see up()} created.

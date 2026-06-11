@@ -2,7 +2,11 @@
 
 namespace Whity\Cli\Commands;
 
+use Whity\Core\Hooks\HookManager;
+use Whity\Core\PluginLoader;
+use Whity\Core\Router;
 use Whity\Database\Database;
+use Whity\Sdk\MigrationInterface;
 use PDO;
 
 /**
@@ -11,6 +15,15 @@ use PDO;
  * Handles database migrations directly without requiring authentication.
  * This is the secure way to run migrations during deployment/setup.
  *
+ * Two migration sources are executed (WC-164):
+ *  - CORE migrations: numbered files under database/migrations with static
+ *    up()/down() receiving the {@see Database} wrapper (unchanged behaviour).
+ *  - PLUGIN migrations: classes declared via PluginInterface::getMigrations()
+ *    implementing {@see \Whity\Sdk\MigrationInterface} (instance up()/down()
+ *    over PDO). Each runs inside an explicit transaction together with its
+ *    tracking row, and is recorded in core_schema_migrations under the
+ *    per-plugin namespace `plugin:<PluginName>:<MigrationClass>`.
+ *
  * Usage:
  *   php public/index.php migrate status  - Show migration status
  *   php public/index.php migrate run     - Run pending migrations
@@ -18,15 +31,33 @@ use PDO;
  */
 class MigrationsCommand
 {
+    /** Tracking-name prefix for plugin-declared migrations (WC-164). */
+    private const PLUGIN_PREFIX = 'plugin:';
+
     private Database $db;
     private string $migrationDir;
+    private ?PluginLoader $pluginLoader;
+    private bool $pluginsLoaded = false;
+
+    /**
+     * @param Database|null $db Injected connection (tests); defaults to Database::connect().
+     * @param PluginLoader|null $pluginLoader Injected loader (tests); defaults to a loader over /plugins.
+     * @param string|null $migrationDir Injected core-migration directory (tests).
+     */
+    public function __construct(
+        private ?Database $injectedDb = null,
+        ?PluginLoader $pluginLoader = null,
+        private ?string $injectedMigrationDir = null
+    ) {
+        $this->pluginLoader = $pluginLoader;
+    }
 
     public function execute(array $argv): int
     {
         try {
-            $this->db = Database::connect();
+            $this->db = $this->injectedDb ?? Database::connect();
             $baseDir = dirname(__DIR__, 3);
-            $this->migrationDir = $baseDir . '/database/migrations';
+            $this->migrationDir = $this->injectedMigrationDir ?? $baseDir . '/database/migrations';
 
             $action = array_shift($argv) ?: 'status';
 
@@ -67,6 +98,21 @@ class MigrationsCommand
                     $name,
                     $isExecuted ? 'Executed' : 'Pending',
                     $isExecuted ? ($executed[$name]['executed_at'] ?? 'N/A') : 'N/A'
+                ];
+            }
+
+            // Plugin-declared migrations (WC-164), listed after core ones.
+            foreach ($this->pluginMigrations() as $entry) {
+                $isExecuted = isset($executed[$entry['record']]);
+
+                if (!$isExecuted) {
+                    $pending++;
+                }
+
+                $migrations[] = [
+                    $entry['record'],
+                    $isExecuted ? 'Executed' : 'Pending',
+                    $isExecuted ? ($executed[$entry['record']]['executed_at'] ?? 'N/A') : 'N/A'
                 ];
             }
 
@@ -115,6 +161,17 @@ class MigrationsCommand
                 }
             }
 
+            // Plugin-declared migrations (WC-164) run after core migrations,
+            // in plugin load order, each inside its own transaction.
+            foreach ($this->pluginMigrations() as $entry) {
+                if (!isset($executed[$entry['record']])) {
+                    echo "  Running: {$entry['record']}... ";
+                    $this->executePluginMigration($entry, 'up');
+                    echo "\033[0;32m✓\033[0m\n";
+                    $count++;
+                }
+            }
+
             echo "\n";
             if ($count === 0) {
                 echo "\033[0;32m✓ All migrations already executed\033[0m\n";
@@ -141,6 +198,10 @@ class MigrationsCommand
             ');
             $stmt->execute();
             $last = $stmt->fetch();
+            // Release the read cursor: an open SELECT on core_schema_migrations
+            // would block the in-transaction DELETE on the same connection
+            // (SQLite reports "database table is locked").
+            $stmt->closeCursor();
 
             if (!$last) {
                 echo "\n\033[1;33m⚠ No migrations to rollback\033[0m\n\n";
@@ -148,6 +209,25 @@ class MigrationsCommand
             }
 
             $name = $last['migration_name'];
+
+            // Plugin migration (WC-164): resolve the class through the loaded
+            // plugins instead of a file under database/migrations.
+            if (str_starts_with($name, self::PLUGIN_PREFIX)) {
+                $entry = $this->findPluginMigrationByRecord($name);
+                if ($entry === null) {
+                    throw new \Exception(
+                        "Cannot roll back {$name}: the declaring plugin is not installed/loaded"
+                    );
+                }
+
+                echo "\n\033[1;33mRolling back: $name... \033[0m";
+                $this->executePluginMigration($entry, 'down');
+                echo "\033[0;32m✓\033[0m\n\n";
+                echo "\033[0;32m✓ Successfully rolled back $name\033[0m\n\n";
+
+                return 0;
+            }
+
             $file = $this->migrationDir . '/' . $name . '.php';
 
             if (!file_exists($file)) {
@@ -202,11 +282,15 @@ class MigrationsCommand
      */
     private function ensureMigrationTable(): void
     {
+        // DEFAULT CURRENT_TIMESTAMP is standard SQL: identical to NOW() on
+        // PostgreSQL and — unlike NOW() — also parseable by SQLite, which the
+        // real-engine runner tests use (SQLite parses the full DDL even when
+        // IF NOT EXISTS makes it a no-op).
         $this->db->exec('
             CREATE TABLE IF NOT EXISTS core_schema_migrations (
                 id SERIAL PRIMARY KEY,
                 migration_name VARCHAR(255) NOT NULL UNIQUE,
-                executed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 execution_time_ms INTEGER
             )
         ');
@@ -277,6 +361,143 @@ class MigrationsCommand
                     throw $e;
                 }
             }
+        }
+    }
+
+    /**
+     * Lazily build (default) or reuse the plugin loader and load plugins once.
+     */
+    private function pluginLoader(): PluginLoader
+    {
+        if ($this->pluginLoader === null) {
+            $this->pluginLoader = new PluginLoader(
+                dirname(__DIR__, 3) . '/plugins',
+                new Router(),
+                null,
+                new HookManager()
+            );
+        }
+
+        if (!$this->pluginsLoaded) {
+            $this->pluginLoader->load();
+            $this->pluginsLoaded = true;
+        }
+
+        return $this->pluginLoader;
+    }
+
+    /**
+     * Collect the plugin-declared migrations through the SDK contract.
+     *
+     * Declarations that are not loadable classes implementing
+     * {@see MigrationInterface}, or whose record name collides with one already
+     * collected, are skipped with a visible warning — one broken plugin must
+     * not block core or other plugins' migrations (quarantining is WC-165).
+     *
+     * @return list<array{record: string, plugin: string, fqcn: class-string<MigrationInterface>}>
+     */
+    private function pluginMigrations(): array
+    {
+        $entries = [];
+        $seen = [];
+
+        foreach ($this->pluginLoader()->getPlugins() as $plugin) {
+            $pluginName = $plugin->getName();
+
+            foreach ($plugin->getMigrations() as $fqcn) {
+                if (!is_string($fqcn) || !class_exists($fqcn)) {
+                    $shown = is_string($fqcn) ? $fqcn : gettype($fqcn);
+                    echo "\033[1;33m⚠ Skipping unknown migration class {$shown} declared by {$pluginName}\033[0m\n";
+                    continue;
+                }
+
+                if (!is_subclass_of($fqcn, MigrationInterface::class)) {
+                    echo "\033[1;33m⚠ Skipping {$fqcn} (declared by {$pluginName}): does not implement Whity\\Sdk\\MigrationInterface\033[0m\n";
+                    continue;
+                }
+
+                $short = substr((string) strrchr('\\' . $fqcn, '\\'), 1);
+                $record = self::PLUGIN_PREFIX . $pluginName . ':' . $short;
+
+                if (isset($seen[$record])) {
+                    echo "\033[1;33m⚠ Skipping {$fqcn}: tracking name {$record} already declared\033[0m\n";
+                    continue;
+                }
+
+                $seen[$record] = true;
+                $entries[] = ['record' => $record, 'plugin' => $pluginName, 'fqcn' => $fqcn];
+            }
+        }
+
+        return $entries;
+    }
+
+    /**
+     * Resolve a recorded plugin-migration name back to its declaration.
+     *
+     * @param string $record The tracking name (plugin:<Plugin>:<Class>).
+     * @return array{record: string, plugin: string, fqcn: class-string<MigrationInterface>}|null
+     */
+    private function findPluginMigrationByRecord(string $record): ?array
+    {
+        foreach ($this->pluginMigrations() as $entry) {
+            if ($entry['record'] === $record) {
+                return $entry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Execute a plugin migration inside an explicit transaction.
+     *
+     * The schema change AND its tracking row commit (or roll back) together,
+     * so a mid-migration failure leaves neither half-applied DDL nor a
+     * tracking row behind. Recording uses ON CONFLICT DO NOTHING, so adopting
+     * hand-created/never-tracked state stays idempotent.
+     *
+     * @param array{record: string, plugin: string, fqcn: class-string<MigrationInterface>} $entry
+     * @param string $direction 'up' or 'down'.
+     */
+    private function executePluginMigration(array $entry, string $direction): void
+    {
+        $pdo = $this->db->getPdo();
+        $fqcn = $entry['fqcn'];
+        $migration = new $fqcn();
+        $start = microtime(true);
+
+        $pdo->beginTransaction();
+
+        try {
+            if ($direction === 'up') {
+                $migration->up($pdo);
+
+                $stmt = $pdo->prepare('
+                    INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
+                    VALUES (?, NOW(), ?)
+                    ON CONFLICT (migration_name) DO NOTHING
+                ');
+                $stmt->execute([$entry['record'], (int)((microtime(true) - $start) * 1000)]);
+            } else {
+                $migration->down($pdo);
+
+                $stmt = $pdo->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
+                $stmt->execute([$entry['record']]);
+            }
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            // A misbehaving migration may have ended the transaction itself.
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw new \Exception(
+                "Plugin migration {$entry['record']} failed ({$direction}): " . $e->getMessage(),
+                0,
+                $e
+            );
         }
     }
 

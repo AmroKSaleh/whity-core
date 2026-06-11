@@ -367,10 +367,14 @@ SDK contract [`Whity\Sdk\MigrationInterface`](../../sdk/src/MigrationInterface.p
 connection — so the migration, like the rest of the plugin, depends only on
 the SDK.
 
-> **Not executed yet:** the host currently collects plugin migrations but does
-> not run them — execution through the migration runner lands with
-> whity-core [#164](https://github.com/AmroKSaleh/whity-core/issues/164).
-> Declare migrations in this shape now so your plugin is ready when it ships.
+> **Executed by the runner (WC-164):** `php public/index.php migrate run`
+> collects every plugin's declared migrations and executes the pending ones
+> after the core migrations — each inside an explicit transaction, recorded in
+> `core_schema_migrations` under the per-plugin namespace
+> `plugin:<PluginName>:<MigrationClass>`. `migrate status` lists them and
+> `migrate rollback` runs your `down()`. Keep statements idempotent
+> (`IF NOT EXISTS` / `IF EXISTS`): re-runs and adopting hand-created schema
+> are then safe by construction.
 
 Create `plugins/HelloWorld/Migrations/CreateHelloGreetingsTable.php`:
 
