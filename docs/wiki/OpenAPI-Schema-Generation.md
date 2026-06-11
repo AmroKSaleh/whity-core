@@ -27,11 +27,46 @@ This generates `public/openapi.json` containing the complete API specification.
 ### Output
 
 The generated `openapi.json` includes:
-- **Paths:** All registered plugin endpoints
+- **Paths:** All routes registered with the Router the generator is given. The
+  `generate:openapi` command currently registers PLUGIN routes only; the core
+  admin resources join the spec with #167 (the mechanism — `Router::register`
+  with a `schema` argument — is already in place for them)
 - **Methods:** HTTP method for each endpoint (GET, POST, PATCH, DELETE, etc.)
 - **Security:** Bearer token authentication configuration
-- **Responses:** Standard response codes (200, 401, 403)
-- **Tags:** Endpoints grouped by resource type
+- **Typed bodies (WC-166):** routes that declare a `schema` get a `requestBody` and per-status `responses` referencing named `components.schemas` via `$ref`
+- **Responses:** declared per-status, or the standard defaults (200, 401, 403) for undeclared routes
+- **Tags:** declared, or derived from the path
+
+Generation is **deterministic** (paths, methods, and component schemas are
+sorted — regenerating over the same routes is byte-identical) and
+**self-validating**: the command refuses to write a spec with dangling `$ref`s
+or response-less operations (exit 1 with the errors listed).
+
+## Declaring typed request/response bodies (WC-166)
+
+Any route — core (`Router::register(..., schema:)`) or plugin (the optional
+`'schema'` key in the route array, SDK ≥ 1.1.1) — can declare its contract:
+
+```php
+'schema' => [
+    'summary' => 'Create a widget',
+    'tags' => ['widgets'],
+    'request' => 'WidgetCreate',          // component name => $ref, or inline JSON-Schema array
+    'responses' => [
+        201 => 'Widget',                  // component name => $ref'd application/json body
+        400 => ['description' => 'Validation failed'],   // raw response object
+    ],
+    'components' => [                     // schemas this route contributes to components.schemas
+        'WidgetCreate' => ['type' => 'object', 'required' => ['name'], 'properties' => ['name' => ['type' => 'string']]],
+        'Widget' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer'], 'name' => ['type' => 'string']]],
+    ],
+]
+```
+
+Identical component contributions from multiple routes are idempotent; a
+CONFLICTING redefinition keeps the first definition and logs a warning. The
+shipped `plugins/HelloWorld` declares its `/api/hello` response (`Greeting`)
+as a working reference.
 
 ## Integration with Plugins
 

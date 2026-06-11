@@ -13,7 +13,7 @@ use Whity\Sdk\Http\Request;
 class Router
 {
     /**
-     * @var array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string}> Registered routes
+     * @var array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string, schema: array<string, mixed>|null}> Registered routes
      */
     private array $routes = [];
 
@@ -31,6 +31,9 @@ class Router
      * @param string|null $requiredRole Optional required role for authorization
      * @param string|null $namespacePrefix Optional plugin namespace prefix
      * @param string|null $requiredPermission Optional required permission (resource:action) for authorization
+     * @param array<string, mixed>|null $schema Optional OpenAPI declaration for the route (WC-166):
+     *   summary/tags plus typed 'request' and 'responses' (component name or
+     *   inline schema) and optional 'components' contributed to the spec.
      * @return void
      */
     public function register(
@@ -39,7 +42,8 @@ class Router
         callable $handler,
         ?string $requiredRole = null,
         ?string $namespacePrefix = null,
-        ?string $requiredPermission = null
+        ?string $requiredPermission = null,
+        ?array $schema = null
     ): void {
         $this->routes[] = [
             'method' => strtoupper($method),
@@ -49,6 +53,7 @@ class Router
             'requiredRole' => $requiredRole,
             'requiredPermission' => $requiredPermission,
             'namespacePrefix' => $namespacePrefix,
+            'schema' => $schema,
         ];
     }
 
