@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/lib/auth-context";
 import { ToastProvider } from "@/lib/toast-context";
 import { NavigationProvider } from "@/lib/navigation-context";
+import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
 import { ToastContainer } from "@/components/ui/toast-container";
 
 // Design-token font families (see src/design/tokens/base.json):
@@ -35,8 +36,10 @@ export default function RootLayout({
         <AuthProvider>
           <ToastProvider>
             <NavigationProvider>
-              {children}
-              <ToastContainer />
+              <PluginFeaturesProvider>
+                {children}
+                <ToastContainer />
+              </PluginFeaturesProvider>
             </NavigationProvider>
           </ToastProvider>
         </AuthProvider>

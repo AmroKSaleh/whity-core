@@ -411,6 +411,47 @@
                 ]
             }
         },
+        "/api/frontend/features": {
+            "get": {
+                "operationId": "get_api_frontend_features",
+                "summary": "List the plugin frontend features visible to the caller",
+                "tags": [
+                    "frontend"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The features whose requiredPermission the caller holds (server-side filtered; empty data is valid)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FrontendFeatureListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/hello": {
             "get": {
                 "operationId": "get_api_hello",
@@ -448,6 +489,190 @@
                     },
                     "403": {
                         "description": "Forbidden"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/hello/greetings": {
+            "get": {
+                "operationId": "get_api_hello_greetings",
+                "summary": "List the tenant's greetings (newest first)",
+                "tags": [
+                    "hello"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HelloGreetingListResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HelloGreetingListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing hello:view or unresolved tenant context"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_hello_greetings",
+                "summary": "Create a greeting in the caller's tenant",
+                "tags": [
+                    "hello"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/HelloGreetingCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "HelloGreetingResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HelloGreetingResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "message missing, empty, or longer than 255 characters"
+                    },
+                    "403": {
+                        "description": "Missing hello:manage or unresolved tenant context"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/hello/greetings/{id}": {
+            "delete": {
+                "operationId": "delete_api_hello_greetings_id",
+                "summary": "Delete a greeting (tenant-scoped 404 semantics)",
+                "tags": [
+                    "hello"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion confirmation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        "data"
+                                    ],
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "required": [
+                                                "id",
+                                                "message"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer"
+                                                },
+                                                "message": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing hello:manage or unresolved tenant context"
+                    },
+                    "404": {
+                        "description": "Greeting not found in the caller's tenant"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_hello_greetings_id",
+                "summary": "Update a greeting (tenant-scoped 404 semantics)",
+                "tags": [
+                    "hello"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/HelloGreetingCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "HelloGreetingResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HelloGreetingResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "message missing, empty, or longer than 255 characters"
+                    },
+                    "403": {
+                        "description": "Missing hello:manage or unresolved tenant context"
+                    },
+                    "404": {
+                        "description": "Greeting not found in the caller's tenant"
                     }
                 },
                 "security": [
@@ -2333,6 +2558,82 @@
                     "error"
                 ]
             },
+            "FrontendFeature": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "plugin": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "icon": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "group": {
+                        "type": "string"
+                    },
+                    "order": {
+                        "type": "integer"
+                    },
+                    "screen": {
+                        "type": "string",
+                        "enum": [
+                            "crud",
+                            "custom"
+                        ]
+                    },
+                    "resource": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                            "basePath": {
+                                "type": "string"
+                            },
+                            "titleField": {
+                                "type": "string",
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "basePath",
+                            "titleField"
+                        ]
+                    },
+                    "requiredPermission": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "plugin",
+                    "label",
+                    "icon",
+                    "group",
+                    "order",
+                    "screen",
+                    "resource",
+                    "requiredPermission"
+                ]
+            },
+            "FrontendFeatureListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/FrontendFeature"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "Greeting": {
                 "type": "object",
                 "required": [
@@ -2349,6 +2650,68 @@
                     },
                     "version": {
                         "type": "string"
+                    }
+                }
+            },
+            "HelloGreeting": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "tenantId",
+                    "message",
+                    "createdAt"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenantId": {
+                        "type": "integer"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
+            "HelloGreetingCreateRequest": {
+                "type": "object",
+                "required": [
+                    "message"
+                ],
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                    }
+                }
+            },
+            "HelloGreetingListResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/HelloGreeting"
+                        }
+                    }
+                }
+            },
+            "HelloGreetingResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/HelloGreeting"
                     }
                 }
             },

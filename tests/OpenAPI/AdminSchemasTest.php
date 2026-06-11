@@ -35,7 +35,8 @@ final class AdminSchemasTest extends TestCase
     }
 
     /**
-     * Regenerate exactly as `generate:openapi` does (plugins + core catalogue).
+     * Regenerate exactly as `generate:openapi` does (core catalogue first,
+     * then plugins — the runtime first-registration-wins ordering, WC-169).
      *
      * @return array{spec: array<string, mixed>, errors: list<string>}
      */
@@ -43,8 +44,8 @@ final class AdminSchemasTest extends TestCase
     {
         $router = new Router();
         $loader = new PluginLoader(dirname(__DIR__, 2) . '/plugins', $router, null, new HookManager());
-        $loader->load();
         CoreApiSchemas::registerRoutes($router);
+        $loader->load();
 
         return (new SchemaGenerator('Whity Core API', '1.0.0', $loader, $router))->generateAndValidate();
     }
@@ -88,6 +89,7 @@ final class AdminSchemasTest extends TestCase
             ['/api/delegations', 'get', 'responses', '200', 'DelegationListResponse'],
             ['/api/delegations', 'post', 'requestBody', null, 'DelegationCreateRequest'],
             ['/api/audit-logs', 'get', 'responses', '200', 'AuditLogListResponse'],
+            ['/api/frontend/features', 'get', 'responses', '200', 'FrontendFeatureListResponse'],
         ];
 
         foreach ($cases as [$path, $method, $kind, $status, $component]) {

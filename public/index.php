@@ -108,6 +108,7 @@ use Whity\Api\MigrationsApiHandler;
 use Whity\Api\AdminApiHandler;
 use Whity\Api\OusApiHandler;
 use Whity\Api\DelegationsApiHandler;
+use Whity\Api\FrontendFeaturesApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
 use Whity\Core\Delegation\DelegationRepository;
@@ -179,6 +180,12 @@ TenantContext::setLogger($logger);
 
 // 1. Initialize database connection
 $db = Database::connect();
+// Expose the shared, lazy, self-healing Database service to plugin route
+// handlers (WC-169): plugins resolve it at request time via
+// \Whity\app(Database::class) — the same service container the HookManager
+// already uses — so they reuse the worker's single connection instead of
+// opening their own. Lazy: registering it does not open a socket.
+\Whity\register_service(Database::class, $db); // @phpstan-ignore-line
 
 // 2. Initialize router
 $router = new Router();
@@ -339,6 +346,10 @@ $kernel->use($tenantIsolationMiddleware);
 // Wire the permission registry, hook manager, and logger (WC-9/WC-13) so plugin
 // permissions/hooks register through core services and plugin error boundaries
 // log structured records via the application logger.
+// NOTE: the loader is CONSTRUCTED here (handlers below depend on the instance)
+// but plugins are LOADED after every core route is registered — first
+// registration wins in the Router (WC-169), so a plugin can never shadow a
+// core route by claiming its path.
 $pluginLoader = new PluginLoader(
     __DIR__ . '/../plugins',
     $router,
@@ -346,7 +357,6 @@ $pluginLoader = new PluginLoader(
     $hookManager,
     $logger
 );
-$pluginLoader->load();
 
 // 9b. Initialize deployment manager
 $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage/deployments');
@@ -400,6 +410,15 @@ $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'adm
 
 $navigationHandler = new NavigationApiHandler($hookManager);
 $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
+
+// Plugin frontend feature descriptors (WC-169). Registered with NO required
+// role/permission — any authenticated caller may ask which screens they may
+// see — but the handler fails closed itself (unresolved tenant or missing
+// user => 403) and filters every descriptor per caller against RoleChecker
+// server-side. Descriptors are UI metadata only; the underlying plugin API
+// routes keep their own route-level RBAC.
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker);
+$router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered with NO required role and NO
 // required permission so it bypasses RBAC (fail-open), and it is listed as a
@@ -486,6 +505,16 @@ $router->register('GET', '/api/relations', [$relationsHandler, 'listEdges'], nul
 $router->register('GET', '/api/users/{id:\d+}/relations', [$relationsHandler, 'userRelations'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('POST', '/api/relations', [$relationsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
 $router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
+
+// Load plugins AFTER every core route (WC-169): the Router refuses duplicate
+// method+path registrations (first wins), so core routes can never be
+// shadowed by a plugin claiming the same path.
+$pluginLoader->load();
+
+// Descriptor-derived navigation (WC-169): every validated plugin frontend
+// feature gets a menu entry pointing at the dynamic screen route /admin/x/{id}.
+// Features are read at dispatch time, so runtime disable drops the entry.
+\Whity\Core\PluginNavigationBridge::subscribe($hookManager, $pluginLoader);
 
 // Handle requests (persistent worker mode or fallback single-request mode)
 $isWorker = function_exists('frankenphp_handle_request');

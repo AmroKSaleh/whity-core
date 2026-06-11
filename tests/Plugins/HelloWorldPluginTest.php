@@ -34,14 +34,14 @@ final class HelloWorldPluginTest extends TestCase
 
         $this->assertInstanceOf(PluginInterface::class, $plugin);
         $this->assertSame('HelloWorld', $plugin->getName());
-        $this->assertSame('1.0.0', $plugin->getVersion());
+        $this->assertSame('1.1.0', $plugin->getVersion());
     }
 
-    public function testDeclaresPublicAndAdminRoutes(): void
+    public function testDeclaresPublicAdminAndGreetingsRoutes(): void
     {
         $routes = (new HelloWorldPlugin())->getRoutes();
 
-        $this->assertCount(2, $routes);
+        $this->assertCount(6, $routes);
 
         $this->assertSame('GET', $routes[0]['method']);
         $this->assertSame('/api/hello', $routes[0]['path']);
@@ -51,6 +51,55 @@ final class HelloWorldPluginTest extends TestCase
         $this->assertSame('GET', $routes[1]['method']);
         $this->assertSame('/api/hello/admin', $routes[1]['path']);
         $this->assertSame('admin', $routes[1]['requiredRole']);
+
+        // The greetings CRUD resource (WC-169): reads gated on hello:view,
+        // writes on hello:manage — a :read-style permission never gates a
+        // write and vice versa.
+        $byKey = [];
+        foreach ($routes as $route) {
+            $byKey[$route['method'] . ' ' . $route['path']] = $route;
+        }
+
+        $this->assertSame('hello:view', $byKey['GET /api/hello/greetings']['requiredPermission']);
+        $this->assertSame('hello:manage', $byKey['POST /api/hello/greetings']['requiredPermission']);
+        $this->assertSame('hello:manage', $byKey['PATCH /api/hello/greetings/{id:\d+}']['requiredPermission']);
+        $this->assertSame('hello:manage', $byKey['DELETE /api/hello/greetings/{id:\d+}']['requiredPermission']);
+
+        // Every greetings route publishes a typed OpenAPI declaration.
+        foreach (
+            [
+                'GET /api/hello/greetings',
+                'POST /api/hello/greetings',
+                'PATCH /api/hello/greetings/{id:\d+}',
+                'DELETE /api/hello/greetings/{id:\d+}',
+            ] as $key
+        ) {
+            $this->assertArrayHasKey('schema', $byKey[$key], "{$key} must declare a schema");
+            $this->assertIsCallable($byKey[$key]['handler']);
+            $this->assertNull($byKey[$key]['requiredRole']);
+        }
+        $this->assertArrayHasKey('HelloGreeting', $byKey['GET /api/hello/greetings']['schema']['components']);
+    }
+
+    public function testDeclaresTheGreetingsFrontendFeature(): void
+    {
+        $features = (new HelloWorldPlugin())->getFrontendFeatures();
+
+        $this->assertSame([
+            [
+                'id' => 'hello-greetings',
+                'label' => 'Greetings',
+                'icon' => 'message-circle',
+                'group' => 'plugins',
+                'order' => 10,
+                'screen' => 'crud',
+                'resource' => [
+                    'basePath' => '/api/hello/greetings',
+                    'titleField' => 'message',
+                ],
+                'requiredPermission' => 'hello:view',
+            ],
+        ], $features);
     }
 
     public function testDeclaresColonNotationPermissions(): void
@@ -166,5 +215,24 @@ final class HelloWorldPluginTest extends TestCase
 
         // The user.creating hook is registered.
         $this->assertNotEmpty($hookManager->getListeners('user.creating'));
+
+        // The greetings routes carry their requiredPermission to the router
+        // (WC-169) so RbacMiddleware enforces them.
+        $greetingsMatch = $router->match(new Request('GET', '/api/hello/greetings'));
+        $this->assertNotNull($greetingsMatch);
+        $this->assertSame('hello:view', $greetingsMatch['requiredPermission']);
+
+        $createMatch = $router->match(new Request('POST', '/api/hello/greetings'));
+        $this->assertNotNull($createMatch);
+        $this->assertSame('hello:manage', $createMatch['requiredPermission']);
+
+        // The frontend feature descriptor survives loader validation and is
+        // exposed with the owning plugin name attached.
+        $features = $loader->getFrontendFeatures();
+        $byId = array_column($features, null, 'id');
+        $this->assertArrayHasKey('hello-greetings', $byId);
+        $this->assertSame('HelloWorld', $byId['hello-greetings']['plugin']);
+        $this->assertSame('crud', $byId['hello-greetings']['screen']);
+        $this->assertSame('/api/hello/greetings', $byId['hello-greetings']['resource']['basePath']);
     }
 }

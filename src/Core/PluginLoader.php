@@ -6,6 +6,7 @@ namespace Whity\Core;
 
 use ReflectionClass;
 use Throwable;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\InvalidPermissionException;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Hooks\HookManager;
@@ -14,6 +15,7 @@ use Psr\Log\LoggerInterface;
 use Composer\Semver\Semver;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\Sdk;
@@ -28,6 +30,20 @@ use Whity\Sdk\Sdk;
  */
 class PluginLoader
 {
+    /**
+     * The mandated `resource:action` permission pattern (WC-13/WC-169).
+     *
+     * Mirrors {@see \Whity\Core\RBAC\PermissionRegistry}'s validation so a
+     * route-level `requiredPermission` and a frontend descriptor's
+     * `requiredPermission` are held to the same contract.
+     */
+    private const PERMISSION_PATTERN = '/^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$/';
+
+    /**
+     * The kebab-case slug pattern for frontend feature descriptor ids (WC-169).
+     */
+    private const FEATURE_ID_PATTERN = '/^[a-z][a-z0-9-]*$/';
+
     /**
      * @var string Directory containing plugin files
      */
@@ -66,9 +82,33 @@ class PluginLoader
      * disabled via the admin API. The plugin instance is retained so a disabled
      * plugin can be re-registered (re-enabled) without re-reading it from disk.
      *
-     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>}>
+     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>}>
      */
     private array $registeredPlugins = [];
+
+    /**
+     * Frontend feature descriptor ids claimed so far, id => plugin key (WC-169).
+     *
+     * Descriptor ids are unique across ALL plugins: the first claimant
+     * (discovery order) wins; a later duplicate is dropped with a warning. A
+     * plugin re-claiming its own id (re-enable after an administrative
+     * disable) is idempotent.
+     *
+     * @var array<string, string>
+     */
+    private array $claimedFeatureIds = [];
+
+    /**
+     * Permission name => owning plugin key (original FQCN), first declarant
+     * (discovery order) wins. Frontend descriptors may only be gated on a
+     * permission the declaring plugin actually OWNS — a later plugin
+     * re-declaring the same name cannot gate screens on it, and core
+     * permission names are never plugin-ownable (see
+     * {@see validateFrontendFeature()}).
+     *
+     * @var array<string, string>
+     */
+    private array $claimedPermissions = [];
 
     /**
      * Plugin keys (original FQCNs) whose routes/hooks were torn down by an
@@ -409,6 +449,8 @@ class PluginLoader
         $this->registeredPlugins = [];
         $this->plugins = [];
         $this->administrativelyDisabled = [];
+        $this->claimedFeatureIds = [];
+        $this->claimedPermissions = [];
 
         // Reset lifecycle state machines. A reload re-registers every plugin
         // from disk, so each plugin (including a previously failed one whose
@@ -739,12 +781,13 @@ class PluginLoader
         $lifecycle->reEnable();
 
         if ($reRegister && $info !== null) {
-            $registeredHooks = $this->registerCapabilities(
+            $registered = $this->registerCapabilities(
                 $info['plugin'],
                 $info['namespacePrefix'],
                 $pluginKey
             );
-            $this->registeredPlugins[$pluginKey]['hooks'] = $registeredHooks;
+            $this->registeredPlugins[$pluginKey]['hooks'] = $registered['hooks'];
+            $this->registeredPlugins[$pluginKey]['frontendFeatures'] = $registered['frontendFeatures'];
             unset($this->administrativelyDisabled[$pluginKey]);
         }
 
@@ -1241,14 +1284,15 @@ class PluginLoader
         $lifecycle->markLoaded();
         $this->lifecycles[$pluginKey] = $lifecycle;
 
-        $registeredHooks = $this->registerCapabilities($plugin, $namespacePrefix, $pluginKey);
+        $registered = $this->registerCapabilities($plugin, $namespacePrefix, $pluginKey);
 
         // Store the plugin instance and its registration bookkeeping
         $this->plugins[] = $plugin;
         $this->registeredPlugins[$pluginKey] = [
             'plugin' => $plugin,
             'namespacePrefix' => $namespacePrefix,
-            'hooks' => $registeredHooks,
+            'hooks' => $registered['hooks'],
+            'frontendFeatures' => $registered['frontendFeatures'],
         ];
 
         // The plugin is now fully registered and ready to serve.
@@ -1261,41 +1305,86 @@ class PluginLoader
      * Shared by initial registration and by re-enable, so a plugin that was
      * administratively disabled (its routes/hooks removed) can be brought back
      * online without re-reading or re-instantiating it from disk. Returns the
-     * hook subscriptions actually registered so the caller can record them for
-     * later unsubscription.
+     * hook subscriptions actually registered (so the caller can record them
+     * for later unsubscription) and the validated frontend feature descriptors
+     * (WC-169).
      *
      * @param PluginInterface $plugin The plugin instance to register.
      * @param string $namespacePrefix The plugin namespace prefix.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
-     * @return array<array{event: string, callback: callable}> Registered hook subscriptions.
+     * @return array{hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>}
      */
     private function registerCapabilities(
         PluginInterface $plugin,
         string $namespacePrefix,
         string $pluginKey
     ): array {
+        // Snapshot the declared routes ONCE so registration and the frontend
+        // descriptor validation below judge the same declaration set.
+        $routes = $plugin->getRoutes();
+
+        // GET routes the router ACTUALLY accepted for this plugin, mapped to
+        // their requiredPermission. Frontend descriptor ownership (rule c) is
+        // judged against this — what registered, not what was declared — so a
+        // route refused for colliding with core can never back a screen.
+        $registeredGetRoutes = [];
+
         // 1. Register routes with the router, each wrapped in an error boundary
         //    so a throwing handler cannot crash the host or other plugins.
-        foreach ($plugin->getRoutes() as $route) {
+        foreach ($routes as $route) {
             $method = $route['method'];
             $path = $route['path'];
             $handler = $route['handler'];
             $requiredRole = $route['requiredRole'] ?? null;
+
+            // Route-level requiredPermission (SDK 1.2, WC-169): validated and
+            // passed through to the router so RbacMiddleware enforces it. A
+            // malformed declaration fails CLOSED — the route is NOT registered,
+            // because registering it without the permission would silently
+            // serve a route its author believed protected.
+            $requiredPermission = $route['requiredPermission'] ?? null;
+            if (
+                $requiredPermission !== null
+                && (!is_string($requiredPermission) || preg_match(self::PERMISSION_PATTERN, $requiredPermission) !== 1)
+            ) {
+                $this->logWarning(
+                    "Plugin {$pluginKey} route {$method} {$path} declares an invalid requiredPermission; "
+                    . 'the route was NOT registered (fail-closed).'
+                );
+                continue;
+            }
 
             if (is_callable($handler)) {
                 // The optional 'schema' key (WC-166) carries the route's typed
                 // OpenAPI declaration through to the router/generator.
                 $schema = isset($route['schema']) && is_array($route['schema']) ? $route['schema'] : null;
 
-                $this->router->register(
+                $accepted = $this->router->register(
                     $method,
                     $path,
                     $this->wrapHandler($pluginKey, $handler),
                     $requiredRole,
                     $namespacePrefix,
-                    null,
+                    $requiredPermission,
                     $schema
                 );
+
+                // First registration wins (core routes register before plugins
+                // since WC-169): a colliding plugin route is refused so it can
+                // never shadow an existing handler. The refusal is logged and
+                // the path is NOT recorded as plugin-owned, so a frontend
+                // descriptor over it fails ownership validation below.
+                if (!$accepted) {
+                    $this->logWarning(
+                        "Plugin {$pluginKey} route {$method} {$path} collides with an already-registered "
+                        . 'route and was NOT registered (first registration wins).'
+                    );
+                    continue;
+                }
+
+                if (strtoupper((string) $method) === 'GET') {
+                    $registeredGetRoutes[$path] = $requiredPermission;
+                }
             }
         }
 
@@ -1316,6 +1405,21 @@ class PluginLoader
             }
         }
 
+        // 2b. Claim permission OWNERSHIP for descriptor gating (WC-169 review
+        //     hardening): the first plugin (discovery order) to declare a name
+        //     owns it; re-claiming one's own name (re-enable) is idempotent.
+        //     Ownership only affects frontend descriptors — route-level RBAC
+        //     and the registry are untouched.
+        try {
+            foreach ($plugin->getPermissions() as $permission) {
+                if (is_string($permission) && !isset($this->claimedPermissions[$permission])) {
+                    $this->claimedPermissions[$permission] = $pluginKey;
+                }
+            }
+        } catch (Throwable $e) {
+            $this->handlePluginThrowable($pluginKey, $e, 'permission declaration');
+        }
+
         // 3. Register hooks with the hook manager, tracking each subscription so
         //    it can be unsubscribed on a later reload/removal/disable. Hook
         //    callbacks are wrapped in the same error boundary as route handlers.
@@ -1328,7 +1432,285 @@ class PluginLoader
             }
         }
 
-        return $registeredHooks;
+        // 4. Collect and validate the plugin's frontend feature descriptors
+        //    (WC-169). Inside the same per-plugin error boundary philosophy:
+        //    invalid descriptors are dropped with a warning, a throwing
+        //    declaration contributes nothing, and the plugin keeps loading.
+        $frontendFeatures = $this->collectFrontendFeatures($plugin, $pluginKey, $registeredGetRoutes);
+
+        return ['hooks' => $registeredHooks, 'frontendFeatures' => $frontendFeatures];
+    }
+
+    /**
+     * Collect, validate, and normalize a plugin's frontend feature descriptors.
+     *
+     * Validation is fail-closed and PER DESCRIPTOR (an invalid descriptor is
+     * dropped with a logged warning naming the plugin, the descriptor id when
+     * present, and the exact reason — the plugin itself keeps loading):
+     *
+     *  (a) shape — id/label/screen/requiredPermission present and well-typed;
+     *      id matches the kebab-case slug pattern; screen ∈ {crud, custom};
+     *  (b) requiredPermission matches the `resource:action` pattern, is one of
+     *      the permissions THIS plugin declares via getPermissions(), is NOT a
+     *      core permission name (self-declaring 'users:read' does not make it
+     *      ownable), and is OWNED by this plugin (first declarant across all
+     *      plugins wins) — a descriptor gated on a foreign permission cannot
+     *      expose a screen over someone else's resource;
+     *  (c) screen='crud' requires resource.basePath (string starting '/api/');
+     *      the plugin must have ACTUALLY REGISTERED a GET route at exactly
+     *      basePath (a declaration the router refused — e.g. a collision with
+     *      a core route — does not count), and that route's requiredPermission
+     *      must EQUAL the descriptor's (a menu gated on X over a data route
+     *      gated on Y, or unprotected, fails closed);
+     *  (d) ids are unique across all plugins (first claimant wins).
+     *
+     * Surviving descriptors are normalized: defaults filled (group 'plugins',
+     * order 100, icon null, titleField null, resource null for resource-less
+     * custom screens) and the owning plugin name attached under 'plugin'.
+     *
+     * @param PluginInterface $plugin The plugin being registered.
+     * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
+     * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
+     * @return list<array<string, mixed>> The validated, normalized descriptors.
+     */
+    private function collectFrontendFeatures(PluginInterface $plugin, string $pluginKey, array $registeredGetRoutes): array
+    {
+        if (!$plugin instanceof PluginFrontendInterface) {
+            return [];
+        }
+
+        // A throwing declaration must not break the plugin (or its peers):
+        // like the other capability failures it is logged and contributes
+        // nothing. getPermissions() is snapshotted under the same boundary
+        // because rule (b) depends on it.
+        try {
+            $declared = $plugin->getFrontendFeatures();
+            $ownPermissions = $plugin->getPermissions();
+        } catch (Throwable $e) {
+            $this->handlePluginThrowable($pluginKey, $e, 'frontend feature declaration');
+            return [];
+        }
+
+        $validated = [];
+        foreach ($declared as $descriptor) {
+            $normalized = $this->validateFrontendFeature(
+                $descriptor,
+                $plugin->getName(),
+                $pluginKey,
+                $ownPermissions,
+                $registeredGetRoutes
+            );
+            if ($normalized !== null) {
+                $validated[] = $normalized;
+            }
+        }
+
+        return $validated;
+    }
+
+    /**
+     * Validate and normalize a single frontend feature descriptor.
+     *
+     * See {@see collectFrontendFeatures()} for the rule catalogue. Returns the
+     * normalized descriptor, or null when it was dropped (the exact reason is
+     * logged as a warning).
+     *
+     * @param mixed $descriptor The raw descriptor as declared by the plugin.
+     * @param string $pluginName The plugin's declared name (attached as 'plugin').
+     * @param string $pluginKey Stable identity (original FQCN) for log messages.
+     * @param array<int|string, mixed> $ownPermissions The plugin's own declared permissions.
+     * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
+     * @return array<string, mixed>|null The normalized descriptor, or null when dropped.
+     */
+    private function validateFrontendFeature(
+        mixed $descriptor,
+        string $pluginName,
+        string $pluginKey,
+        array $ownPermissions,
+        array $registeredGetRoutes
+    ): ?array {
+        $drop = function (string $reason, ?string $id) use ($pluginKey): null {
+            $idLabel = $id !== null ? "'{$id}'" : '(no id)';
+            $this->logWarning(
+                "Plugin {$pluginKey} frontend feature {$idLabel} dropped: {$reason}"
+            );
+            return null;
+        };
+
+        if (!is_array($descriptor)) {
+            return $drop('descriptor must be an associative array', null);
+        }
+
+        // (a) shape: id / label / screen.
+        $id = $descriptor['id'] ?? null;
+        if (!is_string($id) || preg_match(self::FEATURE_ID_PATTERN, $id) !== 1) {
+            return $drop('id must be a kebab-case slug matching ' . self::FEATURE_ID_PATTERN, is_string($id) ? $id : null);
+        }
+
+        $label = $descriptor['label'] ?? null;
+        if (!is_string($label) || $label === '') {
+            return $drop('label must be a non-empty string', $id);
+        }
+
+        $screen = $descriptor['screen'] ?? null;
+        if ($screen !== 'crud' && $screen !== 'custom') {
+            return $drop("screen must be 'crud' or 'custom'", $id);
+        }
+
+        // (b) requiredPermission: well-formed AND owned by THIS plugin. A
+        // descriptor gated on a core permission or another plugin's permission
+        // is rejected — it could otherwise expose a screen over a resource the
+        // plugin does not own. Fail-closed: no permissionless screens.
+        $permission = $descriptor['requiredPermission'] ?? null;
+        if (!is_string($permission) || preg_match(self::PERMISSION_PATTERN, $permission) !== 1) {
+            return $drop('requiredPermission must be a resource:action permission string', $id);
+        }
+        if (!in_array($permission, $ownPermissions, true)) {
+            return $drop(
+                "requiredPermission '{$permission}' is not declared by this plugin's getPermissions()",
+                $id
+            );
+        }
+        // Ownership is NOT self-asserted (review hardening): a core permission
+        // name is never plugin-ownable even when self-declared, and across
+        // plugins the FIRST declarant (discovery order) owns the name.
+        if (in_array($permission, CorePermissions::all(), true)) {
+            return $drop(
+                "requiredPermission '{$permission}' collides with a core permission — core names are not plugin-ownable",
+                $id
+            );
+        }
+        $permissionOwner = $this->claimedPermissions[$permission] ?? null;
+        if ($permissionOwner !== $pluginKey) {
+            return $drop(
+                "requiredPermission '{$permission}' is owned by plugin "
+                . ($permissionOwner ?? '(unclaimed)') . ' (first declarant wins)',
+                $id
+            );
+        }
+
+        // (c) resource: REQUIRED for crud screens; when present (any screen)
+        // it must point at the plugin's OWN REST collection — an exact-path
+        // GET route in its own route declarations.
+        $resource = null;
+        $rawResource = $descriptor['resource'] ?? null;
+        if ($screen === 'crud' && !is_array($rawResource)) {
+            return $drop("screen 'crud' requires a resource array with basePath", $id);
+        }
+        if (is_array($rawResource)) {
+            $basePath = $rawResource['basePath'] ?? null;
+            if (!is_string($basePath) || !str_starts_with($basePath, '/api/')) {
+                return $drop("resource.basePath must be a string starting with '/api/'", $id);
+            }
+            // Ownership is judged by what the router ACTUALLY registered for
+            // this plugin — a declared route the router refused (e.g. a
+            // collision with a core route) can never back a screen.
+            if (!array_key_exists($basePath, $registeredGetRoutes)) {
+                return $drop(
+                    "resource.basePath '{$basePath}' is not a GET route this plugin registered",
+                    $id
+                );
+            }
+            // The menu gate and the data gate must be the SAME permission: a
+            // screen gated on X over a route gated on Y (or unprotected) is a
+            // misalignment that fails closed.
+            if ($registeredGetRoutes[$basePath] !== $permission) {
+                return $drop(
+                    "resource.basePath '{$basePath}' route requiredPermission '"
+                    . ($registeredGetRoutes[$basePath] ?? 'none')
+                    . "' does not match the descriptor's '{$permission}'",
+                    $id
+                );
+            }
+
+            $titleField = $rawResource['titleField'] ?? null;
+            if ($titleField !== null && !is_string($titleField)) {
+                return $drop('resource.titleField must be a string when present', $id);
+            }
+
+            $resource = ['basePath' => $basePath, 'titleField' => $titleField];
+        }
+
+        // Optional presentation fields: type-checked fail-closed (a mistyped
+        // declaration is a bug worth surfacing, not silently defaulting).
+        $icon = $descriptor['icon'] ?? null;
+        if ($icon !== null && !is_string($icon)) {
+            return $drop('icon must be a string when present', $id);
+        }
+        $group = $descriptor['group'] ?? 'plugins';
+        if (!is_string($group) || $group === '') {
+            return $drop('group must be a non-empty string when present', $id);
+        }
+        $order = $descriptor['order'] ?? 100;
+        if (!is_int($order)) {
+            return $drop('order must be an integer when present', $id);
+        }
+
+        // (d) cross-plugin id uniqueness: first claimant (discovery order)
+        // wins; re-claiming one's own id (re-enable) is idempotent.
+        $claimant = $this->claimedFeatureIds[$id] ?? null;
+        if ($claimant !== null && $claimant !== $pluginKey) {
+            return $drop("id '{$id}' is already claimed by plugin {$claimant} (first wins)", $id);
+        }
+        $this->claimedFeatureIds[$id] = $pluginKey;
+
+        return [
+            'id' => $id,
+            'plugin' => $pluginName,
+            'label' => $label,
+            'icon' => $icon,
+            'group' => $group,
+            'order' => $order,
+            'screen' => $screen,
+            'resource' => $resource,
+            'requiredPermission' => $permission,
+        ];
+    }
+
+    /**
+     * Get every active plugin's validated frontend feature descriptors (WC-169).
+     *
+     * Flat list across plugins, each entry carrying its owning plugin's name
+     * under 'plugin'. Plugins that are administratively disabled, auto-failed,
+     * or otherwise not in the active lifecycle state contribute NOTHING — the
+     * features reappear when the plugin is re-enabled.
+     *
+     * @return list<array<string, mixed>> The exposed descriptors.
+     */
+    public function getFrontendFeatures(): array
+    {
+        $features = [];
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            foreach ($info['frontendFeatures'] as $feature) {
+                $features[] = $feature;
+            }
+        }
+
+        return $features;
+    }
+
+    /**
+     * Log a warning through the wired logger, falling back to error_log.
+     *
+     * @param string $message The warning message.
+     * @return void
+     */
+    private function logWarning(string $message): void
+    {
+        if ($this->logger !== null) {
+            $this->logger->warning($message);
+        } else {
+            error_log($message);
+        }
     }
 
     /**

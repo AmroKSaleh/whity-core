@@ -90,6 +90,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/frontend/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the plugin frontend features visible to the caller */
+        get: operations["get_api_frontend_features"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/hello": {
         parameters: {
             query?: never;
@@ -122,6 +139,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/hello/greetings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the tenant's greetings (newest first) */
+        get: operations["get_api_hello_greetings"];
+        put?: never;
+        /** Create a greeting in the caller's tenant */
+        post: operations["post_api_hello_greetings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hello/greetings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a greeting (tenant-scoped 404 semantics) */
+        delete: operations["delete_api_hello_greetings_id"];
+        options?: never;
+        head?: never;
+        /** Update a greeting (tenant-scoped 404 semantics) */
+        patch: operations["patch_api_hello_greetings_id"];
         trace?: never;
     };
     "/api/ous": {
@@ -411,10 +464,43 @@ export interface components {
             error: string;
             details?: Record<string, never>;
         };
+        FrontendFeature: {
+            id: string;
+            plugin: string;
+            label: string;
+            icon: string | null;
+            group: string;
+            order: number;
+            /** @enum {string} */
+            screen: "crud" | "custom";
+            resource: {
+                basePath: string;
+                titleField: string | null;
+            } | null;
+            requiredPermission: string;
+        };
+        FrontendFeatureListResponse: {
+            data: components["schemas"]["FrontendFeature"][];
+        };
         Greeting: {
             message: string;
             plugin: string;
             version: string;
+        };
+        HelloGreeting: {
+            id: number;
+            tenantId: number;
+            message: string;
+            createdAt: string | null;
+        };
+        HelloGreetingCreateRequest: {
+            message: string;
+        };
+        HelloGreetingListResponse: {
+            data: components["schemas"]["HelloGreeting"][];
+        };
+        HelloGreetingResponse: {
+            data: components["schemas"]["HelloGreeting"];
         };
         MutationResponse: {
             data: {
@@ -891,6 +977,44 @@ export interface operations {
             };
         };
     };
+    get_api_frontend_features: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The features whose requiredPermission the caller holds (server-side filtered; empty data is valid) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrontendFeatureListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_hello: {
         parameters: {
             query?: never;
@@ -936,6 +1060,159 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_api_hello_greetings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HelloGreetingListResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HelloGreetingListResponse"];
+                };
+            };
+            /** @description Missing hello:view or unresolved tenant context */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_api_hello_greetings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HelloGreetingCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HelloGreetingResponse */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HelloGreetingResponse"];
+                };
+            };
+            /** @description message missing, empty, or longer than 255 characters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing hello:manage or unresolved tenant context */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_api_hello_greetings_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deletion confirmation */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            id: number;
+                            message: string;
+                        };
+                    };
+                };
+            };
+            /** @description Missing hello:manage or unresolved tenant context */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Greeting not found in the caller's tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    patch_api_hello_greetings_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HelloGreetingCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description HelloGreetingResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HelloGreetingResponse"];
+                };
+            };
+            /** @description message missing, empty, or longer than 255 characters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing hello:manage or unresolved tenant context */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Greeting not found in the caller's tenant */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

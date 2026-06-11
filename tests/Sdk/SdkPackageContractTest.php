@@ -143,6 +143,31 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('PDO', (string) $down->getParameters()[0]->getType());
     }
 
+    /**
+     * SDK 1.2 (WC-169): the OPTIONAL frontend feature descriptor capability.
+     * Mirrors PluginRequirementsInterface — a sibling interface a plugin MAY
+     * implement, keeping PluginInterface itself backend-only.
+     */
+    public function testPluginFrontendInterfaceLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\PluginFrontendInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\PluginFrontendInterface::class))->getMethods()
+        );
+        $this->assertSame(['getFrontendFeatures'], $methods);
+
+        $return = (new \ReflectionMethod(\Whity\Sdk\PluginFrontendInterface::class, 'getFrontendFeatures'))
+            ->getReturnType();
+        $this->assertSame('array', (string) $return);
+    }
+
+    public function testSdkVersionIsOneTwoForTheFrontendDescriptorCapability(): void
+    {
+        $this->assertSame('1.2.0', \Whity\Sdk\Sdk::VERSION, 'SDK 1.2 ships PluginFrontendInterface');
+    }
+
     public function testHookEventConstantsLiveInTheSdk(): void
     {
         $this->assertSame('user.creating', \Whity\Sdk\Hooks\Events::USER_CREATING);

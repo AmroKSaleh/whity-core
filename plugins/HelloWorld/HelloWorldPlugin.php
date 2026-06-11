@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace HelloWorld;
 
+use HelloWorld\Api\GreetingsApiHandler;
 use HelloWorld\Migrations\CreateHelloGreetingsTable;
 use Whity\Sdk\Hooks\Events;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 
@@ -16,10 +18,16 @@ use Whity\Sdk\PluginRequirementsInterface;
  *
  * A complete, copy-paste reference plugin that accompanies the
  * {@see docs/wiki/Plugin-Development.md} tutorial. It demonstrates every
- * capability surface exposed by {@see PluginInterface}:
+ * capability surface exposed by the SDK:
  *
  *  - a public route: GET /api/hello
  *  - an admin-only route: GET /api/hello/admin
+ *  - a tenant-scoped CRUD resource over its own table (WC-169):
+ *    GET/POST /api/hello/greetings + PATCH/DELETE /api/hello/greetings/{id},
+ *    gated on `hello:view` (reads) / `hello:manage` (writes) via the
+ *    host-enforced route-level `requiredPermission` (SDK 1.2)
+ *  - a frontend feature descriptor ({@see PluginFrontendInterface}, SDK 1.2)
+ *    so the host admin UI renders a schema-driven screen for the resource
  *  - permissions declared in the mandated `resource:action` colon notation
  *  - a hook that runs custom logic before a user is created (`user.creating`)
  *  - a migration class registered for the platform migration runner
@@ -28,11 +36,15 @@ use Whity\Sdk\PluginRequirementsInterface;
  * resolves it under the `HelloWorld` namespace prefix (directory name) and
  * auto-discovers it without any manual registration.
  *
- * Since WC-162 the plugin depends ONLY on the standalone `whity/plugin-sdk`
- * package — never on whity-core — which is what makes it distributable to
- * any Whity-based host application.
+ * Since WC-162 the plugin's CONTRACT types come only from the standalone
+ * `whity/plugin-sdk` package — never from whity-core — which is what makes it
+ * distributable to any Whity-based host application. The one deliberate host
+ * seam is data access: route handlers needing the database resolve the host's
+ * shared lazy Database service from the `\Whity` service container at request
+ * time (see {@see self::resolvePdo()}), analogous to the migration runner
+ * injecting a PDO into plugin migrations.
  */
-final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
 {
     /**
      * @inheritDoc
@@ -49,7 +61,9 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
      */
     public function getSdkConstraint(): string
     {
-        return '^1.1';
+        // Requires SDK 1.2: PluginFrontendInterface + host-enforced
+        // route-level requiredPermission.
+        return '^1.2';
     }
 
     /**
@@ -67,7 +81,7 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
      */
     public function getVersion(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     /**
@@ -109,6 +123,181 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
                 'handler' => [$this, 'adminHello'],
                 'requiredRole' => 'admin',
             ],
+            // ---- the tenant-scoped greetings CRUD resource (WC-169) ----
+            // Reads are gated on hello:view, writes on hello:manage via the
+            // route-level requiredPermission the host enforces (SDK 1.2). The
+            // typed 'schema' declarations publish the resource's contract
+            // through the host's generate:openapi.
+            [
+                'method' => 'GET',
+                'path' => '/api/hello/greetings',
+                'handler' => [$this, 'listGreetings'],
+                'requiredRole' => null,
+                'requiredPermission' => 'hello:view',
+                'schema' => [
+                    'summary' => 'List the tenant\'s greetings (newest first)',
+                    'tags' => ['hello'],
+                    'responses' => [
+                        200 => 'HelloGreetingListResponse',
+                        403 => ['description' => 'Missing hello:view or unresolved tenant context'],
+                    ],
+                    'components' => self::greetingComponents(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/hello/greetings',
+                'handler' => [$this, 'createGreeting'],
+                'requiredRole' => null,
+                'requiredPermission' => 'hello:manage',
+                'schema' => [
+                    'summary' => 'Create a greeting in the caller\'s tenant',
+                    'tags' => ['hello'],
+                    'request' => 'HelloGreetingCreateRequest',
+                    'responses' => [
+                        201 => 'HelloGreetingResponse',
+                        400 => ['description' => 'message missing, empty, or longer than 255 characters'],
+                        403 => ['description' => 'Missing hello:manage or unresolved tenant context'],
+                    ],
+                    'components' => self::greetingComponents(),
+                ],
+            ],
+            [
+                'method' => 'PATCH',
+                'path' => '/api/hello/greetings/{id:\d+}',
+                'handler' => [$this, 'updateGreeting'],
+                'requiredRole' => null,
+                'requiredPermission' => 'hello:manage',
+                'schema' => [
+                    'summary' => 'Update a greeting (tenant-scoped 404 semantics)',
+                    'tags' => ['hello'],
+                    'request' => 'HelloGreetingCreateRequest',
+                    'responses' => [
+                        200 => 'HelloGreetingResponse',
+                        400 => ['description' => 'message missing, empty, or longer than 255 characters'],
+                        403 => ['description' => 'Missing hello:manage or unresolved tenant context'],
+                        404 => ['description' => 'Greeting not found in the caller\'s tenant'],
+                    ],
+                    'components' => self::greetingComponents(),
+                ],
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/hello/greetings/{id:\d+}',
+                'handler' => [$this, 'deleteGreeting'],
+                'requiredRole' => null,
+                'requiredPermission' => 'hello:manage',
+                'schema' => [
+                    'summary' => 'Delete a greeting (tenant-scoped 404 semantics)',
+                    'tags' => ['hello'],
+                    'responses' => [
+                        // MutationResponse-like confirmation, declared inline
+                        // because plugin specs stay self-contained (no $refs
+                        // into host-owned components).
+                        200 => [
+                            'description' => 'Deletion confirmation',
+                            'content' => [
+                                'application/json' => [
+                                    'schema' => [
+                                        'type' => 'object',
+                                        'required' => ['data'],
+                                        'properties' => [
+                                            'data' => [
+                                                'type' => 'object',
+                                                'required' => ['id', 'message'],
+                                                'properties' => [
+                                                    'id' => ['type' => 'integer'],
+                                                    'message' => ['type' => 'string'],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        403 => ['description' => 'Missing hello:manage or unresolved tenant context'],
+                        404 => ['description' => 'Greeting not found in the caller\'s tenant'],
+                    ],
+                    'components' => self::greetingComponents(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The OpenAPI component schemas the greetings resource publishes.
+     *
+     * Shared by every greetings route declaration; the host's generator
+     * hoists them into components.schemas (idempotent re-contribution).
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function greetingComponents(): array
+    {
+        return [
+            'HelloGreeting' => [
+                'type' => 'object',
+                'required' => ['id', 'tenantId', 'message', 'createdAt'],
+                'properties' => [
+                    'id' => ['type' => 'integer'],
+                    'tenantId' => ['type' => 'integer'],
+                    'message' => ['type' => 'string'],
+                    'createdAt' => ['type' => 'string', 'nullable' => true],
+                ],
+            ],
+            'HelloGreetingListResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'array',
+                        'items' => ['$ref' => '#/components/schemas/HelloGreeting'],
+                    ],
+                ],
+            ],
+            'HelloGreetingResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => ['$ref' => '#/components/schemas/HelloGreeting'],
+                ],
+            ],
+            'HelloGreetingCreateRequest' => [
+                'type' => 'object',
+                'required' => ['message'],
+                'properties' => [
+                    'message' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 255],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Declare the admin-UI screen for the greetings resource (SDK 1.2).
+     *
+     * UI metadata only — the descriptor grants nothing; the host validates it,
+     * filters it per caller against `hello:view`, and serves it via
+     * GET /api/frontend/features. Data access stays enforced by the
+     * route-level RBAC declared in {@see getRoutes()}.
+     *
+     * @inheritDoc
+     */
+    public function getFrontendFeatures(): array
+    {
+        return [
+            [
+                'id' => 'hello-greetings',
+                'label' => 'Greetings',
+                'icon' => 'message-circle',
+                'group' => 'plugins',
+                'order' => 10,
+                'screen' => 'crud',
+                'resource' => [
+                    'basePath' => '/api/hello/greetings',
+                    'titleField' => 'message',
+                ],
+                'requiredPermission' => 'hello:view',
+            ],
         ];
     }
 
@@ -148,6 +337,10 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
     {
         return [
             CreateHelloGreetingsTable::class,
+            // WC-169: seed hello:view/hello:manage into the persisted catalogue
+            // and grant them to the admin role(s), so the frontend feature works
+            // out-of-the-box on a fresh install.
+            Migrations\GrantGreetingsPermissionsToAdmin::class,
         ];
     }
 
@@ -181,6 +374,90 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
             'message' => 'Hello, administrator!',
             'plugin' => $this->getName(),
         ]);
+    }
+
+    /**
+     * Handle GET /api/hello/greetings (requires hello:view).
+     *
+     * @param Request $request The incoming HTTP request.
+     * @param array<string, string> $params Captured path parameters.
+     * @return Response The tenant-scoped greeting list.
+     */
+    public function listGreetings(Request $request, array $params = []): Response
+    {
+        return $this->greetingsHandler()->list($request);
+    }
+
+    /**
+     * Handle POST /api/hello/greetings (requires hello:manage).
+     *
+     * @param Request $request The incoming HTTP request.
+     * @param array<string, string> $params Captured path parameters.
+     * @return Response The created greeting (201) or a validation error.
+     */
+    public function createGreeting(Request $request, array $params = []): Response
+    {
+        return $this->greetingsHandler()->create($request);
+    }
+
+    /**
+     * Handle PATCH /api/hello/greetings/{id} (requires hello:manage).
+     *
+     * @param Request $request The incoming HTTP request.
+     * @param array<string, string> $params Captured path parameters ('id').
+     * @return Response The updated greeting or a tenant-scoped 404.
+     */
+    public function updateGreeting(Request $request, array $params = []): Response
+    {
+        return $this->greetingsHandler()->update($request, $params);
+    }
+
+    /**
+     * Handle DELETE /api/hello/greetings/{id} (requires hello:manage).
+     *
+     * @param Request $request The incoming HTTP request.
+     * @param array<string, string> $params Captured path parameters ('id').
+     * @return Response A deletion confirmation or a tenant-scoped 404.
+     */
+    public function deleteGreeting(Request $request, array $params = []): Response
+    {
+        return $this->greetingsHandler()->delete($request, $params);
+    }
+
+    /**
+     * Build the greetings handler with a freshly resolved PDO.
+     *
+     * Resolved PER REQUEST (not cached) so the host's connection self-healing
+     * and recycling are honoured — a cached handle would pin a connection the
+     * host may have already replaced.
+     *
+     * @return GreetingsApiHandler The DB-backed CRUD handler.
+     */
+    private function greetingsHandler(): GreetingsApiHandler
+    {
+        return new GreetingsApiHandler($this->resolvePdo());
+    }
+
+    /**
+     * Resolve a live PDO from the host's service container.
+     *
+     * The host registers its shared, lazy, self-healing
+     * {@see \Whity\Database\Database} service under its class name in the
+     * `\Whity` service container (public/index.php) — the same container the
+     * HookManager already travels through. This is the documented wiring seam
+     * for plugin data access; a host without the service yields a safe 500
+     * via the loader's per-plugin error boundary.
+     *
+     * @return \PDO Live database connection.
+     */
+    private function resolvePdo(): \PDO
+    {
+        $database = \Whity\app(\Whity\Database\Database::class);
+        if (!$database instanceof \Whity\Database\Database) {
+            throw new \RuntimeException('The host did not register the shared Database service');
+        }
+
+        return $database->getPdo();
     }
 
     /**
