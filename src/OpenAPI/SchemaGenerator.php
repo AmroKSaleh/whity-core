@@ -44,6 +44,11 @@ class SchemaGenerator
     private ?Router $router;
 
     /**
+     * @var list<string> Component conflicts collected during the current generation.
+     */
+    private array $conflicts = [];
+
+    /**
      * Constructor
      *
      * @param string $title API title
@@ -78,6 +83,7 @@ class SchemaGenerator
     {
         $builder = new SchemaBuilder($this->title, $this->version);
         $builder->addBearerAuth();
+        $this->conflicts = [];
 
         foreach ($this->routeDeclarations() as $route) {
             $this->addOperation(
@@ -89,7 +95,35 @@ class SchemaGenerator
             );
         }
 
-        return ['spec' => $builder->build(), 'errors' => $builder->validate()];
+        return [
+            'spec' => $builder->build(),
+            'errors' => array_values(array_merge($builder->validate(), $this->conflicts)),
+        ];
+    }
+
+    /**
+     * JSON-encode a built spec, preserving empty maps as JSON OBJECTS.
+     *
+     * PHP's empty array is ambiguous and would encode `components.schemas`
+     * (and friends) as `[]` — invalid OpenAPI that external validators
+     * reject. Output is pretty-printed and slash-preserving, matching the
+     * committed public/openapi.json format.
+     *
+     * @param array<string, mixed> $spec The built spec.
+     * @return string Deterministic JSON document.
+     */
+    public static function encode(array $spec): string
+    {
+        foreach (['schemas', 'securitySchemes'] as $key) {
+            if (($spec['components'][$key] ?? null) === []) {
+                $spec['components'][$key] = new \stdClass();
+            }
+        }
+        if (($spec['paths'] ?? null) === []) {
+            $spec['paths'] = new \stdClass();
+        }
+
+        return (string) json_encode($spec, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     }
 
     /**
@@ -148,23 +182,34 @@ class SchemaGenerator
     ): void {
         // Hoist component schemas the route contributes. An identical
         // re-contribution is idempotent; a CONFLICTING redefinition keeps the
-        // first definition and logs — one route must not corrupt another's
-        // published contract.
+        // first definition AND fails validation — the losing route's $refs
+        // would otherwise lie about the shape its handler produces.
         $components = $schema['components'] ?? [];
         if (is_array($components)) {
             foreach ($components as $name => $definition) {
                 if (!is_string($name) || !is_array($definition)) {
+                    error_log("[openapi] {$method} {$path}: ignoring malformed component declaration");
                     continue;
                 }
                 try {
                     $builder->addComponentSchema($name, $definition);
                 } catch (\InvalidArgumentException $e) {
-                    error_log("[openapi] {$method} {$path}: " . $e->getMessage() . ' — keeping the first definition');
+                    $this->conflicts[] = "{$method} {$path}: " . $e->getMessage();
+                    error_log("[openapi] {$method} {$path}: " . $e->getMessage());
                 }
             }
+        } elseif ($components !== null && $components !== []) {
+            error_log("[openapi] {$method} {$path}: 'components' must be an array of name => schema");
         }
 
+        // OpenAPI path templates carry plain {name} placeholders: strip
+        // routing constraints and DECLARE every path parameter.
+        ['path' => $specPath, 'parameters' => $pathParameters] = $this->sanitizePath($path);
+
         $operation = [
+            'operationId' => is_string($schema['operationId'] ?? null)
+                ? $schema['operationId']
+                : $this->operationId($method, $specPath),
             'summary' => is_string($schema['summary'] ?? null)
                 ? $schema['summary']
                 : $this->generateSummary($method, $path),
@@ -172,6 +217,10 @@ class SchemaGenerator
                 ? array_values($schema['tags'])
                 : [$this->getTag($path)],
         ];
+
+        if ($pathParameters !== []) {
+            $operation['parameters'] = $pathParameters;
+        }
 
         // Typed request body.
         $request = $schema['request'] ?? null;
@@ -190,6 +239,9 @@ class SchemaGenerator
             }
             $operation['responses'] = $responses;
         } else {
+            if ($declaredResponses !== null && !is_array($declaredResponses)) {
+                error_log("[openapi] {$method} {$path}: 'responses' must be an array of status => shape; using defaults");
+            }
             $operation['responses'] = [
                 '200' => ['description' => 'Successful response'],
                 '401' => ['description' => 'Unauthorized'],
@@ -204,7 +256,50 @@ class SchemaGenerator
             ];
         }
 
-        $builder->addPath($path, $method, $operation);
+        $builder->addPath($specPath, $method, $operation);
+    }
+
+    /**
+     * Convert a router path into an OpenAPI path template + parameter list.
+     *
+     * `{id:\d+}` becomes `{id}` with a declared integer path parameter;
+     * unconstrained `{name}` placeholders declare string parameters.
+     *
+     * @param string $path The registered route path.
+     * @return array{path: string, parameters: list<array<string, mixed>>}
+     */
+    private function sanitizePath(string $path): array
+    {
+        $parameters = [];
+        $clean = preg_replace_callback(
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^{}]+))?\}#',
+            static function (array $matches) use (&$parameters): string {
+                $constraint = $matches[2] ?? '';
+                $type = in_array($constraint, ['\d+', '[0-9]+'], true) ? 'integer' : 'string';
+                $parameters[] = [
+                    'name' => $matches[1],
+                    'in' => 'path',
+                    'required' => true,
+                    'schema' => ['type' => $type],
+                ];
+
+                return '{' . $matches[1] . '}';
+            },
+            $path
+        );
+
+        return ['path' => is_string($clean) ? $clean : $path, 'parameters' => $parameters];
+    }
+
+    /**
+     * Deterministic operationId for typed-client generators (stable method
+     * names in #168): lowercase method + underscored path.
+     */
+    private function operationId(string $method, string $specPath): string
+    {
+        $slug = strtolower(trim((string) preg_replace('/[^a-zA-Z0-9]+/', '_', $specPath), '_'));
+
+        return strtolower($method) . '_' . $slug;
     }
 
     /**

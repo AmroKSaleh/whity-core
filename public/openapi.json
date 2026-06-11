@@ -13,6 +13,7 @@
     "paths": {
         "/api/example/hello": {
             "get": {
+                "operationId": "get_api_example_hello",
                 "summary": "Get Api/example/hello",
                 "tags": [
                     "Example"
@@ -32,6 +33,7 @@
         },
         "/api/example/secure": {
             "post": {
+                "operationId": "post_api_example_secure",
                 "summary": "Create Api/example/secure",
                 "tags": [
                     "Example"
@@ -56,6 +58,7 @@
         },
         "/api/hello": {
             "get": {
+                "operationId": "get_api_hello",
                 "summary": "Public greeting",
                 "tags": [
                     "hello"
@@ -76,6 +79,7 @@
         },
         "/api/hello/admin": {
             "get": {
+                "operationId": "get_api_hello_admin",
                 "summary": "Get Api/hello/admin",
                 "tags": [
                     "Hello"

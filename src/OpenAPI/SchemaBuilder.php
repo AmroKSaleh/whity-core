@@ -15,10 +15,21 @@ namespace Whity\OpenAPI;
  */
 class SchemaBuilder
 {
+    /** OAS component-key grammar (OpenAPI 3.0 fixed fields). */
+    private const COMPONENT_NAME_PATTERN = '/^[a-zA-Z0-9.\-_]+$/';
+
+    /** Recursion guard for the $ref scan. */
+    private const MAX_REF_SCAN_DEPTH = 100;
+
     /**
      * @var array<string, mixed> The OpenAPI specification
      */
     private array $spec = [];
+
+    /**
+     * @var list<string> Duplicate method+path registrations (surfaced by validate()).
+     */
+    private array $duplicateOperations = [];
 
     /**
      * Constructor
@@ -74,6 +85,12 @@ class SchemaBuilder
      */
     public function addComponentSchema(string $name, array $schema): self
     {
+        if (preg_match(self::COMPONENT_NAME_PATTERN, $name) !== 1) {
+            throw new \InvalidArgumentException(
+                "Component schema name '{$name}' is invalid: only [a-zA-Z0-9.-_] are allowed (it must be \$ref-able)"
+            );
+        }
+
         $existing = $this->spec['components']['schemas'][$name] ?? null;
         if ($existing !== null) {
             if ($existing === $schema) {
@@ -104,6 +121,14 @@ class SchemaBuilder
 
         if (!isset($this->spec['paths'][$path])) {
             $this->spec['paths'][$path] = [];
+        }
+
+        // A second registration of the same method+path means the spec would
+        // describe an operation the router never serves (it matches first
+        // registration wins). Record it so validate() refuses the document.
+        if (isset($this->spec['paths'][$path][$method])) {
+            $this->duplicateOperations[] =
+                "Duplicate operation " . strtoupper($method) . " {$path}: a later registration overwrote an earlier one";
         }
 
         $this->spec['paths'][$path][$method] = $operation;
@@ -149,7 +174,15 @@ class SchemaBuilder
             }
         }
 
+        $errors = array_merge($errors, $this->duplicateOperations);
+
         foreach ($this->spec['paths'] as $path => $operations) {
+            // An OpenAPI path template carries plain {name} placeholders; a
+            // leftover routing constraint ({id:\d+}) is not valid OAS.
+            if (preg_match('/\{[a-zA-Z_][a-zA-Z0-9_]*:/', $path) === 1) {
+                $errors[] = "Path '{$path}' carries a routing constraint; OpenAPI paths must use plain {name} templates";
+            }
+
             if (!is_array($operations)) {
                 $errors[] = "Path '{$path}' must map to an operations object";
                 continue;
@@ -168,9 +201,9 @@ class SchemaBuilder
             }
         }
 
-        $this->collectDanglingRefs($this->spec, $errors);
+        $this->collectDanglingRefs($this->spec, $errors, 0);
 
-        return $errors;
+        return array_values($errors);
     }
 
     /**
@@ -205,12 +238,20 @@ class SchemaBuilder
      *
      * @param array<array-key, mixed> $node The subtree to scan.
      * @param list<string> $errors Accumulated errors (by reference).
+     * @param int $depth Current recursion depth (bounded).
      */
-    private function collectDanglingRefs(array $node, array &$errors): void
+    private function collectDanglingRefs(array $node, array &$errors, int $depth): void
     {
+        if ($depth > self::MAX_REF_SCAN_DEPTH) {
+            $errors[] = 'Spec exceeds the maximum nesting depth (' . self::MAX_REF_SCAN_DEPTH . ')';
+            return;
+        }
+
         foreach ($node as $key => $value) {
-            if ($key === '$ref' && is_string($value)) {
-                if (str_starts_with($value, '#/components/schemas/')) {
+            if ($key === '$ref') {
+                if (!is_string($value)) {
+                    $errors[] = '$ref values must be strings, got ' . gettype($value);
+                } elseif (str_starts_with($value, '#/components/schemas/')) {
                     $name = substr($value, strlen('#/components/schemas/'));
                     if (!isset($this->spec['components']['schemas'][$name])) {
                         $errors[] = "Dangling \$ref '{$value}': component schema '{$name}' is not registered";
@@ -222,7 +263,7 @@ class SchemaBuilder
             }
 
             if (is_array($value)) {
-                $this->collectDanglingRefs($value, $errors);
+                $this->collectDanglingRefs($value, $errors, $depth + 1);
             }
         }
     }

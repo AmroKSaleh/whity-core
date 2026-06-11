@@ -299,6 +299,143 @@ PHP);
         unset($builder);
     }
 
+    // ==================== review-major regressions ====================
+
+    /**
+     * Review MAJOR 1: routes with {param} / {param:regex} placeholders must
+     * emit OpenAPI-legal path strings ({id}, no regex) and DECLARE the path
+     * parameters; validate() must reject any path still carrying a constraint.
+     */
+    public function testPathParametersAreSanitizedAndDeclared(): void
+    {
+        $router = new Router();
+        $router->register('GET', '/api/items/{id:\d+}/tags/{tag}', static fn () => null, null, null, null, [
+            'summary' => 'Get tags',
+            'responses' => [200 => ['description' => 'ok']],
+        ]);
+
+        $loader = new PluginLoader(self::$pluginsDir . '/nonexistent', $router, null, new HookManager());
+        $generator = new SchemaGenerator('T', '1.0.0', $loader, $router);
+        ['spec' => $spec, 'errors' => $errors] = $generator->generateAndValidate();
+
+        $this->assertSame([], $errors);
+        $this->assertArrayHasKey('/api/items/{id}/tags/{tag}', $spec['paths'], 'Constraints must be stripped from spec paths');
+
+        $params = $spec['paths']['/api/items/{id}/tags/{tag}']['get']['parameters'] ?? [];
+        $byName = array_column($params, null, 'name');
+        $this->assertSame('path', $byName['id']['in'] ?? null);
+        $this->assertTrue($byName['id']['required'] ?? false);
+        $this->assertSame('integer', $byName['id']['schema']['type'] ?? null, '\d+ constraints declare integer params');
+        $this->assertSame('string', $byName['tag']['schema']['type'] ?? null, 'Unconstrained params declare string');
+    }
+
+    public function testValidateRejectsPathsStillCarryingConstraints(): void
+    {
+        $builder = new SchemaBuilder('T', '1.0.0');
+        $builder->addPath('/api/items/{id:\d+}', 'GET', ['responses' => ['200' => ['description' => 'ok']]]);
+
+        $errors = $builder->validate();
+        $this->assertTrue(
+            (bool) array_filter($errors, static fn (string $e): bool => str_contains($e, '{id:')),
+            'A path string still carrying a regex constraint must be flagged'
+        );
+    }
+
+    /**
+     * Review MAJOR 2: a cross-route component CONFLICT must surface as a
+     * validation error (refused by the command), not just an error_log line —
+     * the losing route would publish a $ref to a shape it does not produce.
+     */
+    public function testComponentConflictBecomesAValidationError(): void
+    {
+        $router = new Router();
+        $router->register('GET', '/api/one', static fn () => null, null, null, null, [
+            'responses' => [200 => 'Thing'],
+            'components' => ['Thing' => ['type' => 'object']],
+        ]);
+        $router->register('GET', '/api/two', static fn () => null, null, null, null, [
+            'responses' => [200 => 'Thing'],
+            'components' => ['Thing' => ['type' => 'string']],
+        ]);
+
+        $loader = new PluginLoader(self::$pluginsDir . '/nonexistent', $router, null, new HookManager());
+        $generator = new SchemaGenerator('T', '1.0.0', $loader, $router);
+        $errors = $generator->generateAndValidate()['errors'];
+
+        $this->assertTrue(
+            (bool) array_filter($errors, static fn (string $e): bool => str_contains($e, 'Thing')),
+            'A conflicting component contribution must fail validation'
+        );
+    }
+
+    /**
+     * Review MAJOR 4: component names must satisfy the OAS key grammar —
+     * a name containing / or # corrupts every $ref to it.
+     */
+    public function testInvalidComponentNamesAreRejected(): void
+    {
+        $builder = new SchemaBuilder('T', '1.0.0');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $builder->addComponentSchema('Bad/Name', ['type' => 'object']);
+    }
+
+    /**
+     * Review MAJOR 5: two routes emitting the same method+path silently
+     * overwrote each other (spec described an operation the router never
+     * serves). Must surface as a validation error.
+     */
+    public function testDuplicateOperationBecomesAValidationError(): void
+    {
+        $builder = new SchemaBuilder('T', '1.0.0');
+        $builder->addPath('/api/dup', 'GET', ['responses' => ['200' => ['description' => 'first']]]);
+        $builder->addPath('/api/dup', 'GET', ['responses' => ['200' => ['description' => 'second']]]);
+
+        $errors = $builder->validate();
+        $this->assertTrue(
+            (bool) array_filter($errors, static fn (string $e): bool => str_contains($e, '/api/dup')),
+            'A duplicate method+path registration must be flagged'
+        );
+    }
+
+    /**
+     * Review MAJOR 3: empty components.schemas must encode as a JSON OBJECT
+     * ({}), not an array ([]) — [] is invalid OAS and external validators
+     * reject it.
+     */
+    public function testEmptySchemaMapsEncodeAsJsonObjects(): void
+    {
+        $router = new Router();
+        $router->register('GET', '/api/none', static fn () => null, null, null, null, [
+            'responses' => [200 => ['description' => 'ok']],
+        ]);
+
+        $loader = new PluginLoader(self::$pluginsDir . '/nonexistent', $router, null, new HookManager());
+        $generator = new SchemaGenerator('T', '1.0.0', $loader, $router);
+        $json = SchemaGenerator::encode($generator->generate());
+
+        $this->assertStringContainsString('"schemas": {}', $json, 'Empty schema maps must be JSON objects');
+        $this->assertStringNotContainsString('"schemas": []', $json);
+    }
+
+    /**
+     * Review MINOR 7: every operation carries a deterministic operationId so
+     * typed-client generators (#168) get stable method names.
+     */
+    public function testOperationsCarryDeterministicOperationIds(): void
+    {
+        $spec = $this->generateFromFixtures();
+
+        $this->assertSame(
+            'post_api_oapi_widgets',
+            $spec['paths']['/api/oapi/widgets']['post']['operationId'] ?? null
+        );
+        $this->assertSame(
+            'get_api_oapi_plain',
+            $spec['paths']['/api/oapi/plain']['get']['operationId'] ?? null
+        );
+    }
+
     // ==================== helpers ====================
 
     /**

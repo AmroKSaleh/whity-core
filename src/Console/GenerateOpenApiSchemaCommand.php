@@ -67,9 +67,10 @@ class GenerateOpenApiSchemaCommand
             }
 
             // Save to public/openapi.json (deterministic: builder output is
-            // sorted, so regeneration over the same routes is byte-identical).
+            // sorted, so regeneration over the same routes is byte-identical;
+            // the encoder keeps empty maps as JSON objects, valid OAS).
             $outputPath = dirname(__DIR__, 2) . '/public/openapi.json';
-            $json = json_encode($spec, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $json = SchemaGenerator::encode($spec);
 
             if (file_put_contents($outputPath, $json) === false) {
                 echo "Error: Failed to write to {$outputPath}\n";
