@@ -378,26 +378,38 @@ class DelegationsApiHandler
     }
 
     /**
-     * Parse the query string from the request path into an associative array.
+     * Parse the request's query parameters from BOTH runtime sources.
+     *
+     * At runtime FrankenPHP strips the query string from the path, so $_GET is
+     * the live source; the path-query form is how the test suite builds a
+     * {@see Request}. Path values win when both are present — mirroring
+     * {@see AuditLogApiHandler::parseQuery()} (WC-167 review: path-only parsing
+     * made every documented filter dead in production).
      *
      * @param Request $request The incoming request.
      * @return array<string, string> The decoded query parameters.
      */
     private function queryParams(Request $request): array
     {
-        $query = parse_url($request->getPath(), PHP_URL_QUERY);
-        if (!is_string($query) || $query === '') {
-            return [];
-        }
-
-        $params = [];
-        parse_str($query, $params);
-
         /** @var array<string, string> $stringParams */
         $stringParams = [];
-        foreach ($params as $key => $value) {
-            if (is_string($value)) {
-                $stringParams[(string) $key] = $value;
+
+        // Runtime source: the $_GET superglobal.
+        foreach ($_GET as $key => $value) {
+            if (is_string($key) && is_string($value)) {
+                $stringParams[$key] = $value;
+            }
+        }
+
+        // Path source (tests / explicit query in the path).
+        $query = parse_url($request->getPath(), PHP_URL_QUERY);
+        if (is_string($query) && $query !== '') {
+            $params = [];
+            parse_str($query, $params);
+            foreach ($params as $key => $value) {
+                if (is_string($value)) {
+                    $stringParams[(string) $key] = $value;
+                }
             }
         }
 

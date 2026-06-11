@@ -45,6 +45,24 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
         TenantContext::reset();
     }
 
+    /**
+     * WC-167 review BLOCKER regression: empty metadata (JSONB '{}') must
+     * encode as a JSON OBJECT in the response — PHP's empty array would emit
+     * [], breaking every strictly-typed consumer of the published
+     * AuditLogEntry.metadata: object contract.
+     */
+    public function testEmptyMetadataEncodesAsJsonObject(): void
+    {
+        $this->seedRow(1, 10, 'auth.login', null, null);
+
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->list($this->authedRequest('/api/audit-logs', 11));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertStringContainsString('"metadata":{}', $response->getBody());
+        $this->assertStringNotContainsString('"metadata":[]', $response->getBody());
+    }
+
     // ==================== Tenant data isolation (AC) ====================
 
     public function testTenantAdminSeesOnlyItsOwnTenantRows(): void
