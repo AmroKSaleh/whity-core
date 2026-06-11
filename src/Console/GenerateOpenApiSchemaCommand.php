@@ -52,11 +52,22 @@ class GenerateOpenApiSchemaCommand
             // Load plugins - plugin metadata is available without database connection
             $pluginLoader->load();
 
-            // Generate schema
-            $generator = new SchemaGenerator('Whity Core API', '1.0.0', $pluginLoader);
-            $spec = $generator->generate();
+            // Generate from the ROUTER (carries every registered route with
+            // its typed schema declaration, WC-166) and validate before
+            // anything is written: an invalid contract must never be published.
+            $generator = new SchemaGenerator('Whity Core API', '1.0.0', $pluginLoader, $router);
+            ['spec' => $spec, 'errors' => $errors] = $generator->generateAndValidate();
 
-            // Save to public/openapi.json
+            if ($errors !== []) {
+                echo "Error: generated spec failed OpenAPI validation:\n";
+                foreach ($errors as $error) {
+                    echo "  - {$error}\n";
+                }
+                return 1;
+            }
+
+            // Save to public/openapi.json (deterministic: builder output is
+            // sorted, so regeneration over the same routes is byte-identical).
             $outputPath = dirname(__DIR__, 2) . '/public/openapi.json';
             $json = json_encode($spec, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
@@ -68,6 +79,7 @@ class GenerateOpenApiSchemaCommand
             echo "OpenAPI schema generated successfully\n";
             echo "Saved to: public/openapi.json\n";
             echo "Endpoints: " . count($spec['paths']) . "\n";
+            echo "Component schemas: " . count($spec['components']['schemas']) . "\n";
 
             return 0;
         } catch (\Throwable $e) {

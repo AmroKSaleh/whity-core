@@ -20,7 +20,7 @@ namespace Whity\Sdk;
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.1.0';
+    public const VERSION = '1.1.1';
 
     /**
      * Static identity only — never instantiated.

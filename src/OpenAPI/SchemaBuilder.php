@@ -1,12 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\OpenAPI;
 
 /**
- * OpenAPI 3.0 Schema Builder
+ * OpenAPI 3.0 Schema Builder (WC-166: the contract engine)
  *
- * Helper class to construct OpenAPI specification documents.
- * Provides fluent interface for building paths, operations, and components.
+ * Constructs OpenAPI specification documents: paths/operations, named
+ * component schemas referenced via `$ref`, and security schemes. The built
+ * document is DETERMINISTIC — paths, methods, and component schemas are
+ * emitted in sorted order so regeneration is byte-stable — and can be
+ * structurally validated before it is written anywhere.
  */
 class SchemaBuilder
 {
@@ -41,6 +46,48 @@ class SchemaBuilder
                 'securitySchemes' => [],
             ],
         ];
+    }
+
+    /**
+     * Build a `$ref` to a named component schema.
+     *
+     * @param string $name The component schema name.
+     * @return array{'$ref': string}
+     */
+    public static function ref(string $name): array
+    {
+        return ['$ref' => '#/components/schemas/' . $name];
+    }
+
+    /**
+     * Register a named component schema (components.schemas).
+     *
+     * Registering the identical definition twice is an idempotent no-op (two
+     * routes may legitimately contribute the same shared schema); registering
+     * a DIFFERENT definition under an existing name throws — silently letting
+     * one definition shadow another would corrupt the typed contract.
+     *
+     * @param string $name The component schema name (used in $ref).
+     * @param array<string, mixed> $schema The JSON-Schema definition.
+     * @return self
+     * @throws \InvalidArgumentException On a conflicting redefinition.
+     */
+    public function addComponentSchema(string $name, array $schema): self
+    {
+        $existing = $this->spec['components']['schemas'][$name] ?? null;
+        if ($existing !== null) {
+            if ($existing === $schema) {
+                return $this;
+            }
+
+            throw new \InvalidArgumentException(
+                "Component schema '{$name}' is already registered with a different definition"
+            );
+        }
+
+        $this->spec['components']['schemas'][$name] = $schema;
+
+        return $this;
     }
 
     /**
@@ -82,12 +129,101 @@ class SchemaBuilder
     }
 
     /**
-     * Build and return the OpenAPI specification
+     * Structurally validate the spec.
+     *
+     * Checks the invariants a consumer (typed-client generator, schema-driven
+     * UI) depends on: required top-level members, every operation carrying a
+     * non-empty `responses` object, and every `$ref` in the document resolving
+     * to a registered component schema. Returns human-readable error strings;
+     * an empty list means valid.
+     *
+     * @return list<string> Validation errors (empty = valid).
+     */
+    public function validate(): array
+    {
+        $errors = [];
+
+        foreach (['openapi', 'info', 'paths'] as $required) {
+            if (!isset($this->spec[$required])) {
+                $errors[] = "Missing required top-level member '{$required}'";
+            }
+        }
+
+        foreach ($this->spec['paths'] as $path => $operations) {
+            if (!is_array($operations)) {
+                $errors[] = "Path '{$path}' must map to an operations object";
+                continue;
+            }
+
+            foreach ($operations as $method => $operation) {
+                if (!is_array($operation)) {
+                    $errors[] = "Operation {$method} {$path} must be an object";
+                    continue;
+                }
+
+                $responses = $operation['responses'] ?? null;
+                if (!is_array($responses) || $responses === []) {
+                    $errors[] = "Operation {$method} {$path} has no responses";
+                }
+            }
+        }
+
+        $this->collectDanglingRefs($this->spec, $errors);
+
+        return $errors;
+    }
+
+    /**
+     * Build and return the OpenAPI specification.
+     *
+     * Output ordering is deterministic: paths, the methods within each path,
+     * and component schemas are sorted, so regeneration over the same inputs
+     * is byte-identical regardless of registration order.
      *
      * @return array<string, mixed> The complete OpenAPI spec
      */
     public function build(): array
     {
-        return $this->spec;
+        $spec = $this->spec;
+
+        ksort($spec['paths']);
+        foreach ($spec['paths'] as &$operations) {
+            if (is_array($operations)) {
+                ksort($operations);
+            }
+        }
+        unset($operations);
+
+        ksort($spec['components']['schemas']);
+        ksort($spec['components']['securitySchemes']);
+
+        return $spec;
+    }
+
+    /**
+     * Recursively flag `$ref`s that point to unregistered component schemas.
+     *
+     * @param array<array-key, mixed> $node The subtree to scan.
+     * @param list<string> $errors Accumulated errors (by reference).
+     */
+    private function collectDanglingRefs(array $node, array &$errors): void
+    {
+        foreach ($node as $key => $value) {
+            if ($key === '$ref' && is_string($value)) {
+                if (str_starts_with($value, '#/components/schemas/')) {
+                    $name = substr($value, strlen('#/components/schemas/'));
+                    if (!isset($this->spec['components']['schemas'][$name])) {
+                        $errors[] = "Dangling \$ref '{$value}': component schema '{$name}' is not registered";
+                    }
+                } else {
+                    $errors[] = "Unsupported \$ref target '{$value}' (only #/components/schemas/* is supported)";
+                }
+                continue;
+            }
+
+            if (is_array($value)) {
+                $this->collectDanglingRefs($value, $errors);
+            }
+        }
     }
 }

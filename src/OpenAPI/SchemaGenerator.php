@@ -1,14 +1,25 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\OpenAPI;
 
 use Whity\Core\PluginLoader;
+use Whity\Core\Router;
 
 /**
- * OpenAPI 3.0 Schema Generator
+ * OpenAPI 3.0 Schema Generator (WC-166)
  *
- * Generates OpenAPI 3.0 specification from discovered plugins.
- * Introspects PluginInterface implementations and builds a complete API schema.
+ * Generates the OpenAPI specification from registered routes. When a Router
+ * is provided, the ROUTER is the source of truth — it carries every
+ * registered route (core and plugin alike) together with the optional typed
+ * `schema` declaration each route may have made (summary, tags, request
+ * component, per-status responses, contributed component schemas). Routes
+ * without a declaration keep the legacy default operation, so undeclared
+ * plugins remain documented.
+ *
+ * Without a Router (legacy mode), plugin routes are introspected directly
+ * from the PluginLoader as before.
  */
 class SchemaGenerator
 {
@@ -28,67 +39,219 @@ class SchemaGenerator
     private PluginLoader $pluginLoader;
 
     /**
+     * @var Router|null Router carrying all registered routes (preferred source)
+     */
+    private ?Router $router;
+
+    /**
      * Constructor
      *
      * @param string $title API title
      * @param string $version API version
      * @param PluginLoader $pluginLoader Plugin loader instance
+     * @param Router|null $router Router with the registered routes (preferred).
      */
-    public function __construct(string $title, string $version, PluginLoader $pluginLoader)
+    public function __construct(string $title, string $version, PluginLoader $pluginLoader, ?Router $router = null)
     {
         $this->title = $title;
         $this->version = $version;
         $this->pluginLoader = $pluginLoader;
+        $this->router = $router;
     }
 
     /**
-     * Generate OpenAPI spec from all discovered plugins
+     * Generate the OpenAPI spec.
      *
      * @return array<string, mixed> OpenAPI 3.0 specification
      */
     public function generate(): array
     {
-        $builder = new SchemaBuilder($this->title, $this->version);
+        return $this->generateAndValidate()['spec'];
+    }
 
-        // Add Bearer auth
+    /**
+     * Generate the OpenAPI spec AND structurally validate it.
+     *
+     * @return array{spec: array<string, mixed>, errors: list<string>}
+     */
+    public function generateAndValidate(): array
+    {
+        $builder = new SchemaBuilder($this->title, $this->version);
         $builder->addBearerAuth();
 
-        // Add paths from plugins
-        $plugins = $this->pluginLoader->getPlugins();
-        foreach ($plugins as $plugin) {
-            foreach ($plugin->getRoutes() as $route) {
-                $path = $route['path'];
-                $method = $route['method'];
-                $requiredRole = $route['requiredRole'] ?? null;
+        foreach ($this->routeDeclarations() as $route) {
+            $this->addOperation(
+                $builder,
+                $route['method'],
+                $route['path'],
+                $route['requiredRole'],
+                $route['schema']
+            );
+        }
 
-                $operation = [
-                    'summary' => $this->generateSummary($method, $path),
-                    'tags' => [$this->getTag($path)],
-                    'responses' => [
-                        '200' => [
-                            'description' => 'Successful response',
-                        ],
-                        '401' => [
-                            'description' => 'Unauthorized',
-                        ],
-                        '403' => [
-                            'description' => 'Forbidden',
-                        ],
-                    ],
+        return ['spec' => $builder->build(), 'errors' => $builder->validate()];
+    }
+
+    /**
+     * Collect route declarations from the preferred source.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, schema: array<string, mixed>|null}>
+     */
+    private function routeDeclarations(): array
+    {
+        $declarations = [];
+
+        if ($this->router !== null) {
+            foreach ($this->router->getRoutes() as $route) {
+                $declarations[] = [
+                    'method' => $route['method'],
+                    'path' => $route['path'],
+                    'requiredRole' => $route['requiredRole'] ?? null,
+                    'schema' => $route['schema'] ?? null,
                 ];
+            }
 
-                // Add security requirement if role is required
-                if ($requiredRole !== null) {
-                    $operation['security'] = [
-                        ['bearerAuth' => []],
-                    ];
-                }
+            return $declarations;
+        }
 
-                $builder->addPath($path, $method, $operation);
+        // Legacy mode: introspect plugin routes directly.
+        foreach ($this->pluginLoader->getPlugins() as $plugin) {
+            foreach ($plugin->getRoutes() as $route) {
+                $schema = isset($route['schema']) && is_array($route['schema']) ? $route['schema'] : null;
+                $declarations[] = [
+                    'method' => $route['method'],
+                    'path' => $route['path'],
+                    'requiredRole' => $route['requiredRole'] ?? null,
+                    'schema' => $schema,
+                ];
             }
         }
 
-        return $builder->build();
+        return $declarations;
+    }
+
+    /**
+     * Add one route's operation to the builder.
+     *
+     * @param SchemaBuilder $builder The spec builder.
+     * @param string $method HTTP method.
+     * @param string $path Route path.
+     * @param string|null $requiredRole Declared role (maps to bearerAuth security).
+     * @param array<string, mixed>|null $schema The route's typed declaration, if any.
+     */
+    private function addOperation(
+        SchemaBuilder $builder,
+        string $method,
+        string $path,
+        ?string $requiredRole,
+        ?array $schema
+    ): void {
+        // Hoist component schemas the route contributes. An identical
+        // re-contribution is idempotent; a CONFLICTING redefinition keeps the
+        // first definition and logs — one route must not corrupt another's
+        // published contract.
+        $components = $schema['components'] ?? [];
+        if (is_array($components)) {
+            foreach ($components as $name => $definition) {
+                if (!is_string($name) || !is_array($definition)) {
+                    continue;
+                }
+                try {
+                    $builder->addComponentSchema($name, $definition);
+                } catch (\InvalidArgumentException $e) {
+                    error_log("[openapi] {$method} {$path}: " . $e->getMessage() . ' — keeping the first definition');
+                }
+            }
+        }
+
+        $operation = [
+            'summary' => is_string($schema['summary'] ?? null)
+                ? $schema['summary']
+                : $this->generateSummary($method, $path),
+            'tags' => is_array($schema['tags'] ?? null) && ($schema['tags'] ?? []) !== []
+                ? array_values($schema['tags'])
+                : [$this->getTag($path)],
+        ];
+
+        // Typed request body.
+        $request = $schema['request'] ?? null;
+        if (is_string($request) && $request !== '') {
+            $operation['requestBody'] = $this->jsonBody(SchemaBuilder::ref($request));
+        } elseif (is_array($request) && $request !== []) {
+            $operation['requestBody'] = $this->jsonBody($request);
+        }
+
+        // Responses: declared per-status, or the legacy defaults.
+        $declaredResponses = $schema['responses'] ?? null;
+        if (is_array($declaredResponses) && $declaredResponses !== []) {
+            $responses = [];
+            foreach ($declaredResponses as $status => $shape) {
+                $responses[(string) $status] = $this->responseObject($shape);
+            }
+            $operation['responses'] = $responses;
+        } else {
+            $operation['responses'] = [
+                '200' => ['description' => 'Successful response'],
+                '401' => ['description' => 'Unauthorized'],
+                '403' => ['description' => 'Forbidden'],
+            ];
+        }
+
+        // Add security requirement if role is required
+        if ($requiredRole !== null) {
+            $operation['security'] = [
+                ['bearerAuth' => []],
+            ];
+        }
+
+        $builder->addPath($path, $method, $operation);
+    }
+
+    /**
+     * Build a response object from a declared shape.
+     *
+     * - string: a component schema name → $ref'd application/json body.
+     * - array WITH 'description': used verbatim as the response object.
+     * - other array: an inline schema for an application/json body.
+     *
+     * @param mixed $shape The declared response shape.
+     * @return array<string, mixed>
+     */
+    private function responseObject(mixed $shape): array
+    {
+        if (is_string($shape) && $shape !== '') {
+            return [
+                'description' => $shape,
+                'content' => ['application/json' => ['schema' => SchemaBuilder::ref($shape)]],
+            ];
+        }
+
+        if (is_array($shape)) {
+            if (isset($shape['description'])) {
+                return $shape;
+            }
+
+            return [
+                'description' => 'Response',
+                'content' => ['application/json' => ['schema' => $shape]],
+            ];
+        }
+
+        return ['description' => 'Response'];
+    }
+
+    /**
+     * Wrap a schema (or $ref) into a required application/json request body.
+     *
+     * @param array<string, mixed> $schema The schema or $ref.
+     * @return array<string, mixed>
+     */
+    private function jsonBody(array $schema): array
+    {
+        return [
+            'required' => true,
+            'content' => ['application/json' => ['schema' => $schema]],
+        ];
     }
 
     /**
@@ -100,7 +263,7 @@ class SchemaGenerator
      */
     private function generateSummary(string $method, string $path): string
     {
-        $action = match(strtoupper($method)) {
+        $action = match (strtoupper($method)) {
             'GET' => 'Get',
             'POST' => 'Create',
             'PUT' => 'Update',

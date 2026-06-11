@@ -1283,12 +1283,18 @@ class PluginLoader
             $requiredRole = $route['requiredRole'] ?? null;
 
             if (is_callable($handler)) {
+                // The optional 'schema' key (WC-166) carries the route's typed
+                // OpenAPI declaration through to the router/generator.
+                $schema = isset($route['schema']) && is_array($route['schema']) ? $route['schema'] : null;
+
                 $this->router->register(
                     $method,
                     $path,
                     $this->wrapHandler($pluginKey, $handler),
                     $requiredRole,
-                    $namespacePrefix
+                    $namespacePrefix,
+                    null,
+                    $schema
                 );
             }
         }

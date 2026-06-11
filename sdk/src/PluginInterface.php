@@ -45,6 +45,12 @@ interface PluginInterface
      *   function(\Whity\Sdk\Http\Request $request, array $params = []): \Whity\Sdk\Http\Response
      *   where $params holds the captured path parameters (name => value)
      * - 'requiredRole' (string|null, optional): Required role name or null
+     * - 'schema' (array, optional, since 1.1.1): typed OpenAPI declaration the
+     *   host's generator reads — 'summary' (string), 'tags' (list<string>),
+     *   'request' (component name or inline JSON-Schema array),
+     *   'responses' (map of status => component name | inline array |
+     *   {description: ...} object), and 'components' (map of component name =>
+     *   JSON-Schema definition contributed to components.schemas)
      *
      * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string}>
      */

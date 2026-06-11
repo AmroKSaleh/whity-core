@@ -56,19 +56,20 @@
         },
         "/api/hello": {
             "get": {
-                "summary": "Get Api/hello",
+                "summary": "Public greeting",
                 "tags": [
-                    "Hello"
+                    "hello"
                 ],
                 "responses": {
                     "200": {
-                        "description": "Successful response"
-                    },
-                    "401": {
-                        "description": "Unauthorized"
-                    },
-                    "403": {
-                        "description": "Forbidden"
+                        "description": "Greeting",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Greeting"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -99,7 +100,27 @@
         }
     },
     "components": {
-        "schemas": [],
+        "schemas": {
+            "Greeting": {
+                "type": "object",
+                "required": [
+                    "message",
+                    "plugin",
+                    "version"
+                ],
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    },
+                    "plugin": {
+                        "type": "string"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "securitySchemes": {
             "bearerAuth": {
                 "type": "http",

@@ -81,6 +81,27 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
                 'path' => '/api/hello',
                 'handler' => [$this, 'hello'],
                 'requiredRole' => null,
+                // Typed OpenAPI declaration (WC-166): the host's
+                // generate:openapi emits this as a $ref'd response and hoists
+                // the Greeting component into components.schemas.
+                'schema' => [
+                    'summary' => 'Public greeting',
+                    'tags' => ['hello'],
+                    'responses' => [
+                        200 => 'Greeting',
+                    ],
+                    'components' => [
+                        'Greeting' => [
+                            'type' => 'object',
+                            'required' => ['message', 'plugin', 'version'],
+                            'properties' => [
+                                'message' => ['type' => 'string'],
+                                'plugin' => ['type' => 'string'],
+                                'version' => ['type' => 'string'],
+                            ],
+                        ],
+                    ],
+                ],
             ],
             [
                 'method' => 'GET',
