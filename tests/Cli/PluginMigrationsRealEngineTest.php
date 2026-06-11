@@ -38,6 +38,8 @@ final class PluginMigrationsRealEngineTest extends TestCase
 
     private static string $hijackDir;
     private static string $mixedDir;
+    private static string $restartUpDir;
+    private static string $restartDownDir;
 
     public static function setUpBeforeClass(): void
     {
@@ -47,13 +49,113 @@ final class PluginMigrationsRealEngineTest extends TestCase
         self::$explodingDir = sys_get_temp_dir() . '/whity_migexploder_' . uniqid();
         self::$hijackDir = sys_get_temp_dir() . '/whity_mighijack_' . uniqid();
         self::$mixedDir = sys_get_temp_dir() . '/whity_migmixed_' . uniqid();
+        self::$restartUpDir = sys_get_temp_dir() . '/whity_migrestartup_' . uniqid();
+        self::$restartDownDir = sys_get_temp_dir() . '/whity_migrestartdown_' . uniqid();
         self::$emptyCoreDir = sys_get_temp_dir() . '/whity_migcore_' . uniqid();
         mkdir(self::$pluginsDir . '/MigRunnerPlugin/Migrations', 0755, true);
         mkdir(self::$explodingDir . '/MigRunnerExploder/Migrations', 0755, true);
         mkdir(self::$hijackDir . '/MigRunnerHijacker/Migrations', 0755, true);
         mkdir(self::$mixedDir . '/AAThrowingDecl', 0755, true);
         mkdir(self::$mixedDir . '/ZzGoodDecl/Migrations', 0755, true);
+        mkdir(self::$restartUpDir . '/MigRestartUp/Migrations', 0755, true);
+        mkdir(self::$restartDownDir . '/MigRestartDown/Migrations', 0755, true);
         mkdir(self::$emptyCoreDir, 0755, true);
+
+        file_put_contents(self::$restartUpDir . '/MigRestartUp/Plugin.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace MigRestartUp;
+
+use Whity\Sdk\PluginInterface;
+
+final class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MigRestartUp'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array
+    {
+        return [Migrations\RestartsTransaction::class];
+    }
+}
+PHP);
+
+        file_put_contents(self::$restartUpDir . '/MigRestartUp/Migrations/RestartsTransaction.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace MigRestartUp\Migrations;
+
+use Whity\Sdk\MigrationInterface;
+
+final class RestartsTransaction implements MigrationInterface
+{
+    public function up(\PDO $pdo): void
+    {
+        $pdo->exec('CREATE TABLE lost_tbl (id INTEGER PRIMARY KEY)');
+        // The guard-bypass shape: end the host transaction AND start a fresh
+        // one, so a naive inTransaction() check is satisfied again.
+        $pdo->rollBack();
+        $pdo->beginTransaction();
+    }
+
+    public function down(\PDO $pdo): void
+    {
+    }
+}
+PHP);
+
+        file_put_contents(self::$restartDownDir . '/MigRestartDown/Plugin.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace MigRestartDown;
+
+use Whity\Sdk\PluginInterface;
+
+final class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MigRestartDown'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array
+    {
+        return [Migrations\DownRestartsTransaction::class];
+    }
+}
+PHP);
+
+        file_put_contents(self::$restartDownDir . '/MigRestartDown/Migrations/DownRestartsTransaction.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace MigRestartDown\Migrations;
+
+use Whity\Sdk\MigrationInterface;
+
+final class DownRestartsTransaction implements MigrationInterface
+{
+    public function up(\PDO $pdo): void
+    {
+        $pdo->exec('CREATE TABLE IF NOT EXISTS stay_tbl (id INTEGER PRIMARY KEY)');
+    }
+
+    public function down(\PDO $pdo): void
+    {
+        $pdo->rollBack();
+        $pdo->beginTransaction();
+    }
+}
+PHP);
 
         file_put_contents(self::$hijackDir . '/MigRunnerHijacker/Plugin.php', <<<'PHP'
 <?php
@@ -271,7 +373,16 @@ PHP);
 
     public static function tearDownAfterClass(): void
     {
-        foreach ([self::$pluginsDir, self::$explodingDir, self::$hijackDir, self::$mixedDir, self::$emptyCoreDir] as $dir) {
+        $dirs = [
+            self::$pluginsDir,
+            self::$explodingDir,
+            self::$hijackDir,
+            self::$mixedDir,
+            self::$restartUpDir,
+            self::$restartDownDir,
+            self::$emptyCoreDir,
+        ];
+        foreach ($dirs as $dir) {
             self::removeDirectory($dir);
         }
     }
@@ -392,6 +503,51 @@ PHP);
         // in autocommit and cannot be undone by the runner — that damage is the
         // forbidden behaviour's own doing. The invariant the runner protects is
         // the RECORD: never a phantom "executed" row masking unapplied schema.
+    }
+
+    /**
+     * Re-review BLOCKER regression: rollBack() FOLLOWED BY beginTransaction()
+     * inside up() defeats a naive inTransaction() guard — the fresh transaction
+     * satisfies the boolean while the pre-rollback DDL is gone. The tracking
+     * row written inside the runner's ORIGINAL transaction acts as a sentinel:
+     * it vanishes with the hijacked rollback, so the runner detects the swap,
+     * fails the migration, and records nothing.
+     */
+    public function testRollbackThenBeginHijackInUpLeavesNoPhantomRecord(): void
+    {
+        $loader = new PluginLoader(self::$restartUpDir, new Router(), null, new HookManager());
+        $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
+
+        $exit = $this->runQuiet($command, ['run']);
+
+        $this->assertSame(1, $exit, 'A rollback-then-begin hijack must fail the run');
+        $this->assertNotContains(
+            'plugin:MigRestartUp:RestartsTransaction',
+            $this->recordedNames(),
+            'The sentinel must prevent a phantom record when the transaction was swapped'
+        );
+    }
+
+    /**
+     * Down-direction variant: a hijacking down() must not DE-record a
+     * migration whose rollback never actually applied.
+     */
+    public function testRollbackThenBeginHijackInDownKeepsRecord(): void
+    {
+        $loader = new PluginLoader(self::$restartDownDir, new Router(), null, new HookManager());
+        $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
+
+        $this->assertSame(0, $this->runQuiet($command, ['run']), 'The well-behaved up() must apply');
+        $this->assertContains('plugin:MigRestartDown:DownRestartsTransaction', $this->recordedNames());
+
+        $exit = $this->runQuiet($command, ['rollback']);
+
+        $this->assertSame(1, $exit, 'A hijacking down() must fail the rollback');
+        $this->assertContains(
+            'plugin:MigRestartDown:DownRestartsTransaction',
+            $this->recordedNames(),
+            'The migration must stay recorded when its down() never genuinely applied'
+        );
     }
 
     /**

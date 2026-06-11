@@ -497,32 +497,47 @@ class MigrationsCommand
         $pdo->beginTransaction();
 
         try {
+            // The tracking row is written FIRST, inside the runner's
+            // transaction, where it doubles as a HIJACK SENTINEL: if the
+            // migration ends our transaction — even if it then opens a fresh
+            // one, which would satisfy a naive inTransaction() check — the
+            // row's state flips back and the verification below detects it.
+            // Atomicity is unchanged: row and schema change commit together.
             if ($direction === 'up') {
+                $stmt = $pdo->prepare('
+                    INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
+                    VALUES (?, NOW(), 0)
+                    ON CONFLICT (migration_name) DO NOTHING
+                ');
+                $stmt->execute([$entry['record']]);
+
                 $migration->up($pdo);
             } else {
+                $stmt = $pdo->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
+                $stmt->execute([$entry['record']]);
+
                 $migration->down($pdo);
             }
 
-            // The migration must NOT manage the transaction itself: if it
-            // committed or rolled back our transaction, recording the tracking
-            // row now would run in autocommit and create a phantom record for
-            // schema that may not exist (masked from every future re-run).
+            // Guard 1: the migration must not have ended our transaction.
             if (!$pdo->inTransaction()) {
                 throw new \Exception(
                     'the migration ended the host transaction itself; migrations must not call beginTransaction/commit/rollBack'
                 );
             }
 
+            // Guard 2 (sentinel): a rollBack()+beginTransaction() swap passes
+            // guard 1 but reverts the tracking row's in-transaction state.
+            $expectRow = $direction === 'up';
+            if ($this->trackingRowVisible($pdo, $entry['record']) !== $expectRow) {
+                throw new \Exception(
+                    'the migration replaced the host transaction (sentinel check failed); migrations must not call beginTransaction/commit/rollBack'
+                );
+            }
+
             if ($direction === 'up') {
-                $stmt = $pdo->prepare('
-                    INSERT INTO core_schema_migrations (migration_name, executed_at, execution_time_ms)
-                    VALUES (?, NOW(), ?)
-                    ON CONFLICT (migration_name) DO NOTHING
-                ');
-                $stmt->execute([$entry['record'], (int)((microtime(true) - $start) * 1000)]);
-            } else {
-                $stmt = $pdo->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
-                $stmt->execute([$entry['record']]);
+                $upd = $pdo->prepare('UPDATE core_schema_migrations SET execution_time_ms = ? WHERE migration_name = ?');
+                $upd->execute([(int)((microtime(true) - $start) * 1000), $entry['record']]);
             }
 
             $pdo->commit();
@@ -532,12 +547,44 @@ class MigrationsCommand
                 $pdo->rollBack();
             }
 
+            if ($direction === 'up') {
+                // A commit-hijack may have already PERSISTED the sentinel row
+                // without the full migration: remove any such phantom in
+                // autocommit. Safe in every other failure shape — the row was
+                // rolled back with our transaction, so this is a no-op — and
+                // only rows written by THIS run can exist here (only pending,
+                // unrecorded migrations are executed).
+                try {
+                    $del = $pdo->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
+                    $del->execute([$entry['record']]);
+                } catch (\Throwable) {
+                    // Tracking table unreachable; nothing to clean up.
+                }
+            }
+
             throw new \Exception(
                 "Plugin migration {$entry['record']} failed ({$direction}): " . $e->getMessage(),
                 0,
                 $e
             );
         }
+    }
+
+    /**
+     * Whether the tracking row is visible from the CURRENT transaction/state.
+     *
+     * @param PDO $pdo The connection.
+     * @param string $record The tracking name.
+     * @return bool True when the row is visible.
+     */
+    private function trackingRowVisible(PDO $pdo, string $record): bool
+    {
+        $stmt = $pdo->prepare('SELECT 1 FROM core_schema_migrations WHERE migration_name = ?');
+        $stmt->execute([$record]);
+        $visible = $stmt->fetch() !== false;
+        $stmt->closeCursor();
+
+        return $visible;
     }
 
     /**
