@@ -49,12 +49,15 @@ class GenerateOpenApiSchemaCommand
             $router = new Router();
             $pluginLoader = new PluginLoader(dirname(__DIR__, 2) . '/plugins', $router);
 
+            // Register the core admin resources' typed declarations (WC-167)
+            // BEFORE plugins load, mirroring the runtime ordering (WC-169):
+            // the Router refuses duplicate method+path registrations (first
+            // wins), so the published spec attributes a colliding path to the
+            // core handler exactly as the live router would serve it.
+            \Whity\OpenAPI\CoreApiSchemas::registerRoutes($router);
+
             // Load plugins - plugin metadata is available without database connection
             $pluginLoader->load();
-
-            // Register the core admin resources' typed declarations (WC-167)
-            // so the spec carries the full contract, not just plugin routes.
-            \Whity\OpenAPI\CoreApiSchemas::registerRoutes($router);
 
             // Generate from the ROUTER (carries every registered route with
             // its typed schema declaration, WC-166) and validate before

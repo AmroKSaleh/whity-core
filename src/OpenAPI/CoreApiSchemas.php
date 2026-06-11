@@ -71,7 +71,8 @@ final class CoreApiSchemas
             self::tenantRoutes(),
             self::ouRoutes(),
             self::delegationRoutes(),
-            self::auditRoutes()
+            self::auditRoutes(),
+            self::frontendFeatureRoutes()
         );
     }
 
@@ -390,6 +391,37 @@ final class CoreApiSchemas
     }
 
     /**
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function frontendFeatureRoutes(): array
+    {
+        return [
+            // Registered with NEITHER a required role NOR a required permission
+            // (any authenticated caller may list the screens they may see), so
+            // the operation carries no bearerAuth marker — matching how the
+            // generator treats /api/navigation-style endpoints. The handler's
+            // own fail-closed 403s (unresolved tenant, missing user) and the
+            // tenant middleware's 401 are documented as responses.
+            [
+                'method' => 'GET',
+                'path' => '/api/frontend/features',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the plugin frontend features visible to the caller',
+                    'tags' => ['frontend'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The features whose requiredPermission the caller holds (server-side filtered; empty data is valid)',
+                            'FrontendFeatureListResponse'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
      * The component schemas the admin resources publish.
      *
      * @return array<string, array<string, mixed>>
@@ -606,6 +638,31 @@ final class CoreApiSchemas
                 'permissions' => ['type' => 'array', 'items' => self::str()],
                 'count' => self::int(),
             ], ['ids', 'count'])),
+
+            // WC-169: plugin frontend feature descriptors. Mirrors the
+            // FrontendFeaturesApiHandler's ACTUAL output: every key is always
+            // present; icon and resource (and resource.titleField) are the
+            // fields the handler can emit as null.
+            'FrontendFeature' => self::object([
+                'id' => self::str(),
+                'plugin' => self::str(),
+                'label' => self::str(),
+                'icon' => self::str(true),
+                'group' => self::str(),
+                'order' => self::int(),
+                'screen' => ['type' => 'string', 'enum' => ['crud', 'custom']],
+                'resource' => [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'properties' => [
+                        'basePath' => self::str(),
+                        'titleField' => self::str(true),
+                    ],
+                    'required' => ['basePath', 'titleField'],
+                ],
+                'requiredPermission' => self::str(),
+            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'requiredPermission']),
+            'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
 
             'AuditLogEntry' => $auditEntry,
             'Pagination' => self::object([

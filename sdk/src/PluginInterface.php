@@ -45,6 +45,12 @@ interface PluginInterface
      *   function(\Whity\Sdk\Http\Request $request, array $params = []): \Whity\Sdk\Http\Response
      *   where $params holds the captured path parameters (name => value)
      * - 'requiredRole' (string|null, optional): Required role name or null
+     * - 'requiredPermission' (string|null, optional, host-enforced since 1.2):
+     *   a `resource:action` permission (matching
+     *   /^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$/) the host's RBAC middleware
+     *   enforces before the handler runs — a caller without it receives a 403
+     *   naming the missing permission. A malformed value fails CLOSED: the
+     *   host refuses to register the route rather than serve it unprotected.
      * - 'schema' (array, optional, since 1.1.1): typed OpenAPI declaration the
      *   host's generator reads — 'summary' (string), 'tags' (list<string>),
      *   'request' (component name or inline JSON-Schema array),
@@ -52,7 +58,7 @@ interface PluginInterface
      *   {description: ...} object), and 'components' (map of component name =>
      *   JSON-Schema definition contributed to components.schemas)
      *
-     * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string}>
+     * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string, requiredPermission?: ?string, schema?: array<string, mixed>}>
      */
     public function getRoutes(): array;
 

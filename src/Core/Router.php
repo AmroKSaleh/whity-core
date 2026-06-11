@@ -34,7 +34,9 @@ class Router
      * @param array<string, mixed>|null $schema Optional OpenAPI declaration for the route (WC-166):
      *   summary/tags plus typed 'request' and 'responses' (component name or
      *   inline schema) and optional 'components' contributed to the spec.
-     * @return void
+     * @return bool True when the route registered; false when an identical
+     *   method+path was already registered (first registration wins — WC-169:
+     *   a plugin can never shadow a core route or another plugin's route).
      */
     public function register(
         string $method,
@@ -44,9 +46,22 @@ class Router
         ?string $namespacePrefix = null,
         ?string $requiredPermission = null,
         ?array $schema = null
-    ): void {
+    ): bool {
+        $method = strtoupper($method);
+
+        // First registration wins: an exact method+path duplicate is refused
+        // so later registrants (plugins load after core since WC-169) cannot
+        // shadow an existing handler. match() returns the first hit anyway —
+        // refusing the duplicate makes that ordering an enforced contract
+        // instead of an accident, and lets callers detect the collision.
+        foreach ($this->routes as $route) {
+            if ($route['method'] === $method && $route['path'] === $path) {
+                return false;
+            }
+        }
+
         $this->routes[] = [
-            'method' => strtoupper($method),
+            'method' => $method,
             'path' => $path,
             'pattern' => $this->pathToPattern($path),
             'handler' => $handler,
@@ -55,6 +70,8 @@ class Router
             'namespacePrefix' => $namespacePrefix,
             'schema' => $schema,
         ];
+
+        return true;
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
+use HelloWorld\Api\GreetingsApiHandler;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Whity\Api\AuditLogApiHandler;
@@ -15,6 +16,8 @@ use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
+
+require_once dirname(__DIR__, 2) . '/plugins/HelloWorld/Api/GreetingsApiHandler.php';
 
 /**
  * WC-161: per-table cross-tenant read/write rejection on a REAL SQL engine.
@@ -235,6 +238,60 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertContains('tenant-b.action', $actions);
     }
 
+    // ==================== hello_greetings (HelloWorld plugin, WC-169) ====================
+
+    public function testHelloGreetingsListIsTenantScoped(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $rows = $this->listData($this->greetingsHandler()->list($this->req('GET', '/api/hello/greetings')));
+
+        $messages = array_column($rows, 'message');
+        $this->assertContains('a-greeting', $messages);
+        $this->assertNotContains('b-greeting', $messages, "Tenant B's greetings must never appear for Tenant A");
+        foreach ($rows as $row) {
+            $this->assertSame(self::TENANT_A, (int) $row['tenantId']);
+        }
+    }
+
+    public function testSystemTenantSeesHelloGreetingsAcrossTenants(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $rows = $this->listData($this->greetingsHandler()->list($this->req('GET', '/api/hello/greetings', null, self::SYSTEM_TENANT)));
+
+        $messages = array_column($rows, 'message');
+        $this->assertContains('a-greeting', $messages);
+        $this->assertContains('b-greeting', $messages, 'The system tenant (id 0) must see all tenants');
+    }
+
+    public function testTenantCannotUpdateForeignGreetingAndRowIsUntouched(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->greetingsHandler()->update(
+            $this->req('PATCH', '/api/hello/greetings/20', ['message' => 'hijacked']),
+            ['id' => '20']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign greeting must be reported as not found');
+        $this->assertSame(
+            'b-greeting',
+            $this->pdo->query('SELECT message FROM hello_greetings WHERE id = 20')->fetchColumn(),
+            "Tenant B's greeting must be byte-for-byte untouched after the rejected update"
+        );
+    }
+
+    public function testTenantCannotDeleteForeignGreetingAndRowSurvives(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->greetingsHandler()->delete($this->req('DELETE', '/api/hello/greetings/20'), ['id' => '20']);
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM hello_greetings WHERE id = 20')->fetchColumn(),
+            "Tenant B's greeting must survive a cross-tenant delete attempt"
+        );
+    }
+
     // ==================== permission_delegations ====================
 
     public function testDelegationLookupIsTenantScoped(): void
@@ -283,6 +340,11 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         return new AuditLogApiHandler($this->pdo, $roleChecker);
     }
 
+    private function greetingsHandler(): GreetingsApiHandler
+    {
+        return new GreetingsApiHandler($this->pdo);
+    }
+
     private function hooks(): HookManager
     {
         $hooks = $this->createMock(HookManager::class);
@@ -305,7 +367,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function listData(\Whity\Core\Response $response): array
+    private function listData(\Whity\Sdk\Http\Response $response): array
     {
         $this->assertSame(200, $response->getStatusCode(), 'The scoped list itself must succeed');
         $decoded = json_decode($response->getBody(), true);
@@ -441,6 +503,20 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             INSERT INTO audit_log (tenant_id, actor_user_id, action, metadata, created_at) VALUES
                 (1, 10, 'tenant-a.action', '{}', datetime('now')),
                 (2, 20, 'tenant-b.action', '{}', datetime('now'))
+        ");
+
+        $pdo->exec('
+            CREATE TABLE hello_greetings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ');
+        $pdo->exec("
+            INSERT INTO hello_greetings (id, tenant_id, message, created_at) VALUES
+                (10, 1, 'a-greeting', datetime('now')),
+                (20, 2, 'b-greeting', datetime('now'))
         ");
 
         $pdo->exec("

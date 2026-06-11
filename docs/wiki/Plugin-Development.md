@@ -558,6 +558,77 @@ instance without a disk reload. The loader also tracks a per-plugin lifecycle
 
 ---
 
+## Step 8 — Contribute an admin screen (frontend feature descriptors, SDK 1.2)
+
+Since SDK 1.2 (WC-169) a plugin can declare admin-UI screens the host renders
+**with zero per-app frontend code**. Implement the optional sibling interface
+`Whity\Sdk\PluginFrontendInterface` next to `PluginInterface`:
+
+```php
+use Whity\Sdk\PluginFrontendInterface;
+
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
+{
+    public function getFrontendFeatures(): array
+    {
+        return [[
+            'id' => 'hello-greetings',          // unique kebab-case slug
+            'label' => 'Greetings',             // menu / screen title
+            'icon' => 'message-circle',         // tabler icon (optional)
+            'group' => 'plugins',               // nav group (optional)
+            'order' => 10,                      // nav order (optional)
+            'screen' => 'crud',                 // 'crud' | 'custom'
+            'resource' => [
+                'basePath' => '/api/hello/greetings',
+                'titleField' => 'message',      // names a row in confirmations
+            ],
+            'requiredPermission' => 'hello:view',
+        ]];
+    }
+}
+```
+
+What the host does with it:
+
+- **Navigation**: every validated descriptor gets a sidebar entry automatically
+  (`/admin/x/{id}`) via the `navigation.register` chain — `navigation.register`
+  itself remains available for bespoke links.
+- **`screen: 'crud'`**: the host renders a schema-driven list/create/edit/delete
+  screen for `resource.basePath`, derived at runtime from the published
+  OpenAPI spec (declare route `schema`s — see Step 2 — or the screen has
+  nothing to derive). Columns, form fields, required flags, enum selects and
+  max lengths all come from your declared components.
+- **`screen: 'custom'`**: the host app registers a bespoke component for your
+  id in its UI registry (`web/lib/plugin-ui-registry.tsx`):
+  `registerPluginScreen('my-feature', MyScreen)` in a single app-level file.
+  A registered component also OVERRIDES a `crud` screen — that is the
+  documented per-app override slot for bespoke UIs (e.g. graph views).
+
+Security model (all fail-closed, validated at load; an invalid descriptor is
+dropped with a logged warning and the plugin still loads):
+
+- `requiredPermission` must be a permission the plugin genuinely OWNS: declared
+  in its own `getPermissions()`, not a core permission name, and not a name an
+  earlier-loaded plugin declared first. Descriptors are UI metadata — they
+  grant nothing.
+- `GET /api/frontend/features` is the host's descriptor surface and only
+  returns features whose `requiredPermission` the **caller** holds
+  (server-side `RoleChecker`, fail-closed on unresolved tenant).
+- For `crud` screens, `resource.basePath` must be a GET route the plugin
+  **actually registered** (a route refused for colliding with a core path
+  does not count — first registration wins, plugins load after core), and
+  that route's own `requiredPermission` must EQUAL the descriptor's, so the
+  menu gate and the data gate can never diverge.
+- Route-level `requiredPermission` on plugin routes is enforced by the host's
+  RBAC middleware since SDK 1.2; a malformed declaration means the route is
+  NOT registered (never served unprotected).
+- Grants are persisted RBAC rows: ship a migration that seeds your permissions
+  and grants them (see `plugins/HelloWorld/Migrations/GrantGreetingsPermissionsToAdmin.php`
+  for the idempotent, reversible pattern).
+
+The full working reference is the HelloWorld plugin: greetings CRUD routes with
+typed schemas, the descriptor above, and both migrations.
+
 ## Checklist
 
 - [ ] Directory `plugins/HelloWorld/` with namespace prefix `HelloWorld\`.
@@ -569,5 +640,7 @@ instance without a disk reload. The loader also tracks a per-plugin lifecycle
       (e.g. `user.creating`) and return the payload.
 - [ ] Migrations are idempotent and tenant-scoped.
 - [ ] A test under `tests/` exercises the plugin; full suite + PHPStan are green.
+- [ ] (Optional) Frontend feature descriptors validate: own permission, own
+      registered GET `basePath`, matching route permission (Step 8).
 
 See [Architecture.md](./Architecture.md) for how this all fits together.

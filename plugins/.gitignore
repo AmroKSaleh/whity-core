@@ -1,0 +1,9 @@
+# plugins/ is a runtime mount point, not a source tree: real plugins live in
+# their own repositories and are dropped here at deploy/dev time. Only the
+# reference/example plugins that document the SDK contract are tracked.
+*
+!.gitignore
+!.gitkeep
+!ExamplePlugin.php
+!HelloWorld/
+!HelloWorld/**
