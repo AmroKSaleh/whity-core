@@ -229,6 +229,21 @@ class PluginLifecycle
     }
 
     /**
+     * Whether the plugin sits in WC-165 quarantine (Failed with a gate reason).
+     *
+     * Distinct from auto-failure via consecutive errors: a quarantined plugin
+     * has unsatisfied requirements and must not be re-enabled — only a disk
+     * change (and the re-gating reload it triggers) can clear the condition.
+     *
+     * @return bool True when quarantined.
+     */
+    public function isQuarantined(): bool
+    {
+        return $this->state === PluginState::Failed
+            && ($this->lastError['type'] ?? null) === 'quarantine';
+    }
+
+    /**
      * Administratively disable the plugin.
      *
      * @return void

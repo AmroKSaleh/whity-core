@@ -286,7 +286,24 @@ class PluginsApiHandler
     {
         $byName = [];
         foreach ($this->loaderStatuses() as $status) {
+            // A quarantined duplicate must not mask the healthy plugin that
+            // actually serves under this name (WC-165 review): the ACTIVE
+            // lifecycle wins the by-name slot.
+            if (isset($byName[$status['name']]) && $byName[$status['name']]['state'] === 'active') {
+                continue;
+            }
             $byName[$status['name']] = $status;
+        }
+
+        // Fallback index: quarantined plugins whose declared name differs from
+        // their folder name would otherwise be invisible in the listing — key
+        // them additionally by the namespace root of their FQCN id (which IS
+        // the folder name for directory plugins).
+        foreach ($this->loaderStatuses() as $status) {
+            $namespaceRoot = explode('\\', $status['id'])[0];
+            if ($namespaceRoot !== '' && !isset($byName[$namespaceRoot])) {
+                $byName[$namespaceRoot] = $status;
+            }
         }
 
         return $byName;

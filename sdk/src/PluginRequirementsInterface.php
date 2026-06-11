@@ -22,6 +22,11 @@ namespace Whity\Sdk;
  * admin-visible reason) WITHOUT registering any of their capabilities.
  * Plugins that do not implement this interface load unconditionally, in
  * discovery order relative to each other (backward compatible).
+ *
+ * NOTE: the gate is a compatibility mechanism, not a sandbox — evaluating a
+ * declaration requires instantiating the plugin, so a quarantined plugin's
+ * constructor has already run. "Quarantined" means: zero capabilities
+ * (routes, permissions, hooks, migrations) are registered with the host.
  */
 interface PluginRequirementsInterface
 {

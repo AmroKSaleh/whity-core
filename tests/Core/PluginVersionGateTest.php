@@ -28,6 +28,7 @@ final class PluginVersionGateTest extends TestCase
     private static string $mismatchDir;
     private static string $cycleDir;
     private static string $cascadeDir;
+    private static string $throwingDir;
 
     public static function setUpBeforeClass(): void
     {
@@ -54,11 +55,57 @@ final class PluginVersionGateTest extends TestCase
 
         self::writePlugin(self::$cascadeDir, 'CascRoot', '1.0.0', '^99.0', [], '/api/vgate/cascroot');
         self::writePlugin(self::$cascadeDir, 'CascLeaf', '1.0.0', null, ['CascRoot' => '^1.0'], '/api/vgate/cascleaf');
+
+        self::$throwingDir = sys_get_temp_dir() . '/whity_vgate_throwing_' . uniqid();
+        mkdir(self::$throwingDir . '/ThrowingReq', 0755, true);
+        file_put_contents(self::$throwingDir . '/ThrowingReq/Plugin.php', <<<'PHP'
+<?php
+
+declare(strict_types=1);
+
+namespace ThrowingReq;
+
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginRequirementsInterface;
+
+final class Plugin implements PluginInterface, PluginRequirementsInterface
+{
+    public function getName(): string { return 'ThrowingReq'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getSdkConstraint(): string
+    {
+        throw new \RuntimeException('declaration explosion');
+    }
+    public function getPluginDependencies(): array { return []; }
+    public function getRoutes(): array
+    {
+        return [[
+            'method' => 'GET',
+            'path' => '/api/vgate/throwing',
+            'handler' => static fn (Request $r): Response => Response::json(['plugin' => 'ThrowingReq']),
+            'requiredRole' => null,
+        ]];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP);
     }
 
     public static function tearDownAfterClass(): void
     {
-        foreach ([self::$mainDir, self::$ghostDir, self::$mismatchDir, self::$cycleDir, self::$cascadeDir] as $dir) {
+        $dirs = [
+            self::$mainDir,
+            self::$ghostDir,
+            self::$mismatchDir,
+            self::$cycleDir,
+            self::$cascadeDir,
+            self::$throwingDir,
+        ];
+        foreach ($dirs as $dir) {
             self::removeDirectory($dir);
         }
     }
@@ -156,6 +203,45 @@ final class PluginVersionGateTest extends TestCase
         $this->assertSame('failed', $states['CascRoot']['state'] ?? null, 'The SDK-incompatible root fails');
         $this->assertSame('failed', $states['CascLeaf']['state'] ?? null, 'Its dependent must fail too');
         $this->assertStringContainsString('CascRoot', $states['CascLeaf']['last_error']['message'] ?? '');
+    }
+
+    /**
+     * Review MAJOR regression: a throwing requirements declaration must fail
+     * CLOSED (quarantine with the exception named) — a declaration that
+     * explodes is a stronger incompatibility signal than an unparseable
+     * string, not a license to load unconditionally.
+     */
+    public function testThrowingRequirementsDeclarationQuarantines(): void
+    {
+        [$loader, $router] = $this->loadDir(self::$throwingDir);
+
+        $states = $this->statesByName($loader);
+        $this->assertSame('failed', $states['ThrowingReq']['state'] ?? null, 'A throwing declaration must quarantine');
+        $this->assertStringContainsString('RuntimeException', $states['ThrowingReq']['last_error']['message'] ?? '');
+        $this->assertNull($router->match(new Request('GET', '/api/vgate/throwing')));
+    }
+
+    /**
+     * Review MAJOR regression: the admin re-enable API must NOT flip a
+     * quarantined plugin to "active" — its requirements are still unsatisfied
+     * and re-enabling would destroy the only record of why it was refused.
+     */
+    public function testQuarantinedPluginCannotBeReEnabled(): void
+    {
+        [$loader] = $this->loadDir(self::$mainDir);
+
+        $this->assertFalse(
+            $loader->reEnablePlugin('MmIncompatible\\Plugin'),
+            'Re-enabling a quarantined plugin must be refused'
+        );
+
+        $states = $this->statesByName($loader);
+        $this->assertSame('failed', $states['MmIncompatible']['state'] ?? null, 'The quarantine must hold');
+        $this->assertStringContainsString(
+            '^99.0',
+            $states['MmIncompatible']['last_error']['message'] ?? '',
+            'The quarantine reason must survive the re-enable attempt'
+        );
     }
 
     // ==================== evaluator + SDK version contract ====================

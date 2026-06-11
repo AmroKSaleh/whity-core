@@ -307,7 +307,7 @@ class PluginLoader
      *  - Modified plugins are re-registered from their updated source. Because a
      *    PHP class cannot be redefined within a live process, modified classes
      *    are re-evaluated under a content-versioned namespace so the new code
-     *    actually runs (see loadPluginClass()).
+     *    actually runs (see materializeClass()).
      *
      * @return bool True if a change was detected and applied, false if nothing changed
      */
@@ -719,6 +719,15 @@ class PluginLoader
             return false;
         }
 
+        // A QUARANTINED plugin (WC-165: unsatisfied SDK/dependency
+        // requirements) cannot be re-enabled by an admin action: nothing about
+        // its requirements changed, no capabilities were ever registered, and
+        // reEnable() would destroy the only record of WHY it was refused.
+        // Only a disk change (re-gated by reload()) can clear the condition.
+        if ($lifecycle->isQuarantined()) {
+            return false;
+        }
+
         // A plugin disabled via disablePlugin() had its routes and hooks
         // unregistered but its bookkeeping retains the instance. Re-register its
         // capabilities so it can serve traffic once active again. Auto-failed
@@ -797,17 +806,6 @@ class PluginLoader
      * @param string $filePath File path of the plugin
      * @return void
      */
-    private function loadPluginClass(string $fqcn, string $filePath): void
-    {
-        $candidate = $this->instantiatePlugin($fqcn, $filePath);
-        if ($candidate === null) {
-            return;
-        }
-
-        // Register the plugin under its original FQCN identity
-        $this->registerPlugin($candidate['plugin'], $candidate['namespacePrefix'], $candidate['fqcn']);
-    }
-
     /**
      * Materialize and instantiate a plugin class WITHOUT registering it.
      *
@@ -878,8 +876,11 @@ class PluginLoader
     {
         $quarantined = [];
 
-        // Index by declared plugin name; duplicates are quarantined.
-        /** @var array<string, array{fqcn: string, plugin: PluginInterface, namespacePrefix: string}> $byName */
+        // Index by declared plugin name; duplicates are quarantined. The name
+        // and requirements are captured ONCE here — every later phase works
+        // from these snapshots, so a plugin whose accessors return varying
+        // values cannot end up half-registered, half-quarantined.
+        /** @var array<string, array{fqcn: string, plugin: PluginInterface, namespacePrefix: string, sdkConstraint: string, deps: array<string, string>}> $byName */
         $byName = [];
         foreach ($candidates as $candidate) {
             $name = $candidate['plugin']->getName();
@@ -890,12 +891,27 @@ class PluginLoader
                 ];
                 continue;
             }
+
+            // A throwing requirements declaration fails CLOSED: it is a
+            // stronger incompatibility signal than an unparseable string
+            // (e.g. plugin code referencing SDK symbols this host lacks).
+            try {
+                $candidate['sdkConstraint'] = $this->sdkConstraintOf($candidate['plugin']);
+                $candidate['deps'] = $this->dependenciesOf($candidate['plugin']);
+            } catch (\Throwable $e) {
+                $quarantined[] = [
+                    'candidate' => $candidate,
+                    'reason' => 'requirements declaration threw ' . get_class($e) . ': ' . $e->getMessage(),
+                ];
+                continue;
+            }
+
             $byName[$name] = $candidate;
         }
 
         // SDK-constraint gate.
         foreach ($byName as $name => $candidate) {
-            $constraint = $this->sdkConstraintOf($candidate['plugin']);
+            $constraint = $candidate['sdkConstraint'];
             if ($constraint === '') {
                 continue;
             }
@@ -924,7 +940,7 @@ class PluginLoader
         do {
             $removed = false;
             foreach ($byName as $name => $candidate) {
-                foreach ($this->dependenciesOf($candidate['plugin']) as $depName => $depConstraint) {
+                foreach ($candidate['deps'] as $depName => $depConstraint) {
                     if (!isset($byName[$depName])) {
                         $quarantined[] = [
                             'candidate' => $candidate,
@@ -961,14 +977,15 @@ class PluginLoader
             }
         } while ($removed);
 
-        // Topological sort (Kahn), stable by discovery order.
+        // Topological sort (Kahn), stable by discovery order, tracked by the
+        // byName KEYS so unstable getName() implementations cannot desync it.
         $inDegree = [];
         $dependents = [];
         foreach ($byName as $name => $candidate) {
             $inDegree[$name] = 0;
         }
         foreach ($byName as $name => $candidate) {
-            foreach (array_keys($this->dependenciesOf($candidate['plugin'])) as $depName) {
+            foreach (array_keys($candidate['deps']) as $depName) {
                 $inDegree[$name]++;
                 $dependents[$depName][] = $name;
             }
@@ -982,9 +999,11 @@ class PluginLoader
         }
 
         $ordered = [];
+        $orderedKeys = [];
         while ($queue !== []) {
             $name = array_shift($queue);
             $ordered[] = $byName[$name];
+            $orderedKeys[$name] = true;
             foreach ($dependents[$name] ?? [] as $dependent) {
                 if (isset($inDegree[$dependent]) && --$inDegree[$dependent] === 0) {
                     $queue[] = $dependent;
@@ -994,9 +1013,8 @@ class PluginLoader
 
         // Anything not ordered sits on a dependency cycle.
         if (count($ordered) < count($byName)) {
-            $orderedNames = array_map(static fn (array $c): string => $c['plugin']->getName(), $ordered);
             foreach ($byName as $name => $candidate) {
-                if (!in_array($name, $orderedNames, true)) {
+                if (!isset($orderedKeys[$name])) {
                     $quarantined[] = [
                         'candidate' => $candidate,
                         'reason' => "is part of a plugin dependency cycle and cannot be ordered",
@@ -1010,6 +1028,9 @@ class PluginLoader
 
     /**
      * The plugin's declared SDK constraint, or '' when undeclared.
+     *
+     * Deliberately does NOT catch: a throwing declaration is handled
+     * fail-closed by the caller (quarantine with the exception named).
      */
     private function sdkConstraintOf(PluginInterface $plugin): string
     {
@@ -1017,15 +1038,14 @@ class PluginLoader
             return '';
         }
 
-        try {
-            return $plugin->getSdkConstraint();
-        } catch (\Throwable) {
-            return '';
-        }
+        return $plugin->getSdkConstraint();
     }
 
     /**
      * The plugin's declared inter-plugin dependencies, or [] when undeclared.
+     *
+     * Deliberately does NOT catch: a throwing declaration is handled
+     * fail-closed by the caller (quarantine with the exception named).
      *
      * @return array<string, string>
      */
@@ -1035,14 +1055,8 @@ class PluginLoader
             return [];
         }
 
-        try {
-            $dependencies = $plugin->getPluginDependencies();
-        } catch (\Throwable) {
-            return [];
-        }
-
         $valid = [];
-        foreach ($dependencies as $name => $constraint) {
+        foreach ($plugin->getPluginDependencies() as $name => $constraint) {
             if (is_string($name) && is_string($constraint)) {
                 $valid[$name] = $constraint;
             }
