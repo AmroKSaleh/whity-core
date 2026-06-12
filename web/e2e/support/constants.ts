@@ -21,6 +21,43 @@ export const REGULAR_USER: Credentials = {
 };
 
 /**
+ * The delegation-granted account. Unlike ADMIN/REGULAR_USER it is NOT seeded:
+ * the auth setup project provisions it idempotently through the admin API
+ * (role `user`, so its ROLE grants nothing beyond the regular user) and then
+ * delegates {@link DELEGATED_PERMISSIONS} to it. Every permission this account
+ * holds beyond the plain user therefore comes from a delegation, which is
+ * exactly what the matrix specs exercise.
+ */
+export const DELEGATE_USER: Credentials = {
+  email: process.env.E2E_DELEGATE_EMAIL ?? 'delegate@example.com',
+  password: process.env.E2E_DELEGATE_PASSWORD ?? 'delegate123',
+};
+
+/**
+ * The permissions delegated to DELEGATE_USER by the auth setup project.
+ *
+ * All three are held by the seeded admin grantor on a fresh database (the
+ * delegation API enforces a subset-of-own-permissions invariant, so only
+ * admin-held permissions are grantable): `relations:read` and `audit:read`
+ * are granted to the admin role by core migrations 020/016, and `hello:view`
+ * by the HelloWorld plugin migration (the plugin ships in the repo, so the
+ * grant exists in CI too).
+ *
+ * Verified live effect for the delegate session:
+ *  - GET /api/frontend/features  -> 200, ONLY `hello-greetings` (delegations
+ *    are honored by RoleChecker; `announcements` stays hidden)
+ *  - GET /api/relations          -> 200 (vs 403 for the plain user)
+ *  - GET /api/audit-logs         -> 200 (vs 403 for the plain user)
+ *  - GET /api/delegations        -> 403 (delegation:manage is NOT delegated)
+ *  - GET /api/users              -> 403 (unchanged)
+ */
+export const DELEGATED_PERMISSIONS = [
+  'relations:read',
+  'audit:read',
+  'hello:view',
+] as const;
+
+/**
  * Sidebar sections that exist for an authenticated user. The backend currently
  * returns the same navigation set for every role (access is enforced at the
  * data layer, not by hiding nav items), so both admin and regular users see

@@ -107,6 +107,166 @@ export async function findOuIdByName(
   return match ? match.id : null;
 }
 
+/**
+ * Ensure a user account exists and return its id. Looks the email up via
+ * GET /api/users first; when absent, creates it via POST /api/users. The role
+ * is passed by NAME (the backend resolves tenant-visible role names, WC-113).
+ *
+ * Idempotent across runs against a persistent dev database. NOTE: an existing
+ * account is returned as-is — its password is never reset, so a mismatch with
+ * the expected credentials surfaces later as a loud UI-login failure.
+ */
+export async function ensureUser(
+  api: APIRequestContext,
+  opts: { email: string; password: string; role: string }
+): Promise<number> {
+  const existing = await findUserIdByEmail(api, opts.email);
+  if (existing !== null) {
+    return existing;
+  }
+
+  const res = await api.post('/api/users', {
+    data: { email: opts.email, password: opts.password, role: opts.role },
+  });
+  if (res.status() === 409) {
+    // Lost a (re-run) race: the account appeared between the lookup and the
+    // create. Resolve it by email instead of failing.
+    const raced = await findUserIdByEmail(api, opts.email);
+    if (raced !== null) {
+      return raced;
+    }
+  }
+  expect(res.status(), `creating user ${opts.email} should return 201`).toBe(201);
+  const body = (await res.json()) as { data: { id: number } };
+  return body.data.id;
+}
+
+/**
+ * Ensure a LIVE delegation of the given permissions to the grantee exists,
+ * creating only the missing ones (one POST for the whole missing set; the
+ * backend writes one row per permission).
+ *
+ * The grantor is whoever `api` is authenticated as, and the delegation API
+ * enforces the subset invariant server-side: a permission the grantor does not
+ * hold is rejected with 422, which this helper surfaces as a hard failure.
+ * GET /api/delegations excludes revoked rows by default, so revoked grants are
+ * correctly re-created rather than mistaken for live ones.
+ */
+export async function ensureDelegation(
+  api: APIRequestContext,
+  opts: {
+    granteeType: 'role' | 'user';
+    granteeId: number;
+    permissions: string[];
+  }
+): Promise<void> {
+  const listRes = await api.get(
+    `/api/delegations?granteeType=${opts.granteeType}&granteeId=${opts.granteeId}`
+  );
+  let live: string[] = [];
+  if (listRes.ok()) {
+    const body = (await listRes.json()) as {
+      data?: Array<{ permission: string; revokedAt: string | null }>;
+    };
+    live = (body.data ?? [])
+      .filter((d) => d.revokedAt === null)
+      .map((d) => d.permission);
+  }
+
+  const missing = opts.permissions.filter((p) => !live.includes(p));
+  if (missing.length === 0) {
+    return;
+  }
+
+  const createRes = await api.post('/api/delegations', {
+    data: {
+      granteeType: opts.granteeType,
+      granteeId: opts.granteeId,
+      permissions: missing,
+      ouId: null,
+    },
+  });
+  expect(
+    createRes.status(),
+    `delegating [${missing.join(', ')}] to ${opts.granteeType} ${opts.granteeId} ` +
+      'should return 201 (422 means the grantor does not hold the permission)'
+  ).toBe(201);
+}
+
+/**
+ * Best-effort revocation of every LIVE delegation held by the given grantee.
+ * Used by matrix-spec cleanup so a failed test can never leave a live
+ * throwaway delegation behind (revoked rows are list-hidden by default and
+ * harmless). Never throws.
+ */
+export async function revokeDelegationsFor(
+  api: APIRequestContext,
+  granteeType: 'role' | 'user',
+  granteeId: number
+): Promise<void> {
+  try {
+    const res = await api.get(
+      `/api/delegations?granteeType=${granteeType}&granteeId=${granteeId}`
+    );
+    if (!res.ok()) return;
+    const body = (await res.json()) as {
+      data?: Array<{ id: number; revokedAt: string | null }>;
+    };
+    for (const delegation of body.data ?? []) {
+      if (delegation.revokedAt === null) {
+        await api.delete(`/api/delegations/${delegation.id}`).catch(() => undefined);
+      }
+    }
+  } catch {
+    // Best-effort cleanup.
+  }
+}
+
+/** Best-effort person deletion by id (requires relations:manage). */
+export async function deletePerson(api: APIRequestContext, id: number): Promise<void> {
+  await api.delete(`/api/persons/${id}`).catch(() => undefined);
+}
+
+/** Find a person id by exact display name, or null if absent. */
+export async function findPersonIdByName(
+  api: APIRequestContext,
+  displayName: string
+): Promise<number | null> {
+  const res = await api.get('/api/persons');
+  if (!res.ok()) return null;
+  const body = (await res.json()) as {
+    data?: Array<{ id: number; displayName: string }>;
+  };
+  const match = (body.data ?? []).find((p) => p.displayName === displayName);
+  return match ? match.id : null;
+}
+
+/**
+ * Best-effort deletion of every HelloWorld greeting whose message contains the
+ * given marker. Matrix specs tag the greetings they create with a
+ * uniqueSuffix-based marker, so cleanup removes exactly what the test created
+ * and tolerates pre-existing rows on a shared dev database. Never throws.
+ */
+export async function deleteGreetingsMatching(
+  api: APIRequestContext,
+  marker: string
+): Promise<void> {
+  try {
+    const res = await api.get('/api/hello/greetings');
+    if (!res.ok()) return;
+    const body = (await res.json()) as {
+      data?: Array<{ id: number; message: string }>;
+    };
+    for (const row of body.data ?? []) {
+      if (row.message.includes(marker)) {
+        await api.delete(`/api/hello/greetings/${row.id}`).catch(() => undefined);
+      }
+    }
+  } catch {
+    // Best-effort cleanup.
+  }
+}
+
 /** Find a user id by exact email, or null if absent. */
 export async function findUserIdByEmail(
   api: APIRequestContext,
