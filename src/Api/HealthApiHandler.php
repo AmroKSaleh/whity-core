@@ -81,6 +81,9 @@ class HealthApiHandler
 
         $body = [
             'status' => $dbConnected ? 'ok' : 'degraded',
+            // WC-172: the running core version, so operators can read a
+            // deployment's version remotely (and compare it to releases).
+            'version' => \Whity\Core\CoreVersion::VERSION,
             'workers_active' => $this->configuredWorkerCount(),
             'memory_usage_mb' => $this->memoryUsageMb(),
             'uptime_seconds' => $this->uptimeSeconds(),

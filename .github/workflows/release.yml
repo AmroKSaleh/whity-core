@@ -1,0 +1,238 @@
+# Release pipeline (WC-172): pushing a tag `vX.Y.Z` publishes a core release.
+#
+# Gates, in order:
+#   1. verify / postgres-integration / web — full parity with the PR gate
+#      (.github/workflows/automated-tests.yml): the tag name must equal
+#      `v` + CoreVersion::VERSION (a release can never ship with a lying
+#      version), the full backend suite + static analysis + plugin smoke must
+#      pass, migrations + seed must run on real PostgreSQL, and the frontend
+#      types/tests/generated-artifact drift checks must pass on the tagged
+#      commit. A release is never gated weaker than a PR.
+#   2. image — build the production container image (the Dockerfile `release`
+#      stage: code + no-dev vendor baked in) and push it to GHCR as
+#      ghcr.io/<repo>:vX.Y.Z and :latest.
+#   3. release — create the GitHub Release with auto-generated notes (the
+#      source archives GitHub attaches are the deploy artifact for
+#      checkout-based hosts; the GHCR image serves container-based ones).
+#
+# Consumers check for updates with `php public/index.php update:check` and
+# apply them via docs/wiki/Core-Update.md.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  verify:
+    name: Verify tag + full suite
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite
+          coverage: none
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Tag must match CoreVersion::VERSION
+        run: |
+          VERSION=$(php -r "require 'vendor/autoload.php'; echo \Whity\Core\CoreVersion::VERSION;")
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match CoreVersion::VERSION (${VERSION}). Bump src/Core/CoreVersion.php in a PR first, then tag the merge commit v${VERSION}."
+            exit 1
+          fi
+          echo "Releasing version ${VERSION}"
+
+      - name: Run PHPUnit
+        run: vendor/bin/phpunit
+
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse src tests plugins sdk
+
+      - name: Plugin-load smoke
+        run: php scripts/ci-plugin-smoke.php
+
+  postgres-integration:
+    name: Migrations + seed on real PostgreSQL
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    # A real PostgreSQL service so migrations/seed run against the actual engine.
+    # This catches Postgres-specific bugs the SQLite test suite cannot — e.g. use
+    # of a reserved keyword as an identifier (WC-65: `symmetric`), which only
+    # fails on PostgreSQL.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: whity
+          POSTGRES_PASSWORD: whity_dev
+          POSTGRES_DB: whity_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U whity -d whity_core"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          coverage: none
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # The app reads configuration from $_ENV (not getenv); the CLI bootstrap
+      # loads a .env file into $_ENV, so write one rather than rely on the runner's
+      # variables_order including 'E'.
+      - name: Write .env for the CLI bootstrap
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=development
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=whity_core
+          DB_USER=whity
+          DB_PASSWORD=whity_dev
+          JWT_SECRET=ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY=ci_encryption_key_min_32_chars_bbbbbbbb
+          INITIAL_ADMIN_PASSWORD=admin123
+          INITIAL_USER_PASSWORD=user123
+          INITIAL_SYSTEM_ADMIN_PASSWORD=systemadmin123
+          EOF
+
+      - name: Run migrations on real PostgreSQL
+        run: php public/index.php migrate run
+
+      - name: Seed on real PostgreSQL
+        run: php public/index.php seed
+
+      - name: Re-run migrations (idempotency on PostgreSQL)
+        run: php public/index.php migrate run
+
+  web:
+    name: Frontend types, tests & generated-artifact drift
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The committed lib/api/schema.d.ts must match a fresh generation from
+      # public/openapi.json — API changes that skip `npm run generate:api`
+      # would ship a typed client that lies about the contract (WC-168).
+      - name: Typed-client schema drift check
+        run: |
+          npm run generate:api
+          git diff --exit-code -- lib/api/schema.d.ts
+
+      # The committed design-token outputs must match the generator (base.json
+      # is the single source of truth for styling variables).
+      - name: Design-token drift check
+        run: npm run tokens:check
+
+      # The shadcn registry manifest must stay buildable; its output is
+      # generated at build time (prebuild) and never committed.
+      - name: Registry build smoke
+        run: npm run registry:build
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run Jest
+        run: npx jest
+
+  image:
+    name: Build + push container image
+    runs-on: ubuntu-latest
+    needs: [verify, postgres-integration, web]
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v5
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR requires a lowercase repository path; github.repository may not be.
+      - name: Resolve image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: release
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:latest
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [verify, postgres-integration, web, image]
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v5
+
+      - name: Create release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag

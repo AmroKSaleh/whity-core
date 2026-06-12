@@ -62,7 +62,9 @@ class GenerateOpenApiSchemaCommand
             // Generate from the ROUTER (carries every registered route with
             // its typed schema declaration, WC-166) and validate before
             // anything is written: an invalid contract must never be published.
-            $generator = new SchemaGenerator('Whity Core API', '1.0.0', $pluginLoader, $router);
+            // The spec's info.version is the platform core version (WC-172) —
+            // CoreVersion is the single source of truth, never a literal here.
+            $generator = new SchemaGenerator('Whity Core API', \Whity\Core\CoreVersion::VERSION, $pluginLoader, $router);
             ['spec' => $spec, 'errors' => $errors] = $generator->generateAndValidate();
 
             if ($errors !== []) {

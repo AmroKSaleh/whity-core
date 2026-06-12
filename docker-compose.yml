@@ -20,6 +20,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Dev builds the runtime-only stage; the checkout is bind-mounted below.
+      # The `release` stage (code baked in) is for the GHCR image only.
+      target: base
     image: whity-core:dev
     container_name: whity_frankenphp
     ports:

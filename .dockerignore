@@ -1,0 +1,41 @@
+# Build-context hygiene for the release image (WC-172). Dev and staging
+# composes build the `base` stage and bind-mount the checkout over /app, so
+# this file only shapes what ships inside the published `release` stage.
+
+.git
+.github
+.claude
+.playwright-mcp
+.phpunit.cache
+.worktrees
+
+# Documentation and the Next.js frontend: the backend image serves neither.
+docs
+wiki
+web
+
+# CI runs the test suites from the git checkout, never from the image.
+tests
+
+# Local/dev artifacts and secrets.
+.env
+.env.local
+.env.staging
+database.sqlite
+load-tests
+node_modules
+
+# vendor/ is produced INSIDE the release stage (composer install --no-dev).
+# composer.lock is gitignored, so CI release builds resolve fresh from
+# composer.json — exclude any local lock file for parity.
+vendor
+composer.lock
+
+# Real plugins are deploy-time content (docs/wiki/Plugin-Distribution.md) and
+# must NEVER enter the core image — only the committed reference plugins ship.
+# Mirrors plugins/.gitignore.
+plugins/*
+!plugins/.gitkeep
+!plugins/.gitignore
+!plugins/ExamplePlugin.php
+!plugins/HelloWorld

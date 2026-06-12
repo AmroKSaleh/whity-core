@@ -32,14 +32,18 @@ class HealthApiHandlerTest extends TestCase
         $body = json_decode($response->getBody(), true);
         $this->assertIsArray($body);
 
-        // Exact contract: status, workers_active, memory_usage_mb, uptime_seconds, db_connected.
+        // Exact contract: status, version, workers_active, memory_usage_mb,
+        // uptime_seconds, db_connected.
         $this->assertArrayHasKey('status', $body);
+        $this->assertArrayHasKey('version', $body);
         $this->assertArrayHasKey('workers_active', $body);
         $this->assertArrayHasKey('memory_usage_mb', $body);
         $this->assertArrayHasKey('uptime_seconds', $body);
         $this->assertArrayHasKey('db_connected', $body);
 
         $this->assertSame('ok', $body['status']);
+        // WC-172: operators read a deployment's running version remotely.
+        $this->assertSame(\Whity\Core\CoreVersion::VERSION, $body['version']);
         $this->assertTrue($body['db_connected']);
         $this->assertIsInt($body['workers_active']);
         $this->assertGreaterThanOrEqual(1, $body['workers_active']);
@@ -76,6 +80,10 @@ class HealthApiHandlerTest extends TestCase
         $this->assertFalse($body['db_connected']);
 
         // Degraded responses must still expose the full shape (no leaked details).
+        // WC-172: version stays readable even while the database is down — that
+        // is exactly when an operator checks which build is misbehaving.
+        $this->assertArrayHasKey('version', $body);
+        $this->assertSame(\Whity\Core\CoreVersion::VERSION, $body['version']);
         $this->assertArrayHasKey('workers_active', $body);
         $this->assertArrayHasKey('memory_usage_mb', $body);
         $this->assertArrayHasKey('uptime_seconds', $body);
