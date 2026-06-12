@@ -55,3 +55,9 @@ Create a plugin directory under `plugins/` containing a class that implements
 - [Sprint 1 Setup Guide](Sprint-1-Setup.md) — detailed local development walkthrough.
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines.
+
+## Updating
+
+See [Core-Update.md](./Core-Update.md): check with
+`php public/index.php update:check`, apply with the manual runbook
+(backup → checkout the release tag → migrate → regenerate spec → restart).

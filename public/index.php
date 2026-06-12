@@ -75,12 +75,20 @@ if ($isCli && isset($argv[1])) {
         exit(0);
     }
 
+    if ($command === 'update:check') {
+        $updateCheckCommand = new \Whity\Cli\Commands\UpdateCheckCommand();
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'update:check' command
+        exit($updateCheckCommand->execute($argv));
+    }
+
     echo "Unknown command: {$command}\n";
     echo "Available commands:\n";
     echo "  generate:openapi           Generate OpenAPI 3.0 schema\n";
     echo "  migrate                    Manage database migrations\n";
     echo "  seed                       Seed database with default data\n";
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
+    echo "  update:check               Compare the core version against the latest GitHub release\n";
     exit(1);
 }
 

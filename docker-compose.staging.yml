@@ -44,6 +44,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Staging mirrors dev: runtime-only stage + the bind-mounted checkout.
+      # The `release` stage (code baked in) is for the GHCR image only.
+      target: base
     container_name: whity_staging_frankenphp
     ports:
       # Non-default host port so it never collides with the dev demo on 8000.

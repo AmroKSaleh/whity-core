@@ -82,7 +82,7 @@ final class AdminSchemasTest extends TestCase
         CoreApiSchemas::registerRoutes($router);
         $loader->load();
 
-        return (new SchemaGenerator('Whity Core API', '1.0.0', $loader, $router))->generateAndValidate();
+        return (new SchemaGenerator('Whity Core API', \Whity\Core\CoreVersion::VERSION, $loader, $router))->generateAndValidate();
     }
 
     private static function copyDirectory(string $from, string $to): void
