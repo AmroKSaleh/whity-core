@@ -101,9 +101,11 @@ UI renders with **zero per-app frontend code**.
    targeting. Check `php public/index.php migrate status` first: if the
    plugin's `plugin:<Name>:*` entries are the most recent, run rollback once
    per entry; if other migrations were applied after them, you CANNOT
-   selectively roll the plugin back this way — either roll forward with a
-   manual cleanup migration or accept the schema remnants. (The grant
-   migration's `down()` is safe either way: it removes only its own
+   selectively roll the plugin back this way — your options (both with real
+   costs, spelled out under "Uninstall in a fleet" below) are
+   rollback-then-re-migrate, which DESTROYS the rolled-back siblings' data,
+   or accepting the schema remnants until a manual cleanup migration. (The
+   grant migration's `down()` is safe either way: it removes only its own
    marker-scoped permissions and never another role's grants.)
 3. Delete `plugins/<Name>/`, regenerate the spec, restart workers.
 
@@ -114,3 +116,64 @@ UI renders with **zero per-app frontend code**.
 - `GET /api/frontend/features` (as a permitted user) includes its descriptor.
 - Its screen renders at `/admin/x/<feature-id>` and a denied user gets the
   empty feature list + 403 on the data API.
+
+## Extract once, consume twice: multi-deployment pattern (WC-171)
+
+The pilot proved the full lifecycle across a fleet of deployments (KeyHub and
+Elmak — each its own clone of whity-core with its own compose project,
+database, secrets, and private plugins, plus the SAME shared plugin package):
+
+**Deployment anatomy.** Each app is a checkout of whity-core with:
+- its own `.env` (distinct `JWT_SECRET`/`ENCRYPTION_KEY`, ports) and a
+  compose file with per-deployment container names/host ports (run with
+  `docker compose -p <app> up -d`; `db-init` bootstraps migrate+seed),
+- its own private plugins dropped into `plugins/` (e.g. a branding/config
+  plugin from the app's private repository),
+- shared plugins installed from their repos' release tags — from the plugin
+  repo, in a POSIX shell (`git archive` piped through PowerShell corrupts
+  the binary stream; Windows users take the robocopy variant above):
+
+  ```bash
+  mkdir -p /path/to/host/plugins/<Name>
+  git archive vX.Y.Z | tar -x -C /path/to/host/plugins/<Name>
+  ```
+
+Because the plugin lands in `plugins/` BEFORE the first `up`, the
+**development** bootstrap (`db-init`, which only runs when
+`APP_ENV=development`) applies its migrations automatically. Staging and
+production compose files have no db-init: there the install always includes
+an explicit `php public/index.php migrate run` deploy step.
+
+**One web build, many backends.** The Next.js server proxies resolve the
+backend origin at RUNTIME from `WHITY_BACKEND_URL` (`web/lib/backend-url.ts`)
+— set it per deployment when starting the web server. Do NOT rely on
+`NEXT_PUBLIC_API_URL` for built output: Next inlines `NEXT_PUBLIC_*` values
+at build time, freezing whatever the build machine had.
+
+**Staggered versions are normal.** Each deployment upgrades on its own
+cadence: re-deploy the new tag over `plugins/<Name>/`, `migrate run` (only
+the new migrations apply; existing rows keep working), `generate:openapi`,
+restart workers. The schema-driven screens pick up new fields with zero
+frontend work — in the pilot, v1.1.0's `pinned` flag appeared as a new
+column and form checkbox in KeyHub while Elmak ran a different state
+entirely.
+
+**Uninstall in a fleet** follows the per-deployment Uninstalling steps
+above, and the rollback LIFO caveat bites in practice: in the pilot, another
+plugin's migrations sat on top of the stack. When that happens you have
+exactly two options, neither free:
+
+1. **Rollback-then-re-migrate** (what the pilot did): roll back every
+   migration down TO AND INCLUDING the target plugin's, remove the target
+   plugin's directory, then `migrate run` to re-apply the sibling
+   migrations that were popped along the way. **THIS DESTROYS THE ROLLED-BACK
+   SIBLINGS' DATA**: a sibling's `down()` typically drops its tables, and
+   the re-migrate recreates them EMPTY. Acceptable only when the affected
+   siblings' data is disposable (fresh installs, demo data) or restored
+   from a backup afterwards.
+2. **Leave the schema remnants**: remove the plugin directory without
+   rolling back; its tables and grants stay until a manual cleanup
+   migration. Safe for data, untidy for schema.
+
+For production fleets, neither is great — #194 (targeted per-migration
+rollback) tracks the real fix.

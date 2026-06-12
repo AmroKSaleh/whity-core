@@ -7,11 +7,11 @@
  * this tiny route handler exposes it on the Next origin instead. The document
  * is public — no cookies or auth are forwarded.
  */
-export async function GET(): Promise<Response> {
-  const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { backendUrl } from '@/lib/backend-url';
 
+export async function GET(): Promise<Response> {
   try {
-    const upstream = await fetch(`${backendUrl}/openapi.json`);
+    const upstream = await fetch(`${backendUrl()}/openapi.json`);
     const body = await upstream.text();
 
     return new Response(body, {
