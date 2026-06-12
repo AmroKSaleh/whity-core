@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\OpenAPI;
 
+use PHPUnit\Framework\Attributes\PreserveGlobalState;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use PHPUnit\Framework\TestCase;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\PluginLoader;
@@ -18,10 +20,42 @@ use Whity\OpenAPI\SchemaGenerator;
  * regenerating must reproduce it byte-for-byte (modulo line endings on
  * autocrlf checkouts), so any route/schema change that skips
  * `generate:openapi` fails loudly here.
+ *
+ * Runs in SEPARATE PROCESSES: regeneration loads the reference plugins from a
+ * temp copy (see $referencePluginsDir), and other suites load the same plugin
+ * classes from their real paths — sharing one process would fatal on
+ * redeclare. Isolation keeps both worlds clean.
  */
+#[RunTestsInSeparateProcesses]
+#[PreserveGlobalState(false)]
 final class AdminSchemasTest extends TestCase
 {
     private const SPEC_PATH = __DIR__ . '/../../public/openapi.json';
+
+    /**
+     * Temp dir holding ONLY the committed reference plugins. The committed
+     * spec is the CORE BASELINE (core routes + reference plugins): a real
+     * plugin deploy-copied into plugins/ on a dev machine (gitignored, see
+     * plugins/.gitignore) must not fail this suite — deployments regenerate
+     * their own spec as a deploy step (docs/wiki/Plugin-Distribution.md) and
+     * that file is never committed.
+     */
+    private static string $referencePluginsDir;
+
+    public static function setUpBeforeClass(): void
+    {
+        $source = dirname(__DIR__, 2) . '/plugins';
+        self::$referencePluginsDir = sys_get_temp_dir() . '/whity_reference_plugins_' . uniqid();
+        mkdir(self::$referencePluginsDir, 0755, true);
+
+        copy($source . '/ExamplePlugin.php', self::$referencePluginsDir . '/ExamplePlugin.php');
+        self::copyDirectory($source . '/HelloWorld', self::$referencePluginsDir . '/HelloWorld');
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        self::removeDirectory(self::$referencePluginsDir);
+    }
 
     /**
      * @return array<string, mixed>
@@ -36,18 +70,47 @@ final class AdminSchemasTest extends TestCase
 
     /**
      * Regenerate exactly as `generate:openapi` does (core catalogue first,
-     * then plugins — the runtime first-registration-wins ordering, WC-169).
+     * then plugins — the runtime first-registration-wins ordering, WC-169),
+     * but over the REFERENCE plugins only (see $referencePluginsDir).
      *
      * @return array{spec: array<string, mixed>, errors: list<string>}
      */
     private static function regenerate(): array
     {
         $router = new Router();
-        $loader = new PluginLoader(dirname(__DIR__, 2) . '/plugins', $router, null, new HookManager());
+        $loader = new PluginLoader(self::$referencePluginsDir, $router, null, new HookManager());
         CoreApiSchemas::registerRoutes($router);
         $loader->load();
 
         return (new SchemaGenerator('Whity Core API', '1.0.0', $loader, $router))->generateAndValidate();
+    }
+
+    private static function copyDirectory(string $from, string $to): void
+    {
+        mkdir($to, 0755, true);
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($from, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($items as $item) {
+            $target = $to . '/' . $items->getSubPathname();
+            $item->isDir() ? mkdir($target, 0755, true) : copy($item->getPathname(), $target);
+        }
+    }
+
+    private static function removeDirectory(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($items as $item) {
+            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+        }
+        rmdir($dir);
     }
 
     // ==================== populated components ====================

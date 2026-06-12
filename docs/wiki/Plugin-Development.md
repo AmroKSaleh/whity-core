@@ -644,3 +644,11 @@ typed schemas, the descriptor above, and both migrations.
       registered GET `basePath`, matching route permission (Step 8).
 
 See [Architecture.md](./Architecture.md) for how this all fits together.
+
+## Distributing a real plugin
+
+Example plugins live in core; **real plugins live in their own repositories**
+and install by deploy-copy. The packaging template, install/uninstall steps,
+and the deploy-time `generate:openapi` requirement are documented in
+[Plugin-Distribution.md](./Plugin-Distribution.md) (established by the
+`whity/plugin-announcements` pilot).
