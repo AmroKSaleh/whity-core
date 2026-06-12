@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { backendUrl } from '@/lib/backend-url';
 
 /**
  * HTTP statuses that, per the Fetch spec, MUST NOT carry a response body.
@@ -37,7 +38,8 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
   try {
     const url = new URL(request.url);
     const pathWithoutApi = url.pathname.replace('/api/', '');
-    const backendUrl = `http://localhost:8000/api/${pathWithoutApi}${url.search}`;
+    // Runtime-resolved per deployment (WC-171): one web build, many hosts.
+    const upstreamUrl = `${backendUrl()}/api/${pathWithoutApi}${url.search}`;
 
     const cookieStore = await cookies();
     const cookieHeader = cookieStore
@@ -68,7 +70,7 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
       }
     }
 
-    const response = await fetch(backendUrl, options);
+    const response = await fetch(upstreamUrl, options);
 
     const responseHeaders = new Headers(response.headers);
     responseHeaders.delete('transfer-encoding');
