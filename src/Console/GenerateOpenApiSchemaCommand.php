@@ -76,7 +76,14 @@ class GenerateOpenApiSchemaCommand
             // Save to public/openapi.json (deterministic: builder output is
             // sorted, so regeneration over the same routes is byte-identical;
             // the encoder keeps empty maps as JSON objects, valid OAS).
+            // An explicit --output=<path> overrides the destination so tests
+            // (and tooling) can generate without touching the tracked file.
             $outputPath = dirname(__DIR__, 2) . '/public/openapi.json';
+            foreach ($argv as $arg) {
+                if (is_string($arg) && str_starts_with($arg, '--output=')) {
+                    $outputPath = substr($arg, strlen('--output='));
+                }
+            }
             $json = SchemaGenerator::encode($spec);
 
             if (file_put_contents($outputPath, $json) === false) {
