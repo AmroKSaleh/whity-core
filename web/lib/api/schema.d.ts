@@ -478,6 +478,11 @@ export interface components {
                 titleField: string | null;
             } | null;
             requiredPermission: string;
+            capabilities: {
+                canCreate: boolean;
+                canEdit: boolean;
+                canDelete: boolean;
+            };
         };
         FrontendFeatureListResponse: {
             data: components["schemas"]["FrontendFeature"][];

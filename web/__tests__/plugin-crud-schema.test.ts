@@ -1,7 +1,9 @@
 import {
   deriveCrudModel,
+  effectiveCapabilities,
   humanizeKey,
   resolveRef,
+  type CrudCapabilities,
   type OpenApiSpec,
 } from '@/lib/plugin-crud-schema';
 
@@ -358,7 +360,66 @@ describe('deriveCrudModel', () => {
       canDelete: true,
     });
   });
+});
 
+describe('effectiveCapabilities', () => {
+  const ALL_TRUE: CrudCapabilities = {
+    canCreate: true,
+    canEdit: true,
+    canDelete: true,
+  };
+  const ALL_FALSE: CrudCapabilities = {
+    canCreate: false,
+    canEdit: false,
+    canDelete: false,
+  };
+
+  it('ANDs both sides per field — both true yields all true', () => {
+    expect(effectiveCapabilities(ALL_TRUE, ALL_TRUE)).toEqual(ALL_TRUE);
+  });
+
+  it('yields false on a field when the spec side is false', () => {
+    const spec: CrudCapabilities = {
+      canCreate: false,
+      canEdit: true,
+      canDelete: true,
+    };
+    expect(effectiveCapabilities(spec, ALL_TRUE)).toEqual({
+      canCreate: false,
+      canEdit: true,
+      canDelete: true,
+    });
+  });
+
+  it('yields false on a field when the caller side is false', () => {
+    const caller: CrudCapabilities = {
+      canCreate: true,
+      canEdit: false,
+      canDelete: false,
+    };
+    expect(effectiveCapabilities(ALL_TRUE, caller)).toEqual({
+      canCreate: true,
+      canEdit: false,
+      canDelete: false,
+    });
+  });
+
+  it('treats a null/undefined spec side as all-false', () => {
+    expect(effectiveCapabilities(null, ALL_TRUE)).toEqual(ALL_FALSE);
+    expect(effectiveCapabilities(undefined, ALL_TRUE)).toEqual(ALL_FALSE);
+  });
+
+  it('treats a null/undefined caller side as all-false', () => {
+    expect(effectiveCapabilities(ALL_TRUE, null)).toEqual(ALL_FALSE);
+    expect(effectiveCapabilities(ALL_TRUE, undefined)).toEqual(ALL_FALSE);
+  });
+
+  it('yields all-false when both sides are absent', () => {
+    expect(effectiveCapabilities(null, undefined)).toEqual(ALL_FALSE);
+  });
+});
+
+describe('deriveCrudModel — dangling refs', () => {
   it('skips properties whose $ref cannot be resolved', () => {
     const danglingRef: OpenApiSpec = {
       paths: {

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import {
   deriveCrudModel,
+  effectiveCapabilities,
   type CrudField,
   type CrudModel,
   type OpenApiSpec,
@@ -438,8 +439,10 @@ function CrudDeleteDialog({
  * On mount it fetches the public OpenAPI document (same-origin proxy) and the
  * feature's list endpoint in parallel, derives the table/form model from the
  * spec, and renders the standard admin list + create/edit/delete dialogs.
- * Capabilities follow operation presence in the spec; permissions stay
- * server-side (a 403 on the list renders the access-denied card).
+ * Write controls render only when the spec publishes the operation AND the
+ * server reports the caller may perform it (issue #199), so a read-only
+ * delegated caller never sees a control whose submit would 403; a 403 on the
+ * list still renders the access-denied card.
  */
 export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
@@ -638,11 +641,14 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     );
   }
 
-  const capabilities = model?.capabilities ?? {
-    canCreate: false,
-    canEdit: false,
-    canDelete: false,
-  };
+  // A write control renders only when the spec defines the operation AND the
+  // caller is permitted to perform it (issue #199) — otherwise the submit would
+  // 403. AND the spec-derived capability with the server's per-caller one; a
+  // null model (spec failed to load) yields the all-false fallback.
+  const capabilities = effectiveCapabilities(
+    model?.capabilities,
+    feature.capabilities
+  );
 
   const columns: Column<CrudRow>[] = (model?.columns ?? []).map((column) => ({
     key: column.key,

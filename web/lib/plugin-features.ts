@@ -35,6 +35,11 @@ export interface PluginFeature {
   } | null;
   /** Permission the server used to filter this feature (informational). */
   requiredPermission: string;
+  /**
+   * Server-computed effective write capabilities for the caller (issue #199):
+   * the renderer hides controls the caller cannot use.
+   */
+  capabilities: { canCreate: boolean; canEdit: boolean; canDelete: boolean };
 }
 
 /** Narrow an unknown payload to the `{ data: PluginFeature[] }` envelope. */
