@@ -10,13 +10,15 @@ import {
 /**
  * WC-173 role matrix — Family Relations admin area (/admin/relations).
  *
- * LIVE-VERIFIED access map for GET /api/persons and GET /api/relations (both
- * gated on relations:read):
- *   admin    -> 200 (role grant, core migration)
- *   user     -> 403 (Access denied card)
- *   delegate -> 200 — THE flagship delegated-read pin: the active
- *               relations:read delegation turns the plain user's 403 into a
- *               working read surface.
+ * LIVE-VERIFIED access map (WC-175 #191: the "Family Relations" nav link is
+ * RBAC-filtered on requiredPermission relations:read; GET /api/persons and
+ * GET /api/relations enforce the same):
+ *   admin    -> link shown, 200 (role grant, core migration)
+ *   user     -> link HIDDEN (no relations:read; filtered out server-side, so
+ *               the page is not reachable via nav)
+ *   delegate -> link shown, 200 — THE flagship delegated-read pin: the active
+ *               relations:read delegation surfaces the link AND turns the plain
+ *               user's 403 into a working read surface.
  */
 
 // Shared with the cleanup hook so a mid-test failure still gets cleaned up.
@@ -41,6 +43,15 @@ test.describe('Family Relations (role matrix)', () => {
     role,
     page,
   }) => {
+    if (role === 'user') {
+      // The "Family Relations" nav link is filtered out server-side for the
+      // plain user (no relations:read), so the page is not reachable via nav.
+      await expect(
+        roleSession.shell.navLink('Family Relations')
+      ).toHaveCount(0);
+      return;
+    }
+
     const personsResponse = page.waitForResponse(
       (res) =>
         res.url().includes('/api/persons') && res.request().method() === 'GET'
@@ -55,34 +66,20 @@ test.describe('Family Relations (role matrix)', () => {
     await roleSession.shell.clickNav('Family Relations');
     await page.waitForURL('**/admin/relations');
 
-    const expectedStatus = role === 'user' ? 403 : 200;
-    expect((await personsResponse).status()).toBe(expectedStatus);
-    expect((await relationsResponse).status()).toBe(expectedStatus);
+    expect((await personsResponse).status()).toBe(200);
+    expect((await relationsResponse).status()).toBe(200);
 
     await expect(
       page.getByRole('heading', { name: 'Family Relations' })
     ).toBeVisible();
 
-    if (role === 'user') {
-      await expect(
-        page.getByRole('heading', { name: 'Access denied' })
-      ).toBeVisible();
-      await expect(
-        page.getByText(
-          'You need the relations:read permission to view family relations.'
-        )
-      ).toBeVisible();
-      await expect(
-        page.getByRole('button', { name: 'Add relative', exact: true })
-      ).toHaveCount(0);
-      return;
-    }
-
     // admin AND delegate get the full read surface — no denied card, the
-    // list/graph view toggle, and the primary control. NOTE (current
-    // behavior): the "Add relative" button renders for the delegate too; only
-    // the DATA layer is permission-gated, and a delegate write would 403
-    // server-side (relations:manage is not delegated).
+    // list/graph view toggle, and the primary control. NOTE: the "Add relative"
+    // button renders for the delegate too; this relations page is a bespoke
+    // component whose write-gating is OUT OF SCOPE for WC-175 (#199 fixed only
+    // the schema-driven plugin CRUD screen). Only the DATA layer is gated here,
+    // and a delegate write would still 403 server-side (relations:manage is not
+    // delegated) — gating the button is a separate follow-up.
     await expect(
       page.getByRole('heading', { name: 'Access denied' })
     ).toHaveCount(0);

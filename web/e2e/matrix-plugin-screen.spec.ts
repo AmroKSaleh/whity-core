@@ -6,12 +6,19 @@ import { createAuthedApi, deleteGreetingsMatching } from './support/api';
 /**
  * WC-173 role matrix — HelloWorld plugin screen (/admin/x/hello-greetings).
  *
- * LIVE-VERIFIED access map:
+ * LIVE-VERIFIED access map (WC-175):
+ *   /api/navigation (#191): the "Greetings" nav link is RBAC-filtered on
+ *                           requiredPermission hello:view — shown to admin
+ *                           (role grant) and delegate (delegated hello:view),
+ *                           HIDDEN for the plain user.
  *   /api/frontend/features: admin -> includes hello-greetings; user -> [];
  *                           delegate -> hello-greetings ONLY (delegated
  *                           hello:view honored by the feature filter)
  *   GET  /api/hello/greetings: admin 200, user 403, delegate 200
- *   POST /api/hello/greetings: delegate 403 (hello:manage is NOT delegated)
+ *   feature.capabilities (#199): the schema-driven CRUD screen now hides the
+ *                           Create/Edit/Delete controls a caller lacks — the
+ *                           delegate holds hello:view but NOT hello:manage, so
+ *                           it sees a READ-ONLY screen (no write controls).
  *
  * NOTE: the dev stack also carries an extra Announcements plugin that CI will
  * not have — nothing here asserts on announcements, only on hello-greetings.
@@ -36,38 +43,23 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     greetingMarker = null;
   });
 
-  test('the nav link is shown to every role; the screen is permission-gated', async ({
+  test('the nav link follows hello:view; the screen loads for the holders', async ({
     roleSession,
     role,
     page,
   }) => {
-    // CURRENT BEHAVIOR: /api/navigation is NOT permission-filtered, so the
-    // plugin's "Greetings" entry is visible even to roles that cannot use the
-    // feature — gating happens at the screen (permission-filtered feature
-    // list) and data (route RBAC) layers instead.
-    const link = roleSession.shell.navLink('Greetings');
-    await expect(link).toBeVisible();
-
+    // NEW BEHAVIOR (WC-175 #191): /api/navigation IS permission-filtered, so
+    // the plugin's "Greetings" entry is shown only to callers that hold
+    // hello:view — admin (role grant) and delegate (delegated). The plain user
+    // does not hold it, so the link is filtered out server-side.
     if (role === 'user') {
-      await link.click();
-      await page.waitForURL('**/admin/x/hello-greetings');
-      // The user's feature list is empty, so the host page cannot resolve the
-      // feature id and renders the unavailable card (no data request fires).
-      await expect(
-        page.getByRole('heading', { name: 'Feature unavailable' })
-      ).toBeVisible();
-      await expect(
-        page.getByRole('heading', { name: 'Not available' })
-      ).toBeVisible();
-      await expect(
-        page.getByText(
-          "The feature 'hello-greetings' does not exist or you do not have permission to use it."
-        )
-      ).toBeVisible();
+      await expect(roleSession.shell.navLink('Greetings')).toHaveCount(0);
       return;
     }
 
     // admin (role grant) and delegate (delegated hello:view) get the screen.
+    const link = roleSession.shell.navLink('Greetings');
+    await expect(link).toBeVisible();
     const listResponse = page.waitForResponse(
       (res) =>
         res.url().includes('/api/hello/greetings') &&
@@ -146,50 +138,36 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     ).toHaveCount(0);
   });
 
-  test('delegate sees the create affordance but the write is denied server-side', async ({
+  test('delegate has read-only access: no write controls on the greetings screen', async ({
     roleSession,
     role,
     page,
   }) => {
     test.skip(
       role !== 'delegate',
-      'Pins the delegate-specific capability gap; other roles are covered above.'
+      'Pins the delegate read-only surface; other roles are covered above.'
     );
 
-    greetingMarker = `matrix-delegate-denied-${uniqueSuffix()}`;
-    const message = `Denied write ${greetingMarker}`;
-
-    await roleSession.shell.clickNav('Greetings');
-    await page.waitForURL('**/admin/x/hello-greetings');
-    await expect(page.getByRole('heading', { name: 'Greetings' })).toBeVisible();
-
-    // CURRENT-BEHAVIOR PIN (known UX gap): the schema-driven CRUD screen
-    // derives its capabilities from the OpenAPI SPEC, not from the caller's
-    // permissions, so the Create button is visible even though the delegate
-    // holds only hello:view (hello:manage was never delegated).
-    const createButton = page.getByRole('button', { name: 'Create', exact: true });
-    await expect(createButton).toBeVisible();
-
-    await createButton.click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('Create Greetings')).toBeVisible();
-    await dialog.locator('#crud-field-message').fill(message);
-
-    const createResponse = page.waitForResponse(
+    const listResponse = page.waitForResponse(
       (res) =>
         res.url().includes('/api/hello/greetings') &&
-        res.request().method() === 'POST'
+        res.request().method() === 'GET'
     );
-    await dialog.getByRole('button', { name: 'Create', exact: true }).click();
-    expect((await createResponse).status()).toBe(403);
+    await roleSession.shell.clickNav('Greetings');
+    await page.waitForURL('**/admin/x/hello-greetings');
+    expect((await listResponse).status()).toBe(200);
+    await expect(page.getByRole('heading', { name: 'Greetings' })).toBeVisible();
 
-    // The backend rejection surfaces as an error toast with the server's
-    // message; the dialog stays open and no row is ever created.
-    await expect(toastWithText(page, 'Insufficient permissions')).toBeVisible();
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    // FIXED BEHAVIOR (WC-175 #199): the schema-driven CRUD screen now derives
+    // its write capabilities from the server-provided feature.capabilities, not
+    // the OpenAPI spec. The delegate holds hello:view but NOT hello:manage, so
+    // the screen is read-only — the Create button is gone, and rows expose no
+    // "Row actions" menu (Edit/Delete are not rendered for a read-only caller).
     await expect(
-      page.getByRole('row').filter({ hasText: greetingMarker })
+      page.getByRole('button', { name: 'Create', exact: true })
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Row actions' })
     ).toHaveCount(0);
   });
 });

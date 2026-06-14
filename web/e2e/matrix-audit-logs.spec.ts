@@ -4,16 +4,13 @@ import { uniqueSuffix } from './support/constants';
 /**
  * WC-173 role matrix — Audit Logs admin area (/admin/audit-logs).
  *
- * LIVE-VERIFIED access map for GET /api/audit-logs:
- *   admin    -> 200 (role grant, core migration)
- *   user     -> 403
- *   delegate -> 200 (delegated audit:read)
- *
- * DENIAL SURFACE (current behavior, pinned here): unlike the delegations and
- * relations pages, this page has NO dedicated access-denied card — a 403 is
- * treated like any failed fetch, surfacing as a "Failed to fetch audit logs"
- * error toast over the regular "No audit entries found" empty state, while the
- * page chrome (filters + Refresh) still renders.
+ * LIVE-VERIFIED access map (WC-175 #191: the "Audit Logs" nav link is
+ * RBAC-filtered on requiredPermission audit:read; GET /api/audit-logs enforces
+ * the same):
+ *   admin    -> link shown, 200 (role grant, core migration)
+ *   user     -> link HIDDEN (no audit:read; filtered out server-side, so the
+ *               page is not reachable via nav)
+ *   delegate -> link shown, 200 (delegated audit:read)
  */
 test.describe('Audit Logs (role matrix)', () => {
   test('page surface follows the role access map', async ({
@@ -21,6 +18,13 @@ test.describe('Audit Logs (role matrix)', () => {
     role,
     page,
   }) => {
+    if (role === 'user') {
+      // The "Audit Logs" nav link is filtered out server-side for the plain
+      // user (no audit:read), so the page is not reachable via nav.
+      await expect(roleSession.shell.navLink('Audit Logs')).toHaveCount(0);
+      return;
+    }
+
     const listResponse = page.waitForResponse(
       (res) =>
         res.url().includes('/api/audit-logs') &&
@@ -28,24 +32,13 @@ test.describe('Audit Logs (role matrix)', () => {
     );
     await roleSession.shell.clickNav('Audit Logs');
     await page.waitForURL('**/admin/audit-logs');
-    expect((await listResponse).status()).toBe(role === 'user' ? 403 : 200);
+    expect((await listResponse).status()).toBe(200);
 
     await expect(
       page.getByRole('heading', { name: 'Audit Logs' })
     ).toBeVisible();
     // The chrome is not permission-gated; only the data call is.
     await expect(page.getByRole('button', { name: 'Refresh' })).toBeVisible();
-
-    if (role === 'user') {
-      await expect(
-        page.getByText('Failed to fetch audit logs').first()
-      ).toBeVisible();
-      await expect(page.getByText('No audit entries found')).toBeVisible();
-      await expect(
-        page.getByRole('heading', { name: 'Access denied' })
-      ).toHaveCount(0);
-      return;
-    }
 
     // admin (role grant) and delegate (delegated audit:read) read the trail.
     // A fresh database may legitimately hold zero entries, so pin "entries
