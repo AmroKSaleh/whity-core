@@ -164,8 +164,20 @@ export class AppShell {
   }
 
   async logout(): Promise<void> {
+    // The sidebar's logout handler fires POST /api/auth/logout and pushes to
+    // /login WITHOUT awaiting the request, so the URL changes while the
+    // httpOnly cookie may still be valid. Wait for the logout RESPONSE (which
+    // carries the cookie-clearing headers), not just the URL — otherwise an
+    // immediate follow-up (e.g. re-login in a role-switch flow) races the
+    // in-flight logout and /login bounces straight back to /dashboard.
+    const logoutResponse = this.page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/auth/logout') &&
+        res.request().method() === 'POST'
+    );
     await this.logoutButton.click();
     await this.page.waitForURL('**/login');
+    await logoutResponse;
   }
 }
 
@@ -216,8 +228,27 @@ export class SettingsPage {
   async readWizardSecret(): Promise<string> {
     const code = this.wizard.locator('code').first();
     await expect(code).toBeVisible();
-    const text = await code.innerText();
-    return text.trim();
+    // The secret arrives with the async POST /api/auth/2fa/setup response, so
+    // the styled (padded -> non-empty bounding box -> "visible") <code> block
+    // can render before its text exists. Wait for actual base32 content with a
+    // retrying assertion instead of racing a one-shot innerText read.
+    await expect(code).toHaveText(/[A-Z2-7]{10,}=*/);
+    // The dev server runs React StrictMode, which double-mounts the wizard's
+    // setup effect: TWO POST /api/auth/2fa/setup calls race and the LAST
+    // response wins the secret the wizard later submits to confirm. Reading
+    // the first-rendered value can capture the LOSER — a TOTP computed from
+    // it can never verify (live-reproduced: the displayed secret swapped
+    // shortly after first paint). Only trust the secret once it has been
+    // stable across a settle window.
+    let secret = (await code.innerText()).trim();
+    await expect(async () => {
+      await this.page.waitForTimeout(750);
+      const again = (await code.innerText()).trim();
+      const stable = again === secret;
+      secret = again;
+      expect(stable, 'wizard secret should stop changing').toBe(true);
+    }).toPass({ timeout: 15_000 });
+    return secret;
   }
 }
 

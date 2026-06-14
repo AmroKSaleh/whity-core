@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
-import { adminStatePath, userStatePath } from './e2e/support/storage';
+import {
+  adminStatePath,
+  delegateStatePath,
+  userStatePath,
+} from './e2e/support/storage';
 
 /**
  * Playwright configuration for the whity-core web UI E2E suite.
@@ -19,10 +23,15 @@ import { adminStatePath, userStatePath } from './e2e/support/storage';
  * proxied calls to reach the backend from this dev instance.
  *
  * Projects:
- *  - `setup`     logs in once per role and saves browser storage state.
- *  - `authflow`  the from-scratch login/logout specs (no stored auth).
+ *  - `setup`     logs in once per role and saves browser storage state. Also
+ *                provisions the delegate account + its delegations (WC-173).
+ *  - `authflow`  the from-scratch login/logout/role-switch specs (no stored auth).
  *  - `admin`     admin-authenticated specs (depends on `setup`).
  *  - `user`      regular-user-authenticated specs (depends on `setup`).
+ *  - `matrix-*`  the multi-role matrix (WC-173): every `e2e/matrix-*.spec.ts`
+ *                file runs THREE times — once per role project (admin / user /
+ *                delegate) — branching its expectations on the `role` fixture
+ *                (see e2e/support/fixtures.ts for the spec contract).
  */
 
 const PORT = Number(process.env.E2E_PORT ?? 3010);
@@ -32,7 +41,9 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 1,
+  // One retry everywhere: CI and local runs share the same flakiness policy
+  // (a retry must be able to succeed, so specs are self-arranging).
+  retries: 1,
   // One worker: the suite mutates a shared dev database, so serialised writes
   // keep runs deterministic and re-runnable.
   workers: 1,
@@ -53,7 +64,7 @@ export default defineConfig({
     },
     {
       name: 'authflow',
-      testMatch: /(auth(-bugs)?|demo)\.spec\.ts/,
+      testMatch: /(auth(-bugs|-transitions)?|demo)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
@@ -67,6 +78,28 @@ export default defineConfig({
       testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile)\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
+    },
+    // The multi-role matrix (WC-173): one spec file, three role projects.
+    // All three share the same testMatch, so every e2e/matrix-*.spec.ts runs
+    // once per role; specs read the role via the `role` fixture (which parses
+    // the `matrix-` project-name suffix) and branch their expectations on it.
+    {
+      name: 'matrix-admin',
+      testMatch: /matrix-.*\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
+    },
+    {
+      name: 'matrix-user',
+      testMatch: /matrix-.*\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: userStatePath },
+    },
+    {
+      name: 'matrix-delegate',
+      testMatch: /matrix-.*\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: delegateStatePath },
     },
   ],
   webServer: {

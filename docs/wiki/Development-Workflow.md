@@ -123,7 +123,8 @@ pending ──(start work: get_task)──> in_progress ──(PR merged)──>
 3. **Branch** off the latest main: `git checkout -b feature/WC-14-rbac-middleware origin/main`.
 4. **Build** to the IS — TDD, strict types, tenant isolation, structured logs.
 5. **Verify** (CI parity): `vendor/bin/phpunit` + `vendor/bin/phpstan analyse src tests`
-   in the `php:8.4` container; for `web/`, `npm run lint` / `build` / `test:e2e`.
+   in the `php:8.4` container; for `web/`, `npm run lint` / `build` / `test:e2e`
+   (see [E2E Testing](E2E-Testing.md) for the multi-role Playwright suite).
    See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing-requirements) — prefer
    real-engine tests for data-layer logic.
 6. **PR**: `gh pr create --base main --title "WC-14: Build RBAC middleware for route-level enforcement"`.

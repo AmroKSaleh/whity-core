@@ -104,6 +104,23 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
     // retry once with a newly computed code if the first is (rarely) rejected.
     const codeInput = settings.wizard.getByPlaceholder('000000');
     await codeInput.fill(await computeTotp(secret));
+
+    // On a successful confirm the panel swaps to a spinner and only renders the
+    // "Enabled" chip after its own GET /api/auth/2fa/status refetch lands, so
+    // anchor the post-confirm assertion to that response instead of racing it.
+    // Armed BEFORE the first Verify click, it resolves on whichever verify
+    // attempt succeeds; the catch keeps a genuinely failed verify from turning
+    // the pending wait into an unhandled rejection (the chip expect below then
+    // reports the real failure).
+    const statusRefetch = page
+      .waitForResponse(
+        (res) =>
+          res.url().includes('/api/auth/2fa/status') &&
+          res.request().method() === 'GET' &&
+          res.ok(),
+        { timeout: 30_000 }
+      )
+      .catch(() => null);
     await settings.wizard.getByRole('button', { name: 'Verify' }).click();
 
     const enabledChip = settings.statusChip('Enabled');
@@ -114,8 +131,10 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
       await settings.wizard.getByRole('button', { name: 'Verify' }).click();
     }
 
-    // Status flips to Enabled and the backup-code summary appears.
-    await expect(enabledChip).toBeVisible();
+    // Status flips to Enabled (only after the refetch above) and the
+    // backup-code summary appears.
+    await statusRefetch;
+    await expect(enabledChip).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/backup codes available/)).toBeVisible();
     await downloadPromise;
   });

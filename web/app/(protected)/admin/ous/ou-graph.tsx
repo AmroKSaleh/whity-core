@@ -198,6 +198,12 @@ export default function OuGraph({ tree, selectedId, onSelect, onAction }: OuView
         nodesConnectable={false}
         elementsSelectable
         fitView
+        // react-flow's default minZoom (0.5) silently defeats fitView once the
+        // OU forest is wider than ~2x the canvas: both the initial fit and the
+        // Controls fit-view button clamp at 0.5 and centre the view, clipping
+        // the outermost nodes (unreachable without manual panning). A lower
+        // floor lets fit-view actually fit wide hierarchies.
+        minZoom={0.1}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />

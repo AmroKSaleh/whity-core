@@ -1,0 +1,97 @@
+name: E2E
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# A newer push to the same ref obsoletes the in-flight run; never queue two.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright multi-role suite (full stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # The dev compose file bind-mounts this checkout into the containers and
+      # its one-shot db-init service runs `php public/index.php migrate run`,
+      # which needs vendor/autoload.php — and vendor/ is gitignored. Provision
+      # PHP + Composer on the runner BEFORE compose up so the bind-mounted
+      # checkout carries vendor/ into the containers (the suite's TOTP helper
+      # also requires /app/vendor/autoload.php via docker exec).
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pgsql, pdo_pgsql
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # The dev compose file builds whity-core:dev from the Dockerfile `base`
+      # target and bind-mounts the checkout. With the APP_ENV=development
+      # default, the one-shot db-init service runs migrations + seed before
+      # the worker pool starts, so the stack comes up with the deterministic
+      # accounts the suite expects (admin123 / user123 compose defaults).
+      - name: Start the backend stack
+        run: docker compose -f docker-compose.yml up -d --wait
+
+      # `--wait` covers container/healthcheck state, not end-to-end readiness
+      # of the HTTP surface; poll the health endpoint until the API answers.
+      - name: Wait for the backend API
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/health > /dev/null 2>&1; then
+              echo "Backend healthy after ~$(( i * 2 ))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend did not become healthy within 120s" >&2
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs --tail 100
+          exit 1
+
+      # setup-node v5 (issue #198 tracks aligning the other workflows' v4).
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium --with-deps
+
+      # The Playwright config starts the Next dev server itself (webServer on
+      # port 3010) and proxies /api/* to the stack at localhost:8000.
+      - name: Run the E2E suite
+        working-directory: web
+        run: npx playwright test
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+          if-no-files-found: ignore

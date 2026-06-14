@@ -19,15 +19,27 @@ test.describe('System Statistics (admin)', () => {
     await expect(page.getByText('Total Tenants')).toBeVisible();
     await expect(page.getByText('Permissions', { exact: true })).toBeVisible();
 
-    // The "Permissions" card resolves to a concrete number from the live stats
-    // endpoint (the seed catalogue currently exposes 26 permissions after the
-    // migration consolidation), proving the fetch succeeded rather than leaving the
-    // "--" loading placeholder. Scope to the bold value node of the Permissions card
-    // to avoid matching unrelated substrings elsewhere on the page.
-    const permsValue = page
+    // Every headline card resolves to a concrete number from the live stats
+    // endpoint, proving the fetch succeeded rather than leaving the "--"
+    // placeholder (or the loading pulse). The bold value node is unique to the
+    // four headline cards.
+    const resolvedValues = page
       .locator('div.text-2xl.font-bold')
-      .filter({ hasText: /^26$/ });
-    await expect(permsValue).toBeVisible();
+      .filter({ hasText: /^\d+$/ });
+    await expect(resolvedValues).toHaveCount(4);
+
+    // Regression floor for the Permissions card: the catalogue only grows as
+    // plugin migrations seed permissions, so an EXACT count would encode one
+    // environment's plugin set — but every environment carries at least the
+    // 26 core + 2 HelloWorld permissions of a fresh database (dev stacks may
+    // have more). A value below that floor means the stats endpoint regressed.
+    const permissionsValue = page
+      .locator('[data-slot="card"]', {
+        has: page.getByText('Permissions', { exact: true }),
+      })
+      .locator('div.text-2xl.font-bold');
+    const permissions = Number(await permissionsValue.innerText());
+    expect(permissions).toBeGreaterThanOrEqual(28);
   });
 
   test('Growth Trends tabs switch between Users and Tenants', async ({ page }) => {

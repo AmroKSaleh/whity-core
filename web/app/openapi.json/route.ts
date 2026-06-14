@@ -11,7 +11,13 @@ import { backendUrl } from '@/lib/backend-url';
 
 export async function GET(): Promise<Response> {
   try {
-    const upstream = await fetch(`${backendUrl()}/openapi.json`);
+    // Force identity (uncompressed) on this loopback hop: undici only
+    // auto-decodes gzip/deflate, so if Caddy negotiates zstd/br the
+    // `upstream.text()` below would return raw compressed bytes. The backend
+    // is same-host, so compressing this leg is pointless anyway.
+    const upstream = await fetch(`${backendUrl()}/openapi.json`, {
+      headers: { 'Accept-Encoding': 'identity' },
+    });
     const body = await upstream.text();
 
     return new Response(body, {
