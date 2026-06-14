@@ -639,10 +639,13 @@ final class CoreApiSchemas
                 'count' => self::int(),
             ], ['ids', 'count'])),
 
-            // WC-169: plugin frontend feature descriptors. Mirrors the
+            // WC-169 / WC-175: plugin frontend feature descriptors. Mirrors the
             // FrontendFeaturesApiHandler's ACTUAL output: every key is always
             // present; icon and resource (and resource.titleField) are the
-            // fields the handler can emit as null.
+            // fields the handler can emit as null. The capabilities object
+            // (WC-175, #199) carries the caller's effective per-feature write
+            // capabilities, computed server-side from the resource's routes'
+            // RBAC so the renderer can hide controls that would 403 on submit.
             'FrontendFeature' => self::object([
                 'id' => self::str(),
                 'plugin' => self::str(),
@@ -661,7 +664,12 @@ final class CoreApiSchemas
                     'required' => ['basePath', 'titleField'],
                 ],
                 'requiredPermission' => self::str(),
-            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'requiredPermission']),
+                'capabilities' => self::object([
+                    'canCreate' => self::bool(),
+                    'canEdit' => self::bool(),
+                    'canDelete' => self::bool(),
+                ], ['canCreate', 'canEdit', 'canDelete']),
+            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'requiredPermission', 'capabilities']),
             'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
 
             'AuditLogEntry' => $auditEntry,
@@ -810,5 +818,13 @@ final class CoreApiSchemas
     private static function str(bool $nullable = false): array
     {
         return $nullable ? ['type' => 'string', 'nullable' => true] : ['type' => 'string'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function bool(bool $nullable = false): array
+    {
+        return $nullable ? ['type' => 'boolean', 'nullable' => true] : ['type' => 'boolean'];
     }
 }

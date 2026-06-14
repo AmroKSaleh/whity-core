@@ -15,16 +15,23 @@ use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 
 /**
- * WC-169: GET /api/frontend/features — the host's server-side,
- * permission-filtered listing of plugin frontend feature descriptors.
+ * WC-169 / WC-175: GET /api/frontend/features — the host's server-side,
+ * permission-filtered listing of plugin frontend feature descriptors, now
+ * also exposing the caller's effective per-feature WRITE capabilities (#199).
  *
  * Drives the REAL PluginLoader over an on-disk fixture plugin (so the
- * descriptors flow through the same validation/normalization path as in
- * production); RoleChecker is mocked per the AuditLog test pattern so each
- * caller's permission set is precise. Acceptance focus:
+ * descriptors AND its routes flow through the same validation/normalization
+ * path as in production); RoleChecker is mocked per the AuditLog test pattern so
+ * each caller's permission set is precise. The SAME Router is passed to the
+ * loader (so the plugin's routes register into it) and the handler (so it reads
+ * those routes back). Acceptance focus:
  *
  *  - per-descriptor server-side filtering: a caller sees ONLY the features
  *    whose requiredPermission they hold (never client-trust);
+ *  - per-feature capabilities (canCreate/canEdit/canDelete) computed
+ *    server-side from the resource's routes' RBAC, mirroring RbacMiddleware:
+ *    a read-only caller gets all-false; a manage caller gets all-true; a
+ *    feature without a resource gets all-false;
  *  - fail-closed on unresolved tenant context (403);
  *  - fail-closed on missing/invalid authenticated user (403);
  *  - the documented response shape, with resource null for custom screens.
@@ -34,6 +41,8 @@ final class FrontendFeaturesApiHandlerRealEngineTest extends TestCase
     private static string $pluginDir;
 
     private PluginLoader $loader;
+
+    private Router $router;
 
     public static function setUpBeforeClass(): void
     {
@@ -58,15 +67,43 @@ final class Plugin implements PluginInterface, PluginFrontendInterface
     public function getVersion(): string { return '1.0.0'; }
     public function getRoutes(): array
     {
-        return [[
-            'method' => 'GET',
-            'path' => '/api/featapi/widgets',
-            'handler' => static fn (Request $r): Response => Response::json(['data' => []]),
-            'requiredRole' => null,
-            'requiredPermission' => 'featapi:view',
-        ]];
+        $ok = static fn (Request $r): Response => Response::json(['data' => []]);
+
+        return [
+            // Read surface: gated on featapi:view.
+            [
+                'method' => 'GET',
+                'path' => '/api/featapi/widgets',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:view',
+            ],
+            // Write surface: gated on featapi:manage. Create is at the base
+            // path; edit/delete are at the item path.
+            [
+                'method' => 'POST',
+                'path' => '/api/featapi/widgets',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:manage',
+            ],
+            [
+                'method' => 'PATCH',
+                'path' => '/api/featapi/widgets/{id:\d+}',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:manage',
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/featapi/widgets/{id:\d+}',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:manage',
+            ],
+        ];
     }
-    public function getPermissions(): array { return ['featapi:view', 'featapi:admin']; }
+    public function getPermissions(): array { return ['featapi:view', 'featapi:manage', 'featapi:admin']; }
     public function getHooks(): array { return []; }
     public function getMigrations(): array { return []; }
     public function getFrontendFeatures(): array
@@ -104,7 +141,8 @@ PHP);
     {
         TenantContext::reset();
 
-        $this->loader = new PluginLoader(self::$pluginDir, new Router(), new PermissionRegistry(), new HookManager());
+        $this->router = new Router();
+        $this->loader = new PluginLoader(self::$pluginDir, $this->router, new PermissionRegistry(), new HookManager());
         $this->loader->load();
     }
 
@@ -155,7 +193,7 @@ PHP);
                 return true;
             });
 
-        $handler = new FrontendFeaturesApiHandler($this->loader, $roleChecker);
+        $handler = new FrontendFeaturesApiHandler($this->loader, $roleChecker, $this->router);
         $response = $handler->list($this->authedRequest(42));
 
         $this->assertSame(200, $response->getStatusCode());
@@ -169,7 +207,7 @@ PHP);
     {
         TenantContext::setTenantId(1);
 
-        $response = $this->handler(['featapi:view', 'featapi:admin'])->list($this->authedRequest(42));
+        $response = $this->handler(['featapi:view', 'featapi:admin', 'featapi:manage'])->list($this->authedRequest(42));
 
         $this->assertSame(200, $response->getStatusCode());
         $body = json_decode($response->getBody(), true);
@@ -185,6 +223,7 @@ PHP);
             'screen' => 'crud',
             'resource' => ['basePath' => '/api/featapi/widgets', 'titleField' => 'name'],
             'requiredPermission' => 'featapi:view',
+            'capabilities' => ['canCreate' => true, 'canEdit' => true, 'canDelete' => true],
         ], $byId['featapi-widgets']);
 
         $this->assertSame([
@@ -197,7 +236,60 @@ PHP);
             'screen' => 'custom',
             'resource' => null,
             'requiredPermission' => 'featapi:admin',
-        ], $byId['featapi-console'], "A custom screen without a resource carries resource: null");
+            'capabilities' => ['canCreate' => false, 'canEdit' => false, 'canDelete' => false],
+        ], $byId['featapi-console'], "A custom screen without a resource carries resource: null and all-false capabilities");
+    }
+
+    // ==================== per-feature write capabilities (#199) ====================
+
+    public function testReadOnlyCallerGetsAllFalseCapabilitiesForCrudFeature(): void
+    {
+        TenantContext::setTenantId(1);
+
+        // Holds the view permission (so the feature is visible) but NOT manage
+        // (so every write route's RBAC fails).
+        $response = $this->handler(['featapi:view'])->list($this->authedRequest(42));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $byId = array_column(json_decode($response->getBody(), true)['data'], null, 'id');
+
+        $this->assertSame(
+            ['canCreate' => false, 'canEdit' => false, 'canDelete' => false],
+            $byId['featapi-widgets']['capabilities'],
+            'A caller without the write permission must see no write capabilities'
+        );
+    }
+
+    public function testManageCallerGetsAllTrueCapabilitiesForCrudFeature(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $response = $this->handler(['featapi:view', 'featapi:manage'])->list($this->authedRequest(42));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $byId = array_column(json_decode($response->getBody(), true)['data'], null, 'id');
+
+        $this->assertSame(
+            ['canCreate' => true, 'canEdit' => true, 'canDelete' => true],
+            $byId['featapi-widgets']['capabilities'],
+            'A caller holding the write permission gets every write capability'
+        );
+    }
+
+    public function testCustomFeatureWithoutResourceGetsAllFalseCapabilities(): void
+    {
+        TenantContext::setTenantId(1);
+
+        $response = $this->handler(['featapi:admin'])->list($this->authedRequest(42));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $byId = array_column(json_decode($response->getBody(), true)['data'], null, 'id');
+
+        $this->assertSame(
+            ['canCreate' => false, 'canEdit' => false, 'canDelete' => false],
+            $byId['featapi-console']['capabilities'],
+            'A feature without a resource has no derivable write routes'
+        );
     }
 
     // ==================== fail-closed ====================
@@ -246,7 +338,7 @@ PHP);
                 static fn (int $userId, string $permission, int $tenantId): bool => in_array($permission, $granted, true)
             );
 
-        return new FrontendFeaturesApiHandler($this->loader, $roleChecker);
+        return new FrontendFeaturesApiHandler($this->loader, $roleChecker, $this->router);
     }
 
     private function authedRequest(int $userId): Request

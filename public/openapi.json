@@ -2606,6 +2606,25 @@
                     },
                     "requiredPermission": {
                         "type": "string"
+                    },
+                    "capabilities": {
+                        "type": "object",
+                        "properties": {
+                            "canCreate": {
+                                "type": "boolean"
+                            },
+                            "canEdit": {
+                                "type": "boolean"
+                            },
+                            "canDelete": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "canCreate",
+                            "canEdit",
+                            "canDelete"
+                        ]
                     }
                 },
                 "required": [
@@ -2617,7 +2636,8 @@
                     "order",
                     "screen",
                     "resource",
-                    "requiredPermission"
+                    "requiredPermission",
+                    "capabilities"
                 ]
             },
             "FrontendFeatureListResponse": {

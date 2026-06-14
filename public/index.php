@@ -446,7 +446,11 @@ $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
 // user => 403) and filters every descriptor per caller against RoleChecker
 // server-side. Descriptors are UI metadata only; the underlying plugin API
 // routes keep their own route-level RBAC.
-$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker);
+// WC-175 (#199): the handler also reads $router to compute each feature's
+// per-caller write capabilities (canCreate/canEdit/canDelete) server-side from
+// the resource's registered routes' RBAC, so the renderer can hide controls the
+// caller may not use.
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered with NO required role and NO
