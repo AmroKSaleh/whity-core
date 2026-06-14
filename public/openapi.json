@@ -682,6 +682,47 @@
                 ]
             }
         },
+        "/api/me/capabilities": {
+            "get": {
+                "operationId": "get_api_me_capabilities",
+                "summary": "List the caller's effective permission slugs",
+                "tags": [
+                    "me"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The caller's effective, tenant-scoped permission slugs (sorted; empty is valid)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MeCapabilitiesResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/ous": {
             "get": {
                 "operationId": "get_api_ous",
@@ -2734,6 +2775,28 @@
                         "$ref": "#/components/schemas/HelloGreeting"
                     }
                 }
+            },
+            "MeCapabilitiesResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "permissions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": [
+                            "permissions"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "MutationResponse": {
                 "type": "object",

@@ -117,6 +117,7 @@ use Whity\Api\AdminApiHandler;
 use Whity\Api\OusApiHandler;
 use Whity\Api\DelegationsApiHandler;
 use Whity\Api\FrontendFeaturesApiHandler;
+use Whity\Api\MeCapabilitiesApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
 use Whity\Core\Delegation\DelegationRepository;
@@ -439,6 +440,18 @@ $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'adm
 // live delegation actually unlocks gated items.
 $navigationHandler = new NavigationApiHandler($hookManager, $roleChecker);
 $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
+
+// Caller capabilities (WC-176, #205). Registered with NO required
+// role/permission — any authenticated caller may ask which permissions they
+// hold — but the handler fails closed itself (unresolved tenant or missing
+// user => 403), mirroring /api/navigation and /api/frontend/features. It is
+// NOT a public route (see EnforceTenantIsolation::PUBLIC_ROUTES): unlike
+// /api/me (which answers from JWT claims alone), it needs a RESOLVED tenant for
+// RoleChecker. Pass the SAME delegation-aware $roleChecker the siblings use so
+// the returned set includes live delegated permissions. The exact-path router
+// keeps this distinct from /api/me (no prefix collision).
+$meCapabilitiesHandler = new MeCapabilitiesApiHandler($roleChecker);
+$router->register('GET', '/api/me/capabilities', [$meCapabilitiesHandler, 'list']);
 
 // Plugin frontend feature descriptors (WC-169). Registered with NO required
 // role/permission — any authenticated caller may ask which screens they may

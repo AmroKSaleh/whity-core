@@ -177,6 +177,23 @@ export interface paths {
         patch: operations["patch_api_hello_greetings_id"];
         trace?: never;
     };
+    "/api/me/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's effective permission slugs */
+        get: operations["get_api_me_capabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ous": {
         parameters: {
             query?: never;
@@ -506,6 +523,11 @@ export interface components {
         };
         HelloGreetingResponse: {
             data: components["schemas"]["HelloGreeting"];
+        };
+        MeCapabilitiesResponse: {
+            data: {
+                permissions: string[];
+            };
         };
         MutationResponse: {
             data: {
@@ -1222,6 +1244,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_api_me_capabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's effective, tenant-scoped permission slugs (sorted; empty is valid) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeCapabilitiesResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
