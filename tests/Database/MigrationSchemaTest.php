@@ -100,6 +100,8 @@ final class MigrationSchemaTest extends TestCase
         $this->assertContains('018_create_persons.php', $names);
         $this->assertContains('019_create_relationship_types.php', $names);
         $this->assertContains('020_create_relations.php', $names);
+        // WC-185: per-user token epoch for access-token revocation / session invalidation.
+        $this->assertContains('021_add_user_token_epoch.php', $names);
 
         // The absorbed patch migrations must be gone (folded into the creates).
         $this->assertNotContains('003_add_slug_to_tenants.php', $names);
@@ -388,6 +390,26 @@ final class MigrationSchemaTest extends TestCase
             '/user_id\s+INTEGER\s+NOT\s+NULL\s+REFERENCES\s+users\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
             $sql,
             'backup_codes.user_id must cascade-delete with its user.'
+        );
+    }
+
+    public function testTokenEpochColumnIsAddedToUsersForRevocation(): void
+    {
+        $sql = $this->readFile('021_add_user_token_epoch.php');
+
+        // Additive, idempotent, backward-compatible column: NOT NULL DEFAULT 0
+        // so existing rows backfill to the validator's missing-claim=0 default.
+        $this->assertMatchesRegularExpression(
+            '/ADD COLUMN IF NOT EXISTS\s+token_epoch\s+INTEGER\s+NOT\s+NULL\s+DEFAULT\s+0/i',
+            $sql,
+            'users.token_epoch must be added as NOT NULL DEFAULT 0 for backward compatibility.'
+        );
+
+        // Reversible: down() drops exactly this column.
+        $this->assertMatchesRegularExpression(
+            '/DROP COLUMN IF EXISTS\s+token_epoch/i',
+            $sql,
+            'The token_epoch migration down() must drop the column.'
         );
     }
 

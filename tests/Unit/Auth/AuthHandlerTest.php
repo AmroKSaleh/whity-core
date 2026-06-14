@@ -253,8 +253,16 @@ class AuthHandlerTest extends TestCase
             'role' => 'user',
             'jti' => 'test-jti-refresh-1',
             'type' => 'refresh',
+            'token_epoch' => 0,
             'exp' => time() + 604800
         ]);
+
+        // handleRefresh re-reads the user's current epoch (tenant-scoped) before
+        // minting the new access token (WC-185); stub that lookup to return 0.
+        $epochStatement = $this->createMock(PDOStatement::class);
+        $epochStatement->method('execute')->willReturn(true);
+        $epochStatement->method('fetchColumn')->willReturn('0');
+        $this->mockDb->method('prepare')->willReturn($epochStatement);
 
         $request = new Request('POST', '/api/auth/refresh', []);
         $response = $this->authHandler->handleRefresh($request);
