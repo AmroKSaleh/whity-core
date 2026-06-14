@@ -1,5 +1,6 @@
 import { test, expect } from './support/fixtures';
-import { SIDEBAR_SECTIONS } from './support/constants';
+import { AppShell, LoginPage } from './support/pages';
+import { ADMIN, SIDEBAR_SECTIONS } from './support/constants';
 
 test.describe('Sidebar navigation (admin)', () => {
   test('all expected sidebar sections are present', async ({ adminPage }) => {
@@ -89,12 +90,23 @@ test.describe('Sidebar navigation (admin)', () => {
   });
 
   test('footer shows "logged in as" the admin and the logout button works', async ({
-    adminPage,
     page,
   }) => {
-    await adminPage.shell.expectLoggedInAs('admin@example.com');
-    await expect(adminPage.shell.logoutButton).toBeVisible();
-    await adminPage.shell.logout();
+    // This test LOGS OUT, which (since WC-185) revokes the session's access jti
+    // into the global revoked_tokens table. The other admin/matrix specs share
+    // the SAME persisted admin token via storageState (adminStatePath), so
+    // logging THAT token out here would poison every subsequent admin test
+    // (each one re-loads the now-revoked token from disk and gets 401 ->
+    // login/refresh churn -> the e2e suite times out). So mint a FRESH,
+    // throwaway admin session in this context and log THAT out instead; the
+    // shared storage-state token is never revoked.
+    const login = new LoginPage(page);
+    await login.loginExpectingSuccess(ADMIN);
+
+    const shell = new AppShell(page);
+    await shell.expectLoggedInAs(ADMIN.email);
+    await expect(shell.logoutButton).toBeVisible();
+    await shell.logout();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });

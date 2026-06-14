@@ -102,6 +102,78 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
         self::assertSame(200, $response->getStatusCode());
     }
 
+    /**
+     * Logout is jti-SCOPED, not user-scoped (the e2e regression contract, WC-185).
+     *
+     * The e2e timeout was caused by logout being correctly tightened to revoke
+     * the ACCESS jti: a Playwright test logged out the admin session whose token
+     * is SHARED (via storageState) with every other admin/matrix test, so the one
+     * logout killed the token all the later tests reuse → constant 401/re-login
+     * churn → 30-min job timeout. The PHP behaviour is correct and must stay; the
+     * test-isolation fix lives in the e2e suite (the logout test now uses its own
+     * fresh session).
+     *
+     * This test pins the boundary so a future "fix" can't over-correct by
+     * invalidating ALL of a user's tokens on logout (e.g. bumping the epoch),
+     * which would re-introduce the exact e2e breakage: logging out ONE session
+     * must NOT reject a DIFFERENT, independently-issued token for the same user.
+     */
+    public function testLogoutOnlyRevokesTheLoggedOutSessionNotOtherTokensForTheSameUser(): void
+    {
+        $this->seedUser(16, 1, 'two-sessions@example.com', 'secret-123', 2, 0);
+
+        // Two independent sessions for the SAME user (e.g. two devices, or — as in
+        // the e2e suite — the same persisted token reused by many test contexts).
+        // Each carries a distinct jti from JwtParser::create().
+        $sessionA = $this->mintAccess(16, 1, 'two-sessions@example.com', 'user', 0);
+        $sessionB = $this->mintAccess(16, 1, 'two-sessions@example.com', 'user', 0);
+
+        $claimsA = $this->jwtParser->parse($sessionA);
+        $claimsB = $this->jwtParser->parse($sessionB);
+        self::assertIsArray($claimsA);
+        self::assertIsArray($claimsB);
+        self::assertNotSame(
+            $claimsA['jti'],
+            $claimsB['jti'],
+            'Independently-minted tokens must carry distinct jtis.'
+        );
+
+        // Both validate up front.
+        $_COOKIE['access_token'] = $sessionA;
+        self::assertNotNull($this->validator()->validateAccessToken());
+        $_COOKIE['access_token'] = $sessionB;
+        self::assertNotNull($this->validator()->validateAccessToken());
+
+        // Log OUT session A only (its access + refresh cookies present).
+        $_COOKIE['access_token'] = $sessionA;
+        $_COOKIE['refresh_token'] = $this->mintRefresh(16, 1, 'two-sessions@example.com', 'user', 0);
+        $response = $this->handler()->handleLogout(new Request('POST', '/api/auth/logout', []));
+        self::assertSame(200, $response->getStatusCode());
+        unset($_COOKIE['refresh_token']);
+
+        // Session A's token is now dead (its jti was revoked) — the security win.
+        $_COOKIE['access_token'] = $sessionA;
+        self::assertNull(
+            $this->validator()->validateAccessToken(),
+            'The logged-out session token must be rejected (WC-185 access-jti revocation).'
+        );
+
+        // Session B — a DIFFERENT token for the SAME user — must STILL validate.
+        // The user was not globally signed out; only session A's jti was revoked.
+        // (If logout had bumped token_epoch instead, this would wrongly be null —
+        // which is exactly what broke the e2e suite's shared storage-state token.)
+        $_COOKIE['access_token'] = $sessionB;
+        self::assertNotNull(
+            $this->validator()->validateAccessToken(),
+            'Logging out one session must NOT invalidate another independently-issued '
+            . 'token for the same user — logout is jti-scoped, not user-scoped.'
+        );
+
+        // The user's stored epoch is untouched by logout (only a password change bumps it).
+        $epoch = (int) $this->pdo->query('SELECT token_epoch FROM users WHERE id = 16')->fetchColumn();
+        self::assertSame(0, $epoch, 'Logout must not bump the user token_epoch.');
+    }
+
     // ==================== password-change epoch bump ====================
 
     public function testPasswordChangeBumpsEpochAndInvalidatesOldTokens(): void
