@@ -350,7 +350,19 @@ final class UpdateMeRealEngineTest extends TestCase
                 password TEXT NOT NULL,
                 role_id INTEGER,
                 created_at TEXT,
+                token_epoch INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(tenant_id, email)
+            )
+        ');
+
+        // WC-185: a password change revokes the caller's current jtis into the
+        // global revoked_tokens table, so the table must exist here too.
+        $pdo->exec('
+            CREATE TABLE revoked_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                jti TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime(\'now\'))
             )
         ');
 

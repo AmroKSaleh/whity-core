@@ -190,9 +190,10 @@ class AuthHandler
         $email = $body['email'];
         $password = $body['password'];
 
-        // Query user by email with 2FA fields (globally unique)
+        // Query user by email with 2FA fields (globally unique). token_epoch is
+        // selected so issued tokens carry the user's CURRENT epoch (WC-185).
         $stmt = $this->db->prepare('
-            SELECT id, email, password, role_id, tenant_id, two_factor_enabled, two_factor_secret, two_factor_backup_codes_version
+            SELECT id, email, password, role_id, tenant_id, two_factor_enabled, two_factor_secret, two_factor_backup_codes_version, token_epoch
             FROM users
             WHERE email = ?
         ');
@@ -224,7 +225,11 @@ class AuthHandler
             // First factor passed; the second factor is still required. Record the
             // challenge so the trail shows the partial authentication.
             $this->audit('auth.login.2fa_required', $request, (int) $user['tenant_id'], (int) $user['id']);
-            // Create temporary token (5 minutes) for 2FA verification
+            // Create temporary token (5 minutes) for 2FA verification. This is a
+            // short-lived 'temp' token, NOT an access/refresh token: it is never
+            // epoch-checked (validateAccess/RefreshToken reject any other type),
+            // so it carries no token_epoch — the epoch is read fresh and embedded
+            // when the real tokens are minted in completeTwoFaLogin() (WC-185).
             $tempToken = $this->jwtParser->create([
                 'user_id' => $user['id'],
                 'tenant_id' => $user['tenant_id'],
@@ -251,12 +256,17 @@ class AuthHandler
 
         $roleName = $roleData['name'];
 
+        // The user's current token epoch is embedded in every minted token so a
+        // later epoch bump invalidates them (missing column ⇒ 0). (WC-185)
+        $tokenEpoch = (int) ($user['token_epoch'] ?? 0);
+
         // Create access token (15 minutes)
         $accessToken = $this->jwtParser->create([
             'user_id' => $user['id'],
             'tenant_id' => $user['tenant_id'],
             'email' => $user['email'],
-            'role' => $roleName
+            'role' => $roleName,
+            'token_epoch' => $tokenEpoch
         ], 900, 'access'); // 15 minutes
 
         // Create refresh token (7 days)
@@ -264,7 +274,8 @@ class AuthHandler
             'user_id' => $user['id'],
             'tenant_id' => $user['tenant_id'],
             'email' => $user['email'],
-            'role' => $roleName
+            'role' => $roleName,
+            'token_epoch' => $tokenEpoch
         ], 604800, 'refresh'); // 7 days
 
         // Set cookies
@@ -433,6 +444,7 @@ class AuthHandler
             }
         }
 
+        $passwordChanged = false;
         if ($passwordProvided) {
             $newPassword = (string) $body['password'];
             if (strlen($newPassword) < self::MIN_PASSWORD_LENGTH) {
@@ -444,6 +456,13 @@ class AuthHandler
 
             $updates[] = 'password = ?';
             $updateParams[] = password_hash($newPassword, PASSWORD_BCRYPT);
+            $passwordChanged = true;
+
+            // A password change bumps the user's token epoch so EVERY token issued
+            // before now — this session and any other device — is invalidated by
+            // the epoch check in TokenValidator (WC-185). Only bump on an actual
+            // password change; an email-only change must not invalidate sessions.
+            $updates[] = 'token_epoch = token_epoch + 1';
         }
 
         // A request that only re-sends the same email (no real change) is a no-op:
@@ -457,12 +476,23 @@ class AuthHandler
         $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ? AND tenant_id = ?';
         $this->db->prepare($sql)->execute($updateParams);
 
-        // Re-issue auth cookies so a subsequent GET /api/me (which reads token
-        // claims) reflects the new email immediately. The role is unchanged.
-        $role = isset($claims['role']) ? (string) $claims['role'] : '';
-        $this->reissueAuthCookies((int) $userId, (int) $tenantId, $newEmail, $role);
+        if ($passwordChanged) {
+            // Belt-and-suspenders alongside the epoch bump: explicitly revoke the
+            // caller's CURRENT access and refresh jtis so they are rejected even
+            // before the epoch check (and regardless of it). Net effect: all of
+            // this user's existing tokens are dead.
+            $this->revokeCurrentSessionTokens();
+        }
 
-        $this->logProfileUpdate((int) $tenantId, (int) $userId, $emailProvided, $passwordProvided);
+        // Re-issue auth cookies so a subsequent GET /api/me (which reads token
+        // claims) reflects the new email immediately AND carries the post-change
+        // epoch (so the freshly issued tokens are not themselves invalidated by
+        // the bump). The role is unchanged.
+        $role = isset($claims['role']) ? (string) $claims['role'] : '';
+        $currentEpoch = $this->currentTokenEpoch((int) $userId, (int) $tenantId);
+        $this->reissueAuthCookies((int) $userId, (int) $tenantId, $newEmail, $role, $currentEpoch);
+
+        $this->logProfileUpdate((int) $tenantId, (int) $userId, $emailProvided, $passwordChanged);
 
         $user['email'] = $newEmail;
 
@@ -503,19 +533,22 @@ class AuthHandler
      * Used after a self-service profile change so the new email propagates to the
      * token-derived {@see self::handleMe()} response without requiring a re-login.
      *
-     * @param int    $userId   The acting user id.
-     * @param int    $tenantId The acting tenant id.
-     * @param string $email    The (possibly updated) email to embed in the tokens.
-     * @param string $role     The user's role name (unchanged by this endpoint).
+     * @param int    $userId     The acting user id.
+     * @param int    $tenantId   The acting tenant id.
+     * @param string $email      The (possibly updated) email to embed in the tokens.
+     * @param string $role       The user's role name (unchanged by this endpoint).
+     * @param int    $tokenEpoch The user's CURRENT token epoch, embedded so the
+     *                           re-issued tokens survive a same-request epoch bump (WC-185).
      * @return void
      */
-    private function reissueAuthCookies(int $userId, int $tenantId, string $email, string $role): void
+    private function reissueAuthCookies(int $userId, int $tenantId, string $email, string $role, int $tokenEpoch): void
     {
         $accessToken = $this->jwtParser->create([
             'user_id' => $userId,
             'tenant_id' => $tenantId,
             'email' => $email,
             'role' => $role,
+            'token_epoch' => $tokenEpoch,
         ], 900, 'access');
 
         $refreshToken = $this->jwtParser->create([
@@ -523,10 +556,97 @@ class AuthHandler
             'tenant_id' => $tenantId,
             'email' => $email,
             'role' => $role,
+            'token_epoch' => $tokenEpoch,
         ], 604800, 'refresh');
 
         CookieManager::setAccessToken($accessToken, 900);
         CookieManager::setRefreshToken($refreshToken, 604800);
+    }
+
+    /**
+     * Read a user's CURRENT token epoch, tenant-scoped.
+     *
+     * `users` is a tenant-owned table, so the lookup carries both the user id and
+     * the tenant id (the system tenant uses id 0). Returns 0 when the row or the
+     * column cannot be read, matching the validator's missing-claim=0 convention.
+     *
+     * @param int $userId   The user id.
+     * @param int $tenantId The tenant id.
+     * @return int The stored token epoch (0 when unavailable).
+     */
+    private function currentTokenEpoch(int $userId, int $tenantId): int
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT token_epoch FROM users WHERE id = ? AND tenant_id = ? LIMIT 1'
+            );
+            $stmt->execute([$userId, $tenantId]);
+            $epoch = $stmt->fetchColumn();
+
+            return $epoch === false ? 0 : (int) $epoch;
+        } catch (\Exception) {
+            return 0;
+        }
+    }
+
+    /**
+     * Revoke the caller's CURRENT access and refresh jtis (WC-185).
+     *
+     * Reads both auth cookies, parses each, and records its jti in the global
+     * revoked_tokens table. Used on a password change so the in-flight session's
+     * tokens are killed immediately. Idempotent and best-effort: a missing or
+     * unparseable cookie is simply skipped.
+     *
+     * @return void
+     */
+    private function revokeCurrentSessionTokens(): void
+    {
+        foreach ([CookieManager::getAccessToken(), CookieManager::getRefreshToken()] as $token) {
+            if ($token === null) {
+                continue;
+            }
+
+            $claims = $this->jwtParser->parse($token);
+            if ($claims === null) {
+                continue;
+            }
+
+            $jti = $claims['jti'] ?? null;
+            $exp = $claims['exp'] ?? null;
+            if ($jti !== null && $exp !== null) {
+                $this->revokeJti((string) $jti, (int) $exp);
+            }
+        }
+    }
+
+    /**
+     * Record a single jti in the global revoked_tokens table (WC-185).
+     *
+     * revoked_tokens is the sanctioned GLOBAL (non-tenant-scoped) revocation
+     * table — a jti is unique platform-wide, so there is no tenant predicate.
+     * The expiry is written as a portable 'Y-m-d H:i:s' literal (accepted by both
+     * PostgreSQL and SQLite, and the format the cleanup job compares against),
+     * derived from the token's own exp so the row self-prunes once the token is
+     * dead anyway. Inserts are de-duplicated on the UNIQUE jti so a double logout
+     * / repeated revoke stays idempotent. Failure is swallowed: a best-effort
+     * revoke must never break logout/profile-update, and the epoch check is the
+     * authoritative backstop.
+     *
+     * @param string $jti The JWT ID to revoke.
+     * @param int    $exp The token's expiry as a Unix timestamp.
+     * @return void
+     */
+    private function revokeJti(string $jti, int $exp): void
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)
+                 ON CONFLICT (jti) DO NOTHING'
+            );
+            $stmt->execute([$jti, date('Y-m-d H:i:s', $exp)]);
+        } catch (\Exception) {
+            // Best-effort: never let a revocation failure break the caller.
+        }
     }
 
     /**
@@ -570,12 +690,20 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
+        // Re-read the user's CURRENT epoch (tenant-scoped) rather than copying the
+        // refresh token's claim: if the epoch was bumped after this refresh token
+        // was minted, validateRefreshToken() would already have rejected it — but
+        // re-reading guarantees the new access token never carries a stale epoch
+        // that outlives the refresh token (WC-185).
+        $tokenEpoch = $this->currentTokenEpoch((int) $claims['user_id'], (int) $claims['tenant_id']);
+
         // Create new access token (15 minutes)
         $accessToken = $this->jwtParser->create([
             'user_id' => $claims['user_id'],
             'tenant_id' => $claims['tenant_id'],
             'email' => $claims['email'],
-            'role' => $claims['role']
+            'role' => $claims['role'],
+            'token_epoch' => $tokenEpoch
         ], 900, 'access'); // 15 minutes
 
         // Set new access token cookie
@@ -590,39 +718,37 @@ class AuthHandler
     /**
      * Handle POST /api/auth/logout - Logout and revoke tokens
      *
-     * Revokes the refresh token by adding its JTI to the revoked_tokens table,
-     * and clears both access and refresh token cookies.
-     * This endpoint is idempotent - returns 200 even if no refresh token is present.
+     * Revokes BOTH the access and refresh tokens by adding each one's jti to the
+     * global revoked_tokens table, then clears both cookies. Revoking the access
+     * jti (WC-185) is what stops a stolen/cached access token from working until
+     * its natural expiry after the user logs out — previously only the refresh
+     * jti was revoked.
+     *
+     * This endpoint is idempotent - returns 200 even if no token is present, and a
+     * repeated logout re-revokes the same jtis harmlessly (ON CONFLICT DO NOTHING).
      *
      * @param Request $request HTTP request
      * @return Response Logout confirmation (200) on success, even if no token
      */
     public function handleLogout(Request $request, array $params = []): Response
     {
-        // Get refresh token from cookie (optional - logout is idempotent)
-        $refreshToken = CookieManager::getRefreshToken();
+        // Revoke whichever auth tokens are present (logout is idempotent, so a
+        // missing or unparseable cookie is simply skipped). Both access and
+        // refresh jtis are recorded in the global revoked_tokens table.
+        foreach ([CookieManager::getAccessToken(), CookieManager::getRefreshToken()] as $token) {
+            if ($token === null) {
+                continue;
+            }
 
-        if ($refreshToken !== null) {
-            // Parse the refresh token to get claims
-            $claims = $this->jwtParser->parse($refreshToken);
+            $claims = $this->jwtParser->parse($token);
+            if ($claims === null) {
+                continue;
+            }
 
-            if ($claims !== null) {
-                // Get the jti and exp from token claims
-                $jti = $claims['jti'] ?? null;
-                $exp = $claims['exp'] ?? null;
-
-                if ($jti !== null && $exp !== null) {
-                    // Insert into revoked_tokens table
-                    try {
-                        $stmt = $this->db->prepare('
-                            INSERT INTO revoked_tokens (jti, expires_at)
-                            VALUES (?, to_timestamp(?))
-                        ');
-                        $stmt->execute([$jti, $exp]);
-                    } catch (\Exception) {
-                        // Silently fail if revocation fails, still clear cookies
-                    }
-                }
+            $jti = $claims['jti'] ?? null;
+            $exp = $claims['exp'] ?? null;
+            if ($jti !== null && $exp !== null) {
+                $this->revokeJti((string) $jti, (int) $exp);
             }
         }
 
@@ -783,12 +909,17 @@ class AuthHandler
 
         $roleName = $roleData['name'];
 
+        // Read the user's CURRENT epoch (tenant-scoped) so the 2FA-completed
+        // tokens carry it, exactly like the single-factor login path (WC-185).
+        $tokenEpoch = $this->currentTokenEpoch((int) $userId, (int) $tenantId);
+
         // Create access token (15 minutes)
         $accessToken = $this->jwtParser->create([
             'user_id' => $userId,
             'tenant_id' => $tenantId,
             'email' => $email,
-            'role' => $roleName
+            'role' => $roleName,
+            'token_epoch' => $tokenEpoch
         ], 900, 'access'); // 15 minutes
 
         // Create refresh token (7 days)
@@ -796,7 +927,8 @@ class AuthHandler
             'user_id' => $userId,
             'tenant_id' => $tenantId,
             'email' => $email,
-            'role' => $roleName
+            'role' => $roleName,
+            'token_epoch' => $tokenEpoch
         ], 604800, 'refresh'); // 7 days
 
         // Set cookies

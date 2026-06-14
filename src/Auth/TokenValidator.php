@@ -7,8 +7,17 @@ use PDO;
 /**
  * Token Validator for validating JWT access and refresh tokens
  *
- * Validates JWT tokens from cookies using JwtParser and checks revocation status
- * for refresh tokens. Returns decoded token claims on success or null on failure.
+ * Validates JWT tokens from cookies using JwtParser and enforces two revocation
+ * controls (WC-185):
+ *   1. Per-token revocation — the token's `jti` is checked against the
+ *      revoked_tokens table (used on logout and password change).
+ *   2. Per-user token epoch — the token's `token_epoch` claim is checked against
+ *      the issuing user's CURRENT `users.token_epoch`. Bumping a user's epoch
+ *      (on a password change) invalidates ALL of that user's previously-issued
+ *      tokens at once, across every device.
+ *
+ * Both access and refresh tokens are subject to both controls. Returns decoded
+ * token claims on success or null on failure.
  */
 class TokenValidator
 {
@@ -31,7 +40,9 @@ class TokenValidator
      * Validate access token from cookie
      *
      * Retrieves the access token from the access_token cookie, validates its
-     * signature, checks the token type is 'access', and verifies it has not expired.
+     * signature, checks the token type is 'access', verifies it has not expired,
+     * checks the jti has not been revoked, and verifies the token's epoch matches
+     * the issuing user's current epoch (WC-185).
      *
      * @return array|null The decoded token claims on success, null on any failure
      */
@@ -57,6 +68,18 @@ class TokenValidator
             return null;
         }
 
+        // Per-token revocation: a logout / password change adds the access jti to
+        // the revocation table, so a stolen or old access token stops validating
+        // immediately rather than living until expiry (WC-185).
+        if ($this->isTokenRevoked($claims['jti'])) {
+            return null;
+        }
+
+        // Per-user epoch: reject a token issued under an older epoch.
+        if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
         return $claims;
     }
 
@@ -65,7 +88,8 @@ class TokenValidator
      *
      * Retrieves the refresh token from the refresh_token cookie, validates its
      * signature, checks the token type is 'refresh', verifies it has not expired,
-     * and checks that it hasn't been revoked.
+     * checks that it hasn't been revoked, and verifies the token's epoch matches
+     * the issuing user's current epoch (WC-185).
      *
      * @return array|null The decoded token claims on success, null on any failure
      */
@@ -96,6 +120,12 @@ class TokenValidator
             return null;
         }
 
+        // Per-user epoch: an epoch bump (password change) must invalidate refresh
+        // tokens too, not only the individually-revoked jtis (WC-185).
+        if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
         return $claims;
     }
 
@@ -104,6 +134,10 @@ class TokenValidator
      *
      * Queries the revoked_tokens table to check if the given jti (token ID)
      * has been marked as revoked.
+     *
+     * revoked_tokens is the sanctioned GLOBAL (non-tenant-scoped) revocation
+     * table: a jti is unique across the whole platform, so the lookup carries no
+     * tenant predicate.
      *
      * @param string $jti The JWT ID to check for revocation
      * @return bool True if the token is revoked, false otherwise
@@ -120,6 +154,60 @@ class TokenValidator
         } catch (\Exception) {
             // If database query fails, err on the side of caution and reject the token
             return true;
+        }
+    }
+
+    /**
+     * Verify the token's epoch is not older than the issuing user's current epoch.
+     *
+     * The token's `token_epoch` claim is compared against `users.token_epoch` for
+     * the token's (user_id, tenant_id). A token is rejected when its epoch is LESS
+     * than the stored one (it predates a password change). A MISSING claim is
+     * treated as 0, so pre-migration tokens map to the default user epoch (0).
+     *
+     * Tenant isolation: `users` is a tenant-owned table, so the lookup is scoped
+     * to BOTH the user id AND the tenant id from the token — one tenant's epoch
+     * can never gate another tenant's user (the system tenant uses id 0, which is
+     * a normal value here). When the token carries no `user_id`, there is no user
+     * to scope an epoch to, so this control does not apply (signature/exp/type and
+     * jti-revocation still do). Fail closed on a genuine DB error or a missing
+     * user row (e.g. a deleted account).
+     *
+     * @param array<string, mixed> $claims The decoded token claims.
+     * @return bool True when the epoch is current (or not applicable), false to reject.
+     */
+    private function isTokenEpochCurrent(array $claims): bool
+    {
+        $userId = $claims['user_id'] ?? null;
+        $tenantId = $claims['tenant_id'] ?? null;
+
+        // No user/tenant to scope to: the per-user epoch control does not apply.
+        if ($userId === null || $tenantId === null) {
+            return true;
+        }
+
+        // Missing claim ⇒ epoch 0 (pre-migration tokens map to the default).
+        $tokenEpoch = isset($claims['token_epoch']) ? (int) $claims['token_epoch'] : 0;
+
+        try {
+            // Tenant-scoped lookup on the tenant-owned users table.
+            $stmt = $this->db->prepare(
+                'SELECT token_epoch FROM users WHERE id = ? AND tenant_id = ? LIMIT 1'
+            );
+            $stmt->execute([$userId, $tenantId]);
+            $stored = $stmt->fetchColumn();
+
+            // No matching user row (deleted account, or a forged/mismatched
+            // tenant claim): fail closed.
+            if ($stored === false) {
+                return false;
+            }
+
+            // Reject tokens minted before the current epoch.
+            return $tokenEpoch >= (int) $stored;
+        } catch (\Exception) {
+            // Fail closed on any database error.
+            return false;
         }
     }
 }

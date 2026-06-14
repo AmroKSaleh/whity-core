@@ -6,13 +6,11 @@ use PHPUnit\Framework\TestCase;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
-use Whity\Auth\CookieManager;
 use Whity\Core\Request;
 use PDO;
-use PDOStatement;
 
 /**
- * Integration tests for complete auth cycle
+ * Integration tests for the complete auth cycle.
  *
  * Tests the full authentication flow:
  * 1. Login with valid credentials
@@ -21,12 +19,18 @@ use PDOStatement;
  * 4. Logout and revoke tokens
  * 5. Verify revoked token is rejected on refresh
  *
- * Uses mock database with proper token revocation verification.
+ * Runs against a real in-memory SQLite engine (WC-185): the previous mocked-PDO
+ * version could not exercise the access-token revocation lookup, the per-user
+ * token_epoch check, or the actual revoked_tokens writes — all of which this
+ * flow now depends on. The schema mirrors production (users carries token_epoch
+ * and UNIQUE(tenant_id, email); revoked_tokens is the global revocation table).
  */
 class AuthFlowTest extends TestCase
 {
     private JwtParser $jwtParser;
-    private const TEST_SECRET_KEY = 'test-secret-key-for-integration-tests';
+    private PDO $pdo;
+
+    private const TEST_SECRET_KEY = 'test-secret-key-for-integration-tests-padded-min-32-byte-key';
     private const TEST_USER_PASSWORD = 'testpassword123';
     private const TEST_USER_EMAIL = 'testuser@example.com';
     private const TEST_USER_ID = 1;
@@ -34,148 +38,40 @@ class AuthFlowTest extends TestCase
     private const TEST_ROLE_ID = 1;
     private const TEST_ROLE_NAME = 'admin';
 
-    // Track revoked tokens for verification
-    private array $revokedTokens = [];
-
-    // Store pre-hashed password for consistency
-    private string $hashedPassword = '';
-
     protected function setUp(): void
     {
-        // Initialize JWT parser
         $this->jwtParser = new JwtParser(self::TEST_SECRET_KEY);
-
-        // Reset revoked tokens
-        $this->revokedTokens = [];
-
-        // Pre-hash the test password once (for consistency across password_verify calls)
-        $this->hashedPassword = password_hash(self::TEST_USER_PASSWORD, PASSWORD_BCRYPT);
+        $this->pdo = $this->makeSchema();
+        unset($_COOKIE['access_token'], $_COOKIE['refresh_token']);
     }
 
     protected function tearDown(): void
     {
-        // Clean up cookies
-        unset($_COOKIE['access_token']);
-        unset($_COOKIE['refresh_token']);
-
-        // Clear revoked tokens
-        $this->revokedTokens = [];
+        unset($_COOKIE['access_token'], $_COOKIE['refresh_token']);
     }
 
-    /**
-     * Create a mock database for a login + role lookup scenario
-     */
-    private function createMockDbForLogin(): PDO
-    {
-        $hashedPassword = $this->hashedPassword;
-
-        // Mock the user query statement
-        $mockUserStatement = $this->createMock(PDOStatement::class);
-        $mockUserStatement->method('execute')->willReturn(true);
-        $mockUserStatement->method('fetch')->willReturn([
-            'id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
-            'email' => self::TEST_USER_EMAIL,
-            'password' => $hashedPassword,
-            'role_id' => self::TEST_ROLE_ID
-        ]);
-
-        // Mock the role query statement
-        $mockRoleStatement = $this->createMock(PDOStatement::class);
-        $mockRoleStatement->method('execute')->willReturn(true);
-        $mockRoleStatement->method('fetch')->willReturn(['name' => self::TEST_ROLE_NAME]);
-
-        // Create the database mock
-        $mockDb = $this->createMock(PDO::class);
-        $mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockUserStatement, $mockRoleStatement);
-
-        return $mockDb;
-    }
+    // ==================== scenarios ====================
 
     /**
-     * Create a mock database that tracks token revocation
-     */
-    private function createMockDbForRevocation(): PDO
-    {
-        $revokedTokensRef = &$this->revokedTokens;
-
-        // Mock the revocation insert statement
-        $mockRevocationStatement = $this->createMock(PDOStatement::class);
-        $mockRevocationStatement->method('execute')
-            ->willReturnCallback(function($params) use (&$revokedTokensRef) {
-                $jti = $params[0] ?? null;
-                if ($jti) {
-                    $revokedTokensRef[$jti] = true;
-                }
-                return true;
-            });
-
-        // Create the database mock
-        $mockDb = $this->createMock(PDO::class);
-        $mockDb->method('prepare')->willReturn($mockRevocationStatement);
-
-        return $mockDb;
-    }
-
-    /**
-     * Create a mock database that checks token revocation status
-     */
-    private function createMockDbForRevocationCheck(): PDO
-    {
-        $revokedTokensRef = &$this->revokedTokens;
-
-        // Mock the revocation check statement
-        $mockCheckStatement = $this->createMock(PDOStatement::class);
-        $checkedJti = null;
-        $mockCheckStatement->method('execute')
-            ->willReturnCallback(function($params) use (&$checkedJti) {
-                $checkedJti = $params[0] ?? null;
-                return true;
-            });
-        $mockCheckStatement->method('fetchColumn')
-            ->willReturnCallback(function() use (&$checkedJti, &$revokedTokensRef) {
-                return (isset($revokedTokensRef[$checkedJti]) && $revokedTokensRef[$checkedJti]) ? '1' : false;
-            });
-
-        // Create the database mock
-        $mockDb = $this->createMock(PDO::class);
-        $mockDb->method('prepare')->willReturn($mockCheckStatement);
-
-        return $mockDb;
-    }
-
-    /**
-     * Scenario 1: Login with valid credentials
-     *
-     * POST /api/login with email/password
-     * - Verify 200 response
-     * - Verify response includes user data (id, email, role)
-     * - Verify no token in response body
+     * Scenario 1: Login with valid credentials returns user data, no token body.
      */
     public function testLoginWithValidCredentials(): void
     {
-        $mockDb = $this->createMockDbForLogin();
-        $authHandler = new AuthHandler($mockDb, $this->jwtParser);
+        $authHandler = new AuthHandler($this->pdo, $this->jwtParser);
 
-        $requestBody = json_encode([
+        $request = new Request('POST', '/api/login', [], (string) json_encode([
             'email' => self::TEST_USER_EMAIL,
-            'password' => self::TEST_USER_PASSWORD
-        ]);
-
-        $request = new Request('POST', '/api/login', [], $requestBody);
+            'password' => self::TEST_USER_PASSWORD,
+        ]));
         $response = $authHandler->handle($request);
 
-        // Verify response status
         $this->assertSame(200, $response->getStatusCode());
 
-        // Verify response structure
         $responseData = json_decode($response->getBody(), true);
         $this->assertIsArray($responseData);
         $this->assertArrayHasKey('user', $responseData);
         $this->assertArrayNotHasKey('token', $responseData);
 
-        // Verify user data
         $user = $responseData['user'];
         $this->assertSame(self::TEST_USER_ID, $user['id']);
         $this->assertSame(self::TEST_USER_EMAIL, $user['email']);
@@ -183,307 +79,241 @@ class AuthFlowTest extends TestCase
     }
 
     /**
-     * Scenario 2: Call /api/me with valid access token
-     *
-     * Create access_token via JwtParser (type='access', 15min expiry)
-     * Simulate cookie: $_COOKIE['access_token'] = $token
-     * GET /api/me
-     * - Verify 200 response
-     * - Verify response includes user data
-     * - Verify token claims accessible
+     * Scenario 2: /api/me with a valid access token returns user data.
      */
     public function testGetMeWithValidAccessToken(): void
     {
-        $mockDb = $this->createMock(PDO::class); // Not used for this test
-        $tokenValidator = new TokenValidator($this->jwtParser, $mockDb);
-        $authHandler = new AuthHandler($mockDb, $this->jwtParser, $tokenValidator);
+        $tokenValidator = new TokenValidator($this->jwtParser, $this->pdo);
+        $authHandler = new AuthHandler($this->pdo, $this->jwtParser, $tokenValidator);
 
-        // Create access token (15 minutes)
-        $accessToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
-            'email' => self::TEST_USER_EMAIL,
-            'role' => self::TEST_ROLE_NAME
-        ], 900, 'access'); // 15 minutes
-
-        // Simulate cookie
+        $accessToken = $this->mintAccess(0);
         $_COOKIE['access_token'] = $accessToken;
 
-        // Call /api/me
         $request = new Request('GET', '/api/me', []);
         $response = $authHandler->handleMe($request);
 
-        // Verify response status
         $this->assertSame(200, $response->getStatusCode());
 
-        // Verify response structure
         $responseData = json_decode($response->getBody(), true);
         $this->assertIsArray($responseData);
         $this->assertArrayHasKey('user', $responseData);
 
-        // Verify user data
         $user = $responseData['user'];
         $this->assertSame(self::TEST_USER_ID, $user['id']);
         $this->assertSame(self::TEST_USER_EMAIL, $user['email']);
         $this->assertSame(self::TEST_ROLE_NAME, $user['role']);
 
-        // Verify token claims are accessible
         $claims = $this->jwtParser->parse($accessToken);
         $this->assertIsArray($claims);
         $this->assertSame(self::TEST_USER_ID, $claims['user_id']);
         $this->assertSame(self::TEST_TENANT_ID, $claims['tenant_id']);
-        $this->assertSame(self::TEST_USER_EMAIL, $claims['email']);
-        $this->assertSame(self::TEST_ROLE_NAME, $claims['role']);
         $this->assertSame('access', $claims['type']);
         $this->assertArrayHasKey('jti', $claims);
     }
 
     /**
-     * Scenario 3: Call /api/auth/refresh with valid refresh token
-     *
-     * Create refresh_token via JwtParser (type='refresh', 7day expiry)
-     * Simulate cookie: $_COOKIE['refresh_token'] = $token
-     * POST /api/auth/refresh
-     * - Verify 200 response
-     * - Verify response body is { "status": "success" }
-     * - Verify new access_token cookie issued
+     * Scenario 3: refresh with a valid refresh token issues a new access token.
      */
     public function testRefreshWithValidRefreshToken(): void
     {
-        // Create a mock that doesn't report any revoked tokens
-        $mockDb = $this->createMock(PDO::class);
-        $mockCheckStatement = $this->createMock(PDOStatement::class);
-        $mockCheckStatement->method('execute')->willReturn(true);
-        $mockCheckStatement->method('rowCount')->willReturn(0); // Token not revoked
-        $mockDb->method('prepare')->willReturn($mockCheckStatement);
+        $tokenValidator = new TokenValidator($this->jwtParser, $this->pdo);
+        $authHandler = new AuthHandler($this->pdo, $this->jwtParser, $tokenValidator);
 
-        $tokenValidator = new TokenValidator($this->jwtParser, $mockDb);
-        $authHandler = new AuthHandler($mockDb, $this->jwtParser, $tokenValidator);
+        $_COOKIE['refresh_token'] = $this->mintRefresh(0);
 
-        // Create refresh token (7 days)
-        $refreshToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
-            'email' => self::TEST_USER_EMAIL,
-            'role' => self::TEST_ROLE_NAME
-        ], 604800, 'refresh'); // 7 days
-
-        // Simulate cookie
-        $_COOKIE['refresh_token'] = $refreshToken;
-
-        // Call /api/auth/refresh
         $request = new Request('POST', '/api/auth/refresh', []);
         $response = $authHandler->handleRefresh($request);
 
-        // Verify response status
         $this->assertSame(200, $response->getStatusCode());
 
-        // Verify response structure
         $responseData = json_decode($response->getBody(), true);
         $this->assertIsArray($responseData);
-        $this->assertArrayHasKey('status', $responseData);
         $this->assertSame('success', $responseData['status']);
     }
 
     /**
-     * Scenario 4: Call /api/auth/logout
-     *
-     * Setup: user has valid refresh_token
-     * POST /api/auth/logout
-     * - Verify 200 response
-     * - Verify response body is { "status": "logged out" }
-     * - CRITICAL: Verify token jti is added to revoked_tokens table
+     * Scenario 4: logout revokes BOTH the access and refresh jti (WC-185).
      */
     public function testLogoutRevokesToken(): void
     {
-        $mockDb = $this->createMockDbForRevocation();
-        $authHandler = new AuthHandler($mockDb, $this->jwtParser);
+        $authHandler = new AuthHandler($this->pdo, $this->jwtParser);
 
-        // Create refresh token (7 days)
-        $refreshToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
-            'email' => self::TEST_USER_EMAIL,
-            'role' => self::TEST_ROLE_NAME
-        ], 604800, 'refresh'); // 7 days
+        $accessToken = $this->mintAccess(0);
+        $refreshToken = $this->mintRefresh(0);
+        $accessJti = (string) $this->jwtParser->parse($accessToken)['jti'];
+        $refreshJti = (string) $this->jwtParser->parse($refreshToken)['jti'];
 
-        // Extract JTI from token for verification
-        $claims = $this->jwtParser->parse($refreshToken);
-        $tokenJti = $claims['jti'];
-
-        // Simulate cookie
+        $_COOKIE['access_token'] = $accessToken;
         $_COOKIE['refresh_token'] = $refreshToken;
 
-        // Call /api/auth/logout
         $request = new Request('POST', '/api/auth/logout', []);
         $response = $authHandler->handleLogout($request);
 
-        // Verify response status
         $this->assertSame(200, $response->getStatusCode());
 
-        // Verify response structure
         $responseData = json_decode($response->getBody(), true);
         $this->assertIsArray($responseData);
-        $this->assertArrayHasKey('status', $responseData);
         $this->assertSame('logged out', $responseData['status']);
 
-        // CRITICAL: Verify token jti is added to revoked_tokens table
-        // (via our mock tracking)
-        $this->assertTrue(
-            isset($this->revokedTokens[$tokenJti]),
-            'Token JTI should be tracked as revoked'
-        );
+        $this->assertTrue($this->isRevoked($accessJti), 'Logout must revoke the access jti.');
+        $this->assertTrue($this->isRevoked($refreshJti), 'Logout must revoke the refresh jti.');
     }
 
     /**
-     * Scenario 5: Call /api/auth/refresh with revoked token (should fail)
-     *
-     * Use same refresh_token from logout (now revoked)
-     * Simulate cookie: $_COOKIE['refresh_token'] = $revokedToken
-     * POST /api/auth/refresh
-     * - Verify 401 response (token rejected because jti in revocation table)
+     * Scenario 5: a refresh token revoked by logout is rejected on refresh.
      */
     public function testRefreshWithRevokedTokenFails(): void
     {
-        // Step 1: Logout with a refresh token (revoking it)
-        $logoutMockDb = $this->createMockDbForRevocation();
-        $logoutHandler = new AuthHandler($logoutMockDb, $this->jwtParser);
+        // Step 1: logout revokes the refresh token.
+        $logoutHandler = new AuthHandler($this->pdo, $this->jwtParser);
 
-        // Create refresh token (7 days)
-        $refreshToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
-            'email' => self::TEST_USER_EMAIL,
-            'role' => self::TEST_ROLE_NAME
-        ], 604800, 'refresh'); // 7 days
-
-        // Extract JTI from token for verification
-        $claims = $this->jwtParser->parse($refreshToken);
-        $tokenJti = $claims['jti'];
-
-        // Simulate logout by setting cookie and calling logout
-        $_COOKIE['refresh_token'] = $refreshToken;
-        $logoutRequest = new Request('POST', '/api/auth/logout', []);
-        $logoutHandler->handleLogout($logoutRequest);
-        unset($_COOKIE['refresh_token']);
-
-        // Verify token is revoked (via mock)
-        $this->assertTrue(
-            isset($this->revokedTokens[$tokenJti]),
-            'Token should be revoked'
-        );
-
-        // Step 2: Try to use the revoked token to refresh
-        $refreshMockDb = $this->createMockDbForRevocationCheck();
-        $tokenValidator = new TokenValidator($this->jwtParser, $refreshMockDb);
-        $refreshHandler = new AuthHandler($refreshMockDb, $this->jwtParser, $tokenValidator);
+        $refreshToken = $this->mintRefresh(0);
+        $refreshJti = (string) $this->jwtParser->parse($refreshToken)['jti'];
 
         $_COOKIE['refresh_token'] = $refreshToken;
-        $refreshRequest = new Request('POST', '/api/auth/refresh', []);
-        $response = $refreshHandler->handleRefresh($refreshRequest);
+        $logoutHandler->handleLogout(new Request('POST', '/api/auth/logout', []));
+        $this->assertTrue($this->isRevoked($refreshJti), 'Token should be revoked.');
 
-        // Verify response is 401 (unauthorized)
+        // Step 2: the revoked refresh token can no longer mint an access token.
+        $tokenValidator = new TokenValidator($this->jwtParser, $this->pdo);
+        $refreshHandler = new AuthHandler($this->pdo, $this->jwtParser, $tokenValidator);
+
+        $_COOKIE['refresh_token'] = $refreshToken;
+        $response = $refreshHandler->handleRefresh(new Request('POST', '/api/auth/refresh', []));
+
         $this->assertSame(401, $response->getStatusCode());
-
-        // Verify error response
         $responseData = json_decode($response->getBody(), true);
         $this->assertIsArray($responseData);
         $this->assertArrayHasKey('error', $responseData);
     }
 
     /**
-     * Test complete auth cycle in sequence
-     *
-     * Comprehensive test that runs through the entire auth flow:
-     * 1. Login
-     * 2. Use access token to get current user
-     * 3. Refresh access token
-     * 4. Logout
-     * 5. Verify refresh fails with revoked token
+     * The full cycle: login → /api/me → refresh → logout → revoked refresh fails.
      */
     public function testCompleteAuthCycle(): void
     {
-        // Step 1: Login
-        $loginMockDb = $this->createMockDbForLogin();
-        $loginHandler = new AuthHandler($loginMockDb, $this->jwtParser);
+        $tokenValidator = new TokenValidator($this->jwtParser, $this->pdo);
+        $handler = new AuthHandler($this->pdo, $this->jwtParser, $tokenValidator);
 
-        $loginRequest = json_encode([
+        // Step 1: Login.
+        $response = $handler->handle(new Request('POST', '/api/login', [], (string) json_encode([
             'email' => self::TEST_USER_EMAIL,
-            'password' => self::TEST_USER_PASSWORD
-        ]);
-        $request = new Request('POST', '/api/login', [], $loginRequest);
-        $response = $loginHandler->handle($request);
+            'password' => self::TEST_USER_PASSWORD,
+        ])));
         $this->assertSame(200, $response->getStatusCode());
-        $loginData = json_decode($response->getBody(), true);
-        $this->assertSame(self::TEST_USER_EMAIL, $loginData['user']['email']);
+        $this->assertSame(self::TEST_USER_EMAIL, json_decode($response->getBody(), true)['user']['email']);
 
-        // Step 2: Get current user with access token
-        $mockDb = $this->createMock(PDO::class);
-        $tokenValidator = new TokenValidator($this->jwtParser, $mockDb);
-        $meHandler = new AuthHandler($mockDb, $this->jwtParser, $tokenValidator);
-
-        $accessToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
-            'email' => self::TEST_USER_EMAIL,
-            'role' => self::TEST_ROLE_NAME
-        ], 900, 'access');
-        $_COOKIE['access_token'] = $accessToken;
-        $meRequest = new Request('GET', '/api/me', []);
-        $response = $meHandler->handleMe($meRequest);
+        // Step 2: /api/me with an access token.
+        $_COOKIE['access_token'] = $this->mintAccess(0);
+        $response = $handler->handleMe(new Request('GET', '/api/me', []));
         $this->assertSame(200, $response->getStatusCode());
-        $meData = json_decode($response->getBody(), true);
-        $this->assertSame(self::TEST_USER_EMAIL, $meData['user']['email']);
+        $this->assertSame(self::TEST_USER_EMAIL, json_decode($response->getBody(), true)['user']['email']);
         unset($_COOKIE['access_token']);
 
-        // Step 3: Refresh access token
-        $refreshMockDb = $this->createMock(PDO::class);
-        $mockCheckStatement = $this->createMock(PDOStatement::class);
-        $mockCheckStatement->method('execute')->willReturn(true);
-        $mockCheckStatement->method('rowCount')->willReturn(0); // Token not revoked
-        $refreshMockDb->method('prepare')->willReturn($mockCheckStatement);
+        // Step 3: Refresh.
+        $refreshToken = $this->mintRefresh(0);
+        $refreshJti = (string) $this->jwtParser->parse($refreshToken)['jti'];
+        $_COOKIE['refresh_token'] = $refreshToken;
+        $response = $handler->handleRefresh(new Request('POST', '/api/auth/refresh', []));
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('success', json_decode($response->getBody(), true)['status']);
 
-        $refreshTokenValidator = new TokenValidator($this->jwtParser, $refreshMockDb);
-        $refreshHandler = new AuthHandler($refreshMockDb, $this->jwtParser, $refreshTokenValidator);
+        // Step 4: Logout (revokes the refresh jti).
+        $response = $handler->handleLogout(new Request('POST', '/api/auth/logout', []));
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('logged out', json_decode($response->getBody(), true)['status']);
+        $this->assertTrue($this->isRevoked($refreshJti), 'Token should be revoked.');
 
-        $refreshToken = $this->jwtParser->create([
+        // Step 5: the revoked refresh token now fails.
+        $_COOKIE['refresh_token'] = $refreshToken;
+        $response = $handler->handleRefresh(new Request('POST', '/api/auth/refresh', []));
+        $this->assertSame(401, $response->getStatusCode());
+        $this->assertArrayHasKey('error', json_decode($response->getBody(), true));
+    }
+
+    // ==================== helpers ====================
+
+    private function mintAccess(int $epoch): string
+    {
+        return $this->jwtParser->create([
             'user_id' => self::TEST_USER_ID,
             'tenant_id' => self::TEST_TENANT_ID,
             'email' => self::TEST_USER_EMAIL,
-            'role' => self::TEST_ROLE_NAME
+            'role' => self::TEST_ROLE_NAME,
+            'token_epoch' => $epoch,
+        ], 900, 'access');
+    }
+
+    private function mintRefresh(int $epoch): string
+    {
+        return $this->jwtParser->create([
+            'user_id' => self::TEST_USER_ID,
+            'tenant_id' => self::TEST_TENANT_ID,
+            'email' => self::TEST_USER_EMAIL,
+            'role' => self::TEST_ROLE_NAME,
+            'token_epoch' => $epoch,
         ], 604800, 'refresh');
-        $_COOKIE['refresh_token'] = $refreshToken;
-        $refreshRequest = new Request('POST', '/api/auth/refresh', []);
-        $response = $refreshHandler->handleRefresh($refreshRequest);
-        $this->assertSame(200, $response->getStatusCode());
-        $refreshData = json_decode($response->getBody(), true);
-        $this->assertSame('success', $refreshData['status']);
+    }
 
-        // Step 4: Logout
-        $logoutMockDb = $this->createMockDbForRevocation();
-        $logoutHandler = new AuthHandler($logoutMockDb, $this->jwtParser);
+    private function isRevoked(string $jti): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT 1 FROM revoked_tokens WHERE jti = ? LIMIT 1');
+        $stmt->execute([$jti]);
 
-        // Extract JTI for later verification
-        $claims = $this->jwtParser->parse($refreshToken);
-        $tokenJti = $claims['jti'];
+        return (bool) $stmt->fetchColumn();
+    }
 
-        $logoutRequest = new Request('POST', '/api/auth/logout', []);
-        $response = $logoutHandler->handleLogout($logoutRequest);
-        $this->assertSame(200, $response->getStatusCode());
-        $logoutData = json_decode($response->getBody(), true);
-        $this->assertSame('logged out', $logoutData['status']);
+    private function makeSchema(): PDO
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-        // Verify token is revoked
-        $this->assertTrue(isset($this->revokedTokens[$tokenJti]), 'Token should be revoked');
+        $pdo->exec('
+            CREATE TABLE roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT
+            )
+        ');
+        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES (1, 'admin', datetime('now')), (2, 'user', datetime('now'))");
 
-        // Step 5: Verify refresh fails with revoked token
-        $revokedMockDb = $this->createMockDbForRevocationCheck();
-        $revokedTokenValidator = new TokenValidator($this->jwtParser, $revokedMockDb);
-        $revokedHandler = new AuthHandler($revokedMockDb, $this->jwtParser, $revokedTokenValidator);
+        $pdo->exec('
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                role_id INTEGER,
+                created_at TEXT,
+                two_factor_enabled INTEGER DEFAULT 0,
+                two_factor_secret TEXT,
+                two_factor_backup_codes_version INTEGER DEFAULT 0,
+                token_epoch INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(tenant_id, email)
+            )
+        ');
+        $stmt = $pdo->prepare(
+            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
+             VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
+        );
+        $stmt->execute([
+            self::TEST_USER_ID,
+            self::TEST_TENANT_ID,
+            self::TEST_USER_EMAIL,
+            password_hash(self::TEST_USER_PASSWORD, PASSWORD_BCRYPT),
+            self::TEST_ROLE_ID,
+        ]);
 
-        $response = $revokedHandler->handleRefresh($refreshRequest);
-        $this->assertSame(401, $response->getStatusCode());
-        $errorData = json_decode($response->getBody(), true);
-        $this->assertArrayHasKey('error', $errorData);
+        $pdo->exec('
+            CREATE TABLE revoked_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                jti TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime(\'now\'))
+            )
+        ');
+
+        return $pdo;
     }
 }

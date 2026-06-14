@@ -119,13 +119,18 @@ abstract class BaseCommand
         $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
         $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
 
-        // Generate a CLI token if none provided
+        // Generate a CLI token if none provided. This synthetic admin token is
+        // authorised via JwtParser in the RBAC/tenant middleware (NOT via
+        // TokenValidator's cookie path), so it is never epoch-checked; the
+        // token_epoch claim is included only for issuance consistency (WC-185)
+        // and pinned to the default 0.
         if (!$this->token) {
             $this->token = $jwtParser->create([
                 'user_id' => 0,
                 'sub' => 'cli-admin',
                 'role' => 'admin',
-                'tenant_id' => 1
+                'tenant_id' => 1,
+                'token_epoch' => 0
             ]);
         }
     }
