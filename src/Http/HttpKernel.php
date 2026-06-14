@@ -6,6 +6,7 @@ namespace Whity\Http;
 
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Core\Audit\AuditContext;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 
@@ -31,9 +32,28 @@ class HttpKernel
     private static array $shutdownFunctions = [];
     /** @var array<string> */
     private array $initialGlobals = [];
-    /** @var array<class-string> */
-    private array $coreClasses = [];
     private bool $memoryLimitExceeded = false;
+
+    /**
+     * Explicit allowlist of the request-scoped static state that MUST be cleared
+     * between requests on a persistent (FrankenPHP) worker.
+     *
+     * Each entry is a `Class::reset` callable owned by the class that holds the
+     * request-scoped statics. This is deliberately an EXPLICIT registry rather
+     * than a reflective sweep of every static under Whity\Core: BOOT-scoped
+     * statics (injected loggers, the plugin autoloader registry/flag, memoized
+     * metadata) are wired ONCE at bootstrap and must SURVIVE across requests.
+     * The old whole-tree reflection reset re-nulled them every request, which
+     * silently disabled the boot-wired audit logger from request #2 onward
+     * (WC-181 / issue #179). Anything not listed here is treated as boot-scoped
+     * and is intentionally left untouched.
+     *
+     * Adding a new class with request-scoped statics? Give it a public static
+     * reset() and register it here.
+     *
+     * @var list<callable():void>
+     */
+    private array $requestScopedResetters;
 
     /**
      * Constructor
@@ -45,6 +65,17 @@ class HttpKernel
     {
         $this->router = $router;
         $this->rbacMiddleware = $rbacMiddleware;
+
+        // The explicit set of request-scoped statics to clear between requests.
+        // Note: TenantContext::reset() is invoked first and separately (step 1 of
+        // resetRequestState) because the rest of the lifecycle reasons about a
+        // clean tenant context; it is intentionally NOT duplicated here.
+        $this->requestScopedResetters = [
+            // Actor user id + client IP of the current request (WC-34). Holds only
+            // scalar identity data; previously cleared ONLY by the reflection
+            // sweep inside the kernel, so it must be reset explicitly now.
+            AuditContext::reset(...),
+        ];
     }
 
     /**
@@ -75,61 +106,25 @@ class HttpKernel
     }
 
     /**
-     * Initialize core classes scanning
-     */
-    private function initCoreClasses(): void
-    {
-        $coreDir = dirname(__DIR__) . '/Core';
-        if (!is_dir($coreDir)) {
-            return;
-        }
-
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($coreDir, \FilesystemIterator::SKIP_DOTS)
-        );
-
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $relativePath = substr($file->getPathname(), strlen($coreDir) + 1);
-                $relativePath = str_replace('.php', '', $relativePath);
-                $subNamespace = str_replace(DIRECTORY_SEPARATOR, '\\', $relativePath);
-                $className = 'Whity\\Core\\' . $subNamespace;
-
-                if (class_exists($className)) {
-                    /** @var class-string $className */
-                    $this->coreClasses[] = $className;
-                }
-            }
-        }
-    }
-
-    /**
      * Reset the request state between persistent worker cycles
      */
     private function resetRequestState(): void
     {
-        // 1. Reset TenantContext
+        // 1. Reset TenantContext (tenant id, lock, system mode). The injected
+        //    audit logger is process-scoped and intentionally preserved.
         TenantContext::reset();
 
         // 2. Execute namespaced shutdown functions
         self::executeShutdownFunctions();
 
-        // 3. Reset static properties of core classes
-        foreach ($this->coreClasses as $className) {
-            $refClass = new \ReflectionClass($className);
-            if ($refClass->isInterface() || $refClass->isTrait()) {
-                continue;
-            }
-            $defaultProperties = $refClass->getDefaultProperties();
-            foreach ($refClass->getProperties(\ReflectionProperty::IS_STATIC) as $property) {
-                // Note: ReflectionProperty::setAccessible() is a no-op since PHP 8.1
-                // (all reflected properties are accessible) and emits a deprecation
-                // on PHP 8.5+, so it is intentionally omitted here.
-                $name = $property->getName();
-                if (array_key_exists($name, $defaultProperties)) {
-                    $property->setValue(null, $defaultProperties[$name]);
-                }
-            }
+        // 3. Reset the remaining request-scoped core statics via the EXPLICIT
+        //    registry (WC-181). This replaces the previous reflection sweep that
+        //    reset EVERY static under Whity\Core and so re-nulled boot-wired
+        //    infrastructure (e.g. TenantContext's audit logger), silently killing
+        //    the audit trail from request #2 onward. Only genuinely request-scoped
+        //    statics are listed; boot-scoped statics are left to survive.
+        foreach ($this->requestScopedResetters as $reset) {
+            $reset();
         }
 
         // 4. Reset custom globals
@@ -191,7 +186,6 @@ class HttpKernel
         // Initialize state isolation tracking on the first request
         if (empty($this->initialGlobals)) {
             $this->initialGlobals = array_keys($GLOBALS);
-            $this->initCoreClasses();
         }
 
         try {
