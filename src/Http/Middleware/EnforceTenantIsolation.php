@@ -66,7 +66,11 @@ class EnforceTenantIsolation
         '/api/me',
         '/api/auth/refresh',
         '/api/auth/logout',
-        '/api/navigation',
+        // WC-175 (#191): /api/navigation is NO LONGER public. It is now
+        // caller-aware — NavigationApiHandler resolves the authenticated user
+        // and tenant and RBAC-filters items — so an unauthenticated request
+        // must resolve to 401 here instead of enumerating gated items, exactly
+        // like /api/frontend/features.
         // Health monitoring (WC-4): unauthenticated liveness/readiness probe.
         // Must stay reachable without a JWT or tenant context so external
         // monitors can poll it even while auth/tenant subsystems are unhealthy.
