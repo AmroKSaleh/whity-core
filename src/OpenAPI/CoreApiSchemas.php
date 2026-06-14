@@ -72,7 +72,8 @@ final class CoreApiSchemas
             self::ouRoutes(),
             self::delegationRoutes(),
             self::auditRoutes(),
-            self::frontendFeatureRoutes()
+            self::frontendFeatureRoutes(),
+            self::meRoutes()
         );
     }
 
@@ -422,6 +423,39 @@ final class CoreApiSchemas
     }
 
     /**
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function meRoutes(): array
+    {
+        return [
+            // WC-176 (#205): the caller's effective permission slugs, so a
+            // bespoke admin page can hide write controls the caller lacks.
+            // Registered with NEITHER a required role NOR a required permission
+            // (any authenticated caller may ask which permissions they hold), so
+            // the operation carries no bearerAuth marker — matching how the
+            // generator treats /api/navigation-style endpoints. The handler's
+            // own fail-closed 403s (unresolved tenant, missing user) and the
+            // tenant middleware's 401 are documented as responses.
+            [
+                'method' => 'GET',
+                'path' => '/api/me/capabilities',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the caller\'s effective permission slugs',
+                    'tags' => ['me'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The caller\'s effective, tenant-scoped permission slugs (sorted; empty is valid)',
+                            'MeCapabilitiesResponse'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
      * The component schemas the admin resources publish.
      *
      * @return array<string, array<string, mixed>>
@@ -671,6 +705,13 @@ final class CoreApiSchemas
                 ], ['canCreate', 'canEdit', 'canDelete']),
             ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'requiredPermission', 'capabilities']),
             'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
+
+            // WC-176 (#205): the caller's effective permission slugs. Mirrors
+            // MeCapabilitiesApiHandler's ACTUAL output: a data envelope wrapping
+            // a single `permissions` array of strings (sorted; empty is valid).
+            'MeCapabilitiesResponse' => self::dataEnvelope(self::object([
+                'permissions' => ['type' => 'array', 'items' => self::str()],
+            ], ['permissions'])),
 
             'AuditLogEntry' => $auditEntry,
             'Pagination' => self::object([
