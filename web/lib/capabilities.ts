@@ -9,9 +9,9 @@
  * caller cannot use.
  *
  * The server stays authoritative: these slugs are UI hints only and grant
- * nothing. Parsing FAILS CLOSED — a non-ok response, a malformed body, or a
- * thrown error yields an empty permission set, so callers hide write controls
- * rather than dangle dead affordances that would 403 on submit.
+ * nothing. Parsing FAILS CLOSED — a malformed body yields an empty permission
+ * set, so callers hide write controls rather than dangle dead affordances that
+ * would 403 on submit.
  */
 
 /** Permission required to create/edit/delete persons and relations. */
@@ -36,27 +36,4 @@ export function parsePermissions(body: unknown): string[] {
     return [];
   }
   return permissions.filter((p): p is string => typeof p === 'string');
-}
-
-/**
- * Resolve the caller's permission slugs from a `/api/me/capabilities` response.
- *
- * FAILS CLOSED: resolves to `[]` on any non-ok status, malformed body, or
- * thrown error, so the UI hides write controls when capabilities are unknown.
- *
- * @param fetcher A fetch-like call (e.g. the auth context's `apiClient`) that
- *                attaches cookies and handles silent token refresh.
- */
-export async function fetchCapabilities(
-  fetcher: (url: string) => Promise<Response>
-): Promise<string[]> {
-  try {
-    const res = await fetcher('/api/me/capabilities');
-    if (!res.ok) {
-      return [];
-    }
-    return parsePermissions(await res.json());
-  } catch {
-    return [];
-  }
 }
