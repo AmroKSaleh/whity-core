@@ -50,6 +50,14 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
     const headers = new Headers(request.headers);
     headers.delete('host');
     headers.delete('connection');
+    // Force an identity (uncompressed) response on the proxy->backend leg.
+    // The browser's Accept-Encoding (br/zstd/gzip) is forwarded by the line
+    // above, and Caddy will negotiate zstd — but Node's undici fetch only
+    // auto-decodes gzip/deflate, so `response.text()` would hand back raw
+    // compressed bytes and JSON parsing would explode. The proxy sits on the
+    // same host as the backend, so compressing this hop buys nothing; asking
+    // for identity sidesteps the entire compressed-garbage-body class of bug.
+    headers.set('Accept-Encoding', 'identity');
 
     if (cookieHeader) {
       headers.set('Cookie', cookieHeader);
