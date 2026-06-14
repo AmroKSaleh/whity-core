@@ -50,6 +50,36 @@ test.describe('Regular user (non-admin)', () => {
     await expect(userPage.shell.sidebar.getByText('Logged in as')).toBeVisible();
   });
 
+  test('an admin data page reached by direct URL degrades safely (data-layer 403)', async ({
+    userPage,
+    page,
+  }) => {
+    // DEFENCE-IN-DEPTH pin (complements the nav-absence test above). The
+    // sidebar correctly hides the gated links now, but the admin route layout
+    // still renders its children unconditionally, so a non-holder who reaches
+    // an admin data page by TYPING the URL must be rejected at the DATA layer:
+    // GET /api/roles returns 403 for the plain user, which the screen surfaces
+    // as an empty table + an error toast. This guards against a regression
+    // where /api/roles started returning 200 for a regular user — invisible to
+    // the nav-absence test, which never loads the page. We go straight to the
+    // page (NOT via the sidebar nav, which has no link to click) and assert the
+    // exact degradation the old nav-based test pinned before the WC-175 flip.
+    void userPage; // landed on the dashboard; we navigate by URL from here.
+    await page.goto('/admin/roles');
+    await page.waitForURL('**/admin/roles');
+    await expect(page.getByRole('heading', { name: 'Roles' })).toBeVisible();
+    await expect(page.getByText('No data available')).toBeVisible();
+    await expect(page.getByText('Failed to fetch roles').first()).toBeVisible();
+
+    // A second admin page proves the screen-layer 403 handling is not specific
+    // to /api/roles: /api/users is likewise rejected for the plain user.
+    await page.goto('/admin/users');
+    await page.waitForURL('**/admin/users');
+    await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
+    await expect(page.getByText('No data available')).toBeVisible();
+    await expect(page.getByText('Failed to fetch users').first()).toBeVisible();
+  });
+
   test('settings page is accessible and shows the user role', async ({ userPage, page }) => {
     await userPage.shell.clickNav('Settings');
     await page.waitForURL('**/settings');

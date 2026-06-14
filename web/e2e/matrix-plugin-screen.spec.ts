@@ -142,11 +142,37 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     roleSession,
     role,
     page,
+    baseURL,
   }) => {
     test.skip(
       role !== 'delegate',
       'Pins the delegate read-only surface; other roles are covered above.'
     );
+    if (baseURL === undefined) {
+      throw new Error('baseURL is required to seed the delegate read-only row');
+    }
+
+    // SEED a real row so the per-row write-control absence is NON-VACUOUS: the
+    // greetings list is shared dev-DB state and can be EMPTY when this runs, in
+    // which case "no Row actions button" would pass with zero rows regardless of
+    // gating. We POST one greeting as the admin (who holds hello:manage) into
+    // the shared tenant the delegate also belongs to, so the delegate's GET sees
+    // it. The marker is stamped on the module-level `greetingMarker` so the
+    // afterEach cleanup deletes exactly this row even if the test fails midway.
+    greetingMarker = `matrix-greeting-${uniqueSuffix()}`;
+    const message = `Hello from ${greetingMarker}`;
+    const seedApi = await createAuthedApi(baseURL, ADMIN);
+    try {
+      const created = await seedApi.post('/api/hello/greetings', {
+        data: { message },
+      });
+      expect(
+        created.status(),
+        'seeding a greeting as admin should return 201'
+      ).toBe(201);
+    } finally {
+      await seedApi.dispose();
+    }
 
     const listResponse = page.waitForResponse(
       (res) =>
@@ -158,11 +184,17 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     expect((await listResponse).status()).toBe(200);
     await expect(page.getByRole('heading', { name: 'Greetings' })).toBeVisible();
 
+    // The seeded row is present in the delegate's read-only table — so the
+    // per-row write-control assertion below is tested against a REAL row.
+    const seededRow = page.getByRole('row').filter({ hasText: message });
+    await expect(seededRow).toBeVisible();
+
     // FIXED BEHAVIOR (WC-175 #199): the schema-driven CRUD screen now derives
     // its write capabilities from the server-provided feature.capabilities, not
     // the OpenAPI spec. The delegate holds hello:view but NOT hello:manage, so
-    // the screen is read-only — the Create button is gone, and rows expose no
-    // "Row actions" menu (Edit/Delete are not rendered for a read-only caller).
+    // the screen is read-only — the Create button is gone, and the seeded row
+    // exposes no "Row actions" menu (Edit/Delete are not rendered for a
+    // read-only caller, even though a real row is present).
     await expect(
       page.getByRole('button', { name: 'Create', exact: true })
     ).toHaveCount(0);
