@@ -30,6 +30,17 @@ jobs:
       - name: Run PHPUnit
         run: vendor/bin/phpunit
 
+      # The committed public/openapi.json must match a fresh generation from
+      # the live PHP router — API changes that skip `generate:openapi` would
+      # ship a published contract that lies to the typed client (#168) and the
+      # schema-driven UI (#169). Mirrors the `web` job's schema.d.ts drift
+      # check (WC-168); the PHPUnit OpenApiSpecDriftTest is the primary gate,
+      # this byte-level diff is defense-in-depth (WC-179).
+      - name: OpenAPI spec drift check
+        run: |
+          php public/index.php generate:openapi
+          git diff --exit-code -- public/openapi.json
+
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse src tests plugins sdk
 
