@@ -40,6 +40,8 @@ interface PersonNodeData extends Record<string, unknown> {
   selected: boolean;
   onSelect: (id: number) => void;
   onAction: (action: PersonAction, person: Person) => void;
+  /** When false the per-node write action menu is hidden (WC-177). */
+  canManage: boolean;
 }
 
 /**
@@ -74,7 +76,7 @@ function layout(persons: Person[]): Array<{ person: Person; x: number; y: number
 
 /** Custom react-flow node: a selectable card marked account vs non-user. */
 function PersonFlowNode({ data }: NodeProps<Node<PersonNodeData>>) {
-  const { person, selected, onSelect, onAction } = data;
+  const { person, selected, onSelect, onAction, canManage } = data;
   const Icon = person.hasAccount ? IconUser : IconUserOff;
 
   return (
@@ -100,34 +102,40 @@ function PersonFlowNode({ data }: NodeProps<Node<PersonNodeData>>) {
       >
         {person.displayName}
       </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Actions for ${person.displayName}`}
-            className="nodrag"
-          >
-            <IconDotsVertical />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => onAction('add-relation', person)}>
-            Add relation
-          </DropdownMenuItem>
-          {!person.hasAccount && (
-            <DropdownMenuItem onClick={() => onAction('edit', person)}>Edit</DropdownMenuItem>
-          )}
-          {!person.hasAccount && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => onAction('delete', person)}>
-                Delete
-              </DropdownMenuItem>
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/* The action menu items are ALL writes (Add relation / Edit / Delete),
+          so the whole menu is hidden unless the caller holds relations:manage
+          (WC-177). Selecting the node (the name button above) stays available
+          to any reader. */}
+      {canManage && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Actions for ${person.displayName}`}
+              className="nodrag"
+            >
+              <IconDotsVertical />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onAction('add-relation', person)}>
+              Add relation
+            </DropdownMenuItem>
+            {!person.hasAccount && (
+              <DropdownMenuItem onClick={() => onAction('edit', person)}>Edit</DropdownMenuItem>
+            )}
+            {!person.hasAccount && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => onAction('delete', person)}>
+                  Delete
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </div>
   );
 }
@@ -156,6 +164,7 @@ export default function RelationsGraph({
   selectedId,
   onSelect,
   onAction,
+  canManage,
 }: RelationsGraphProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<PersonNodeData>>([]);
 
@@ -173,11 +182,11 @@ export default function RelationsGraph({
         id: String(person.id),
         type: 'personNode',
         position: draggedPos.get(String(person.id)) ?? { x, y },
-        data: { person, selected: person.id === selectedId, onSelect, onAction },
+        data: { person, selected: person.id === selectedId, onSelect, onAction, canManage },
         connectable: false,
       }));
     });
-  }, [layouted, selectedId, onSelect, onAction, setNodes]);
+  }, [layouted, selectedId, onSelect, onAction, canManage, setNodes]);
 
   const flowEdges = useMemo<Edge[]>(
     () =>
