@@ -155,10 +155,24 @@ final class FrontendFeaturesApiHandler
      * Resolve the caller's effective write capabilities for a feature's resource.
      *
      * Mirrors exactly what RbacMiddleware enforces on submit: for the resource's
-     * `basePath`, `canCreate` requires a satisfiable POST at the base path, while
-     * `canEdit`/`canDelete` require a satisfiable PATCH/DELETE at an item route
-     * under `basePath . '/'`. A feature without a resource (or an empty base
-     * path) has no derivable write routes, so every capability is false.
+     * `basePath`, `canCreate` requires a satisfiable POST at EXACTLY the base
+     * path, while `canEdit`/`canDelete` require a satisfiable PATCH/DELETE at the
+     * resource's single item route — `basePath` followed by EXACTLY one
+     * `{param}` segment and nothing further. That is the only write target the
+     * schema-driven renderer ever submits to (`${basePath}/{id}`, see
+     * web/components/plugin/crud-screen.tsx handleEdit/handleDelete).
+     *
+     * The item route MUST be matched precisely rather than by an item-prefix
+     * test: a prefix match would also capture NESTED sub-resource write routes
+     * under the same base path (e.g. `PATCH /api/foo/{id}/notes/{nid}`) that are
+     * gated on a DIFFERENT permission. Whichever such route iterated last would
+     * then decide `canEdit`/`canDelete` purely by route-registration order,
+     * over-granting (or over-denying) a capability the renderer would never
+     * even exercise. Requiring a single brace-param segment with no further
+     * slash binds the capability to the resource's own item route alone.
+     *
+     * A feature without a resource (or an empty base path) has no derivable
+     * write routes, so every capability is false.
      *
      * @param string|null $basePath The resource base path, or null when absent.
      * @param int $userId The resolved caller user id.
@@ -173,7 +187,11 @@ final class FrontendFeaturesApiHandler
             return $capabilities;
         }
 
-        $itemPrefix = $basePath . '/';
+        // Matches `${basePath}/{param}` precisely: the remainder after the base
+        // path is a single brace-param segment with NO nested slash. This binds
+        // edit/delete to the resource's own item route and excludes deeper
+        // sub-resource routes (whose remainder contains a `/`).
+        $itemPattern = '#^' . preg_quote($basePath . '/', '#') . '\{[^/]+\}$#';
 
         foreach ($this->router->getRoutes() as $route) {
             $method = $route['method'];
@@ -181,9 +199,9 @@ final class FrontendFeaturesApiHandler
 
             if ($method === 'POST' && $path === $basePath) {
                 $capabilities['canCreate'] = $this->callerSatisfies($route, $userId, $tenantId);
-            } elseif ($method === 'PATCH' && str_starts_with($path, $itemPrefix)) {
+            } elseif ($method === 'PATCH' && preg_match($itemPattern, $path) === 1) {
                 $capabilities['canEdit'] = $this->callerSatisfies($route, $userId, $tenantId);
-            } elseif ($method === 'DELETE' && str_starts_with($path, $itemPrefix)) {
+            } elseif ($method === 'DELETE' && preg_match($itemPattern, $path) === 1) {
                 $capabilities['canDelete'] = $this->callerSatisfies($route, $userId, $tenantId);
             }
         }

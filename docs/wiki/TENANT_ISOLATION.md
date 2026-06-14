@@ -55,7 +55,7 @@ TenantContext::setTenantId(99); // RuntimeException: locked
 
 `handle(Request $request, callable $next)`:
 
-1. **Public routes** carry no tenant context and pass straight through: `/api/login`, `/api/login/2fa`, `/api/me`, `/api/auth/refresh`, `/api/auth/logout`, `/api/navigation`.
+1. **Public routes** carry no tenant context and pass straight through: `/api/login`, `/api/login/2fa`, `/api/me`, `/api/auth/refresh`, `/api/auth/logout`. `/api/navigation` is **not** among them: WC-175 (#191) made it authenticated and per-caller RBAC-filtered (returning only the items the caller's permissions allow, mirroring `/api/frontend/features`), so it was removed from `PUBLIC_ROUTES` and returns 401 when unauthenticated.
 2. Otherwise it delegates token → tenant extraction to `TenantContext::resolve()`. Any `TenantResolutionException` collapses to a generic `401 Authentication required` (internals never leak to the client).
 3. It re-parses the (now validated) token to expose the decoded payload as `Request::$user` for downstream handlers.
 4. It determines the tenant the request *addresses*, if any (`resolveResourceTenantId()`), in priority order:

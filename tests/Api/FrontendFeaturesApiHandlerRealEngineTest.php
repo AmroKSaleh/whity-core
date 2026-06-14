@@ -101,9 +101,28 @@ final class Plugin implements PluginInterface, PluginFrontendInterface
                 'requiredRole' => null,
                 'requiredPermission' => 'featapi:manage',
             ],
+            // NESTED sub-resource write routes under the SAME base path, gated
+            // on a DIFFERENT permission (featapi:notes). Their item path has an
+            // extra segment after the {id}, so a prefix match on the base item
+            // path would wrongly attribute them to the widgets resource and
+            // over-grant canEdit/canDelete to a caller holding only notes.
+            [
+                'method' => 'PATCH',
+                'path' => '/api/featapi/widgets/{id:\d+}/notes/{noteId:\d+}',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:notes',
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/featapi/widgets/{id:\d+}/notes/{noteId:\d+}',
+                'handler' => $ok,
+                'requiredRole' => null,
+                'requiredPermission' => 'featapi:notes',
+            ],
         ];
     }
-    public function getPermissions(): array { return ['featapi:view', 'featapi:manage', 'featapi:admin']; }
+    public function getPermissions(): array { return ['featapi:view', 'featapi:manage', 'featapi:notes', 'featapi:admin']; }
     public function getHooks(): array { return []; }
     public function getMigrations(): array { return []; }
     public function getFrontendFeatures(): array
@@ -273,6 +292,29 @@ PHP);
             ['canCreate' => true, 'canEdit' => true, 'canDelete' => true],
             $byId['featapi-widgets']['capabilities'],
             'A caller holding the write permission gets every write capability'
+        );
+    }
+
+    public function testNestedSubResourceWriteRoutesDoNotOverGrantCapabilities(): void
+    {
+        TenantContext::setTenantId(1);
+
+        // The caller can view widgets and manage their NESTED notes, but holds
+        // NO featapi:manage. The genuine item routes (PATCH/DELETE
+        // /api/featapi/widgets/{id}) are gated on featapi:manage; only the
+        // deeper notes routes are gated on featapi:notes. The renderer only ever
+        // submits to ${basePath}/{id}, so canEdit/canDelete must reflect ONLY
+        // those genuine item routes — never a nested sub-resource route with a
+        // different RBAC. A prefix match would over-grant here.
+        $response = $this->handler(['featapi:view', 'featapi:notes'])->list($this->authedRequest(42));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $byId = array_column(json_decode($response->getBody(), true)['data'], null, 'id');
+
+        $this->assertSame(
+            ['canCreate' => false, 'canEdit' => false, 'canDelete' => false],
+            $byId['featapi-widgets']['capabilities'],
+            'A nested sub-resource write route gated on a different permission must not grant the resource its own canEdit/canDelete'
         );
     }
 

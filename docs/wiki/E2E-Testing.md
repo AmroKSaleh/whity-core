@@ -86,10 +86,11 @@ Observed contrast (live-verified):
 | `GET /api/delegations` | 200 | 403 | 403 |
 | `GET /api/users` | 200 | 403 | 403 |
 
-Note `/api/navigation` is **unfiltered** — every role sees every link (the
-current intended behaviour; issue #191 tracks filtering). Access is enforced at
-the data layer, so specs assert on page *content* (data vs the "Access denied"
-card), not on the sidebar.
+Note `/api/navigation` now **requires authentication** and is **per-caller
+RBAC-filtered** — each role sees only the links its permissions allow (mirroring
+`/api/frontend/features`), and an unauthenticated request gets 401. This landed
+in WC-175 (#191). Access is also still enforced at the data layer, so specs
+assert on page *content* (data vs the "Access denied" card), not on the sidebar.
 
 ### The matrix pattern — contract for spec authors
 
