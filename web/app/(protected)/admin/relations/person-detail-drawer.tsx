@@ -26,6 +26,13 @@ interface PersonDetailDrawerProps {
   onAction: (action: PersonAction, person: Person) => void;
   /** Notify the page that the person/relations changed (triggers a refetch). */
   onChanged: () => void;
+  /**
+   * Whether the caller holds `relations:manage` (WC-177). When false the write
+   * affordances are hidden — the structural action row (Add relation / Edit /
+   * Delete) and each relation's "Remove" control — while the relations LIST
+   * itself (read) stays visible.
+   */
+  canManage: boolean;
 }
 
 /**
@@ -37,7 +44,13 @@ interface PersonDetailDrawerProps {
  * place. Editing/deleting are offered only for non-user relatives (a user-linked
  * shadow is managed via user management).
  */
-export function PersonDetailDrawer({ person, onClose, onAction, onChanged }: PersonDetailDrawerProps) {
+export function PersonDetailDrawer({
+  person,
+  onClose,
+  onAction,
+  onChanged,
+  canManage,
+}: PersonDetailDrawerProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
 
@@ -114,24 +127,28 @@ export function PersonDetailDrawer({ person, onClose, onAction, onChanged }: Per
               )}
             </SheetHeader>
 
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => onAction('add-relation', person)}>
-                <IconPlus />
-                Add relation
-              </Button>
-              {!person.hasAccount && (
-                <Button size="sm" variant="outline" onClick={() => onAction('edit', person)}>
-                  <IconEdit />
-                  Edit
+            {/* The structural action row is entirely writes; hide it unless the
+                caller holds relations:manage (WC-177). */}
+            {canManage && (
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => onAction('add-relation', person)}>
+                  <IconPlus />
+                  Add relation
                 </Button>
-              )}
-              {!person.hasAccount && (
-                <Button size="sm" variant="destructive" onClick={() => onAction('delete', person)}>
-                  <IconTrash />
-                  Delete
-                </Button>
-              )}
-            </div>
+                {!person.hasAccount && (
+                  <Button size="sm" variant="outline" onClick={() => onAction('edit', person)}>
+                    <IconEdit />
+                    Edit
+                  </Button>
+                )}
+                {!person.hasAccount && (
+                  <Button size="sm" variant="destructive" onClick={() => onAction('delete', person)}>
+                    <IconTrash />
+                    Delete
+                  </Button>
+                )}
+              </div>
+            )}
 
             <section aria-labelledby="person-relations-heading" className="space-y-2">
               <h3
@@ -163,15 +180,20 @@ export function PersonDetailDrawer({ person, onClose, onAction, onChanged }: Per
                           </span>
                         )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Remove relation to ${relation.otherPersonName}`}
-                        disabled={isMutating}
-                        onClick={() => handleRemoveRelation(relation.relationId)}
-                      >
-                        <IconX />
-                      </Button>
+                      {/* Remove is a DELETE write; hide it unless the caller
+                          holds relations:manage (WC-177). The relation row
+                          (read) stays visible. */}
+                      {canManage && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Remove relation to ${relation.otherPersonName}`}
+                          disabled={isMutating}
+                          onClick={() => handleRemoveRelation(relation.relationId)}
+                        >
+                          <IconX />
+                        </Button>
+                      )}
                     </li>
                   ))}
                 </ul>

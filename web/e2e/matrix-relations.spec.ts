@@ -73,20 +73,28 @@ test.describe('Family Relations (role matrix)', () => {
       page.getByRole('heading', { name: 'Family Relations' })
     ).toBeVisible();
 
-    // admin AND delegate get the full read surface — no denied card, the
-    // list/graph view toggle, and the primary control. NOTE: the "Add relative"
-    // button renders for the delegate too; this relations page is a bespoke
-    // component whose write-gating is OUT OF SCOPE for WC-175 (#199 fixed only
-    // the schema-driven plugin CRUD screen). Only the DATA layer is gated here,
-    // and a delegate write would still 403 server-side (relations:manage is not
-    // delegated) — gating the button is a separate follow-up.
+    // admin AND delegate get the full READ surface — no denied card, and the
+    // list/graph view toggle. The WRITE surface is caller-aware (WC-177, #205):
+    // the "Add relative" header control is gated on relations:manage, read from
+    // GET /api/me/capabilities. admin holds relations:manage (role grant); the
+    // delegate holds relations:read ONLY, so the button is hidden client-side
+    // (the data layer would 403 a delegate write regardless — the frontend now
+    // mirrors that authority instead of dangling a dead control).
     await expect(
       page.getByRole('heading', { name: 'Access denied' })
     ).toHaveCount(0);
     await expect(page.getByRole('group', { name: 'View mode' })).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'Add relative', exact: true })
-    ).toBeVisible();
+    if (role === 'admin') {
+      await expect(
+        page.getByRole('button', { name: 'Add relative', exact: true })
+      ).toBeVisible();
+    } else {
+      // delegate: relations:read WITHOUT relations:manage — the manage-gated
+      // "Add relative" control is hidden, while the read surface stays intact.
+      await expect(
+        page.getByRole('button', { name: 'Add relative', exact: true })
+      ).toHaveCount(0);
+    }
     // Data may legitimately be empty (fresh database, or another spec cleaned
     // up after itself) — pin the non-denied surface, not specific rows.
     await expect(
@@ -128,5 +136,104 @@ test.describe('Family Relations (role matrix)', () => {
     await expect(
       page.getByRole('cell', { name: createdPersonName })
     ).toBeVisible();
+  });
+
+  test('per-row write affordances follow relations:manage', async ({
+    roleSession,
+    role,
+    page,
+    baseURL,
+  }) => {
+    // user can't reach the page (nav link filtered out server-side); the
+    // surface pin above already covers that role.
+    test.skip(role === 'user', 'No read access; covered by the surface pin.');
+    expect(baseURL, 'baseURL is configured').toBeDefined();
+
+    // Seed two non-account persons + a relation between them AS ADMIN, so both
+    // admin and delegate sessions observe the SAME data and the assertion is
+    // purely about the caller-aware write affordances (WC-177). Cleaned up in
+    // finally regardless of role/outcome.
+    const admin = await createAuthedApi(baseURL!, ADMIN);
+    const suffix = uniqueSuffix();
+    const aliceName = `WC177 Alice ${suffix}`;
+    const bobName = `WC177 Bob ${suffix}`;
+    let aliceId: number | null = null;
+    let bobId: number | null = null;
+    try {
+      const aliceRes = await admin.post('/api/persons', {
+        data: { displayName: aliceName },
+      });
+      aliceId = ((await aliceRes.json()) as { data: { id: number } }).data.id;
+      const bobRes = await admin.post('/api/persons', {
+        data: { displayName: bobName },
+      });
+      bobId = ((await bobRes.json()) as { data: { id: number } }).data.id;
+      // Sibling (symmetric, typeId 4) so the drawer lists one relation row.
+      await admin.post('/api/relations', {
+        data: {
+          from: { kind: 'person', id: aliceId },
+          to: { kind: 'person', id: bobId },
+          relationshipTypeId: 4,
+        },
+      });
+
+      await roleSession.shell.clickNav('Family Relations');
+      await page.waitForURL('**/admin/relations');
+      await expect(
+        page.getByRole('cell', { name: aliceName })
+      ).toBeVisible();
+
+      // Open the detail drawer for Alice (the "View" row action is a READ
+      // control, present for both roles).
+      await page
+        .getByRole('row', { name: new RegExp(aliceName) })
+        .getByRole('button', { name: 'View' })
+        .click();
+      const drawer = page.getByRole('dialog');
+      await expect(drawer.getByRole('heading', { name: aliceName })).toBeVisible();
+      // The relations LIST (read) is visible to both roles.
+      await expect(drawer.getByText('Sibling')).toBeVisible();
+      await expect(drawer.getByText(bobName)).toBeVisible();
+
+      if (role === 'admin') {
+        // relations:manage -> the structural action row and the per-relation
+        // Remove control are present and usable.
+        await expect(
+          drawer.getByRole('button', { name: 'Add relation' })
+        ).toBeVisible();
+        await expect(
+          drawer.getByRole('button', { name: `Remove relation to ${bobName}` })
+        ).toBeVisible();
+      } else {
+        // delegate (relations:read only) -> every write affordance is hidden,
+        // while the relation row above stays visible.
+        await expect(
+          drawer.getByRole('button', { name: 'Add relation' })
+        ).toHaveCount(0);
+        await expect(drawer.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+        await expect(drawer.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+        await expect(
+          drawer.getByRole('button', { name: `Remove relation to ${bobName}` })
+        ).toHaveCount(0);
+      }
+
+      // Close the drawer, switch to the GRAPH view, and check the per-node
+      // action menu (all-writes) against the same capability.
+      await page.keyboard.press('Escape');
+      await expect(drawer).toHaveCount(0);
+      await page.getByRole('button', { name: 'Graph' }).click();
+      await expect(page.getByTestId('relations-graph')).toBeVisible();
+      const nodeMenu = page.getByRole('button', { name: `Actions for ${aliceName}` });
+      if (role === 'admin') {
+        await expect(nodeMenu).toBeVisible();
+      } else {
+        await expect(nodeMenu).toHaveCount(0);
+      }
+    } finally {
+      // Removing Alice cascades her relations; remove Bob too. Best-effort.
+      if (aliceId !== null) await deletePerson(admin, aliceId);
+      if (bobId !== null) await deletePerson(admin, bobId);
+      await admin.dispose();
+    }
   });
 });

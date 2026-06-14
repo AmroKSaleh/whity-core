@@ -22,6 +22,7 @@ import { DeletePersonModal } from './delete-person-modal';
 import { AddRelationModal } from './add-relation-modal';
 import type { PersonAction } from './relations-view';
 import type { Person, RelationEdge, RelationshipType } from './types';
+import { RELATIONS_MANAGE, parsePermissions } from '@/lib/capabilities';
 
 // react-flow is heavy and touches browser-only APIs, so the graph view is loaded
 // on demand and never server-rendered (ssr:false) — mirrors the OU hub.
@@ -57,6 +58,10 @@ export default function RelationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isForbidden, setIsForbidden] = useState(false);
   const [search, setSearch] = useState('');
+  // Caller's relations:manage capability (WC-177, #205). Fail-closed: write
+  // controls stay hidden until proven otherwise, so a delegate holding only
+  // relations:read never sees affordances that would 403 server-side.
+  const [canManage, setCanManage] = useState(false);
 
   // Lazily restore the persisted view (List default). The typeof guard keeps the
   // initializer safe under SSR pre-render where window is undefined.
@@ -83,11 +88,22 @@ export default function RelationsPage() {
   const fetchAll = useCallback(async () => {
     try {
       setIsLoading(true);
-      const [personsRes, edgesRes, typesRes] = await Promise.all([
+      const [personsRes, edgesRes, typesRes, capsRes] = await Promise.all([
         apiClient('/api/persons'),
         apiClient('/api/relations'),
         apiClient('/api/relationship-types'),
+        apiClient('/api/me/capabilities'),
       ]);
+
+      // Derive the caller's manage capability before the read gate so the UI
+      // hides write controls (WC-177). FAIL CLOSED: any non-ok response or
+      // parse failure leaves canManage false.
+      if (capsRes.ok) {
+        const permissions = parsePermissions(await capsRes.json());
+        setCanManage(permissions.includes(RELATIONS_MANAGE));
+      } else {
+        setCanManage(false);
+      }
 
       if (personsRes.status === 403) {
         setIsForbidden(true);
@@ -108,6 +124,8 @@ export default function RelationsPage() {
         setTypes(((await typesRes.json()).data ?? []) as RelationshipType[]);
       }
     } catch (error) {
+      // Fail closed: an aborted fetch must not leave stale write affordances.
+      setCanManage(false);
       addToast(error instanceof Error ? error.message : 'Failed to fetch relations', 'error');
     } finally {
       setIsLoading(false);
@@ -223,10 +241,13 @@ export default function RelationsPage() {
         title="Family Relations"
         description="Record and manage familial relationships, including relatives without a platform account."
         action={
-          <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
-            <IconPlus />
-            Add relative
-          </Button>
+          // Manage-gated (WC-177): hidden for callers without relations:manage.
+          canManage ? (
+            <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
+              <IconPlus />
+              Add relative
+            </Button>
+          ) : undefined
         }
       />
 
@@ -250,13 +271,23 @@ export default function RelationsPage() {
         <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
           <IconUsersGroup size={32} className="mx-auto mb-3 text-muted-foreground" />
           <h2 className="font-heading text-sm font-medium">No people yet</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Add a relative, or relate existing platform accounts to build the family graph.
-          </p>
-          <Button onClick={() => setIsCreateOpen(true)} variant="outline" className="mt-4 gap-2">
-            <IconPlus />
-            Add the first relative
-          </Button>
+          {canManage ? (
+            <>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Add a relative, or relate existing platform accounts to build the family graph.
+              </p>
+              <Button onClick={() => setIsCreateOpen(true)} variant="outline" className="mt-4 gap-2">
+                <IconPlus />
+                Add the first relative
+              </Button>
+            </>
+          ) : (
+            // Read-only callers (relations:read without relations:manage, WC-177)
+            // get the empty state without the create CTA.
+            <p className="mt-1 text-xs text-muted-foreground">
+              No people have been added to the family graph yet.
+            </p>
+          )}
         </div>
       ) : view === 'list' ? (
         <DataTable columns={columns} data={rows} rowActions={rowActions} isLoading={isLoading} />
@@ -267,6 +298,7 @@ export default function RelationsPage() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           onAction={handleAction}
+          canManage={canManage}
         />
       )}
 
@@ -275,6 +307,7 @@ export default function RelationsPage() {
         onClose={() => setSelectedId(null)}
         onAction={handleAction}
         onChanged={fetchAll}
+        canManage={canManage}
       />
 
       <CreatePersonModal

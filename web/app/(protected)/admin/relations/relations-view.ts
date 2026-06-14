@@ -23,4 +23,9 @@ export interface RelationsGraphProps {
   onSelect: (id: number) => void;
   /** Emitted when a node's action menu item is chosen. */
   onAction: (action: PersonAction, person: Person) => void;
+  /**
+   * Whether the caller holds `relations:manage` (WC-177). When false the
+   * per-node write action menu is hidden; node selection (read) is unaffected.
+   */
+  canManage: boolean;
 }
