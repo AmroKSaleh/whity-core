@@ -17,10 +17,10 @@ namespace Whity\Core\Audit;
  *
  * Worker safety: like {@see \Whity\Core\Tenant\TenantContext}, this is the
  * sanctioned exception to the "no request state in statics" rule on FrankenPHP
- * persistent workers. It MUST be reset between requests, which the HTTP kernel
- * does (it reflectively resets every `Whity\Core` class's static properties in
- * resetRequestState()) and which {@see self::reset()} also performs explicitly in
- * the worker loop's finally block. It holds only scalar identity data, never a
+ * persistent workers. It MUST be reset between requests. The HTTP kernel clears
+ * it via {@see self::reset()} from its explicit request-scoped reset registry
+ * (HttpKernel::resetRequestState(), WC-181) and the worker loop's finally block
+ * calls {@see self::reset()} too. It holds only scalar identity data, never a
  * live request object.
  */
 final class AuditContext
