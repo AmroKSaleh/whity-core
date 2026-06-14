@@ -104,6 +104,7 @@ use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
 use Whity\Http\Cors;
+use Whity\Http\WorkerRuntime;
 use Whity\Http\Middleware\CsrfGuard;
 use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Api\UsersApiHandler;
@@ -574,10 +575,17 @@ if ($isWorker) {
     $maxRequests = (int)($_ENV['MAX_REQUESTS'] ?? $_SERVER['MAX_REQUESTS'] ?? 0);
 
     for ($nbRequests = 0; !$maxRequests || $nbRequests < $maxRequests; ++$nbRequests) {
-        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db) {
+        // WC-182: the per-request lifecycle log lines are useful when tracing
+        // locally but flood the production log (one pair per request), so they
+        // are gated behind development/DEBUG. Decision is computed once per
+        // iteration and captured by the request closure below.
+        $logLifecycle = WorkerRuntime::shouldLogLifecycle($_ENV);
+        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle) {
             try {
                 // Dispatch request start hook
-                error_log("[FrankenPHP Worker] Request start");
+                if ($logLifecycle) {
+                    error_log("[FrankenPHP Worker] Request start");
+                }
                 $hookManager->dispatch('worker.request.start', []);
 
                 // Plugin hot-reload (WC-8/PR #83): pick up plugins added, modified,
@@ -634,7 +642,9 @@ if ($isWorker) {
                 error_log($e->getMessage() . "\n" . $e->getTraceAsString());
             } finally {
                 // Dispatch request end hook
-                error_log("[FrankenPHP Worker] Request end");
+                if ($logLifecycle) {
+                    error_log("[FrankenPHP Worker] Request end");
+                }
                 $hookManager->dispatch('worker.request.end', []);
                 // Reset tenant context to prevent cross-request leakage
                 \Whity\Core\Tenant\TenantContext::reset();
@@ -649,8 +659,15 @@ if ($isWorker) {
             }
         });
 
-        // Force garbage collection to prevent memory bloat
-        gc_collect_cycles();
+        // WC-182: a forced full cycle collection on EVERY request adds avoidable
+        // CPU work to the hot path. It is now opportunistic: every request in
+        // development/DEBUG (so leaks surface eagerly while iterating), and only
+        // every WorkerRuntime::GC_CADENCE iterations in production. PHP's
+        // automatic cycle collector handles the gaps, and the memory-recycle
+        // backstop below remains the hard safety net regardless.
+        if (WorkerRuntime::shouldCollectCycles($nbRequests, $_ENV)) {
+            gc_collect_cycles();
+        }
 
         if ($kernel->hasExceededMemoryLimit()) {
             error_log("[FrankenPHP Worker] Memory limit exceeded. Recycling worker gracefully.");
