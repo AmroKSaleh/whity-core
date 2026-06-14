@@ -51,44 +51,35 @@ test.describe('Auth transitions', () => {
     await login.loginExpectingSuccess(REGULAR_USER);
     await shell.expectLoggedInAs(REGULAR_USER.email);
 
-    // A permission-gated page must reflect the NEW session immediately: the
-    // delegations page fails closed with its Access denied card for a user
-    // without delegation:manage (the nav link itself is unfiltered, #191).
-    await shell.clickNav('Delegations');
-    await page.waitForURL('**/admin/delegations');
-    await expect(
-      page.getByRole('heading', { name: 'Access denied' })
-    ).toBeVisible();
-    await expect(page.getByText(/delegation:manage/)).toBeVisible();
-    // No admin-only action may leak into the denied state.
-    await expect(
-      page.getByRole('button', { name: 'Create Delegation' })
-    ).toHaveCount(0);
+    // The sidebar must re-filter to the NEW session immediately (WC-175 #191:
+    // /api/navigation is now RBAC-filtered per caller). The plain user lacks
+    // delegation:manage, so the gated Delegations link is hidden outright —
+    // only the ungated Settings link survives the identity swap.
+    await expect(shell.navLink('Delegations')).toHaveCount(0);
+    await expect(shell.navLink('Settings')).toBeVisible();
   });
 
-  test('re-login as admin after a user session clears the stale denied state', async ({
+  test('the sidebar re-filters on identity switch: Delegations link hidden for user, restored for admin', async ({
     page,
   }) => {
-    // Arrange the "denied" state first: a user session that has VISITED the
-    // gated page, so any stale client cache would keep showing the denial.
+    // Arrange a user session first: with the RBAC-filtered nav (WC-175 #191),
+    // the plain user simply has no Delegations link — there is nothing to
+    // navigate to, and no stale forbidden state can be left behind.
     const login = new LoginPage(page);
     await login.loginExpectingSuccess(REGULAR_USER);
     const shell = new AppShell(page);
-    await shell.clickNav('Delegations');
-    await page.waitForURL('**/admin/delegations');
-    await expect(
-      page.getByRole('heading', { name: 'Access denied' })
-    ).toBeVisible();
+    await expect(shell.navLink('Delegations')).toHaveCount(0);
 
     // Role switch back to admin in the same context.
     await shell.logout();
     await login.loginExpectingSuccess(ADMIN);
+
+    // The sidebar must RE-FILTER on the identity switch: the gated link that
+    // was hidden for the user REAPPEARS for the admin, and navigating to it now
+    // resolves the full management view (no stale denied state survives).
+    await expect(shell.navLink('Delegations')).toBeVisible();
     await shell.clickNav('Delegations');
     await page.waitForURL('**/admin/delegations');
-
-    // The admin view (header action + table or first-delegation empty state)
-    // must replace the denial — no stale forbidden state may survive the
-    // role switch. "Create Delegation" only renders in the non-denied view.
     await expect(
       page.getByRole('button', { name: 'Create Delegation' })
     ).toBeVisible();

@@ -89,6 +89,27 @@ export interface CrudCapabilities {
   canDelete: boolean;
 }
 
+/**
+ * AND two capability sets per field (WC-175, issue #199).
+ *
+ * The renderer must only show a write control when the spec defines the
+ * operation (`spec`, from {@link deriveCrudModel}) AND the server says the
+ * caller may perform it (`caller`, from `feature.capabilities`) — otherwise a
+ * submit would 403. A null/undefined side is treated as all-false, so a missing
+ * spec (failed schema load) or absent server capabilities degrades to no
+ * controls rather than a crash.
+ */
+export function effectiveCapabilities(
+  spec: CrudCapabilities | null | undefined,
+  caller: CrudCapabilities | null | undefined
+): CrudCapabilities {
+  return {
+    canCreate: (spec?.canCreate ?? false) && (caller?.canCreate ?? false),
+    canEdit: (spec?.canEdit ?? false) && (caller?.canEdit ?? false),
+    canDelete: (spec?.canDelete ?? false) && (caller?.canDelete ?? false),
+  };
+}
+
 export interface CrudModel {
   /** The resolved list-item schema, or null when it cannot be located. */
   itemSchema: SchemaObject | null;

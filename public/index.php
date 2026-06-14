@@ -245,6 +245,9 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'dashboard',
         'group' => 'admin',
         'order' => 1,
+        // WC-175 (#191): mirrors the dashboard's primary API (GET /api/admin/stats),
+        // which is gated on the 'admin' ROLE — so the nav item gates on the role.
+        'requiredRole' => 'admin',
     ];
     $items[] = [
         'id' => 'users',
@@ -253,6 +256,9 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'users',
         'group' => 'admin',
         'order' => 2,
+        // WC-175 (#191): mirrors GET /api/users, gated on the 'admin' ROLE (the
+        // admin role does not hold a users:read permission grant).
+        'requiredRole' => 'admin',
     ];
     $items[] = [
         'id' => 'roles',
@@ -261,6 +267,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'lock',
         'group' => 'admin',
         'order' => 3,
+        // WC-175 (#191): mirrors GET /api/roles, gated on the 'admin' ROLE.
+        'requiredRole' => 'admin',
     ];
     $items[] = [
         'id' => 'ous',
@@ -269,6 +277,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'building-community',
         'group' => 'admin',
         'order' => 4,
+        // WC-175 (#191): mirrors GET /api/ous, gated on the 'admin' ROLE.
+        'requiredRole' => 'admin',
     ];
     $items[] = [
         'id' => 'delegations',
@@ -303,6 +313,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'building',
         'group' => 'admin',
         'order' => 5,
+        // WC-175 (#191): mirrors GET /api/tenants, gated on the 'admin' ROLE.
+        'requiredRole' => 'admin',
     ];
     $items[] = [
         'id' => 'audit-logs',
@@ -311,6 +323,9 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'history',
         'group' => 'admin',
         'order' => 6,
+        // WC-175 (#191): mirrors GET /api/audit-logs, gated on the audit:read
+        // permission — so the nav item gates on the same permission.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::AUDIT_READ,
     ];
     $items[] = [
         'id' => 'settings',
@@ -416,7 +431,13 @@ $router->register('DELETE', '/api/tenants/{id:\d+}', [$tenantsHandler, 'delete']
 $permissionsHandler = new PermissionsApiHandler($db->getPdo());
 $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
 
-$navigationHandler = new NavigationApiHandler($hookManager);
+// Navigation menu items (WC-175, #191). Registered with NO required
+// role/permission — any authenticated caller may ask which menu items they may
+// see — but the handler fails closed itself (unresolved tenant or missing user
+// => 403) and filters every item per caller against RoleChecker server-side,
+// mirroring /api/frontend/features. Pass the delegation-aware $roleChecker so a
+// live delegation actually unlocks gated items.
+$navigationHandler = new NavigationApiHandler($hookManager, $roleChecker);
 $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
 
 // Plugin frontend feature descriptors (WC-169). Registered with NO required
@@ -425,7 +446,11 @@ $router->register('GET', '/api/navigation', [$navigationHandler, 'list']);
 // user => 403) and filters every descriptor per caller against RoleChecker
 // server-side. Descriptors are UI metadata only; the underlying plugin API
 // routes keep their own route-level RBAC.
-$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker);
+// WC-175 (#199): the handler also reads $router to compute each feature's
+// per-caller write capabilities (canCreate/canEdit/canDelete) server-side from
+// the resource's registered routes' RBAC, so the renderer can hide controls the
+// caller may not use.
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered with NO required role and NO

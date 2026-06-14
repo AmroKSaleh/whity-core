@@ -26,6 +26,7 @@ const FEATURE: PluginFeature = {
   screen: 'crud',
   resource: { basePath: '/api/hello/greetings', titleField: 'message' },
   requiredPermission: 'hello:view',
+  capabilities: { canCreate: true, canEdit: true, canDelete: false },
 };
 
 describe('fetchPluginFeatures', () => {
@@ -40,6 +41,12 @@ describe('fetchPluginFeatures', () => {
 
     expect(apiClientMock).toHaveBeenCalledWith('/api/frontend/features');
     expect(features).toEqual([FEATURE]);
+    // The server-computed write capabilities (issue #199) are carried through.
+    expect(features[0].capabilities).toEqual({
+      canCreate: true,
+      canEdit: true,
+      canDelete: false,
+    });
   });
 
   it('returns an empty list on a non-ok response', async () => {

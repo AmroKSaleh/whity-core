@@ -55,6 +55,7 @@ const FEATURE = {
   screen: 'crud' as const,
   resource: { basePath: '/api/hello/greetings', titleField: 'message' },
   requiredPermission: 'hello:view',
+  capabilities: { canCreate: true, canEdit: true, canDelete: true },
 };
 
 describe('PluginFeaturesProvider auth-awareness', () => {

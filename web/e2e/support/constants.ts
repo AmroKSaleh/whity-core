@@ -58,10 +58,12 @@ export const DELEGATED_PERMISSIONS = [
 ] as const;
 
 /**
- * Sidebar sections that exist for an authenticated user. The backend currently
- * returns the same navigation set for every role (access is enforced at the
- * data layer, not by hiding nav items), so both admin and regular users see
- * these links.
+ * Sidebar sections an ADMIN sees. `GET /api/navigation` is now RBAC-filtered
+ * per caller server-side (WC-175 #191): each link is returned only if the
+ * caller satisfies that page's RBAC, so the set differs by role (a plain user
+ * sees only "Settings"). This is the ADMIN-visible set — navigation.spec.ts
+ * runs authenticated as admin, which holds every gated permission and so sees
+ * all of these.
  */
 export const SIDEBAR_SECTIONS = [
   { label: 'Dashboard', href: '/admin' },

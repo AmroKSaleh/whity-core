@@ -11,12 +11,14 @@ import {
 /**
  * WC-173 role matrix — Delegations admin area (/admin/delegations).
  *
- * LIVE-VERIFIED access map for GET /api/delegations:
- *   admin    -> 200 (full management UI)
- *   user     -> 403 (Access denied card; delegation:manage is admin-role-gated)
- *   delegate -> 403 (delegation:manage is NOT in the delegated set — holding
- *               delegated permissions grants no access to the delegation
- *               management area itself)
+ * LIVE-VERIFIED access map (WC-175 #191: the nav link is RBAC-filtered on
+ * requiredPermission delegation:manage, and GET /api/delegations enforces it):
+ *   admin    -> link shown, 200 (full management UI)
+ *   user     -> link HIDDEN (delegation:manage is admin-role-gated; the link is
+ *               filtered out server-side, so the page is not reachable via nav)
+ *   delegate -> link HIDDEN (delegation:manage is NOT in the delegated set —
+ *               holding delegated permissions grants no access to the
+ *               delegation management area itself)
  *
  * DATA HYGIENE: the admin lifecycle delegates to a THROWAWAY user created per
  * run — never to the seeded accounts and never to the delegate fixture account
@@ -46,6 +48,14 @@ test.describe('Delegations (role matrix)', () => {
     role,
     page,
   }) => {
+    if (role !== 'admin') {
+      // user AND delegate: the Delegations nav link is filtered out server-side
+      // (neither holds delegation:manage), so the page is not reachable from
+      // the sidebar — the old in-page denied card surface is gone.
+      await expect(roleSession.shell.navLink('Delegations')).toHaveCount(0);
+      return;
+    }
+
     const listResponse = page.waitForResponse(
       (res) =>
         res.url().includes('/api/delegations') &&
@@ -53,33 +63,17 @@ test.describe('Delegations (role matrix)', () => {
     );
     await roleSession.shell.clickNav('Delegations');
     await page.waitForURL('**/admin/delegations');
-    expect((await listResponse).status()).toBe(role === 'admin' ? 200 : 403);
+    expect((await listResponse).status()).toBe(200);
 
     await expect(
       page.getByRole('heading', { name: 'Delegations' })
     ).toBeVisible();
-
-    if (role === 'admin') {
-      await expect(
-        page.getByRole('button', { name: 'Create Delegation' })
-      ).toBeVisible();
-      await expect(
-        page.getByRole('heading', { name: 'Access denied' })
-      ).toHaveCount(0);
-    } else {
-      // user AND delegate: same denied card, and no create affordance.
-      await expect(
-        page.getByRole('heading', { name: 'Access denied' })
-      ).toBeVisible();
-      await expect(
-        page.getByText(
-          'You need the delegation:manage permission to manage delegations.'
-        )
-      ).toBeVisible();
-      await expect(
-        page.getByRole('button', { name: 'Create Delegation' })
-      ).toHaveCount(0);
-    }
+    await expect(
+      page.getByRole('button', { name: 'Create Delegation' })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Access denied' })
+    ).toHaveCount(0);
   });
 
   test('admin can create a delegation and revoking removes it from the live list', async ({
