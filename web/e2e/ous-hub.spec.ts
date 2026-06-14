@@ -208,12 +208,12 @@ test.describe('OU Management Hub (admin)', () => {
     page,
   }) => {
     const suffix = uniqueSuffix();
-    const name = `e2e-hub-graph-${suffix}`;
+    const name = `e2e-hub-gv-${suffix}`;
     const id = await createOu(adminApi, name);
     created.push(id);
 
     await gotoHub(adminPage, page);
-    await page.getByRole('button', { name: 'Graph' }).click();
+    await page.getByRole('button', { name: 'Graph', exact: true }).click();
 
     // The react-flow canvas renders (lazy-loaded) with a node for the OU.
     const graph = page.getByTestId('ou-graph');

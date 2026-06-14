@@ -8,16 +8,15 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 
 export default function DemoDashboard() {
   const [isDark, setIsDark] = useState(false);
   const [selectedRole, setSelectedRole] = useState('admin');
 
   return (
-    <html className={isDark ? 'dark' : ''}>
-      <body className="bg-background text-foreground transition-colors">
-        <div className="min-h-screen">
-          {/* Header */}
+    <div className={cn('min-h-screen bg-background text-foreground transition-colors', isDark && 'dark')}>
+      {/* Header */}
           <header className="border-b border-border bg-card">
             <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
               <div>
@@ -339,8 +338,6 @@ export default function DemoDashboard() {
               </Card>
             </section>
           </main>
-        </div>
-      </body>
-    </html>
+    </div>
   );
 }
