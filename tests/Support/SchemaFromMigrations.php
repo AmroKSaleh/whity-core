@@ -221,20 +221,27 @@ final class SchemaFromMigrations
         $files = glob($dir . '/*.php') ?: [];
         sort($files);
 
-        foreach ($files as $file) {
-            $class = self::resolveMigrationClass($file);
-            try {
-                $class::up($db);
-            } catch (\Throwable $e) {
-                $msg = strtolower($e->getMessage());
-                if (
-                    str_contains($msg, 'alter sequence') ||
-                    str_contains($msg, 'near "type": syntax error')
-                ) {
-                    continue; // gracefully skip PG-only DDL
+        // Some migrations (e.g. 010) print to stdout (generated password notices).
+        // PHPUnit treats any test-time stdout output as a failure, so silence it.
+        ob_start();
+        try {
+            foreach ($files as $file) {
+                $class = self::resolveMigrationClass($file);
+                try {
+                    $class::up($db);
+                } catch (\Throwable $e) {
+                    $msg = strtolower($e->getMessage());
+                    if (
+                        str_contains($msg, 'alter sequence') ||
+                        str_contains($msg, 'near "type": syntax error')
+                    ) {
+                        continue; // gracefully skip PG-only DDL
+                    }
+                    throw $e;
                 }
-                throw $e;
             }
+        } finally {
+            ob_end_clean();
         }
     }
 
