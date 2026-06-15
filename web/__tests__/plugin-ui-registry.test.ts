@@ -16,6 +16,7 @@ function makeFeature(overrides: Partial<PluginFeature> = {}): PluginFeature {
     order: 10,
     screen: 'crud',
     resource: { basePath: '/api/hello/greetings', titleField: 'message' },
+    action: null,
     requiredPermission: 'hello:view',
     capabilities: { canCreate: true, canEdit: true, canDelete: true },
     ...overrides,

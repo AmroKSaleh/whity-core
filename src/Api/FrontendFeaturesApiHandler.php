@@ -137,6 +137,34 @@ final class FrontendFeaturesApiHandler
             ];
         }
 
+        $action = null;
+        if (isset($feature['action']) && is_array($feature['action'])) {
+            $rawFields = isset($feature['action']['fields']) && is_array($feature['action']['fields'])
+                ? $feature['action']['fields']
+                : [];
+            $fields = [];
+            foreach ($rawFields as $rawField) {
+                if (!is_array($rawField)) {
+                    continue;
+                }
+                $fields[] = [
+                    'name' => (string) ($rawField['name'] ?? ''),
+                    'label' => (string) ($rawField['label'] ?? ''),
+                    'kind' => (string) ($rawField['kind'] ?? 'text'),
+                    'accept' => isset($rawField['accept']) && is_string($rawField['accept']) ? $rawField['accept'] : null,
+                    'required' => (bool) ($rawField['required'] ?? false),
+                ];
+            }
+            $action = [
+                'method' => (string) ($feature['action']['method'] ?? 'POST'),
+                'path' => (string) ($feature['action']['path'] ?? ''),
+                'submitLabel' => isset($feature['action']['submitLabel']) && is_string($feature['action']['submitLabel'])
+                    ? $feature['action']['submitLabel']
+                    : null,
+                'fields' => $fields,
+            ];
+        }
+
         return [
             'id' => (string) ($feature['id'] ?? ''),
             'plugin' => (string) ($feature['plugin'] ?? ''),
@@ -146,6 +174,7 @@ final class FrontendFeaturesApiHandler
             'order' => (int) ($feature['order'] ?? 100),
             'screen' => (string) ($feature['screen'] ?? 'custom'),
             'resource' => $resource,
+            'action' => $action,
             'requiredPermission' => $permission,
             'capabilities' => $this->resolveCapabilities($basePath, $userId, $tenantId),
         ];

@@ -848,10 +848,23 @@ export interface components {
             group: string;
             order: number;
             /** @enum {string} */
-            screen: "crud" | "custom";
+            screen: "crud" | "custom" | "action";
             resource: {
                 basePath: string;
                 titleField: string | null;
+            } | null;
+            action: {
+                method: string;
+                path: string;
+                submitLabel: string | null;
+                fields: {
+                    name: string;
+                    label: string;
+                    /** @enum {string} */
+                    kind: "text" | "textarea" | "file";
+                    accept: string | null;
+                    required: boolean;
+                }[];
             } | null;
             requiredPermission: string;
             capabilities: {

@@ -940,7 +940,7 @@ final class CoreApiSchemas
                 'icon' => self::str(true),
                 'group' => self::str(),
                 'order' => self::int(),
-                'screen' => ['type' => 'string', 'enum' => ['crud', 'custom']],
+                'screen' => ['type' => 'string', 'enum' => ['crud', 'custom', 'action']],
                 'resource' => [
                     'type' => 'object',
                     'nullable' => true,
@@ -950,13 +950,35 @@ final class CoreApiSchemas
                     ],
                     'required' => ['basePath', 'titleField'],
                 ],
+                // WC-169 follow-up: present (non-null) only for screen=action —
+                // the route the generic form submits to plus its input fields.
+                'action' => [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'properties' => [
+                        'method' => self::str(),
+                        'path' => self::str(),
+                        'submitLabel' => self::str(true),
+                        'fields' => [
+                            'type' => 'array',
+                            'items' => self::object([
+                                'name' => self::str(),
+                                'label' => self::str(),
+                                'kind' => ['type' => 'string', 'enum' => ['text', 'textarea', 'file']],
+                                'accept' => self::str(true),
+                                'required' => self::bool(),
+                            ], ['name', 'label', 'kind', 'accept', 'required']),
+                        ],
+                    ],
+                    'required' => ['method', 'path', 'submitLabel', 'fields'],
+                ],
                 'requiredPermission' => self::str(),
                 'capabilities' => self::object([
                     'canCreate' => self::bool(),
                     'canEdit' => self::bool(),
                     'canDelete' => self::bool(),
                 ], ['canCreate', 'canEdit', 'canDelete']),
-            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'requiredPermission', 'capabilities']),
+            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'requiredPermission', 'capabilities']),
             'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
 
             // WC-176 (#205): the caller's effective permission slugs. Mirrors

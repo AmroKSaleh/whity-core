@@ -24,14 +24,39 @@ export interface PluginFeature {
   group: string;
   /** Sort order within the group. */
   order: number;
-  /** "crud" renders the generic schema-driven screen; "custom" expects a registered override. */
-  screen: 'crud' | 'custom';
-  /** REST resource backing a crud screen; null for custom screens without one. */
+  /**
+   * "crud" renders the generic schema-driven screen; "action" renders the
+   * generic action form; "custom" expects a registered override.
+   */
+  screen: 'crud' | 'custom' | 'action';
+  /** REST resource backing a crud screen; null for custom/action screens. */
   resource: {
     /** Collection endpoint, e.g. "/api/hello/greetings". */
     basePath: string;
     /** Item property naming a row in confirmations (falls back to id). */
     titleField: string | null;
+  } | null;
+  /** Action backing an "action" screen; null for crud/custom screens. */
+  action: {
+    /** HTTP method the form submits with ("POST" or "PUT"). */
+    method: string;
+    /** Handler endpoint the form submits to, e.g. "/api/bom/documents". */
+    path: string;
+    /** Submit-button label, or null for the default. */
+    submitLabel: string | null;
+    /** Inputs the generic form renders. */
+    fields: {
+      /** JSON property name the value is sent under. */
+      name: string;
+      /** Field label. */
+      label: string;
+      /** "text" | "textarea" | "file" (file is read as text into `name`). */
+      kind: 'text' | 'textarea' | 'file';
+      /** Accept filter for file inputs (e.g. ".csv"), or null. */
+      accept: string | null;
+      /** Whether the field is required. */
+      required: boolean;
+    }[];
   } | null;
   /** Permission the server used to filter this feature (informational). */
   requiredPermission: string;

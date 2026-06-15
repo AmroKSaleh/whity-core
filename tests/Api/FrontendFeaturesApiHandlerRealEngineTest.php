@@ -241,6 +241,7 @@ PHP);
             'order' => 7,
             'screen' => 'crud',
             'resource' => ['basePath' => '/api/featapi/widgets', 'titleField' => 'name'],
+            'action' => null,
             'requiredPermission' => 'featapi:view',
             'capabilities' => ['canCreate' => true, 'canEdit' => true, 'canDelete' => true],
         ], $byId['featapi-widgets']);
@@ -254,6 +255,7 @@ PHP);
             'order' => 100,
             'screen' => 'custom',
             'resource' => null,
+            'action' => null,
             'requiredPermission' => 'featapi:admin',
             'capabilities' => ['canCreate' => false, 'canEdit' => false, 'canDelete' => false],
         ], $byId['featapi-console'], "A custom screen without a resource carries resource: null and all-false capabilities");
