@@ -6,6 +6,7 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\AuditLogApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
@@ -275,30 +276,11 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * In-memory SQLite seeded with an audit_log schema that mirrors the migration
-     * closely enough to exercise the handler's real SQL. STRINGIFY_FETCHES mirrors
-     * PostgreSQL so int-vs-string comparison bugs surface (per the project rule).
+     * In-memory SQLite seeded with the full migration schema. STRINGIFY_FETCHES
+     * mirrors PostgreSQL so int-vs-string comparison bugs surface (per the project rule).
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, true);
-
-        $pdo->exec('
-            CREATE TABLE audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                actor_user_id INTEGER NULL,
-                action TEXT NOT NULL,
-                target_type TEXT NULL,
-                target_id INTEGER NULL,
-                metadata TEXT NOT NULL DEFAULT \'{}\',
-                ip_address TEXT NULL,
-                created_at TEXT NOT NULL
-            )
-        ');
-
-        return $pdo;
+        return SchemaFromMigrations::make(true);
     }
 }

@@ -7,6 +7,7 @@ namespace Tests\Api;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\MockRequestFactory;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\TenantsApiHandler;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
@@ -220,44 +221,11 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * Build an in-memory SQLite connection seeded with a tenants/users schema
-     * close enough to production to exercise the handler's real list SQL (the
-     * LEFT JOIN + COUNT aggregate). Two non-system tenants are seeded plus the
-     * reserved system tenant (id 0), which the listing must exclude.
+     * Build an in-memory SQLite connection seeded with the full migration schema.
+     * Tenants (System/0, Tenant A/1, Tenant B/2) are seeded by migrations.
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        // create() inserts with PostgreSQL's NOW(); register a UDF so the handler's
-        // statement runs unmodified against SQLite (mirrors the Roles real-engine test).
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        $pdo->exec('
-            CREATE TABLE tenants (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                slug TEXT,
-                created_at TEXT
-            )
-        ');
-        $pdo->exec("
-            INSERT INTO tenants (id, name, slug, created_at) VALUES
-                (0, 'System', 'system', datetime('now')),
-                (1, 'Tenant A', 'tenant-a', datetime('now')),
-                (2, 'Tenant B', 'tenant-b', datetime('now'))
-        ");
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                created_at TEXT
-            )
-        ');
-
-        return $pdo;
+        return SchemaFromMigrations::make();
     }
 }

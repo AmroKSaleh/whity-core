@@ -6,6 +6,7 @@ namespace Tests\Auth;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
@@ -377,47 +378,6 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT
-            )
-        ');
-        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES (1, 'admin', datetime('now')), (2, 'user', datetime('now'))");
-
-        // Note: a real `users` PK is (id) auto-increment; here the same user_id
-        // can appear under two tenants (id is not the PK) so the tenant-scoping
-        // test can seed (5, tenant 1) and (5, tenant 2) distinctly.
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER NOT NULL,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                created_at TEXT,
-                two_factor_enabled INTEGER DEFAULT 0,
-                two_factor_secret TEXT,
-                two_factor_backup_codes_version INTEGER DEFAULT 0,
-                token_epoch INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(tenant_id, email)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE revoked_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jti TEXT NOT NULL UNIQUE,
-                expires_at TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime(\'now\'))
-            )
-        ');
-
-        return $pdo;
+        return SchemaFromMigrations::make();
     }
 }

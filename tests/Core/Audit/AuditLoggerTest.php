@@ -6,6 +6,7 @@ namespace Tests\Core\Audit;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Audit\AuditContext;
 use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Hooks\HookManager;
@@ -217,26 +218,6 @@ final class AuditLoggerTest extends TestCase
 
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, true);
-        // SQLite has no NOW(); the writer uses NOW() in its INSERT.
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        $pdo->exec('
-            CREATE TABLE audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                actor_user_id INTEGER NULL,
-                action TEXT NOT NULL,
-                target_type TEXT NULL,
-                target_id INTEGER NULL,
-                metadata TEXT NOT NULL DEFAULT \'{}\',
-                ip_address TEXT NULL,
-                created_at TEXT NOT NULL
-            )
-        ');
-
-        return $pdo;
+        return SchemaFromMigrations::make(true);
     }
 }

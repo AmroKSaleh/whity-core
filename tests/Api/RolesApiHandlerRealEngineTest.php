@@ -7,6 +7,7 @@ namespace Tests\Api;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\MockRequestFactory;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\RolesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Hooks\HookManager;
@@ -422,11 +423,14 @@ final class RolesApiHandlerRealEngineTest extends TestCase
     /**
      * Seed a GLOBAL/system role (NULL tenant_id) — the production state of the
      * seeded base roles after migration 018 with no backfill.
+     *
+     * Uses INSERT OR IGNORE because migrations already seed admin (id 1) and
+     * user (id 2); this is a no-op for those rows and still inserts any new ones.
      */
     private function seedGlobalRole(int $id, string $name): void
     {
         $stmt = $this->pdo->prepare(
-            "INSERT INTO roles (id, name, description, tenant_id, created_at)
+            "INSERT OR IGNORE INTO roles (id, name, description, tenant_id, created_at)
              VALUES (?, ?, '', NULL, datetime('now'))"
         );
         $stmt->execute([$id, $name]);
@@ -444,80 +448,10 @@ final class RolesApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * Build an in-memory SQLite connection seeded with a roles/permissions schema
-     * that mirrors the production migrations closely enough to exercise the
-     * handler's real SQL.
-     *
-     * A `NOW()` UDF is registered because the handler's INSERTs use PostgreSQL's
-     * NOW(); SQLite has no such function natively.
+     * Build an in-memory SQLite connection seeded with the full migration schema.
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        $pdo->exec('CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT)');
-        $pdo->exec("INSERT INTO tenants (id, name) VALUES (0, 'system'), (1, 'tenant-a'), (2, 'tenant-b')");
-
-        // roles now carries a nullable tenant_id (WC-110 defect 2 fix).
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT DEFAULT \'\',
-                parent_id INTEGER,
-                tenant_id INTEGER,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT
-            )
-        ');
-        $pdo->exec("
-            INSERT INTO permissions (id, name, description) VALUES
-                (1, 'users:read', null),
-                (2, 'roles:read', null),
-                (3, 'tenants:read', null)
-        ");
-
-        $pdo->exec('
-            CREATE TABLE role_permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
-                permission_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(role_id, permission_id)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE user_roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(user_id, role_id)
-            )
-        ');
-
-        return $pdo;
+        return SchemaFromMigrations::make();
     }
 }

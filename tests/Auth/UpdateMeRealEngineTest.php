@@ -6,6 +6,7 @@ namespace Tests\Auth;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
@@ -329,43 +330,6 @@ final class UpdateMeRealEngineTest extends TestCase
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT
-            )
-        ');
-        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES (1, 'admin', datetime('now')), (2, 'user', datetime('now'))");
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                created_at TEXT,
-                token_epoch INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(tenant_id, email)
-            )
-        ');
-
-        // WC-185: a password change revokes the caller's current jtis into the
-        // global revoked_tokens table, so the table must exist here too.
-        $pdo->exec('
-            CREATE TABLE revoked_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jti TEXT NOT NULL UNIQUE,
-                expires_at TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime(\'now\'))
-            )
-        ');
-
-        return $pdo;
+        return SchemaFromMigrations::make();
     }
 }

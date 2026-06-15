@@ -7,6 +7,7 @@ namespace Tests\Integration;
 use HelloWorld\Api\GreetingsApiHandler;
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\AuditLogApiHandler;
 use Whity\Api\OusApiHandler;
 use Whity\Api\RolesApiHandler;
@@ -798,107 +799,48 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     }
 
     /**
-     * In-memory SQLite with the production-shaped schema for every table this
-     * suite covers, seeded with disjoint Tenant A / Tenant B rows.
+     * In-memory SQLite with the full production schema (via migrations) seeded
+     * with disjoint Tenant A / Tenant B rows.
      * PDO::ATTR_STRINGIFY_FETCHES mirrors PostgreSQL's string fetches so int
      * comparisons that only pass natively would fail here too.
      */
     private function makeSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, true);
-        // Let the handlers' PostgreSQL-flavoured NOW() run unmodified on SQLite,
-        // matching the other RealEngine harnesses.
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+        $pdo = SchemaFromMigrations::make(true);
 
-        $pdo->exec('CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT)');
-        $pdo->exec("INSERT INTO tenants (id, name) VALUES (0, 'system'), (1, 'tenant-a'), (2, 'tenant-b')");
+        // system tenant (id=0) comes from migration 010 — use INSERT OR IGNORE.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (0, 'system')");
+        // Test tenants (id=1, 2) are test-specific — plain INSERT.
+        $pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
 
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT DEFAULT \'\',
-                parent_id INTEGER,
-                tenant_id INTEGER,
-                created_at TEXT
-            )
-        ');
+        // Global roles (1=admin, 2=user) come from migrations — INSERT OR IGNORE.
+        $pdo->exec("
+            INSERT OR IGNORE INTO roles (id, name, description, tenant_id, created_at) VALUES
+                (1, 'admin', '', NULL, datetime('now')),
+                (2, 'user',  '', NULL, datetime('now'))
+        ");
+        // Test-specific tenant-private roles are NOT from migrations — plain INSERT.
         $pdo->exec("
             INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES
-                (1,   'admin',            '', NULL, datetime('now')),
-                (2,   'user',             '', NULL, datetime('now')),
-                (100, 'tenant-a-private', '', 1,    datetime('now')),
-                (200, 'tenant-b-private', '', 2,    datetime('now'))
+                (100, 'tenant-a-private', '', 1, datetime('now')),
+                (200, 'tenant-b-private', '', 2, datetime('now'))
         ");
 
-        $pdo->exec('
-            CREATE TABLE permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT
-            )
-        ');
-        // role_permissions carries NO tenant_id column: a grant inherits its
-        // tenant transitively from the owning role (roles.tenant_id). The WC-190
-        // predicate must therefore scope the junction DELETE via the parent role.
-        $pdo->exec('
-            CREATE TABLE role_permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
-                permission_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(role_id, permission_id)
-            )
-        ');
-        // user_roles DOES carry tenant_id (migration 012); the WC-190 predicate
-        // scopes its DELETE on that column directly.
-        $pdo->exec('
-            CREATE TABLE user_roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                tenant_id INTEGER,
-                created_at TEXT
-            )
-        ');
-        // Grants and assignments for Tenant B's PRIVATE role 200, so a rejected
+        // Grants and assignments for both tenant-private roles so a rejected
         // cross-tenant role delete/update can be proven to leave them intact.
+        // users:read (id=1) is seeded by migration 002 — use INSERT OR IGNORE.
+        $pdo->exec("INSERT OR IGNORE INTO permissions (id, name, description) VALUES (1, 'users:read', 'Read users')");
         $pdo->exec("
-            INSERT INTO permissions (id, name, description) VALUES
-                (1, 'users:read', 'Read users')
+            INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES
+                (100, 1, datetime('now')),
+                (200, 1, datetime('now'))
         ");
-        $pdo->exec('
-            INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
-                (100, 1, datetime(\'now\')),
-                (200, 1, datetime(\'now\'))
-        ');
-        $pdo->exec('
+        $pdo->exec("
             INSERT INTO user_roles (user_id, role_id, tenant_id, created_at) VALUES
-                (11, 100, 1, datetime(\'now\')),
-                (21, 200, 2, datetime(\'now\'))
-        ');
+                (11, 100, 1, datetime('now')),
+                (21, 200, 2, datetime('now'))
+        ");
 
-        // The 2FA columns (two_factor_*) and token_epoch mirror the production
-        // users table after migrations 007 (two-factor support) and the WC-185
-        // epoch bump, so the REAL 2FA handlers and TokenValidator run unmodified
-        // here (WC-191).
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                ou_id INTEGER,
-                two_factor_secret TEXT,
-                two_factor_enabled BOOLEAN DEFAULT 0,
-                two_factor_backup_codes_version INTEGER DEFAULT 0,
-                token_epoch INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT
-            )
-        ');
         // Tenant A user 10 and Tenant B user 20 both have 2FA ENABLED at version
         // 1, so a cross-tenant 2FA read/write can be proven to leave the foreign
         // row's 2FA state byte-for-byte intact (WC-191).
@@ -910,79 +852,19 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (21, 2, 'b2@t2.example', 'x', 2, NULL,       0, 0, datetime('now'))
         ");
 
-        // Global (non-tenant-scoped) JWT revocation table; the real TokenValidator
-        // checks every access token against it, so it must exist for the 2FA
-        // handler tests that mint real tokens (WC-191).
-        $pdo->exec('
-            CREATE TABLE revoked_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jti TEXT NOT NULL UNIQUE,
-                expires_at TEXT NOT NULL
-            )
-        ');
-
-        // backup_codes is keyed on user_id only (no tenant_id column — it inherits
-        // its tenant transitively from the owning user, FK ON DELETE CASCADE).
-        // Seeded so the real BackupCodesService runs during regenerate/disable.
-        $pdo->exec('
-            CREATE TABLE backup_codes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                code TEXT NOT NULL,
-                version INTEGER NOT NULL DEFAULT 1,
-                used BOOLEAN NOT NULL DEFAULT 0,
-                used_at TEXT,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE organizational_units (
-                id INTEGER PRIMARY KEY,
-                tenant_id INTEGER NOT NULL,
-                parent_id INTEGER,
-                name TEXT NOT NULL,
-                slug TEXT NOT NULL,
-                description TEXT DEFAULT \'\',
-                created_at TEXT
-            )
-        ');
         $pdo->exec("
             INSERT INTO organizational_units (id, tenant_id, parent_id, name, slug, description, created_at) VALUES
                 (10, 1, NULL, 'A-Engineering', 'a-engineering', '', datetime('now')),
                 (20, 2, NULL, 'B-Sales',       'b-sales',       '', datetime('now'))
         ");
 
-        $pdo->exec('
-            CREATE TABLE ou_role_assignments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                ou_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(ou_id, role_id)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                actor_user_id INTEGER NULL,
-                action TEXT NOT NULL,
-                target_type TEXT NULL,
-                target_id INTEGER NULL,
-                metadata TEXT NOT NULL DEFAULT \'{}\',
-                ip_address TEXT NULL,
-                created_at TEXT NOT NULL
-            )
-        ');
         $pdo->exec("
             INSERT INTO audit_log (tenant_id, actor_user_id, action, metadata, created_at) VALUES
                 (1, 10, 'tenant-a.action', '{}', datetime('now')),
                 (2, 20, 'tenant-b.action', '{}', datetime('now'))
         ");
 
+        // hello_greetings is NOT from core migrations (it's a plugin table) — create it here.
         $pdo->exec('
             CREATE TABLE hello_greetings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -997,20 +879,6 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (20, 2, 'b-greeting', datetime('now'))
         ");
 
-        $pdo->exec("
-            CREATE TABLE permission_delegations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                grantor_user_id INTEGER NOT NULL,
-                grantee_type TEXT NOT NULL,
-                grantee_id INTEGER NOT NULL,
-                permission TEXT NOT NULL,
-                ou_id INTEGER,
-                granted_at TEXT,
-                revoked_at TEXT,
-                CHECK (grantee_type IN ('role', 'user'))
-            )
-        ");
         $pdo->exec("
             INSERT INTO permission_delegations
                 (id, tenant_id, grantor_user_id, grantee_type, grantee_id, permission, granted_at) VALUES

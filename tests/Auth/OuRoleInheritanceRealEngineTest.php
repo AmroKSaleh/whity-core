@@ -6,6 +6,7 @@ namespace Tests\Auth;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Database\Database;
@@ -362,78 +363,10 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
      */
     private function makeSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                parent_id INTEGER,
-                tenant_id INTEGER,
-                created_at TEXT
-            )
-        ');
-        // Base roles (001) + a couple of common custom roles used by the tests.
-        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES
-            (1, 'admin', NOW()), (2, 'user', NOW()), (3, 'editor', NOW()), (4, 'viewer', NOW())");
-
-        $pdo->exec('
-            CREATE TABLE permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE role_permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL REFERENCES roles(id),
-                permission_id INTEGER NOT NULL REFERENCES permissions(id),
-                created_at TEXT,
-                UNIQUE(role_id, permission_id)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE organizational_units (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                parent_id INTEGER,
-                name TEXT NOT NULL,
-                slug TEXT NOT NULL,
-                description TEXT DEFAULT \'\',
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE ou_role_assignments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                ou_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(ou_id, role_id)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                ou_id INTEGER,
-                created_at TEXT
-            )
-        ');
-
+        $pdo = SchemaFromMigrations::make();
+        // Migrations seed admin(1) and user(2); seed the extra roles used by these tests.
+        $pdo->exec("INSERT OR IGNORE INTO roles (id, name, created_at) VALUES
+            (3, 'editor', NOW()), (4, 'viewer', NOW())");
         return $pdo;
     }
 }

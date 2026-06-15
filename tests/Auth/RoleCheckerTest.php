@@ -7,6 +7,7 @@ namespace Tests\Auth;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Database\Database;
@@ -331,76 +332,19 @@ class RoleCheckerTest extends TestCase
 
     private function makeSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+        $pdo = SchemaFromMigrations::make();
 
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                parent_id INTEGER,
-                tenant_id INTEGER,
-                created_at TEXT
-            )
-        ');
-        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES
-            (1, 'super_admin', NOW()), (2, 'admin', NOW()), (3, 'editor', NOW()),
-            (4, 'viewer', NOW()), (5, 'user', NOW())");
+        // Migrations seed admin(id=1) and user(id=2).  Add the extra roles that
+        // this test suite exercises via name-based lookups (roleId() resolves by
+        // name, so the auto-assigned ids don't matter).
+        $pdo->exec("INSERT OR IGNORE INTO roles (name, created_at) VALUES
+            ('super_admin', datetime('now')),
+            ('editor',      datetime('now')),
+            ('viewer',      datetime('now'))");
 
-        $pdo->exec('
-            CREATE TABLE permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE role_permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL REFERENCES roles(id),
-                permission_id INTEGER NOT NULL REFERENCES permissions(id),
-                created_at TEXT,
-                UNIQUE(role_id, permission_id)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE organizational_units (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                parent_id INTEGER,
-                name TEXT NOT NULL,
-                slug TEXT NOT NULL,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE ou_role_assignments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                ou_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(ou_id, role_id)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                ou_id INTEGER,
-                created_at TEXT
-            )
-        ');
+        // Migration 001 seeds only the System tenant (id=0).  seedUser() inserts
+        // rows with tenant_id=1 (TENANT constant), so add a test tenant.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'test-tenant')");
 
         return $pdo;
     }

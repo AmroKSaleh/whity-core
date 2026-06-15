@@ -7,6 +7,7 @@ namespace Tests\Api;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\MockRequestFactory;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\OusApiHandler;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
@@ -429,8 +430,8 @@ final class OusApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * Build an in-memory SQLite connection seeded with an OUs/roles/users schema
-     * close enough to production to exercise the handler's real SQL.
+     * Build an in-memory SQLite connection seeded with the full migration schema,
+     * plus the OUs and tenant-specific roles required by these tests.
      *
      *  - OU 10 (Engineering, root) → 11 (Backend) → 12 (Platform); 10 → 13 (Frontend).
      *  - OU 14 (Sales, root, tenant 1); OU 30 (Other, tenant 2).
@@ -438,31 +439,12 @@ final class OusApiHandlerRealEngineTest extends TestCase
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        // Mirror production PostgreSQL's PDO behaviour: pgsql returns integer
-        // columns as PHP strings ("10"), whereas in-memory SQLite returns native
-        // ints by default. Forcing string fetches here reproduces the real-DB
-        // type semantics so the cycle-prevention guard is exercised exactly as it
-        // runs in production (the prior strict `===` int/string mismatch let a
-        // descendant-move slip through against Postgres while passing on SQLite).
-        $pdo->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, true);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+        $pdo = SchemaFromMigrations::make(true);
 
-        $pdo->exec('CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT)');
-        $pdo->exec("INSERT INTO tenants (id, name) VALUES (0, 'system'), (1, 'tenant-a'), (2, 'tenant-b')");
+        // System tenant (id=0) comes from migrations; test tenants (1, 2) are test-specific.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (0, 'system')");
+        $pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
 
-        $pdo->exec('
-            CREATE TABLE organizational_units (
-                id INTEGER PRIMARY KEY,
-                tenant_id INTEGER NOT NULL,
-                parent_id INTEGER,
-                name TEXT NOT NULL,
-                slug TEXT NOT NULL,
-                description TEXT DEFAULT \'\',
-                created_at TEXT
-            )
-        ');
         $pdo->exec("
             INSERT INTO organizational_units (id, tenant_id, parent_id, name, slug, description, created_at) VALUES
                 (10, 1, NULL, 'Engineering', 'engineering', '', datetime('now')),
@@ -473,45 +455,12 @@ final class OusApiHandlerRealEngineTest extends TestCase
                 (30, 2, NULL, 'Other',       'other',       '', datetime('now'))
         ");
 
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT DEFAULT \'\',
-                tenant_id INTEGER,
-                created_at TEXT
-            )
-        ');
+        // Tenant-specific roles (not seeded by migrations).
         $pdo->exec("
             INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES
-                (1,   'admin',        'Administrator', NULL, datetime('now')),
-                (2,   'user',         'Standard user', NULL, datetime('now')),
-                (100, 'tenant-a-role','Tenant A role', 1,    datetime('now')),
-                (200, 'tenant-b-role','Tenant B role', 2,    datetime('now'))
+                (100, 'tenant-a-role', 'Tenant A role', 1, datetime('now')),
+                (200, 'tenant-b-role', 'Tenant B role', 2, datetime('now'))
         ");
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER NOT NULL,
-                ou_id INTEGER,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE ou_role_assignments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                ou_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(ou_id, role_id)
-            )
-        ');
 
         return $pdo;
     }
