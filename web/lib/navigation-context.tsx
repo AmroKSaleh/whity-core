@@ -60,7 +60,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
       let fetched: NavigationItem[] = [];
       if (userId !== null) {
         try {
-          const response = await fetch('/api/navigation', {
+          const response = await fetch('/api/v1/navigation', {
             credentials: 'include',
           });
           if (!response.ok) throw new Error('Failed to fetch navigation');

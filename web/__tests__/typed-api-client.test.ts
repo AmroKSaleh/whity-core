@@ -80,7 +80,7 @@ describe('typed api client — 401 silent refresh', () => {
 
     // Second call is the refresh: POST /api/v1/auth/refresh with credentials
     // and the CSRF header (the backend rejects auth POSTs without it).
-    expect(calls[1].url).toBe(`${BASE}/api/v1/v1/auth/refresh`);
+    expect(calls[1].url).toBe(`${BASE}/api/v1/auth/refresh`);
     expect(calls[1].method).toBe('POST');
     expect(calls[1].credentials).toBe('include');
     expect(calls[1].headers.get('X-Requested-With')).toBe('XMLHttpRequest');

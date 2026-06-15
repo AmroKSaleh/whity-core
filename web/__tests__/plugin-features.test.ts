@@ -40,7 +40,7 @@ describe('fetchPluginFeatures', () => {
 
     const features = await fetchPluginFeatures();
 
-    expect(apiClientMock).toHaveBeenCalledWith('/api/frontend/features');
+    expect(apiClientMock).toHaveBeenCalledWith('/api/v1/frontend/features');
     expect(features).toEqual([FEATURE]);
     // The server-computed write capabilities (issue #199) are carried through.
     expect(features[0].capabilities).toEqual({

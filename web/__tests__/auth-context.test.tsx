@@ -56,7 +56,7 @@ describe('AuthContext', () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/me'),
+      expect.stringContaining('/api/v1/me'),
       expect.objectContaining({ credentials: 'include' })
     );
   });
@@ -200,7 +200,7 @@ describe('AuthContext', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/auth/logout'),
+        expect.stringContaining('/api/v1/auth/logout'),
         expect.objectContaining({
           method: 'POST',
           credentials: 'include',
@@ -302,7 +302,7 @@ describe('AuthContext', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/me'),
+        expect.stringContaining('/api/v1/me'),
         expect.any(Object)
       );
     });
@@ -393,7 +393,7 @@ describe('AuthContext', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/login'),
+        expect.stringContaining('/api/v1/login'),
         expect.objectContaining({
           credentials: 'include',
         })
