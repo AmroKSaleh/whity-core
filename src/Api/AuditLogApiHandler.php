@@ -136,6 +136,7 @@ final class AuditLogApiHandler
             $where = $conditions === [] ? '' : (' WHERE ' . implode(' AND ', $conditions));
 
             // Total count for pagination metadata.
+            // @tenant-guard-ignore: tenant_id predicate is appended to $where only for non-system tenants; system tenant (id 0) reads all audit rows by design
             $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM audit_log' . $where);
             $countStmt->execute($params);
             $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
@@ -147,6 +148,7 @@ final class AuditLogApiHandler
 
             // Newest-first; bound LIMIT/OFFSET as integers (cast, not interpolated
             // arbitrary input — both are validated non-negative ints above).
+            // @tenant-guard-ignore: tenant_id predicate is appended to $where only for non-system tenants; system tenant (id 0) reads all audit rows by design
             $listStmt = $this->db->prepare(
                 'SELECT id, tenant_id, actor_user_id, action, target_type, target_id, metadata, ip_address, created_at
                  FROM audit_log' . $where . '

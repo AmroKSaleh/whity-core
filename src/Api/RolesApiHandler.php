@@ -105,6 +105,7 @@ class RolesApiHandler
 
             // SYSTEM tenant (id 0) sees every role across all tenants.
             if ($tenantId === 0) {
+                // @tenant-guard-ignore: system-tenant (id 0) lists roles across all tenants; scoped else-branch binds (r.tenant_id = ? OR r.tenant_id IS NULL)
                 $stmt = $this->db->prepare('
                     SELECT r.id, r.name, r.description, r.parent_id, r.created_at,
                            COUNT(rp.id) AS permission_count
@@ -177,6 +178,7 @@ class RolesApiHandler
                 return Response::error('Role not found', 404);
             }
 
+            // @tenant-guard-ignore: role visibility already enforced by roleVisibleToTenant($id,$tenantId) guard above
             $stmt = $this->db->prepare('
                 SELECT id, name, description, parent_id, created_at
                 FROM roles
@@ -233,6 +235,7 @@ class RolesApiHandler
             $permissions = $this->extractPermissionList($body);
 
             // Role names are globally unique at the database layer.
+            // @tenant-guard-ignore: role-name uniqueness check is intentionally platform-global (role names are globally unique)
             $checkStmt = $this->db->prepare('SELECT id FROM roles WHERE name = ?');
             $checkStmt->execute([$name]);
             if ($checkStmt->fetch()) {
@@ -341,6 +344,7 @@ class RolesApiHandler
 
             $body = JsonBody::parsed($request);
 
+            // @tenant-guard-ignore: role manageability already enforced by roleManageableByTenant($id,$tenantId) guard above
             $stmt = $this->db->prepare('SELECT * FROM roles WHERE id = ?');
             $stmt->execute([$id]);
             $role = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -360,6 +364,7 @@ class RolesApiHandler
             $updateParams = [];
 
             if (isset($body['name']) && $body['name'] !== $role['name']) {
+                // @tenant-guard-ignore: role-name uniqueness check is intentionally platform-global (role names are globally unique)
                 $checkStmt = $this->db->prepare('SELECT id FROM roles WHERE name = ? AND id != ?');
                 $checkStmt->execute([$body['name'], $id]);
                 if ($checkStmt->fetch()) {
@@ -552,6 +557,7 @@ class RolesApiHandler
     private function roleVisibleToTenant(int $roleId, ?int $tenantId): bool
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT id FROM roles WHERE id = ?');
             $stmt->execute([$roleId]);
             return $stmt->fetch() !== false;
@@ -588,6 +594,7 @@ class RolesApiHandler
     {
         if ($tenantId === 0) {
             // SYSTEM tenant may manage any role, including global (NULL) roles.
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT id FROM roles WHERE id = ?');
             $stmt->execute([$roleId]);
             return $stmt->fetch() !== false;
@@ -662,6 +669,7 @@ class RolesApiHandler
     protected function deleteRoleScoped(int $roleId, ?int $tenantId): void
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('DELETE FROM roles WHERE id = ?');
             $stmt->execute([$roleId]);
             return;
@@ -726,6 +734,7 @@ class RolesApiHandler
     protected function deleteUserRolesScoped(int $roleId, ?int $tenantId): void
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('DELETE FROM user_roles WHERE role_id = ?');
             $stmt->execute([$roleId]);
             return;
@@ -753,6 +762,7 @@ class RolesApiHandler
     private function roleHasActiveUsers(int $roleId, ?int $tenantId): bool
     {
         if ($tenantId === 0 || $tenantId === null) {
+            // @tenant-guard-ignore: system-tenant (id 0) counts references across all tenants; scoped else-branch binds tenant_id in both subqueries
             $stmt = $this->db->prepare('
                 SELECT (
                     (SELECT COUNT(*) FROM users WHERE role_id = ?)

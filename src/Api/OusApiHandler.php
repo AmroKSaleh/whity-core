@@ -48,6 +48,7 @@ class OusApiHandler
 
             // System users (tenant_id=0) can see all OUs from all tenants
             if ($tenantId === 0) {
+                // @tenant-guard-ignore: system-tenant (id 0) lists OUs across all tenants; scoped else-branch binds tenant_id
                 $stmt = $this->db->prepare('
                     SELECT id, tenant_id, parent_id, name, slug, description, created_at
                     FROM organizational_units
@@ -586,6 +587,7 @@ class OusApiHandler
             // tenant this equals $tenantId; for the system tenant we read the
             // OU's own tenant so assignments are matched on the same tenant_id
             // they were written with.
+            // @tenant-guard-ignore: OU visibility already enforced by ouIsVisible($id,$tenantId) guard above; lookup keyed on the visible ou_id
             $assignmentStmt = $this->db->prepare('
                 SELECT r.id, r.name, r.description
                 FROM ou_role_assignments ora
@@ -634,6 +636,7 @@ class OusApiHandler
                 return Response::error('Organizational unit not found', 404);
             }
 
+            // @tenant-guard-ignore: OU visibility already enforced by ouIsVisible($id,$tenantId) guard above; lookup keyed on the visible ou_id
             $stmt = $this->db->prepare('
                 SELECT u.id, u.email, u.created_at, u.tenant_id, r.name AS role
                 FROM users u
@@ -664,6 +667,7 @@ class OusApiHandler
     private function ouIsVisible(int $ouId, int $tenantId): bool
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) lists OUs across all tenants; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT 1 FROM organizational_units WHERE id = ?');
             $stmt->execute([$ouId]);
         } else {

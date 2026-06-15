@@ -252,6 +252,7 @@ class RelationResolver
      */
     private function findUser(int $userId): ?array
     {
+        // @tenant-guard-ignore: deliberate unscoped by-PK read; cross-tenant access is enforced in PHP by requireUserVisible() at the call sites
         $stmt = $this->db->prepare('SELECT id, tenant_id, email FROM users WHERE id = :id');
         $stmt->execute([':id' => $userId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

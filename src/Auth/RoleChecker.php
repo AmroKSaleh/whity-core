@@ -167,6 +167,7 @@ class RoleChecker
      */
     public function getRoleForUser(int $userId): ?string
     {
+        // @tenant-guard-ignore: lookup by globally-unique user id (SERIAL PK); a PK match returns at most one row regardless of tenant
         $sql = 'SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = :userId';
         $statement = $this->db->query($sql, [':userId' => $userId]);
         $result = $statement->fetch();
@@ -248,6 +249,7 @@ class RoleChecker
      */
     public function getPermissionsForUser(int $userId): array
     {
+        // @tenant-guard-ignore: lookup by globally-unique user id (SERIAL PK); a PK match returns at most one row regardless of tenant
         $sql = 'SELECT DISTINCT p.name
                 FROM role_permissions rp
                 JOIN users u ON u.role_id = rp.role_id
@@ -474,6 +476,7 @@ class RoleChecker
      */
     private function getRoleIdForUser(int $userId): ?int
     {
+        // @tenant-guard-ignore: lookup by globally-unique user id (SERIAL PK); a PK match returns at most one row regardless of tenant
         $statement = $this->db->query(
             'SELECT role_id FROM users WHERE id = :userId',
             [':userId' => $userId]
@@ -658,6 +661,7 @@ class RoleChecker
      */
     private function getRoleName(int $roleId): ?string
     {
+        // @tenant-guard-ignore: lookup by globally-unique role id (SERIAL PK)
         $statement = $this->db->query(
             'SELECT name FROM roles WHERE id = :roleId',
             [':roleId' => $roleId]
@@ -705,6 +709,7 @@ class RoleChecker
      */
     private function getParentRoleId(int $roleId): ?int
     {
+        // @tenant-guard-ignore: role-hierarchy traversal by globally-unique role id (SERIAL PK); the role hierarchy is tenant-independent
         $statement = $this->db->query(
             'SELECT parent_id FROM roles WHERE id = :roleId',
             [':roleId' => $roleId]

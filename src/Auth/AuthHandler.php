@@ -193,6 +193,7 @@ class AuthHandler
 
         // Query user by email with 2FA fields (globally unique). token_epoch is
         // selected so issued tokens carry the user's CURRENT epoch (WC-185).
+        // @tenant-guard-ignore: login resolves a user by globally-unique email (platform identity convention); tenant is derived from the matched row
         $stmt = $this->db->prepare('
             SELECT id, email, password, role_id, tenant_id, two_factor_enabled, two_factor_secret, two_factor_backup_codes_version, token_epoch
             FROM users
@@ -247,6 +248,7 @@ class AuthHandler
         }
 
         // Get role name
+        // @tenant-guard-ignore: role-name lookup by globally-unique role id (SERIAL PK); the role id was just read from the authenticated user row
         $roleStmt = $this->db->prepare('SELECT name FROM roles WHERE id = ?');
         $roleStmt->execute([$user['role_id']]);
         $roleData = $roleStmt->fetch(PDO::FETCH_ASSOC);
@@ -509,6 +511,7 @@ class AuthHandler
     {
         $roleName = '';
         if (isset($user['role_id'])) {
+            // @tenant-guard-ignore: role-name lookup by globally-unique role id (SERIAL PK); the role id was just read from the authenticated user row
             $roleStmt = $this->db->prepare('SELECT name FROM roles WHERE id = ?');
             $roleStmt->execute([$user['role_id']]);
             $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
@@ -817,6 +820,7 @@ class AuthHandler
         // The SYSTEM tenant (id 0) — and a token missing the claim — stay unscoped,
         // matching the platform convention.
         if ($tenantId === null || (int) $tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant / unresolved-context branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('
                 SELECT id, email, role_id, tenant_id, two_factor_secret, two_factor_backup_codes_version
                 FROM users
@@ -912,6 +916,7 @@ class AuthHandler
         $email = $claims['email'];
 
         // Get role name
+        // @tenant-guard-ignore: role-name lookup keyed on the authenticated user's globally-unique id (SERIAL PK)
         $roleStmt = $this->db->prepare('SELECT name FROM roles WHERE id = (SELECT role_id FROM users WHERE id = ?)');
         $roleStmt->execute([$userId]);
         $roleData = $roleStmt->fetch(PDO::FETCH_ASSOC);

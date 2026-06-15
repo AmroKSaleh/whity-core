@@ -133,6 +133,7 @@ class TwoFactorHandler
             // WC-191: pin the self read to the caller's tenant (system stays unscoped).
             $tenantId = $this->scopeTenantId();
             if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
                 $stmt = $this->db->prepare('SELECT email, two_factor_enabled FROM users WHERE id = ?');
                 $stmt->execute([$userId]);
             } else {
@@ -213,6 +214,7 @@ class TwoFactorHandler
             // WC-191: pin the self write to the caller's tenant (system stays unscoped).
             $tenantId = $this->scopeTenantId();
             if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
                 $stmt = $this->db->prepare('
                     UPDATE users
                     SET two_factor_secret = ?, two_factor_enabled = true, two_factor_backup_codes_version = 1
@@ -280,6 +282,7 @@ class TwoFactorHandler
 
             // Get current version before disabling
             if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
                 $stmt = $this->db->prepare('
                     SELECT two_factor_backup_codes_version
                     FROM users
@@ -310,6 +313,7 @@ class TwoFactorHandler
             // Disable 2FA
             // WC-191: pin the self write to the caller's tenant (system stays unscoped).
             if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
                 $updateStmt = $this->db->prepare('
                     UPDATE users
                     SET two_factor_enabled = false
@@ -364,6 +368,7 @@ class TwoFactorHandler
 
             // Get user and check if 2FA is enabled
             if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
                 $stmt = $this->db->prepare('
                     SELECT two_factor_enabled, two_factor_backup_codes_version
                     FROM users
@@ -399,6 +404,7 @@ class TwoFactorHandler
             // Increment version in users table
             // WC-191: pin the self write to the caller's tenant (system stays unscoped).
             if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
                 $updateStmt = $this->db->prepare('
                     UPDATE users
                     SET two_factor_backup_codes_version = ?
@@ -463,6 +469,7 @@ class TwoFactorHandler
             // WC-191: pin the self read to the caller's tenant (system stays unscoped).
             $tenantId = $this->scopeTenantId();
             if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
                 $stmt = $this->db->prepare('
                     SELECT two_factor_enabled, two_factor_backup_codes_version
                     FROM users

@@ -278,6 +278,7 @@ class DelegationsApiHandler
     {
         if ($granteeType === DelegationRepository::GRANTEE_USER) {
             if ($tenantId === 0) {
+                // @tenant-guard-ignore: system-tenant (id 0) visibility branch; scoped else-branch binds tenant_id
                 $stmt = $this->db->prepare('SELECT 1 FROM users WHERE id = ?');
                 $stmt->execute([$granteeId]);
             } else {
@@ -290,6 +291,7 @@ class DelegationsApiHandler
 
         // Role grantee.
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) visibility branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT 1 FROM roles WHERE id = ?');
             $stmt->execute([$granteeId]);
         } else {
@@ -312,6 +314,7 @@ class DelegationsApiHandler
     private function ouVisible(int $ouId, int $tenantId): bool
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) visibility branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT 1 FROM organizational_units WHERE id = ?');
             $stmt->execute([$ouId]);
         } else {

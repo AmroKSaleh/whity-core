@@ -162,6 +162,7 @@ class RelationRepository
     public function findById(int $id, int $tenantId): ?array
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT * FROM relations WHERE id = :id');
             $stmt->execute([':id' => $id]);
         } else {
@@ -193,6 +194,7 @@ class RelationRepository
     public function delete(int $id, int $tenantId): int
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('DELETE FROM relations WHERE id = :id');
             $stmt->execute([':id' => $id]);
         } else {
