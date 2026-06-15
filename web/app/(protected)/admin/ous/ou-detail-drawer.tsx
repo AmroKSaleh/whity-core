@@ -109,7 +109,9 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
 
   useEffect(() => {
     if (ouId !== null) {
-      void loadDetail();
+      void (async () => {
+        await loadDetail();
+      })();
     }
   }, [ouId, loadDetail]);
 

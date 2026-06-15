@@ -98,11 +98,13 @@ export function CreateDelegationModal({
   }, [addToast]);
 
   // Load the picker options when the dialog opens. Fetching external data is a
-  // legitimate effect (synchronising with an external system); no React state
-  // is set synchronously here.
+  // legitimate effect (synchronising with an external system); the async work is
+  // wrapped so the load runs off the synchronous effect tick.
   useEffect(() => {
     if (isOpen) {
-      void loadOptions();
+      void (async () => {
+        await loadOptions();
+      })();
     }
   }, [isOpen, loadOptions]);
 

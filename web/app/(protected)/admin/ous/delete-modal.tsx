@@ -58,7 +58,7 @@ export function DeleteOuModal({ isOpen, onClose, onSuccess, ou }: DeleteOuModalP
             Delete Organizational Unit
           </DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete "{ou.name}"?
+            Are you sure you want to delete &quot;{ou.name}&quot;?
           </DialogDescription>
         </DialogHeader>
 

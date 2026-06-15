@@ -108,7 +108,7 @@ describe('AuthContext', () => {
       status: 401,
     });
 
-    const { rerender } = render(
+    render(
       <AuthProvider>
         <TestComponent />
       </AuthProvider>
@@ -165,9 +165,12 @@ describe('AuthContext', () => {
     });
 
     // Verify token is NOT in the context value
-    const { useAuth: getAuth } = require('@/lib/auth-context');
-    const contextValue = { user: mockUser, isLoading: false, error: null };
-    expect((contextValue as any).token).toBeUndefined();
+    const contextValue: Record<string, unknown> = {
+      user: mockUser,
+      isLoading: false,
+      error: null,
+    };
+    expect(contextValue.token).toBeUndefined();
   });
 
   // Test 6: Logout calls /api/auth/logout endpoint
@@ -244,11 +247,13 @@ describe('AuthContext', () => {
       json: async () => ({ user: mockUser }),
     });
 
-    let contextValue: any = null;
+    const captured: { value: ReturnType<typeof useAuth> | null } = { value: null };
 
     function CaptureContext() {
       const auth = useAuth();
-      contextValue = auth;
+      React.useEffect(() => {
+        captured.value = auth;
+      }, [auth]);
       return null;
     }
 
@@ -259,7 +264,7 @@ describe('AuthContext', () => {
     );
 
     waitFor(() => {
-      expect(contextValue).not.toHaveProperty('token');
+      expect(captured.value).not.toHaveProperty('token');
     });
   });
 
@@ -277,11 +282,15 @@ describe('AuthContext', () => {
       status: 401,
     });
 
-    let capturedApiClient: any = null;
+    const captured: { apiClient: ReturnType<typeof useAuth>['apiClient'] | null } = {
+      apiClient: null,
+    };
 
     function CaptureApiClient() {
       const auth = useAuth();
-      capturedApiClient = auth.apiClient;
+      React.useEffect(() => {
+        captured.apiClient = auth.apiClient;
+      }, [auth]);
       return null;
     }
 
@@ -298,9 +307,9 @@ describe('AuthContext', () => {
       );
     });
 
-    // Call apiClient and verify it delegates
-    if (capturedApiClient) {
-      await capturedApiClient('/api/test');
+    // Call apiClient and verify it delegates.
+    if (captured.apiClient) {
+      await captured.apiClient('/api/test');
       expect(mockApiClient).toHaveBeenCalledWith('/api/test', undefined);
     }
   });

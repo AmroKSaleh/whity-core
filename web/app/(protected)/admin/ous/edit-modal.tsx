@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -35,15 +35,13 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  // Form state seeds from the `ou` prop. The parent remounts this component via
+  // `key={ou.id}` whenever a different OU is edited, so these initializers re-run
+  // on the new record instead of synchronising state inside an effect (which the
+  // React lint rules disallow).
   const [name, setName] = useState(ou.name);
   const [description, setDescription] = useState(ou.description || '');
   const [parentId, setParentId] = useState<string>(ou.parent_id ? ou.parent_id.toString() : 'null');
-
-  useEffect(() => {
-    setName(ou.name);
-    setDescription(ou.description || '');
-    setParentId(ou.parent_id ? ou.parent_id.toString() : 'null');
-  }, [ou]);
 
   const handleUpdate = async () => {
     if (!name.trim()) {

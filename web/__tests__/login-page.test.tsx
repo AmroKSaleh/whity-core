@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { useRouter } from 'next/navigation';
 import LoginPage from '@/app/login/page';
-import { AuthProvider, useAuth } from '@/lib/auth-context';
+import { AuthProvider } from '@/lib/auth-context';
 import { ToastProvider } from '@/lib/toast-context';
 import { ToastContainer } from '@/components/ui/toast-container';
 

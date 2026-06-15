@@ -28,9 +28,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 interface JWTPayload {
   exp?: number;
   id?: number;
+  user_id?: number;
   email?: string;
   role?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 function decodeJWT(token: string): JWTPayload | null {
@@ -42,7 +43,7 @@ function decodeJWT(token: string): JWTPayload | null {
     const payload = parts[1];
     const decoded = atob(payload);
     return JSON.parse(decoded);
-  } catch (error) {
+  } catch {
     return null;
   }
 }

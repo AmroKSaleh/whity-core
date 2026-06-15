@@ -52,7 +52,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user } = useAuth();
-  const { items, getGroupedItems } = useNavigation();
+  const { getGroupedItems } = useNavigation();
   const groupedItems = getGroupedItems();
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -86,7 +86,6 @@ export function Sidebar() {
   };
 
   const sidebarWidth = isCollapsed ? 'w-20' : 'w-64';
-  const isDrawerOpen = isMobile ? isOpen : true;
 
   return (
     <>

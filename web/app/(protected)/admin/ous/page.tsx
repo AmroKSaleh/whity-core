@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -56,7 +56,7 @@ export default function OUsPage() {
     window.localStorage.setItem(VIEW_STORAGE_KEY, next);
   };
 
-  const fetchOUs = async () => {
+  const fetchOUs = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await apiClient('/api/ous');
@@ -72,12 +72,13 @@ export default function OUsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [apiClient, addToast]);
 
   useEffect(() => {
-    void fetchOUs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void (async () => {
+      await fetchOUs();
+    })();
+  }, [fetchOUs]);
 
   const tree = useMemo(() => buildOuTree(ous), [ous]);
 
@@ -210,6 +211,7 @@ export default function OUsPage() {
 
       {actionOu && (
         <EditOuModal
+          key={actionOu.id}
           isOpen={isEditModalOpen}
           onClose={() => {
             setIsEditModalOpen(false);

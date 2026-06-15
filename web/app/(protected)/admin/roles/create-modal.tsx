@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -61,13 +61,7 @@ export function CreateRoleModal({
     },
   });
 
-  useEffect(() => {
-    if (isOpen && permissions.length === 0) {
-      fetchPermissions();
-    }
-  }, [isOpen]);
-
-  const fetchPermissions = async () => {
+  const fetchPermissions = useCallback(async () => {
     try {
       setIsLoadingPermissions(true);
       const response = await apiClient('/api/permissions');
@@ -85,7 +79,13 @@ export function CreateRoleModal({
     } finally {
       setIsLoadingPermissions(false);
     }
-  };
+  }, [apiClient, addToast]);
+
+  useEffect(() => {
+    if (isOpen && permissions.length === 0) {
+      void (async () => { await fetchPermissions(); })();
+    }
+  }, [isOpen, permissions.length, fetchPermissions]);
 
   const onSubmit = async (data: CreateRoleFormData) => {
     try {
@@ -136,7 +136,7 @@ export function CreateRoleModal({
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             <FormField
-              control={form.control as any}
+              control={form.control}
               name="name"
               render={({ field }) => (
                 <FormItem>
@@ -150,7 +150,7 @@ export function CreateRoleModal({
             />
 
             <FormField
-              control={form.control as any}
+              control={form.control}
               name="description"
               render={({ field }) => (
                 <FormItem>

@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@radix-ui/react-scroll-area';
 import { IconChevronDown } from '@tabler/icons-react';
 import type { Permission } from './types';
 

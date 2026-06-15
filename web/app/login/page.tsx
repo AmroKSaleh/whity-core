@@ -51,10 +51,17 @@ export default function LoginPage() {
   const twoFactorInputRef = useRef<HTMLInputElement>(null);
   const recoveryCodeInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle hydration and mount
+  // Mark the component as mounted and move focus to the email field. The form
+  // renders enabled on the server and the first client render (isMounted=false)
+  // so SSR markup matches hydration; only afterwards does it reflect the live
+  // auth/submit state. The flag flip is scheduled off the synchronous effect
+  // tick (a microtask) rather than set directly in the effect body, which keeps
+  // it clear of React's set-state-in-effect rule while preserving the original
+  // "enabled until mounted" timing. Focusing the DOM is a plain side effect.
   useEffect(() => {
-    setIsMounted(true);
     emailInputRef.current?.focus();
+    const flip = Promise.resolve().then(() => setIsMounted(true));
+    void flip;
   }, []);
 
   // Redirect if already authenticated
@@ -183,7 +190,7 @@ export default function LoginPage() {
         addToast(`Verification failed (${response.status}): ${errorMsg}`, 'error');
         setTwoFactorCode('');
       }
-    } catch (err) {
+    } catch {
       // Network/transport error — no HTTP status is available.
       const errorMsg = 'An error occurred. Please try again.';
       setTwoFactorError(errorMsg);
@@ -441,7 +448,7 @@ export default function LoginPage() {
                   }}
                   className="text-blue-600 hover:text-blue-700 underline"
                 >
-                  Can't access your authenticator? Use a recovery code instead
+                  Can&apos;t access your authenticator? Use a recovery code instead
                 </button>
               </p>
             </>

@@ -13,7 +13,7 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-4xl font-bold">Welcome back!</h1>
         <p className="text-muted-foreground mt-2">
-          You're logged in as <span className="font-semibold">{auth.user?.email}</span>
+          You&apos;re logged in as <span className="font-semibold">{auth.user?.email}</span>
         </p>
       </div>
 

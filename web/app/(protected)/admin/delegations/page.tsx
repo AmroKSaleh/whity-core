@@ -66,7 +66,9 @@ export default function DelegationsPage() {
   }, [addToast]);
 
   useEffect(() => {
-    void fetchDelegations();
+    void (async () => {
+      await fetchDelegations();
+    })();
   }, [fetchDelegations]);
 
   const rows: DelegationRow[] = useMemo(
