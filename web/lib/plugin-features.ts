@@ -51,7 +51,7 @@ export interface PluginFeature {
       /** Field label. */
       label: string;
       /** "text" | "textarea" | "file" (file is read as text into `name`). */
-      kind: string;
+      kind: 'text' | 'textarea' | 'file';
       /** Accept filter for file inputs (e.g. ".csv"), or null. */
       accept: string | null;
       /** Whether the field is required. */

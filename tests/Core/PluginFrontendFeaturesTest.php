@@ -354,6 +354,9 @@ PHP);
             // GET is not allowed for an action route
             ['id' => 'act-bad-method', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run',
              'action' => ['method' => 'GET', 'path' => '/api/featact/run']],
+            // path is registered but as POST, not PUT — method mismatch
+            ['id' => 'act-wrong-method', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run',
+             'action' => ['method' => 'PUT', 'path' => '/api/featact/run']],
             // path the plugin does not serve as POST/PUT
             ['id' => 'act-foreign', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run',
              'action' => ['method' => 'POST', 'path' => '/api/somebody/else']],
@@ -572,6 +575,7 @@ PHP);
         $this->assertSame(['act-valid'], $ids, 'Only the single valid action descriptor survives');
         $this->assertNotContains('act-no-action', $ids, "screen='action' without an action object must drop");
         $this->assertNotContains('act-bad-method', $ids, 'action.method must be POST or PUT');
+        $this->assertNotContains('act-wrong-method', $ids, 'action.method PUT must not match a POST-only route');
         $this->assertNotContains('act-foreign', $ids, 'action.path must be a POST/PUT route this plugin registered');
         $this->assertNotContains('act-mismatch', $ids, "action route permission must equal the descriptor's");
         $this->assertNotContains('act-bad-field', $ids, 'a malformed action.fields entry fails closed');

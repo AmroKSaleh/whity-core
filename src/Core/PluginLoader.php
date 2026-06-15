@@ -1390,7 +1390,7 @@ class PluginLoader
                 if ($upperMethod === 'GET') {
                     $registeredGetRoutes[$path] = $requiredPermission;
                 } elseif ($upperMethod === 'POST' || $upperMethod === 'PUT') {
-                    $registeredActionRoutes[$path] = $requiredPermission;
+                    $registeredActionRoutes["{$upperMethod} {$path}"] = $requiredPermission;
                 }
             }
         }
@@ -1489,7 +1489,7 @@ class PluginLoader
      * @param PluginInterface $plugin The plugin being registered.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
-     * @param array<string, string|null> $registeredActionRoutes POST/PUT path => requiredPermission, ACTUALLY registered for this plugin.
+     * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
      * @return list<array<string, mixed>> The validated, normalized descriptors.
      */
     private function collectFrontendFeatures(
@@ -1544,7 +1544,7 @@ class PluginLoader
      * @param string $pluginKey Stable identity (original FQCN) for log messages.
      * @param array<int|string, mixed> $ownPermissions The plugin's own declared permissions.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
-     * @param array<string, string|null> $registeredActionRoutes POST/PUT path => requiredPermission, ACTUALLY registered for this plugin.
+     * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
      * @return array<string, mixed>|null The normalized descriptor, or null when dropped.
      */
     private function validateFrontendFeature(
@@ -1679,13 +1679,14 @@ class PluginLoader
             if (!is_string($path) || !str_starts_with($path, '/api/')) {
                 return $drop("action.path must be a string starting with '/api/'", $id);
             }
-            if (!array_key_exists($path, $registeredActionRoutes)) {
+            $routeKey = "{$method} {$path}";
+            if (!array_key_exists($routeKey, $registeredActionRoutes)) {
                 return $drop("action.path '{$path}' is not a {$method} route this plugin registered", $id);
             }
-            if ($registeredActionRoutes[$path] !== $permission) {
+            if ($registeredActionRoutes[$routeKey] !== $permission) {
                 return $drop(
                     "action.path '{$path}' route requiredPermission '"
-                    . ($registeredActionRoutes[$path] ?? 'none')
+                    . ($registeredActionRoutes[$routeKey] ?? 'none')
                     . "' does not match the descriptor's '{$permission}'",
                     $id
                 );
