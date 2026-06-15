@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
+import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@/components/ui/button';
@@ -22,39 +23,28 @@ import type { Role } from './types';
 export default function RolesPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isPermissionsPanelOpen, setIsPermissionsPanelOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
 
-  const fetchRoles = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const response = await apiClient('/api/roles');
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch roles');
-      }
-
-      const data = await response.json();
-      setRoles(data.data || []);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to fetch roles';
-      addToast(message, 'error');
-    } finally {
-      setIsLoading(false);
+  const { data, loading: isLoading, error, refetch: fetchRoles } = useFetch(async () => {
+    const response = await apiClient('/api/roles');
+    if (!response.ok) {
+      throw new Error('Failed to fetch roles');
     }
-  }, [apiClient, addToast]);
+    const data = await response.json();
+    return (data.data ?? []) as Role[];
+  }, [apiClient]);
+
+  const roles = data ?? [];
 
   useEffect(() => {
-    void (async () => {
-      await fetchRoles();
-    })();
-  }, [fetchRoles]);
+    if (error) {
+      addToast(error, 'error');
+    }
+  }, [error, addToast]);
 
   const handleViewPermissions = (role: Role) => {
     setSelectedRole(role);
