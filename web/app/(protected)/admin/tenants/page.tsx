@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
+import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@/components/ui/button';
@@ -28,38 +29,27 @@ export interface Tenant {
 export default function TenantsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
 
-  const fetchTenants = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const response = await apiClient('/api/tenants');
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch tenants');
-      }
-
-      const data = await response.json();
-      setTenants(data.data || []);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to fetch tenants';
-      addToast(message, 'error');
-    } finally {
-      setIsLoading(false);
+  const { data, loading: isLoading, error, refetch: fetchTenants } = useFetch(async () => {
+    const response = await apiClient('/api/tenants');
+    if (!response.ok) {
+      throw new Error('Failed to fetch tenants');
     }
-  }, [apiClient, addToast]);
+    const data = await response.json();
+    return (data.data ?? []) as Tenant[];
+  }, [apiClient]);
+
+  const tenants = data ?? [];
 
   useEffect(() => {
-    void (async () => {
-      await fetchTenants();
-    })();
-  }, [fetchTenants]);
+    if (error) {
+      addToast(error, 'error');
+    }
+  }, [error, addToast]);
 
   const handleEditClick = (tenant: Tenant) => {
     setSelectedTenant(tenant);

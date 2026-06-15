@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
+import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -31,8 +32,6 @@ const VIEW_STORAGE_KEY = 'wc:ous:view';
 export default function OUsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
-  const [ous, setOus] = useState<OU[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   // Lazily restore the persisted view choice. The initializer runs on the
   // client (this is a 'use client' route); the typeof guard keeps it safe under
   // SSR pre-render, where window is undefined.
@@ -56,29 +55,22 @@ export default function OUsPage() {
     window.localStorage.setItem(VIEW_STORAGE_KEY, next);
   };
 
-  const fetchOUs = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      const response = await apiClient('/api/ous');
-      if (!response.ok) {
-        throw new Error('Failed to fetch organizational units');
-      }
-      const data = await response.json();
-      setOus(data.data || []);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to fetch organizational units';
-      addToast(message, 'error');
-    } finally {
-      setIsLoading(false);
+  const { data, loading: isLoading, error, refetch: fetchOUs } = useFetch(async () => {
+    const response = await apiClient('/api/ous');
+    if (!response.ok) {
+      throw new Error('Failed to fetch organizational units');
     }
-  }, [apiClient, addToast]);
+    const data = await response.json();
+    return (data.data ?? []) as OU[];
+  }, [apiClient]);
+
+  const ous = useMemo(() => data ?? [], [data]);
 
   useEffect(() => {
-    void (async () => {
-      await fetchOUs();
-    })();
-  }, [fetchOUs]);
+    if (error) {
+      addToast(error, 'error');
+    }
+  }, [error, addToast]);
 
   const tree = useMemo(() => buildOuTree(ous), [ous]);
 
