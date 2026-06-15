@@ -132,11 +132,12 @@ if ($tenantId === 0) { /* unscoped variant */ } else { /* scoped variant */ }
 
 The runtime tests above prove the predicates that *exist* are correct; the **static guard** proves a predicate was not *forgotten*. `scripts/ci-tenant-predicate-guard.php` (wired as the `Tenant-predicate guard` step in `.github/workflows/automated-tests.yml`, alongside PHPStan and the plugin smoke) scans `src/` and **fails CI** when a `SELECT`/`UPDATE`/`DELETE` touches a tenant-owned table without a `tenant_id` predicate. It turns the platform's #1 risk — cross-tenant data exposure — into a CI-enforced invariant.
 
-The guard is two small classes plus the script:
+The guard is two small core classes plus the script, over a portable scan engine that lives in the SDK:
 
+- **`Whity\Sdk\Tenant\TenantPredicateScanner`** (`sdk/src/Tenant/TenantPredicateScanner.php`) — the tokenizer-based scan engine and **single source of truth** for the detection logic (WC-194). It is schema-agnostic: it is handed a `TenantTableRegistry` of tenant-owned / global tables per call. For each SQL statement it reassembles the string literals that build it (`.` concatenation, `implode()`-built `SET`/`WHERE`, the `$sql .= '...'` builder pattern, and `{$col}` interpolation), then passes the statement when it binds a `tenant_id` **predicate** (`tenant_id =`/`IN`/`IS …`, including aliased `u.tenant_id = ?` and transitive joins `p.tenant_id = r.tenant_id`), or only touches global tables, or carries an ignore annotation. A `tenant_id` that appears only in a `SELECT`/`INSERT` column list is **not** a predicate. `INSERT` (and `INSERT … ON CONFLICT … DO UPDATE` upserts) is out of scope — it sets `tenant_id` as a value, not a predicate. Living in the standalone SDK is what lets out-of-repo plugins run the very same engine in their own CI (see the conformance kit below).
 - **`TenantOwnedTables`** (`src/Core/Tenant/TenantOwnedTables.php`) — the canonical set of tables that carry a `tenant_id` column, derived from the migrations. `TenantOwnedTablesTest` re-derives the set straight from `database/migrations/` and fails if the list drifts, so the guard can never go stale against the schema.
 - **`SanctionedGlobalTables`** (`src/Core/Tenant/SanctionedGlobalTables.php`) — the allowlist of intentionally non-tenant tables (`revoked_tokens`, `core_schema_migrations`). The guard never flags these.
-- **`TenantPredicateGuard`** (`src/Core/Tenant/TenantPredicateGuard.php`) — the tokenizer-based scanner. For each SQL statement it reassembles the string literals that build it (`.` concatenation, `implode()`-built `SET`/`WHERE`, the `$sql .= '...'` builder pattern, and `{$col}` interpolation), then passes the statement when it binds a `tenant_id` **predicate** (`tenant_id =`/`IN`/`IS …`, including aliased `u.tenant_id = ?` and transitive joins `p.tenant_id = r.tenant_id`), or only touches global tables, or carries an ignore annotation. A `tenant_id` that appears only in a `SELECT`/`INSERT` column list is **not** a predicate. `INSERT` (and `INSERT … ON CONFLICT … DO UPDATE` upserts) is out of scope — it sets `tenant_id` as a value, not a predicate.
+- **`TenantPredicateGuard`** (`src/Core/Tenant/TenantPredicateGuard.php`) — a thin core facade that builds a `TenantTableRegistry` from the two lists above (via `CoreTenantTableRegistry`) and delegates to the SDK scanner, preserving the `scanDirectory()` / `scanSource()` surface the CI script uses.
 
 > **Tables with no `tenant_id` column** — `role_permissions` (scopes via `roles`) and `backup_codes` (scopes via `users.user_id`) — are deliberately **not** in `TenantOwnedTables`. They are not directly scannable for a `tenant_id` predicate; isolation for them is enforced at the parent join / owning user id, so listing them would only produce false positives on correct `WHERE role_id = ?` / `WHERE user_id = ?` access.
 
@@ -155,7 +156,17 @@ Rules:
 - Place it on the statement's own line(s) or on the comment line(s) directly above it.
 - Adding one is a deliberate, reviewed decision: it opts a single statement out of the isolation invariant, so the reason must justify *why* the access is safe without a `tenant_id` predicate.
 
-The detection logic (unscoped → flagged; scoped/global/annotated/INSERT → not) is pinned by `tests/Unit/Core/Tenant/TenantPredicateGuardTest.php`, so the guard's teeth cannot regress.
+The detection logic (unscoped → flagged; scoped/global/annotated/INSERT → not) is pinned by `tests/Unit/Core/Tenant/TenantPredicateGuardTest.php` (core facade) and `tests/Unit/Sdk/Tenant/TenantPredicateScannerTest.php` (the SDK engine), so the guard's teeth cannot regress.
+
+### Plugin tenant-isolation conformance kit (WC-194)
+
+The core guard above polices `src/`. A **plugin** — including a distributable one that depends only on `whity/plugin-sdk` and never on the host — proves its OWN isolation with the SDK conformance kit (`sdk/src/Tenant/`, `sdk/src/Testing/`, SDK 1.3):
+
+- **`MigrationTenantColumnLinter`** scans a plugin's migration `CREATE TABLE` statements; a table that stores tenant data must declare a `tenant_id` column or be declared global / transitively-scoped (with a reason) in the registry. A plugin tenant table missing `tenant_id` **fails**.
+- **`TenantPredicateScanner`** (the same engine the core guard uses) runs over the plugin's handler source. The plugin builds a `TenantTableRegistry` of its own tables and `merge()`s in the host's registry, so an unscoped query against the plugin's **or** a core tenant table fails — honouring the `@tenant-guard-ignore:` annotation and the global allowlist.
+- **`TenantIsolationConformanceTestCase`** is the shared PHPUnit base case a plugin extends; it wires the linter, the scanner, and a **RealEngine** check that applies the plugin's migrations to a real SQL engine (in-memory SQLite locally, Postgres in CI) and asserts each declared tenant table physically carries `tenant_id`.
+
+The in-tree HelloWorld plugin is the reference fixture: `tests/Plugins/HelloWorldTenantConformanceTest.php` proves it PASSES, and `scripts/ci-plugin-tenant-conformance.php` (wired into `automated-tests.yml`) runs the kit the way an out-of-repo plugin would.
 
 ## The system tenant (id 0)
 

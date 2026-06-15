@@ -1,8 +1,8 @@
 {
   "name": "whity/plugin-sdk",
-  "description": "Standalone plugin contract package for the Whity platform: plugin/migration interfaces, HTTP shapes, and hook event constants. Depends on nothing but PHP.",
+  "description": "Standalone plugin contract package for the Whity platform: plugin/migration interfaces, HTTP shapes, hook event constants, and the tenant-isolation conformance kit. Depends on nothing but PHP at runtime.",
   "type": "library",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "license": "MIT",
   "authors": [
     {
@@ -12,6 +12,12 @@
   ],
   "require": {
     "php": ">=8.4"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.0"
+  },
+  "suggest": {
+    "phpunit/phpunit": "Required only to extend Whity\\Sdk\\Testing\\TenantIsolationConformanceTestCase in a plugin's test suite (the tenant-isolation conformance kit)."
   },
   "autoload": {
     "psr-4": {

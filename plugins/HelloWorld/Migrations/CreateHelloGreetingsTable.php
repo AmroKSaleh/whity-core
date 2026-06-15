@@ -28,12 +28,16 @@ final class CreateHelloGreetingsTable implements MigrationInterface
      */
     public function up(\PDO $pdo): void
     {
+        // `DEFAULT (NOW())` (parenthesised) is valid on both PostgreSQL and
+        // SQLite, so the migration runs unmodified on the host's Postgres AND on
+        // the in-memory SQLite the SDK tenant-isolation conformance kit applies
+        // it against (the RealEngine check, WC-194).
         $pdo->exec('
             CREATE TABLE IF NOT EXISTS hello_greetings (
                 id SERIAL PRIMARY KEY,
                 tenant_id INTEGER NOT NULL,
                 message VARCHAR(255) NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                created_at TIMESTAMP NOT NULL DEFAULT (NOW())
             )
         ');
 

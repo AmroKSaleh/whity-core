@@ -163,9 +163,65 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('array', (string) $return);
     }
 
-    public function testSdkVersionIsOneTwoForTheFrontendDescriptorCapability(): void
+    public function testSdkVersionIsOneThreeForTheTenantConformanceKit(): void
     {
-        $this->assertSame('1.2.0', \Whity\Sdk\Sdk::VERSION, 'SDK 1.2 ships PluginFrontendInterface');
+        $this->assertSame(
+            '1.3.0',
+            \Whity\Sdk\Sdk::VERSION,
+            'SDK 1.3 ships the tenant-isolation conformance kit'
+        );
+    }
+
+    /**
+     * WC-194: the conformance kit ships in the SDK so out-of-repo plugins (which
+     * depend only on whity/plugin-sdk) can run it. The scanner engine and the
+     * shared base test case must live under the SDK autoload root.
+     */
+    public function testTenantConformanceKitLivesInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Tenant\TenantPredicateScanner::class),
+            'The portable tenant-predicate scanner must live in the SDK'
+        );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Tenant\MigrationTenantColumnLinter::class),
+            'The migration linter must live in the SDK'
+        );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Tenant\TenantTableRegistry::class),
+            'The portable tenant-table registry must live in the SDK'
+        );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Testing\TenantIsolationConformanceTestCase::class),
+            'The shared base conformance test case must live in the SDK'
+        );
+    }
+
+    /**
+     * The conformance kit is part of the standalone contract: it must not drag
+     * in any host namespace, so an out-of-repo plugin can run it with only the
+     * SDK (and phpunit) installed.
+     */
+    public function testTenantConformanceKitDependsOnlyOnTheSdkAndPhpunit(): void
+    {
+        $files = [
+            self::SDK_DIR . '/src/Tenant/TenantPredicateScanner.php',
+            self::SDK_DIR . '/src/Tenant/TenantTableRegistry.php',
+            self::SDK_DIR . '/src/Tenant/MigrationTenantColumnLinter.php',
+            self::SDK_DIR . '/src/Testing/TenantIsolationConformanceTestCase.php',
+        ];
+
+        foreach ($files as $path) {
+            $this->assertFileExists($path);
+            $source = (string) file_get_contents($path);
+            foreach (['Whity\\Core', 'Whity\\Database', 'Whity\\Http\\', 'Whity\\Auth', 'Whity\\Api'] as $forbidden) {
+                $this->assertStringNotContainsString(
+                    $forbidden,
+                    $source,
+                    "{$path} must not reference {$forbidden} — the conformance kit is standalone"
+                );
+            }
+        }
     }
 
     public function testHookEventConstantsLiveInTheSdk(): void
