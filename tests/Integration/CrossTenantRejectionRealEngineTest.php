@@ -115,6 +115,48 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    /**
+     * WC-190: the legitimate same-tenant user update path is unaffected by the
+     * added `AND tenant_id = ?` predicate on the UPDATE — Tenant A can still edit
+     * its OWN user 10.
+     */
+    public function testTenantCanUpdateOwnUser(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->usersHandler()->update(
+            $this->req('PATCH', '/api/users/10', ['email' => 'a1-renamed@t1.example']),
+            ['id' => '10']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own user update must succeed");
+        $this->assertSame(
+            'a1-renamed@t1.example',
+            $this->pdo->query('SELECT email FROM users WHERE id = 10')->fetchColumn(),
+            "Tenant A's own user row must reflect the legitimate same-tenant update"
+        );
+    }
+
+    /**
+     * WC-190: the SYSTEM tenant (id 0) edits across tenants by design — the new
+     * user-UPDATE predicate leaves the system path unscoped, so a system-tenant
+     * edit of Tenant B's user still lands.
+     */
+    public function testSystemTenantCanUpdateForeignUser(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->usersHandler()->update(
+            $this->req('PATCH', '/api/users/20', ['email' => 'b1-by-system@t2.example'], self::SYSTEM_TENANT),
+            ['id' => '20']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), 'The system tenant must edit any tenant user');
+        $this->assertSame(
+            'b1-by-system@t2.example',
+            $this->pdo->query('SELECT email FROM users WHERE id = 20')->fetchColumn(),
+            'The system-tenant user UPDATE must remain unscoped and land on the foreign row'
+        );
+    }
+
     // ==================== roles ====================
 
     public function testRolesListShowsOwnAndGlobalButNeverForeignPrivate(): void
@@ -161,6 +203,103 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertSame(
             1,
             (int) $this->pdo->query('SELECT COUNT(*) FROM roles WHERE id = 200')->fetchColumn()
+        );
+    }
+
+    /**
+     * WC-190: a rejected cross-tenant role delete must NOT collaterally remove
+     * the foreign role's permission grants or user-role assignments. The guard
+     * SELECT returns 404 before the writes here, but the writes are also
+     * tenant-scoped so even if the guard were bypassed the junction rows for
+     * Tenant B's role 200 stay intact.
+     */
+    public function testRejectedForeignRoleDeleteLeavesForeignJunctionRowsIntact(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $this->rolesHandler()->delete($this->req('DELETE', '/api/roles/200'), ['id' => '200']);
+
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 200')->fetchColumn(),
+            "Tenant B's role grants must survive a cross-tenant role delete attempt"
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
+            "Tenant B's user-role assignments must survive a cross-tenant role delete attempt"
+        );
+    }
+
+    /**
+     * WC-190 (TOCTOU defense-in-depth): the FINAL mutating statements that scope
+     * role-owned junction rows must themselves reject a cross-tenant role id —
+     * not merely rely on the upstream guard SELECT. We invoke the handler's
+     * scoped DELETEs through a thin subclass that skips the guard, simulating an
+     * attacker id reaching the write directly, and assert zero foreign rows die.
+     */
+    public function testScopedJunctionDeletesRejectCrossTenantRoleIdAtTheWriteItself(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        // Tenant A drives the role-owned junction deletes against Tenant B's
+        // role id 200 directly (bypassing the 404 guard). The predicate on the
+        // statement — not the guard — must keep the count at the foreign rows.
+        $handler = new class ($this->pdo, $this->hooks()) extends RolesApiHandler {
+            public function purge(int $roleId, int $tenantId): void
+            {
+                $this->deleteRolePermissionsScoped($roleId, $tenantId);
+                $this->deleteUserRolesScoped($roleId, $tenantId);
+                $this->deleteRoleScoped($roleId, $tenantId);
+            }
+        };
+        $handler->purge(200, self::TENANT_A);
+
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM roles WHERE id = 200')->fetchColumn(),
+            'The scoped role DELETE must not touch a foreign tenant role'
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 200')->fetchColumn(),
+            'The scoped role_permissions DELETE must not touch a foreign tenant role grants'
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
+            'The scoped user_roles DELETE must not touch a foreign tenant assignments'
+        );
+    }
+
+    /**
+     * WC-190: the legitimate same-tenant delete path is unaffected — Tenant A
+     * deleting its OWN role 100 removes the role and ITS grants/assignments,
+     * while Tenant B's role 200 rows remain untouched.
+     */
+    public function testOwnRoleDeleteRemovesOnlyOwnJunctionRows(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        // Role 100 has a user assigned (user 11); detach it first so the
+        // active-assignment guard does not 409 the legitimate delete.
+        $this->pdo->exec('DELETE FROM user_roles WHERE role_id = 100');
+        $response = $this->rolesHandler()->delete($this->req('DELETE', '/api/roles/100'), ['id' => '100']);
+
+        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own role delete must succeed");
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM roles WHERE id = 100')->fetchColumn(),
+            "Tenant A's own role must be gone"
+        );
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 100')->fetchColumn(),
+            "Tenant A's own role grants must be gone"
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 200')->fetchColumn(),
+            "Tenant B's grants must be untouched by Tenant A's own-role delete"
         );
     }
 
@@ -213,6 +352,31 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertSame(
             1,
             (int) $this->pdo->query('SELECT COUNT(*) FROM organizational_units WHERE id = 20')->fetchColumn()
+        );
+    }
+
+    /**
+     * WC-190 (TOCTOU defense-in-depth): the OU UPDATE was previously scoped
+     * only by `WHERE id = ?` and relied on a prior guard SELECT. Drive the
+     * scoped UPDATE through a thin subclass that skips the guard with a foreign
+     * id; the predicate ON THE UPDATE must keep Tenant B's name unchanged.
+     */
+    public function testScopedOuUpdateRejectsCrossTenantIdAtTheWriteItself(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $handler = new class ($this->pdo, $this->hooks()) extends OusApiHandler {
+            public function renameUnscopedGuard(int $ouId, string $name, int $tenantId): void
+            {
+                $this->updateOuScoped($ouId, ['name = ?'], [$name], $tenantId);
+            }
+        };
+        $handler->renameUnscopedGuard(20, 'Hijacked', self::TENANT_A);
+
+        $this->assertSame(
+            'B-Sales',
+            $this->pdo->query('SELECT name FROM organizational_units WHERE id = 20')->fetchColumn(),
+            "Tenant B's OU name must be untouched: the UPDATE predicate, not the guard, rejects the foreign id"
         );
     }
 
@@ -420,6 +584,9 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 description TEXT
             )
         ');
+        // role_permissions carries NO tenant_id column: a grant inherits its
+        // tenant transitively from the owning role (roles.tenant_id). The WC-190
+        // predicate must therefore scope the junction DELETE via the parent role.
         $pdo->exec('
             CREATE TABLE role_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -429,6 +596,8 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 UNIQUE(role_id, permission_id)
             )
         ');
+        // user_roles DOES carry tenant_id (migration 012); the WC-190 predicate
+        // scopes its DELETE on that column directly.
         $pdo->exec('
             CREATE TABLE user_roles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -437,6 +606,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 tenant_id INTEGER,
                 created_at TEXT
             )
+        ');
+        // Grants and assignments for Tenant B's PRIVATE role 200, so a rejected
+        // cross-tenant role delete/update can be proven to leave them intact.
+        $pdo->exec("
+            INSERT INTO permissions (id, name, description) VALUES
+                (1, 'users:read', 'Read users')
+        ");
+        $pdo->exec('
+            INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
+                (100, 1, datetime(\'now\')),
+                (200, 1, datetime(\'now\'))
+        ');
+        $pdo->exec('
+            INSERT INTO user_roles (user_id, role_id, tenant_id, created_at) VALUES
+                (11, 100, 1, datetime(\'now\')),
+                (21, 200, 2, datetime(\'now\'))
         ');
 
         $pdo->exec('

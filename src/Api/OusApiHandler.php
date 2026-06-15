@@ -307,10 +307,10 @@ class OusApiHandler
             }
 
             if (!empty($updates)) {
-                $params_array[] = $id;
-                $sql = 'UPDATE organizational_units SET ' . implode(', ', $updates) . ' WHERE id = ?';
-                $updateStmt = $this->db->prepare($sql);
-                $updateStmt->execute($params_array);
+                // WC-190: the UPDATE itself carries the tenant predicate, not just
+                // the prior guard SELECT, so a cross-tenant id can never mutate
+                // another tenant's OU even if the guard were bypassed (TOCTOU).
+                $this->updateOuScoped((int)$id, $updates, $params_array, $tenantId);
             }
 
             // Dispatch synchronous hook after OU is updated
@@ -674,6 +674,45 @@ class OusApiHandler
         }
 
         return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Apply a scoped `UPDATE organizational_units` whose WHERE clause itself
+     * carries the tenant boundary (WC-190), not merely a preceding guard SELECT.
+     *
+     * Convention: the SYSTEM tenant (id 0) is unscoped and may update any tenant's
+     * OU; any other tenant is scoped with `AND tenant_id = ?` so a cross-tenant id
+     * mutates zero rows even if the guard SELECT were bypassed. A null/unresolved
+     * tenant updates nothing.
+     *
+     * @param int                $ouId     The OU id to update.
+     * @param array<int, string> $sets     SQL `column = ?` assignment fragments.
+     * @param array<int, mixed>  $values   Bound values for the assignment fragments.
+     * @param int|null           $tenantId The acting tenant (0 = SYSTEM).
+     * @return void
+     */
+    protected function updateOuScoped(int $ouId, array $sets, array $values, ?int $tenantId): void
+    {
+        if ($sets === []) {
+            return;
+        }
+
+        $assignments = implode(', ', $sets);
+
+        if ($tenantId === 0) {
+            $sql = 'UPDATE organizational_units SET ' . $assignments . ' WHERE id = ?';
+            $params = array_merge($values, [$ouId]);
+        } elseif ($tenantId === null) {
+            // No resolvable tenant: never mutate (use an impossible predicate).
+            $sql = 'UPDATE organizational_units SET ' . $assignments . ' WHERE id = ? AND 1 = 0';
+            $params = array_merge($values, [$ouId]);
+        } else {
+            $sql = 'UPDATE organizational_units SET ' . $assignments . ' WHERE id = ? AND tenant_id = ?';
+            $params = array_merge($values, [$ouId, $tenantId]);
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
     }
 
     /**
