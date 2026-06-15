@@ -263,11 +263,23 @@ class RelationsApiHandler
             }
 
             $relations = $this->relations->listForPerson($personId, $tenantId);
+            $mapped = array_map(
+                static fn (array $r): array => [
+                    'relationId'           => (int) $r['relationId'],
+                    'otherPersonId'        => (int) $r['otherPersonId'],
+                    'otherPersonName'      => (string) $r['otherPersonName'],
+                    'otherPersonHasAccount' => $r['otherPersonUserId'] !== null,
+                    'typeId'               => (int) $r['typeId'],
+                    'typeName'             => (string) $r['typeName'],
+                    'direction'            => (string) $r['direction'],
+                ],
+                $relations
+            );
 
             return Response::json([
                 'data' => [
                     'personId' => $personId,
-                    'relations' => $relations,
+                    'relations' => $mapped,
                 ],
             ], 200);
         } catch (CrossTenantReferenceException | PersonNotFoundException $e) {
