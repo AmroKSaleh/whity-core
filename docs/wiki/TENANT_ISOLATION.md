@@ -65,7 +65,7 @@ TenantContext::setTenantId(99); // RuntimeException: locked
 5. Decision:
    - no addressed tenant → defer to the handler and the query-level layer (`next`),
    - addressed tenant **equals** the caller's tenant → allow,
-   - addressed tenant **differs** → allow only if the caller has **cross-tenant authority** (tenant id 0 **or** `isSystemMode()`), in which case the bypass is **audit-logged**; otherwise refuse with `403 Access to the requested tenant is forbidden` *before any handler/DB work runs*.
+   - addressed tenant **differs** → allow only if the caller has **cross-tenant authority** (tenant id 0 **or** `isSystemMode()`), in which case the bypass is **audit-logged** (`tenant_isolation.cross_tenant_bypass`); otherwise refuse with `403 Access to the requested tenant is forbidden` *before any handler/DB work runs* — and the refusal is **audit-logged too** (`tenant_isolation.cross_tenant_denied`, WC-193) so an escalation probe is not silent. See [the trust boundary](#the-x-tenant-id--tenant_id-query--path-trust-boundary-wc-193) below for why these declared-target signals can never escalate a non-system caller.
 
 ```mermaid
 flowchart TD
@@ -82,6 +82,26 @@ flowchart TD
     H -- yes --> I["audit log → next()"]
     H -- no --> J["403 forbidden (before handler/DB)"]
 ```
+
+## The X-Tenant-Id / tenant_id-query / path trust boundary (WC-193)
+
+The JWT-derived `TenantContext` is the **sole source of truth** for *who the caller is*. The three signals `EnforceTenantIsolation` recognises in step 4 above — the `/api/tenants/{id}` path segment, the `tenant_id` query parameter and the `X-Tenant-Id` header — are **attacker-suppliable declared targets**: they say which tenant a request *claims to address*, never who the caller is. They are read in exactly one place (`resolveResourceTenantId()`), feed exactly one consumer (this middleware's cross-tenant gate), and have exactly three outcomes:
+
+| Declared target vs caller's JWT tenant | Caller | Outcome |
+| --- | --- | --- |
+| equal | any | **allow** — stays inside the caller's own JWT tenant by construction |
+| differs | system tenant 0 / `isSystemMode()` | **allow + audit** (`tenant_isolation.cross_tenant_bypass`) |
+| differs | ordinary caller | **403 + audit** (`tenant_isolation.cross_tenant_denied`) |
+
+**These signals can never escalate a non-system caller across tenants.** For an ordinary caller the *only* non-error continuation is the match path, and matching its own JWT tenant keeps it inside its own boundary. A different value is refused before any handler or database work runs. This is the *match-or-403* invariant: a declared target can match the caller's tenant or be refused — it can never widen the caller's reach.
+
+Why keep the header/query at all rather than going path-only? The `X-Tenant-Id` header has one legitimate use: trusted **system-mode** tooling declares a cross-tenant maintenance target with it while keeping the router-matched path clean (proven by `tests/Security/WorkerLoopAuditSurvivalTest.php`). Removing it would break that audited path and buy no isolation, because the gate already refuses every non-system mismatch. So the signals are kept, but locked to *match-or-403* and explicitly tested.
+
+**No handler trusts these signals for scoping.** Every tenant-owned query binds its `tenant_id` predicate from `TenantContext` (WC-161/190/191), never from the header/query/path — verified: a repo-wide search finds zero handler reads of `X-Tenant-Id` or the `tenant_id` query parameter as an authorization/scoping input (the only `X-Tenant-Id` references in `src/` are inside this middleware), and the web client never sends either. So even if this gate were removed, the header/query could not select another tenant's rows; the gate is the early, audited refusal, and the per-query predicate (below) is the structural guarantee.
+
+**Fail-closed parsing.** `resolveResourceTenantId()` accepts only a plain non-negative decimal integer. The path `{id}` is `(\d+)`; the header and query are gated by `ctype_digit()`, which accepts only a non-empty run of ASCII digits and rejects signs, decimals, hex, whitespace and the empty string. A crafted value (`-1`, `+2`, `2.0`, `0x2`, ` 2 `, `2; DROP`) resolves to **no declared target** (null) and the request defers to the handler's JWT-derived scoping — it can neither coincide with a real tenant id nor smuggle past the gate. Pinned by `EnforceTenantIsolationTest` (the `malformedTenantSelectorProvider` cases).
+
+> Runtime note: under FrankenPHP the query string is stripped from the request path before the middleware sees it, so the `tenant_id` *query* selector is effective mainly in the test harness (which embeds the query in the path); the header and path-segment selectors are the runtime-relevant ones. This does not weaken the boundary — fewer effective declared-target signals only ever means *more* requests defer to the JWT-scoped handler, never fewer.
 
 ## The query layer — explicit predicates, proven by tests
 
@@ -175,6 +195,7 @@ Tenant safety also depends on the shared worker connection not carrying state be
 - One shared PostgreSQL DB; isolation is a `tenant_id` column + request-scoped context, **not** separate databases.
 - `TenantContext` resolves the tenant from the JWT, locks it, and is reset between requests (no silent fallback; tenant 0 = system).
 - `EnforceTenantIsolation` resolves + refuses cross-tenant requests at the HTTP layer before routing/DB; public routes bypass it.
+- The `/api/tenants/{id}` path, `tenant_id` query and `X-Tenant-Id` header are attacker-suppliable **declared targets** used only by the cross-tenant gate (*match-or-403*); no handler scopes by them, parsing fails closed, and both the privileged bypass and the refusal are audited (WC-193).
 - Query-level isolation is the explicit, bound `tenant_id` predicate every handler/repository statement carries (no rewriting layer); `CrossTenantRejectionRealEngineTest` proves read AND write rejection per table on a real engine and fails if a predicate is dropped.
 - The WC-192 CI guard (`scripts/ci-tenant-predicate-guard.php`) statically fails the build on any unscoped tenant-owned-table query; sanctioned exceptions (system-tenant branches, by-PK/global-unique lookups, maintenance/seed paths) must carry a reasoned `// @tenant-guard-ignore: <reason>` annotation.
 - The system tenant (id 0) and `isSystemMode()` are the audited cross-tenant bypass; `DISCARD ALL` keeps the shared worker connection clean between requests.
