@@ -8,6 +8,7 @@ use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Http\JsonBody;
 use Whity\Core\Tenant\TenantContext;
 
 /**
@@ -95,11 +96,7 @@ class PersonsApiHandler
                 return Response::error('Select a specific tenant to create a person', 400);
             }
 
-            /** @var array<string, mixed>|null $body */
-            $body = json_decode($request->getBody(), true);
-            if (!is_array($body)) {
-                return Response::error('Invalid request body', 400);
-            }
+            $body = JsonBody::parsed($request);
 
             $displayName = isset($body['displayName']) ? trim((string) $body['displayName']) : '';
             if ($displayName === '') {
@@ -197,11 +194,7 @@ class PersonsApiHandler
                 );
             }
 
-            /** @var array<string, mixed>|null $body */
-            $body = json_decode($request->getBody(), true);
-            if (!is_array($body)) {
-                return Response::error('Invalid request body', 400);
-            }
+            $body = JsonBody::parsed($request);
 
             $fields = [];
             if (array_key_exists('displayName', $body)) {

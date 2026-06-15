@@ -6,6 +6,7 @@ namespace Whity\Api;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Http\JsonBody;
 use Whity\Auth\TotpService;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
@@ -163,8 +164,8 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
-            // Parse request body
-            $body = json_decode($request->getBody(), true);
+            // Parse request body (envelope validated upstream, WC-189).
+            $body = JsonBody::parsed($request);
 
             if (empty($body['code']) || empty($body['secret'])) {
                 return Response::error('Code and secret are required', 400);

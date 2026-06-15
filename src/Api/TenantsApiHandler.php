@@ -8,6 +8,7 @@ use Whity\Api\Exception\SystemTenantProtectedException;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Http\JsonBody;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
 
@@ -186,7 +187,7 @@ class TenantsApiHandler
         }
 
         try {
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
 
             if (empty($body['name'])) {
                 return Response::error('Tenant name is required', 400);
@@ -282,7 +283,7 @@ class TenantsApiHandler
                 return Response::error('Unauthorized: Cannot update other tenants', 403);
             }
 
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
 
             // Get target tenant
             $stmt = $this->db->prepare('SELECT * FROM tenants WHERE id = ?');
