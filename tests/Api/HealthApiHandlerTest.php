@@ -125,6 +125,10 @@ class HealthApiHandlerTest extends TestCase
         unset($_ENV['FRANKENPHP_WORKERS']);
         $previousServer = $_SERVER['FRANKENPHP_WORKERS'] ?? null;
         unset($_SERVER['FRANKENPHP_WORKERS']);
+        // Also clear the process-level env so getenv() returns false even when
+        // the container exports FRANKENPHP_WORKERS=8 at the OS level.
+        $previousGetenv = getenv('FRANKENPHP_WORKERS');
+        putenv('FRANKENPHP_WORKERS');
 
         try {
             $db = Database::withFactory(fn (): PDO => $this->healthyPdo());
@@ -140,6 +144,9 @@ class HealthApiHandlerTest extends TestCase
             }
             if ($previousServer !== null) {
                 $_SERVER['FRANKENPHP_WORKERS'] = $previousServer;
+            }
+            if ($previousGetenv !== false) {
+                putenv("FRANKENPHP_WORKERS={$previousGetenv}");
             }
         }
     }
