@@ -29,9 +29,10 @@ use Whity\Database\Database;
  *
  * SQLite limitations handled automatically:
  *   - SERIAL / BIGSERIAL → INTEGER AUTOINCREMENT
- *   - VARCHAR(n) / TIMESTAMP / BOOLEAN → TEXT / INTEGER
+ *   - VARCHAR(n) / TIMESTAMP / BOOLEAN / JSONB / JSON → TEXT / INTEGER
  *   - DEFAULT NOW() → DEFAULT (datetime('now'))
  *   - DEFAULT false/true → DEFAULT 0/1
+ *   - PostgreSQL cast operator (::typename) → stripped
  *   - ALTER TABLE … ADD COLUMN IF NOT EXISTS → IF NOT EXISTS stripped (SQLite ≥ 3.37)
  *   - DROP TABLE … CASCADE → CASCADE stripped
  *   - ALTER SEQUENCE … / ALTER TABLE … ALTER COLUMN … TYPE → silently skipped
@@ -107,6 +108,12 @@ final class SchemaFromMigrations
                 $sql = preg_replace('/\bBOOLEAN(\s+NOT\s+NULL)?\s+DEFAULT\s+false\b/i', 'INTEGER$1 DEFAULT 0', $sql) ?? $sql;
                 $sql = preg_replace('/\bBOOLEAN(\s+NOT\s+NULL)?\s+DEFAULT\s+true\b/i',  'INTEGER$1 DEFAULT 1', $sql) ?? $sql;
                 $sql = preg_replace('/\bBOOLEAN\b/i', 'INTEGER', $sql) ?? $sql;
+
+                // JSONB / JSON -> TEXT
+                $sql = preg_replace('/\bJSONB?\b/i', 'TEXT', $sql) ?? $sql;
+
+                // PostgreSQL type-cast operator (e.g. '{}'::jsonb) -> strip ::typename
+                $sql = preg_replace('/::\w+/i', '', $sql) ?? $sql;
 
                 // DROP TABLE ... CASCADE -> DROP TABLE ... (SQLite has no CASCADE on DROP)
                 $sql = preg_replace('/\bDROP\s+TABLE\s+(IF\s+EXISTS\s+)?(\w+)\s+CASCADE\b/i', 'DROP TABLE IF EXISTS $2', $sql) ?? $sql;
