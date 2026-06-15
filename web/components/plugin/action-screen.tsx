@@ -240,7 +240,7 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
                 <li
                   key={index}
                   className={`rounded-md border-l-4 bg-muted/40 px-3 py-2 text-sm ${
-                    isError ? 'border-destructive' : 'border-yellow-500'
+                    isError ? 'border-destructive' : 'border-warning'
                   }`}
                 >
                   <span className="mr-2 text-xs font-semibold uppercase tracking-wide">
