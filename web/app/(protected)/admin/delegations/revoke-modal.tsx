@@ -40,7 +40,7 @@ export function RevokeDelegationModal({
   const handleRevoke = async () => {
     try {
       setIsRevoking(true);
-      const { error, response } = await api.DELETE('/api/delegations/{id}', {
+      const { error, response } = await api.DELETE('/api/v1/delegations/{id}', {
         params: { path: { id: delegation.id } },
       });
 

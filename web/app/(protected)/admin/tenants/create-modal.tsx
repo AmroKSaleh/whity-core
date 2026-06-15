@@ -82,7 +82,7 @@ export function CreateTenantModal({
     try {
       setIsSubmitting(true);
 
-      const response = await apiClient('/api/tenants', {
+      const response = await apiClient('/api/v1/tenants', {
         method: 'POST',
         body: JSON.stringify({
           name: data.name,

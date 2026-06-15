@@ -67,7 +67,7 @@ export function CreateOuModal({
         payload.parent_id = parseInt(parentId, 10);
       }
 
-      const response = await apiClient('/api/ous', {
+      const response = await apiClient('/api/v1/ous', {
         method: 'POST',
         body: JSON.stringify(payload),
       });

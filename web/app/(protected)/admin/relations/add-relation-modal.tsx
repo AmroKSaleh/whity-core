@@ -77,7 +77,7 @@ export function AddRelationModal({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await apiClient('/api/users');
+        const res = await apiClient('/api/v1/users');
         if (!res.ok) {
           return;
         }
@@ -105,7 +105,7 @@ export function AddRelationModal({
 
     try {
       setIsLoading(true);
-      const response = await apiClient('/api/relations', {
+      const response = await apiClient('/api/v1/relations', {
         method: 'POST',
         body: JSON.stringify({
           from: { kind: 'person', id: fromPerson.id },

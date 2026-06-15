@@ -91,9 +91,9 @@ export default function RelationsPage() {
     try {
       setIsLoading(true);
       const [personsRes, edgesRes, typesRes] = await Promise.all([
-        apiClient('/api/persons'),
-        apiClient('/api/relations'),
-        apiClient('/api/relationship-types'),
+        apiClient('/api/v1/persons'),
+        apiClient('/api/v1/relations'),
+        apiClient('/api/v1/relationship-types'),
       ]);
 
       if (personsRes.status === 403) {

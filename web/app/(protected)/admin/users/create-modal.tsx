@@ -76,7 +76,7 @@ export function CreateUserModal({
     try {
       setIsSubmitting(true);
 
-      const { error, response } = await api.POST('/api/users', {
+      const { error, response } = await api.POST('/api/v1/users', {
         body: {
           email: data.email,
           password: data.password,

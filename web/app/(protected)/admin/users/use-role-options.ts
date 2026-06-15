@@ -61,7 +61,7 @@ export function useRoleOptions(enabled: boolean): {
     const fetchRoles = async (): Promise<void> => {
       try {
         setIsLoadingRoles(true);
-        const { data } = await api.GET('/api/roles');
+        const { data } = await api.GET('/api/v1/roles');
 
         if (data === undefined) {
           throw new Error('Failed to fetch roles');

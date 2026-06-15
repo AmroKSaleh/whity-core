@@ -40,7 +40,7 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const { data, loading: isLoading, error, refetch: fetchUsers } = useFetch(async () => {
-    const { data: responseData } = await api.GET('/api/users');
+    const { data: responseData } = await api.GET('/api/v1/users');
     if (responseData === undefined) {
       throw new Error('Failed to fetch users');
     }

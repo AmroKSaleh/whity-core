@@ -42,7 +42,7 @@ export default function TenantsPage() {
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
 
   const { data, loading: isLoading, error, refetch: fetchTenants } = useFetch(async () => {
-    const response = await apiClient('/api/tenants');
+    const response = await apiClient('/api/v1/tenants');
     if (!response.ok) {
       throw new Error('Failed to fetch tenants');
     }

@@ -68,7 +68,7 @@ export function EditRoleModal({
   const fetchPermissions = useCallback(async () => {
     try {
       setIsLoadingPermissions(true);
-      const response = await apiClient('/api/permissions');
+      const response = await apiClient('/api/v1/permissions');
 
       if (!response.ok) {
         throw new Error('Failed to fetch permissions');

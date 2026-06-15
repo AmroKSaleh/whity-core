@@ -37,7 +37,7 @@ export default function RolesPage() {
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
 
   const { data, loading: isLoading, error, refetch: fetchRoles } = useFetch(async () => {
-    const response = await apiClient('/api/roles');
+    const response = await apiClient('/api/v1/roles');
     if (!response.ok) {
       throw new Error('Failed to fetch roles');
     }

@@ -88,7 +88,7 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
       const [rolesRes, membersRes, allRolesRes] = await Promise.all([
         apiClient(`/api/ous/${ouId}/roles`),
         apiClient(`/api/ous/${ouId}/members`),
-        apiClient('/api/roles'),
+        apiClient('/api/v1/roles'),
       ]);
 
       if (rolesRes.ok) {
