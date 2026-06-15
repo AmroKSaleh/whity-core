@@ -54,7 +54,7 @@ export function DeleteOuModal({ isOpen, onClose, onSuccess, ou }: DeleteOuModalP
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <IconAlertTriangle className="text-red-600" size={24} />
+            <IconAlertTriangle className="text-destructive" size={24} />
             Delete Organizational Unit
           </DialogTitle>
           <DialogDescription>
@@ -62,7 +62,7 @@ export function DeleteOuModal({ isOpen, onClose, onSuccess, ou }: DeleteOuModalP
           </DialogDescription>
         </DialogHeader>
 
-        <div className="bg-red-50 dark:bg-red-950/20 rounded-lg p-4 text-sm text-red-800 dark:text-red-200">
+        <div className="bg-destructive/10 rounded-lg p-4 text-sm text-destructive">
           <p className="font-medium">Warning:</p>
           <ul className="mt-2 list-inside list-disc space-y-1">
             <li>This action cannot be undone</li>

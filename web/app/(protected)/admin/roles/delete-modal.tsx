@@ -70,15 +70,15 @@ export function DeleteRoleModal({
         </DialogHeader>
 
         <div className="space-y-3 py-4">
-          <div className="rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
-            <div className="text-sm font-medium text-slate-900 dark:text-slate-50">
+          <div className="rounded-lg bg-muted p-3">
+            <div className="text-sm font-medium text-foreground">
               {role.name}
             </div>
-            <div className="text-xs text-slate-600 dark:text-slate-400">
+            <div className="text-xs text-muted-foreground">
               {role.description}
             </div>
             {role.permissionCount && (
-              <div className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+              <div className="text-xs text-muted-foreground mt-2">
                 Permissions: {role.permissionCount}
               </div>
             )}

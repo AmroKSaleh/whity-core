@@ -267,7 +267,7 @@ export default function AdminStats() {
               </div>
               <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-500 rounded-full"
+                  className="h-full bg-primary rounded-full"
                   style={{
                     width: `${((stats?.maintenance.migrations_executed ?? 0) / (stats?.maintenance.migrations_total ?? 1)) * 100}%`,
                   }}

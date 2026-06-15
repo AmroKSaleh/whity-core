@@ -81,12 +81,12 @@ export function PermissionsPanel({
               {permissions.map(permission => (
                 <div
                   key={permission.id}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 p-3"
+                  className="rounded-lg border border-border p-3"
                 >
-                  <div className="text-sm font-medium text-slate-900 dark:text-slate-50">
+                  <div className="text-sm font-medium text-foreground">
                     {permission.name}
                   </div>
-                  <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                  <div className="text-xs text-muted-foreground mt-1">
                     {permission.description}
                   </div>
                 </div>
