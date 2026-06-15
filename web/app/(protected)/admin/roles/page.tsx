@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { ROLES_WRITE, ROLES_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@/components/ui/button';
@@ -23,6 +25,11 @@ import type { Role } from './types';
 export default function RolesPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const { hasPermission } = useCapabilities();
+  const canCreate = hasPermission(ROLES_WRITE);
+  const canEdit = hasPermission(ROLES_WRITE);
+  const canDelete = hasPermission(ROLES_DELETE);
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -78,15 +85,19 @@ export default function RolesPage() {
         <DropdownMenuItem onClick={() => handleViewPermissions(role)}>
           View Permissions
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleEditClick(role)}>
-          Edit
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => handleDeleteClick(role)}
-          className="text-destructive focus:text-destructive"
-        >
-          Delete
-        </DropdownMenuItem>
+        {canEdit && (
+          <DropdownMenuItem onClick={() => handleEditClick(role)}>
+            Edit
+          </DropdownMenuItem>
+        )}
+        {canDelete && (
+          <DropdownMenuItem
+            onClick={() => handleDeleteClick(role)}
+            className="text-destructive focus:text-destructive"
+          >
+            Delete
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -97,13 +108,15 @@ export default function RolesPage() {
         title="Roles"
         description="Manage roles and their permissions"
         action={
-          <Button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="gap-2"
-          >
-            <IconPlus size={18} />
-            Create Role
-          </Button>
+          canCreate ? (
+            <Button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="gap-2"
+            >
+              <IconPlus size={18} />
+              Create Role
+            </Button>
+          ) : undefined
         }
       />
 

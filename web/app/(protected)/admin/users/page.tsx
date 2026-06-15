@@ -5,6 +5,8 @@ import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { USERS_WRITE, USERS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@/components/ui/button';
@@ -27,6 +29,11 @@ export type User = components['schemas']['User'];
 
 export default function UsersPage() {
   const { addToast } = useToast();
+  const { hasPermission } = useCapabilities();
+  const canCreate = hasPermission(USERS_WRITE);
+  const canEdit = hasPermission(USERS_WRITE);
+  const canDelete = hasPermission(USERS_DELETE);
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -66,26 +73,33 @@ export default function UsersPage() {
     { key: 'createdAt', label: 'Created At', sortable: true },
   ];
 
-  const rowActions = (user: User) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Row actions">
-          <IconMenu2 />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => handleEditClick(user)}>
-          Edit
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          variant="destructive"
-          onClick={() => handleDeleteClick(user)}
-        >
-          Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+  const rowActions = (user: User) => {
+    if (!canEdit && !canDelete) return null;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label="Row actions">
+            <IconMenu2 />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {canEdit && (
+            <DropdownMenuItem onClick={() => handleEditClick(user)}>
+              Edit
+            </DropdownMenuItem>
+          )}
+          {canDelete && (
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => handleDeleteClick(user)}
+            >
+              Delete
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -93,13 +107,15 @@ export default function UsersPage() {
         title="Users"
         description="Manage users in your system"
         action={
-          <Button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="gap-2"
-          >
-            <IconPlus />
-            Create User
-          </Button>
+          canCreate ? (
+            <Button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="gap-2"
+            >
+              <IconPlus />
+              Create User
+            </Button>
+          ) : undefined
         }
       />
 

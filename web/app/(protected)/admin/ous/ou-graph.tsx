@@ -39,6 +39,9 @@ interface OuNodeData extends Record<string, unknown> {
   selected: boolean;
   onSelect: (id: number) => void;
   onAction: (action: OuAction, node: OuNode) => void;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
 }
 
 /**
@@ -83,7 +86,8 @@ function layout(tree: OuNode[]): { nodes: Array<{ node: OuNode; x: number; y: nu
 
 /** Custom react-flow node: a selectable card with a per-node action menu. */
 function OuFlowNode({ data }: NodeProps<Node<OuNodeData>>) {
-  const { ou, selected, onSelect, onAction } = data;
+  const { ou, selected, onSelect, onAction, canCreate, canEdit, canDelete } = data;
+  const hasAnyAction = canCreate || canEdit || canDelete;
   return (
     <div
       className={cn(
@@ -100,29 +104,39 @@ function OuFlowNode({ data }: NodeProps<Node<OuNodeData>>) {
       >
         {ou.name}
       </button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={`Actions for ${ou.name}`}
-            className="nodrag"
-          >
-            <IconDotsVertical />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => onAction('create-child', ou)}>
-            Create child OU
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onAction('edit', ou)}>Edit</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onAction('move', ou)}>Move to&hellip;</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onClick={() => onAction('delete', ou)}>
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {hasAnyAction && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Actions for ${ou.name}`}
+              className="nodrag"
+            >
+              <IconDotsVertical />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {canCreate && (
+              <DropdownMenuItem onClick={() => onAction('create-child', ou)}>
+                Create child OU
+              </DropdownMenuItem>
+            )}
+            {canEdit && (
+              <DropdownMenuItem onClick={() => onAction('edit', ou)}>Edit</DropdownMenuItem>
+            )}
+            {canEdit && (
+              <DropdownMenuItem onClick={() => onAction('move', ou)}>Move to&hellip;</DropdownMenuItem>
+            )}
+            {(canCreate || canEdit) && canDelete && <DropdownMenuSeparator />}
+            {canDelete && (
+              <DropdownMenuItem variant="destructive" onClick={() => onAction('delete', ou)}>
+                Delete
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       <Handle type="source" position={Position.Bottom} className="!bg-muted-foreground/50" />
     </div>
   );
@@ -144,7 +158,7 @@ const nodeTypes: NodeTypes = { ouNode: OuFlowNode };
  * imported with `ssr:false` by the page so react-flow stays out of the main
  * bundle and never runs on the server.
  */
-export default function OuGraph({ tree, selectedId, onSelect, onAction }: OuViewProps) {
+export default function OuGraph({ tree, selectedId, onSelect, onAction, canCreate = false, canEdit = false, canDelete = false }: OuViewProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<OuNodeData>>([]);
 
   // Computed tidy-tree positions, recomputed only when the tree structure changes.
@@ -161,11 +175,11 @@ export default function OuGraph({ tree, selectedId, onSelect, onAction }: OuView
         id: String(node.id),
         type: 'ouNode',
         position: draggedPos.get(String(node.id)) ?? { x, y },
-        data: { ou: node, selected: node.id === selectedId, onSelect, onAction },
+        data: { ou: node, selected: node.id === selectedId, onSelect, onAction, canCreate, canEdit, canDelete },
         connectable: false,
       }));
     });
-  }, [layouted, selectedId, onSelect, onAction, setNodes]);
+  }, [layouted, selectedId, onSelect, onAction, canCreate, canEdit, canDelete, setNodes]);
 
   const edges = useMemo<Edge[]>(() => {
     const all = flattenOuTree(tree);

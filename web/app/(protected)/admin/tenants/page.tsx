@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { TENANTS_WRITE, TENANTS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@/components/ui/button';
@@ -29,6 +31,11 @@ export interface Tenant {
 export default function TenantsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const { hasPermission } = useCapabilities();
+  const canCreate = hasPermission(TENANTS_WRITE);
+  const canEdit = hasPermission(TENANTS_WRITE);
+  const canDelete = hasPermission(TENANTS_DELETE);
+
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -68,26 +75,33 @@ export default function TenantsPage() {
     { key: 'createdAt', label: 'Created At', sortable: true },
   ];
 
-  const rowActions = (tenant: Tenant) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm">
-          <IconMenu2 size={16} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => handleEditClick(tenant)}>
-          Edit
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => handleDeleteClick(tenant)}
-          className="text-destructive focus:text-destructive"
-        >
-          Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+  const rowActions = (tenant: Tenant) => {
+    if (!canEdit && !canDelete) return null;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm">
+            <IconMenu2 size={16} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {canEdit && (
+            <DropdownMenuItem onClick={() => handleEditClick(tenant)}>
+              Edit
+            </DropdownMenuItem>
+          )}
+          {canDelete && (
+            <DropdownMenuItem
+              onClick={() => handleDeleteClick(tenant)}
+              className="text-destructive focus:text-destructive"
+            >
+              Delete
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -95,13 +109,15 @@ export default function TenantsPage() {
         title="Tenants"
         description="Manage tenants in your system"
         action={
-          <Button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="gap-2"
-          >
-            <IconPlus size={18} />
-            Create Tenant
-          </Button>
+          canCreate ? (
+            <Button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="gap-2"
+            >
+              <IconPlus size={18} />
+              Create Tenant
+            </Button>
+          ) : undefined
         }
       />
 
