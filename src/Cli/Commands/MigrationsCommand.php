@@ -64,7 +64,7 @@ class MigrationsCommand
             return match ($action) {
                 'status' => $this->status(),
                 'run' => $this->run(),
-                'rollback' => $this->rollback(),
+                'rollback' => $this->dispatchRollback($argv),
                 '--help', '-h', 'help' => $this->showHelp(),
                 default => $this->unknownAction($action),
             };
@@ -75,6 +75,43 @@ class MigrationsCommand
             echo "\033[0;31m✗ Error: " . $e->getMessage() . "\033[0m\n";
             return 1;
         }
+    }
+
+    /**
+     * Dispatch rollback to the appropriate mode based on arguments.
+     *
+     * Modes:
+     *  - No arguments: existing LIFO single-migration rollback (unchanged).
+     *  - `--plugin <PluginName> [--force]`: roll back all migrations for the
+     *    given plugin in reverse execution order.
+     *  - `<MigrationName> [--force]`: roll back exactly the named core
+     *    migration (file stem, e.g. "002_create_permissions").
+     *
+     * @param list<string> $argv Remaining arguments after "rollback".
+     */
+    private function dispatchRollback(array $argv): int
+    {
+        $force = in_array('--force', $argv, true);
+        $argv  = array_values(array_filter($argv, static fn(string $a): bool => $a !== '--force'));
+
+        // --plugin <PluginName>
+        $pluginIdx = array_search('--plugin', $argv, true);
+        if ($pluginIdx !== false) {
+            $pluginName = $argv[$pluginIdx + 1] ?? null;
+            if ($pluginName === null || str_starts_with($pluginName, '--')) {
+                echo "\033[0;31m✗ Rollback error: --plugin requires a plugin name argument\033[0m\n";
+                return 1;
+            }
+            return $this->rollbackPlugin($pluginName, $force);
+        }
+
+        // Named migration
+        if (!empty($argv)) {
+            return $this->rollbackNamed($argv[0], $force);
+        }
+
+        // Default: global LIFO
+        return $this->rollback();
     }
 
     /**
@@ -204,6 +241,207 @@ class MigrationsCommand
     }
 
     /**
+     * Roll back exactly one named core migration by its file-stem name.
+     *
+     * Safety: refuses by default when any migration that was executed AFTER
+     * the target references one of the tables the target creates in its `up()`
+     * SQL.  Pass `$force = true` to skip the check.
+     *
+     * @param string $name  File-stem name (e.g. "001_create_users_roles").
+     * @param bool   $force Bypass the dependency check.
+     */
+    private function rollbackNamed(string $name, bool $force): int
+    {
+        try {
+            $executed = $this->getExecutedMigrations();
+
+            if (!isset($executed[$name])) {
+                echo "\033[0;31m✗ Rollback error: migration '{$name}' has not been executed\033[0m\n";
+                return 1;
+            }
+
+            $file = $this->migrationDir . '/' . $name . '.php';
+            if (!file_exists($file)) {
+                echo "\033[0;31m✗ Rollback error: migration file {$name}.php not found\033[0m\n";
+                return 1;
+            }
+
+            if (!$force) {
+                $blockers = $this->findDependentMigrations($name, $file, $executed);
+                if (!empty($blockers)) {
+                    echo "\033[0;31m✗ Rollback blocked: the following migrations executed after '{$name}' depend on its tables:\033[0m\n";
+                    foreach ($blockers as $blocker) {
+                        echo "    - {$blocker}\n";
+                    }
+                    echo "\nUse --force to roll back anyway.\n";
+                    return 1;
+                }
+            }
+
+            echo "\n\033[1;33mRolling back: $name... \033[0m";
+            $this->executeMigration($file, 'down');
+            echo "\033[0;32m✓\033[0m\n\n";
+            echo "\033[0;32m✓ Successfully rolled back $name\033[0m\n\n";
+
+            return 0;
+        } catch (\Exception $e) {
+            echo "\033[0;31m✗ Rollback failed: " . $e->getMessage() . "\033[0m\n";
+            return 1;
+        }
+    }
+
+    /**
+     * Roll back all executed migrations that belong to the named plugin, in
+     * reverse execution order.
+     *
+     * Plugin migrations are identified by their tracking record:
+     * `plugin:<PluginName>:<ClassName>`.  The rollback uses the
+     * `executePluginMigration` path when the plugin is loaded (real migration
+     * class available), or removes the tracking row directly for orphaned
+     * records (plugin no longer installed) — consistent with the uninstall
+     * use-case this feature targets.
+     *
+     * @param string $pluginName The plugin's declared name (case-sensitive).
+     * @param bool   $force      Currently unused but accepted for consistency.
+     */
+    private function rollbackPlugin(string $pluginName, bool $force): int
+    {
+        try {
+            $prefix   = self::PLUGIN_PREFIX . $pluginName . ':';
+            $executed = $this->getExecutedMigrations();
+
+            // Collect matching records, ordered by id DESC (reverse execution).
+            $targets = [];
+            foreach ($executed as $migName => $row) {
+                if (str_starts_with((string) $migName, $prefix)) {
+                    $targets[] = ['name' => (string) $migName, 'row' => $row];
+                }
+            }
+
+            // Sort by id DESC so the most-recently-run migration rolls back first.
+            usort($targets, static function (array $a, array $b): int {
+                return (int) ($b['row']['id'] ?? 0) <=> (int) ($a['row']['id'] ?? 0);
+            });
+
+            if (empty($targets)) {
+                echo "\n\033[1;33m⚠ No executed migrations found for plugin '{$pluginName}'\033[0m\n\n";
+                return 0;
+            }
+
+            echo "\n\033[1;33mRolling back migrations for plugin '{$pluginName}'...\033[0m\n";
+
+            foreach ($targets as $target) {
+                $migName = $target['name'];
+                echo "  Rolling back: $migName... ";
+
+                $entry = $this->findPluginMigrationByRecord($migName);
+                if ($entry !== null) {
+                    $this->executePluginMigration($entry, 'down');
+                } else {
+                    // Plugin is no longer installed; remove the orphaned tracking
+                    // row so the record does not block a future re-install.
+                    $stmt = $this->db->getPdo()->prepare(
+                        'DELETE FROM core_schema_migrations WHERE migration_name = ?'
+                    );
+                    $stmt->execute([$migName]);
+                }
+
+                echo "\033[0;32m✓\033[0m\n";
+            }
+
+            $count = count($targets);
+            echo "\n\033[0;32m✓ Successfully rolled back $count migration(s) for plugin '{$pluginName}'\033[0m\n\n";
+
+            return 0;
+        } catch (\Exception $e) {
+            echo "\033[0;31m✗ Plugin rollback failed: " . $e->getMessage() . "\033[0m\n";
+            return 1;
+        }
+    }
+
+    /**
+     * Find core migrations executed AFTER `$targetName` whose `up()` SQL
+     * references any table created by the target migration.
+     *
+     * The dependency detection reads the PHP source of each later migration
+     * file and searches for the table names extracted from the target's
+     * `up()` method via a simple CREATE TABLE pattern match.  This is a
+     * best-effort static analysis: it catches `CREATE TABLE [IF NOT EXISTS]
+     * <name>` and then looks for those names in the text of subsequent files.
+     *
+     * @param string            $targetName  File-stem of the target migration.
+     * @param string            $targetFile  Absolute path to the target file.
+     * @param array<string, mixed> $executed Executed migrations map (name → row).
+     * @return list<string> Names of blocking dependent migrations.
+     */
+    private function findDependentMigrations(string $targetName, string $targetFile, array $executed): array
+    {
+        // Extract table names created by the target migration.
+        $targetSrc   = (string) file_get_contents($targetFile);
+        $tableNames  = $this->extractCreatedTableNames($targetSrc);
+
+        if (empty($tableNames)) {
+            return [];
+        }
+
+        // Determine the target's execution order by its id.
+        $targetId = (int) ($executed[$targetName]['id'] ?? 0);
+
+        $blockers = [];
+
+        foreach ($executed as $migName => $row) {
+            if ($migName === $targetName) {
+                continue;
+            }
+
+            // Only migrations executed AFTER the target (higher id) matter.
+            if ((int) ($row['id'] ?? 0) <= $targetId) {
+                continue;
+            }
+
+            // Skip plugin migrations — they live under a different path.
+            if (str_starts_with((string) $migName, self::PLUGIN_PREFIX)) {
+                continue;
+            }
+
+            $candidateFile = $this->migrationDir . '/' . $migName . '.php';
+            if (!file_exists($candidateFile)) {
+                continue;
+            }
+
+            $candidateSrc = (string) file_get_contents($candidateFile);
+            foreach ($tableNames as $table) {
+                if (preg_match('/\b' . preg_quote($table, '/') . '\b/i', $candidateSrc)) {
+                    $blockers[] = (string) $migName;
+                    break;
+                }
+            }
+        }
+
+        return $blockers;
+    }
+
+    /**
+     * Extract table names from `CREATE TABLE [IF NOT EXISTS] <name>` statements
+     * in the given PHP source.
+     *
+     * @param string $src PHP source code of a migration file.
+     * @return list<string> Unique table names found.
+     */
+    private function extractCreatedTableNames(string $src): array
+    {
+        preg_match_all(
+            '/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"\']?(\w+)[`"\']?)/i',
+            $src,
+            $matches
+        );
+
+        /** @var list<string> $names */
+        $names = array_unique(array_filter(array_map('trim', $matches[2])));
+        return array_values($names);
+    }
+
+    /**
      * Rollback last migration
      */
     private function rollback(): int
@@ -273,7 +511,7 @@ class MigrationsCommand
     private function getExecutedMigrations(): array
     {
         try {
-            $stmt = $this->db->getPdo()->prepare('SELECT migration_name, executed_at FROM core_schema_migrations');
+            $stmt = $this->db->getPdo()->prepare('SELECT id, migration_name, executed_at FROM core_schema_migrations');
             $stmt->execute();
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -639,10 +877,13 @@ class MigrationsCommand
         echo "\033[1mUsage:\033[0m\n";
         echo "  php public/index.php migrate <action>\n\n";
         echo "\033[1mActions:\033[0m\n";
-        echo "  status      Show migration status (default)\n";
-        echo "  run         Run pending migrations\n";
-        echo "  rollback    Rollback last migration\n";
-        echo "  help        Show this help message\n\n";
+        echo "  status                              Show migration status (default)\n";
+        echo "  run                                 Run pending migrations\n";
+        echo "  rollback                            Rollback last migration (LIFO)\n";
+        echo "  rollback <MigrationName>            Rollback exactly one named migration\n";
+        echo "  rollback --plugin <PluginName>      Rollback all migrations for a plugin\n";
+        echo "  rollback [...] --force              Bypass dependent-migration safety check\n";
+        echo "  help                                Show this help message\n\n";
         return 0;
     }
 
