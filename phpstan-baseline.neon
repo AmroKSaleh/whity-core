@@ -1,0 +1,1316 @@
+parameters:
+	ignoreErrors:
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: src/Api/AdminApiHandler.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 7
+			path: src/Api/AdminApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\AdminApiHandler\\:\\:fillMissingDates\\(\\) has parameter \\$data with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/AdminApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\AdminApiHandler\\:\\:fillMissingDates\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/AdminApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\AdminApiHandler\\:\\:formatBytes\\(\\) has parameter \\$bytes with no type specified\\.$#"
+			count: 1
+			path: src/Api/AdminApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\AdminApiHandler\\:\\:formatBytes\\(\\) has parameter \\$precision with no type specified\\.$#"
+			count: 1
+			path: src/Api/AdminApiHandler.php
+
+		-
+			message: "#^Parameter \\#1 \\$value of function count expects array\\|Countable, array\\<int, string\\>\\|false given\\.$#"
+			count: 1
+			path: src/Api/AdminApiHandler.php
+
+		-
+			message: "#^Parameter \\#1 \\$tenantId of method Whity\\\\Core\\\\Deployment\\\\DeploymentManager\\:\\:apply\\(\\) expects int, int\\|null given\\.$#"
+			count: 1
+			path: src/Api/DeploymentApiHandler.php
+
+		-
+			message: "#^Parameter \\#1 \\$tenantId of method Whity\\\\Core\\\\Deployment\\\\DeploymentManager\\:\\:getStatus\\(\\) expects int, int\\|null given\\.$#"
+			count: 1
+			path: src/Api/DeploymentApiHandler.php
+
+		-
+			message: "#^Parameter \\#1 \\$tenantId of method Whity\\\\Core\\\\Deployment\\\\DeploymentManager\\:\\:rollback\\(\\) expects int, int\\|null given\\.$#"
+			count: 1
+			path: src/Api/DeploymentApiHandler.php
+
+		-
+			message: "#^Parameter \\#1 \\$tenantId of method Whity\\\\Core\\\\Deployment\\\\DeploymentManager\\:\\:rollbackMigration\\(\\) expects int, int\\|null given\\.$#"
+			count: 1
+			path: src/Api/DeploymentApiHandler.php
+
+		-
+			message: "#^Argument of an invalid type array\\<int, string\\>\\|false supplied for foreach, only iterables are supported\\.$#"
+			count: 1
+			path: src/Api/MigrationsApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\MigrationsApiHandler\\:\\:getExecutedMigrations\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/MigrationsApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\MigrationsApiHandler\\:\\:getMigrationFiles\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/MigrationsApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\OusApiHandler\\:\\:assignRole\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\OusApiHandler\\:\\:delete\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\OusApiHandler\\:\\:get\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\OusApiHandler\\:\\:members\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\OusApiHandler\\:\\:removeRole\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\OusApiHandler\\:\\:roles\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\OusApiHandler\\:\\:update\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Parameter \\#1 \\$string of function trim expects string, string\\|null given\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Parameter \\#2 \\$tenantId of method Whity\\\\Api\\\\OusApiHandler\\:\\:ouIsVisible\\(\\) expects int, int\\|null given\\.$#"
+			count: 2
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Parameter \\#3 \\$subject of function preg_replace expects array\\|string, string\\|null given\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Parameter \\#3 \\$tenantId of method Whity\\\\Api\\\\OusApiHandler\\:\\:wouldCreateCycle\\(\\) expects int, int\\|null given\\.$#"
+			count: 1
+			path: src/Api/OusApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\TenantsApiHandler\\:\\:delete\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/TenantsApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\TenantsApiHandler\\:\\:update\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/TenantsApiHandler.php
+
+		-
+			message: "#^Parameter \\#1 \\$string of function trim expects string, string\\|null given\\.$#"
+			count: 1
+			path: src/Api/TenantsApiHandler.php
+
+		-
+			message: "#^Parameter \\#3 \\$subject of function preg_replace expects array\\|string, string\\|null given\\.$#"
+			count: 1
+			path: src/Api/TenantsApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Api\\\\UsersApiHandler\\:\\:delete\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/UsersApiHandler.php
+
+		-
+			message: "#^Parameter \\#3 \\$ownerTenantId of method Whity\\\\Api\\\\UsersApiHandler\\:\\:resolveVisibleRoleId\\(\\) expects int, int\\|null given\\.$#"
+			count: 2
+			path: src/Api/UsersApiHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:completeTwoFaLogin\\(\\) has parameter \\$claims with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:handle\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:handle2fa\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:handleLogout\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:handleMe\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:handleRefresh\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\DatabaseQueryWrapper\\:\\:query\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\BackupCodesService\\:\\:generateCodes\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/BackupCodesService.php
+
+		-
+			message: "#^Strict comparison using \\=\\=\\= between array and false will always evaluate to false\\.$#"
+			count: 3
+			path: src/Auth/RoleChecker.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\TokenValidator\\:\\:validateAccessToken\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/TokenValidator.php
+
+		-
+			message: "#^Method Whity\\\\Auth\\\\TokenValidator\\:\\:validateRefreshToken\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Auth/TokenValidator.php
+
+		-
+			message: "#^Parameter \\#1 \\$label of method OTPHP\\\\OTP\\:\\:setLabel\\(\\) expects non\\-empty\\-string, string given\\.$#"
+			count: 1
+			path: src/Auth/TotpService.php
+
+		-
+			message: "#^Parameter \\#1 \\$otp of method OTPHP\\\\TOTP\\:\\:verify\\(\\) expects non\\-empty\\-string, string given\\.$#"
+			count: 2
+			path: src/Auth/TotpService.php
+
+		-
+			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
+			count: 3
+			path: src/Auth/TotpService.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\CliRunner\\:\\:run\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/CliRunner.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\BaseCommand\\:\\:callApi\\(\\) has parameter \\$data with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/BaseCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\BaseCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/BaseCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\BaseCommand\\:\\:renderTable\\(\\) has parameter \\$headers with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/BaseCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\BaseCommand\\:\\:renderTable\\(\\) has parameter \\$rows with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/BaseCommand.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 1
+			path: src/Cli/Commands/BaseCommand.php
+
+		-
+			message: "#^Argument of an invalid type array\\<int, string\\>\\|false supplied for foreach, only iterables are supported\\.$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^Else branch is unreachable because ternary operator condition is always true\\.$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:getExecutedMigrations\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:getMigrationFiles\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:renderTable\\(\\) has parameter \\$headers with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:renderTable\\(\\) has parameter \\$rows with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^PHPDoc tag @param references unknown parameter\\: \\$db$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^PHPDoc tag @param references unknown parameter\\: \\$migrationDir$#"
+			count: 1
+			path: src/Cli/Commands/MigrationsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\PluginsCommand\\:\\:disable\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/PluginsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\PluginsCommand\\:\\:enable\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/PluginsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\PluginsCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/PluginsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\SeedCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/SeedCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:create\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/TenantsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:delete\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/TenantsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/TenantsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:parseOptions\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/TenantsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:parseOptions\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/TenantsCommand.php
+
+		-
+			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:update\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Cli/Commands/TenantsCommand.php
+
+		-
+			message: "#^Argument of an invalid type array\\<int, string\\>\\|false supplied for foreach, only iterables are supported\\.$#"
+			count: 1
+			path: src/Console/GenerateOpenApiSchemaCommand.php
+
+		-
+			message: "#^Method Whity\\\\Console\\\\GenerateOpenApiSchemaCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Console/GenerateOpenApiSchemaCommand.php
+
+		-
+			message: "#^Argument of an invalid type array\\<int, string\\>\\|false supplied for foreach, only iterables are supported\\.$#"
+			count: 2
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method Whity\\\\Core\\\\Deployment\\\\DeploymentManager\\:\\:getStatus\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:__construct\\(\\) has parameter \\$pdo with no type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:exec\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:exec\\(\\) has parameter \\$sql with no type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:getPdo\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:query\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:query\\(\\) has parameter \\$params with no type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:query\\(\\) has parameter \\$sql with no type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Parameter \\#1 \\$array of function array_diff expects array, array\\<int, string\\>\\|false given\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Parameter \\#1 \\$array of function sort expects TArray of array\\<string\\>, array\\<int, string\\>\\|false given\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Property class@anonymous/src/Core/Deployment/DeploymentManager\\.php\\:214\\:\\:\\$pdo has no type specified\\.$#"
+			count: 1
+			path: src/Core/Deployment/DeploymentManager.php
+
+		-
+			message: "#^Method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:dispatch\\(\\) has parameter \\$data with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Core/Hooks/HookManager.php
+
+		-
+			message: "#^Method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:dispatch\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Core/Hooks/HookManager.php
+
+		-
+			message: "#^Method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:dispatchAsync\\(\\) has parameter \\$payload with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Core/Hooks/HookManager.php
+
+		-
+			message: "#^Method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:getListeners\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Core/Hooks/HookManager.php
+
+		-
+			message: "#^Property Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:\\$listeners type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Core/Hooks/HookManager.php
+
+		-
+			message: "#^Offset 'active'\\|'disabled'\\|'discovered'\\|'failed'\\|'loaded' on array\\{discovered\\: array\\{Whity\\\\Core\\\\PluginState\\:\\:Loaded\\}, loaded\\: array\\{Whity\\\\Core\\\\PluginState\\:\\:Active, Whity\\\\Core\\\\PluginState\\:\\:Failed, Whity\\\\Core\\\\PluginState\\:\\:Disabled\\}, active\\: array\\{Whity\\\\Core\\\\PluginState\\:\\:Failed, Whity\\\\Core\\\\PluginState\\:\\:Disabled\\}, failed\\: array\\{Whity\\\\Core\\\\PluginState\\:\\:Active, Whity\\\\Core\\\\PluginState\\:\\:Disabled\\}, disabled\\: array\\{Whity\\\\Core\\\\PluginState\\:\\:Active\\}\\} on left side of \\?\\? always exists and is not nullable\\.$#"
+			count: 1
+			path: src/Core/PluginLifecycle.php
+
+		-
+			message: "#^If condition is always false\\.$#"
+			count: 1
+			path: src/Core/PluginLoader.php
+
+		-
+			message: "#^Parameter \\#1 \\$objectOrClass of class ReflectionClass constructor expects class\\-string\\<T of object\\>\\|T of object, string given\\.$#"
+			count: 1
+			path: src/Core/PluginLoader.php
+
+		-
+			message: "#^Result of && is always true\\.$#"
+			count: 1
+			path: src/Core/PluginLoader.php
+
+		-
+			message: "#^Right side of && is always true\\.$#"
+			count: 1
+			path: src/Core/PluginLoader.php
+
+		-
+			message: "#^Method Whity\\\\Core\\\\Queue\\\\Queue\\:\\:push\\(\\) has parameter \\$payload with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Core/Queue/Queue.php
+
+		-
+			message: "#^Strict comparison using \\=\\=\\= between mixed and null will always evaluate to false\\.$#"
+			count: 1
+			path: src/Database/Database.php
+
+		-
+			message: "#^Offset 'requiredPermission' does not exist on array\\{method\\: string, path\\: string, requiredRole\\: null, schema\\: array\\<string, mixed\\>\\|null\\}\\.$#"
+			count: 1
+			path: src/OpenAPI/SchemaGenerator.php
+
+		-
+			message: "#^Offset 'schema' on array\\{method\\: string, path\\: string, pattern\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null\\} on left side of \\?\\? does not exist\\.$#"
+			count: 1
+			path: src/OpenAPI/SchemaGenerator.php
+
+		-
+			message: "#^Offset 'tags' on array\\<string, mixed\\> on left side of \\?\\? always exists and is not nullable\\.$#"
+			count: 1
+			path: src/OpenAPI/SchemaGenerator.php
+
+		-
+			message: "#^Right side of && is always true\\.$#"
+			count: 1
+			path: src/OpenAPI/SchemaGenerator.php
+
+		-
+			message: "#^Function Whity\\\\app\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: src/helpers.php
+
+		-
+			message: "#^Function Whity\\\\register_service\\(\\) has parameter \\$instance with no type specified\\.$#"
+			count: 1
+			path: src/helpers.php
+
+		-
+			message: "#^Method class@anonymous/tests/Api/AdminApiHandlerRealEngineTest\\.php\\:155\\:\\:prepare\\(\\) has parameter \\$options with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Api/AdminApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 6
+			path: tests/Api/DelegationsApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Method class@anonymous/tests/Api/ExceptionLeakageTest\\.php\\:193\\:\\:prepare\\(\\) has parameter \\$options with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Api/ExceptionLeakageTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
+			path: tests/Api/MeCapabilitiesApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 9
+			path: tests/Api/OusApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Offset 'handler' does not exist on array\\{handler\\: callable\\(\\)\\: mixed, params\\: array\\<string, string\\>, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null\\}\\|null\\.$#"
+			count: 2
+			path: tests/Api/PluginsApiHandlerTest.php
+
+		-
+			message: "#^Using nullsafe method call on non\\-nullable type Whity\\\\Core\\\\PluginLifecycle\\. Use \\-\\> instead\\.$#"
+			count: 1
+			path: tests/Api/PluginsApiHandlerTest.php
+
+		-
+			message: "#^Offset 'display_name' does not exist on array\\<string, mixed\\>\\|null\\.$#"
+			count: 1
+			path: tests/Api/RelationsApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Api/RolesApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Api/RolesApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Method Tests\\\\Api\\\\RolesApiHandlerTest\\:\\:authedRequest\\(\\) has parameter \\$body with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Api/RolesApiHandlerTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$fetch of method Tests\\\\Api\\\\RolesApiHandlerTest\\:\\:statement\\(\\) expects array\\<string, mixed\\>\\|false, array\\{1\\: 1\\} given\\.$#"
+			count: 7
+			path: tests/Api/RolesApiHandlerTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 5
+			path: tests/Api/TenantsApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Api/UsersApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 10
+			path: tests/Api/UsersApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Method Tests\\\\Api\\\\UsersApiHandlerTest\\:\\:request\\(\\) has parameter \\$body with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Api/UsersApiHandlerTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Auth/AccessTokenRevocationRealEngineTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$string of function base64_encode expects string, string\\|false given\\.$#"
+			count: 6
+			path: tests/Auth/JwtParserTest.php
+
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
+			path: tests/Auth/RoleCheckerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 5
+			path: tests/Auth/RoleCheckerRealEngineTest.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
+			count: 1
+			path: tests/Auth/TokenValidatorTest.php
+
+		-
+			message: "#^Offset 'jti' does not exist on array\\<string, mixed\\>\\|null\\.$#"
+			count: 1
+			path: tests/Auth/TokenValidatorTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 9
+			path: tests/Auth/UpdateMeRealEngineTest.php
+
+		-
+			message: "#^Method class@anonymous/tests/Cli/BaseCommandCallApiTest\\.php\\:27\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Cli/BaseCommandCallApiTest.php
+
+		-
+			message: "#^Expression on left side of \\?\\? is not nullable\\.$#"
+			count: 1
+			path: tests/Cli/MigrationsCommandTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$string of function strtolower expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Cli/MigrationsCommandTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$haystack of method PHPUnit\\\\Framework\\\\Assert\\:\\:assertStringContainsString\\(\\) expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Cli/MigrationsCommandTest.php
+
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Cli/PluginMigrationsRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Cli/PluginMigrationsRealEngineTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Cli/PluginsCommandTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$haystack of method PHPUnit\\\\Framework\\\\Assert\\:\\:assertStringContainsString\\(\\) expects string, string\\|false given\\.$#"
+			count: 3
+			path: tests/Cli/PluginsCommandTest.php
+
+		-
+			message: "#^Expression on left side of \\?\\? is not nullable\\.$#"
+			count: 1
+			path: tests/Cli/SeedCommandTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$string of function strtolower expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Cli/SeedCommandTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$haystack of method PHPUnit\\\\Framework\\\\Assert\\:\\:assertStringContainsString\\(\\) expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Cli/SeedCommandTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Cli/TenantsCommandTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$haystack of method PHPUnit\\\\Framework\\\\Assert\\:\\:assertStringContainsString\\(\\) expects string, string\\|false given\\.$#"
+			count: 5
+			path: tests/Cli/TenantsCommandTest.php
+
+		-
+			message: "#^Property Whity\\\\Tests\\\\Cli\\\\TenantsCommandTest\\:\\:\\$runner is never read, only written\\.$#"
+			count: 1
+			path: tests/Cli/TenantsCommandTest.php
+
+		-
+			message: "#^Anonymous function never returns null so it can be removed from the return type\\.$#"
+			count: 3
+			path: tests/Cli/UpdateCheckCommandTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Commands/RevokedTokensCleanupCommandTest.php
+
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Core/Audit/AuditLoggerTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 4
+			path: tests/Core/Delegation/DelegationServiceRealEngineTest.php
+
+		-
+			message: "#^Call to an undefined method ReflectionType\\:\\:getName\\(\\)\\.$#"
+			count: 1
+			path: tests/Core/PluginInterfaceTest.php
+
+		-
+			message: "#^Offset 'requiredRole' does not exist on array\\{method\\: string, path\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\?\\: string\\|null, requiredPermission\\?\\: string\\|null, schema\\?\\: array\\<string, mixed\\>\\}\\.$#"
+			count: 2
+			path: tests/Core/PluginInterfaceTest.php
+
+		-
+			message: "#^Using nullsafe method call on non\\-nullable type Whity\\\\Core\\\\PluginLifecycle\\. Use \\-\\> instead\\.$#"
+			count: 8
+			path: tests/Core/PluginIsolationTest.php
+
+		-
+			message: "#^Using nullsafe method call on non\\-nullable type Whity\\\\Core\\\\PluginLifecycle\\. Use \\-\\> instead\\.$#"
+			count: 1
+			path: tests/Core/PluginLoaderTest.php
+
+		-
+			message: "#^Method Tests\\\\Core\\\\PluginVersionGateTest\\:\\:writePlugin\\(\\) has parameter \\$dependencies with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Core/PluginVersionGateTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Core/Relations/RelationsRealEngineTest.php
+
+		-
+			message: "#^Strict comparison using \\=\\=\\= between mixed~\\(0\\|0\\.0\\|''\\|'0'\\|array\\{\\}\\|false\\|null\\) and '' will always evaluate to false\\.$#"
+			count: 2
+			path: tests/Database/MigrationCycleTest.php
+
+		-
+			message: "#^Method Whity\\\\Tests\\\\Database\\\\MigrationSchemaTest\\:\\:migrationFileProvider\\(\\) should return array\\<int, array\\{string\\}\\> but returns array\\<string, array\\{string\\}\\>\\.$#"
+			count: 1
+			path: tests/Database/MigrationSchemaTest.php
+
+		-
+			message: "#^Offset 1 on array\\{string, string, non\\-empty\\-string\\} on left side of \\?\\? always exists and is not nullable\\.$#"
+			count: 1
+			path: tests/Database/MigrationSchemaTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$fileName of method Whity\\\\Tests\\\\Database\\\\MigrationSchemaTest\\:\\:readFile\\(\\) expects string, int given\\.$#"
+			count: 1
+			path: tests/Database/MigrationSchemaTest.php
+
+		-
+			message: "#^Method class@anonymous/tests/Http/HttpKernelTest\\.php\\:367\\:\\:__construct\\(\\) has parameter \\$executionOrder with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Http/HttpKernelTest.php
+
+		-
+			message: "#^Property class@anonymous/tests/Http/HttpKernelTest\\.php\\:367\\:\\:\\$executionOrder is never read, only written\\.$#"
+			count: 1
+			path: tests/Http/HttpKernelTest.php
+
+		-
+			message: "#^Property class@anonymous/tests/Http/HttpKernelTest\\.php\\:367\\:\\:\\$executionOrder type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Http/HttpKernelTest.php
+
+		-
+			message: "#^Access to an undefined property Whity\\\\Auth\\\\JwtParser\\:\\:\\$parseCalls\\.$#"
+			count: 9
+			path: tests/Http/JwtSingleDecodeTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			count: 1
+			path: tests/Http/JwtSingleDecodeTest.php
+
+		-
+			message: "#^Anonymous function should return Whity\\\\Core\\\\Response but returns Whity\\\\Sdk\\\\Http\\\\Response\\.$#"
+			count: 1
+			path: tests/Http/JwtSingleDecodeTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$email\\.$#"
+			count: 2
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$permissions\\.$#"
+			count: 1
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$role\\.$#"
+			count: 1
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			count: 4
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Auth\\\\JwtParser\\:\\:method\\(\\)\\.$#"
+			count: 16
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Auth\\\\RoleChecker\\:\\:expects\\(\\)\\.$#"
+			count: 1
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Auth\\\\RoleChecker\\:\\:method\\(\\)\\.$#"
+			count: 12
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Property Tests\\\\Http\\\\RbacMiddlewareTest\\:\\:\\$secret is never read, only written\\.$#"
+			count: 1
+			path: tests/Http/RbacMiddlewareTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Integration/AuditLogRbacTest.php
+
+		-
+			message: "#^Offset 'jti' does not exist on array\\<string, mixed\\>\\|null\\.$#"
+			count: 4
+			path: tests/Integration/AuthFlowTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 24
+			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
+
+		-
+			message: "#^Call to an undefined method Psr\\\\Log\\\\LoggerInterface\\:\\:expects\\(\\)\\.$#"
+			count: 2
+			path: tests/Integration/HookIntegrationTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Integration/OuRbacTest.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
+			count: 2
+			path: tests/Integration/OuTenantIsolationTest.php
+
+		-
+			message: "#^Method Tests\\\\Integration\\\\OuTenantIsolationTest\\:\\:getQueryResults\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Integration/OuTenantIsolationTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 5
+			path: tests/Integration/OuTenantIsolationTest.php
+
+		-
+			message: "#^Property Tests\\\\Integration\\\\OuTenantIsolationTest\\:\\:\\$database type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Integration/OuTenantIsolationTest.php
+
+		-
+			message: "#^Property Tests\\\\Integration\\\\OuTenantIsolationTest\\:\\:\\$lastExecutedParams type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Integration/OuTenantIsolationTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$email\\.$#"
+			count: 1
+			path: tests/Integration/PermissionAssignmentTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			count: 1
+			path: tests/Integration/PermissionAssignmentTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 3
+			path: tests/Integration/PermissionAssignmentTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			count: 1
+			path: tests/Integration/RbacLifecycleTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Integration/RbacLifecycleTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			count: 1
+			path: tests/Integration/RbacRouteEnforcementTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Integration/RbacRouteEnforcementTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Integration/RolesApiTenantIsolationTest.php
+
+		-
+			message: "#^Cannot access offset 'name' on array\\{id\\: 10, name\\: 'admin', tenant_id\\: 1\\}\\|array\\{id\\: 20, name\\: 'admin', tenant_id\\: 2\\}\\|false\\.$#"
+			count: 2
+			path: tests/Integration/TenantIsolationTest.php
+
+		-
+			message: "#^Method Tests\\\\Integration\\\\TenantIsolationTest\\:\\:simulateQueryUsersForTenant\\(\\) has parameter \\$allUsers with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Integration/TenantIsolationTest.php
+
+		-
+			message: "#^Method Tests\\\\Integration\\\\TenantIsolationTest\\:\\:simulateQueryUsersForTenant\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Integration/TenantIsolationTest.php
+
+		-
+			message: "#^Offset 0 does not exist on array\\{0\\?\\: array\\{id\\: 10, name\\: 'admin', tenant_id\\: 1\\}, 1\\?\\: array\\{id\\: 20, name\\: 'admin', tenant_id\\: 2\\}\\}\\.$#"
+			count: 1
+			path: tests/Integration/TenantIsolationTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Integration/TenantIsolationTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$haystack of method PHPUnit\\\\Framework\\\\Assert\\:\\:assertStringContainsString\\(\\) expects string, string\\|null given\\.$#"
+			count: 1
+			path: tests/Integration/TenantIsolationTest.php
+
+		-
+			message: "#^Property Tests\\\\Integration\\\\TenantIsolationTest\\:\\:\\$middleware is never read, only written\\.$#"
+			count: 1
+			path: tests/Integration/TenantIsolationTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Integration/TenantManagementRbacTest.php
+
+		-
+			message: "#^Property Tests\\\\Integration\\\\TenantManagementRbacTest\\:\\:\\$jwtParser is never read, only written\\.$#"
+			count: 1
+			path: tests/Integration/TenantManagementRbacTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
+			path: tests/Integration/TotpSecretReencryptorTest.php
+
+		-
+			message: "#^Method Tests\\\\Integration\\\\TwoFactorFlowTest\\:\\:createMockPdo\\(\\) has parameter \\$userOverrides with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Integration/TwoFactorFlowTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
+			count: 1
+			path: tests/Integration/TwoFactorFlowTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 2
+			path: tests/Integration/TwoFactorFlowTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
+			count: 2
+			path: tests/Integration/TwoFactorKeyConsistencyTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 3
+			path: tests/Integration/TwoFactorKeyConsistencyTest.php
+
+		-
+			message: "#^Offset 'schema' on array\\{method\\: string, path\\: string, pattern\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null\\} on left side of \\?\\? does not exist\\.$#"
+			count: 1
+			path: tests/OpenAPI/SchemaEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Plugins/HelloWorldGrantMigrationRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Plugins/HelloWorldGrantMigrationRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Plugins/HelloWorldGreetingsRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 5
+			path: tests/Plugins/HelloWorldGreetingsRealEngineTest.php
+
+		-
+			message: "#^Offset 'requiredPermission' does not exist on array\\{method\\: string, path\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\?\\: string\\|null, requiredPermission\\?\\: string\\|null, schema\\?\\: array\\<string, mixed\\>\\}\\.$#"
+			count: 4
+			path: tests/Plugins/HelloWorldPluginTest.php
+
+		-
+			message: "#^Offset 'requiredRole' does not exist on array\\{method\\: string, path\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\?\\: string\\|null, requiredPermission\\?\\: string\\|null, schema\\?\\: array\\<string, mixed\\>\\}\\.$#"
+			count: 3
+			path: tests/Plugins/HelloWorldPluginTest.php
+
+		-
+			message: "#^Offset 'schema' does not exist on array\\{method\\: string, path\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\?\\: string\\|null, requiredPermission\\: string, schema\\?\\: array\\<string, mixed\\>\\}\\.$#"
+			count: 1
+			path: tests/Plugins/HelloWorldPluginTest.php
+
+		-
+			message: "#^Method class@anonymous/tests/Security/BootScopedStaticSurvivalTest\\.php\\:65\\:\\:log\\(\\) has parameter \\$message with no type specified\\.$#"
+			count: 1
+			path: tests/Security/BootScopedStaticSurvivalTest.php
+
+		-
+			message: "#^Offset 0 does not exist on array\\{\\}\\.$#"
+			count: 3
+			path: tests/Security/BootScopedStaticSurvivalTest.php
+
+		-
+			message: "#^Property class@anonymous/tests/Security/BootScopedStaticSurvivalTest\\.php\\:65\\:\\:\\$records is never read, only written\\.$#"
+			count: 1
+			path: tests/Security/BootScopedStaticSurvivalTest.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
+			count: 10
+			path: tests/Security/CrossTenantAccessTest.php
+
+		-
+			message: "#^Constant Tests\\\\Security\\\\CrossTenantAccessTest\\:\\:ADMIN_USER_A_ID is unused\\.$#"
+			count: 1
+			path: tests/Security/CrossTenantAccessTest.php
+
+		-
+			message: "#^Constant Tests\\\\Security\\\\CrossTenantAccessTest\\:\\:ADMIN_USER_B_ID is unused\\.$#"
+			count: 1
+			path: tests/Security/CrossTenantAccessTest.php
+
+		-
+			message: "#^Constant Tests\\\\Security\\\\CrossTenantAccessTest\\:\\:USER_B_ID is unused\\.$#"
+			count: 1
+			path: tests/Security/CrossTenantAccessTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 7
+			path: tests/Security/CrossTenantAccessTest.php
+
+		-
+			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Security/RbacCrossTenantDenialTest.php
+
+		-
+			message: "#^Offset 0 does not exist on array\\{\\}\\.$#"
+			count: 7
+			path: tests/Security/WorkerLoopAuditSurvivalTest.php
+
+		-
+			message: "#^Property class@anonymous/tests/Security/WorkerLoopAuditSurvivalTest\\.php\\:82\\:\\:\\$records is never read, only written\\.$#"
+			count: 1
+			path: tests/Security/WorkerLoopAuditSurvivalTest.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\MockRequestFactory\\:\\:withBearerToken\\(\\) has parameter \\$body with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/MockRequestFactory.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\MockRequestFactory\\:\\:withBearerToken\\(\\) has parameter \\$jwtPayload with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/MockRequestFactory.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 1
+			path: tests/Support/MockRequestFactory.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\TestFixtureBuilder\\:\\:jwtPayload\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\TestFixtureBuilder\\:\\:ou\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\TestFixtureBuilder\\:\\:ouRoleAssignment\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\TestFixtureBuilder\\:\\:permission\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\TestFixtureBuilder\\:\\:role\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\TestFixtureBuilder\\:\\:tenant\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Method Tests\\\\Support\\\\TestFixtureBuilder\\:\\:user\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Parameter \\#1 \\$string of function trim expects string, string\\|null given\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Parameter \\#3 \\$subject of function preg_replace expects array\\|string, string\\|null given\\.$#"
+			count: 1
+			path: tests/Support/TestFixtureBuilder.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
+			count: 20
+			path: tests/Unit/Api/OusApiHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:expects\\(\\)\\.$#"
+			count: 2
+			path: tests/Unit/Api/OusApiHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:method\\(\\)\\.$#"
+			count: 2
+			path: tests/Unit/Api/OusApiHandlerTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 12
+			path: tests/Unit/Api/OusApiHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:expects\\(\\)\\.$#"
+			count: 3
+			path: tests/Unit/Api/PermissionsApiHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
+			count: 2
+			path: tests/Unit/Api/PermissionsApiHandlerTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 5
+			path: tests/Unit/Api/TenantsApiHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
+			count: 9
+			path: tests/Unit/Api/UsersApiHandlerTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 10
+			path: tests/Unit/Api/UsersApiHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
+			count: 9
+			path: tests/Unit/Auth/AuthHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Auth\\\\TokenValidator\\:\\:method\\(\\)\\.$#"
+			count: 7
+			path: tests/Unit/Auth/AuthHandlerTest.php
+
+		-
+			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
+			count: 9
+			path: tests/Unit/Auth/AuthHandlerTest.php
+
+		-
+			message: "#^Property Tests\\\\Unit\\\\Auth\\\\BackupCodesServiceTest\\:\\:\\$mockDb has no type specified\\.$#"
+			count: 1
+			path: tests/Unit/Auth/BackupCodesServiceTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
+			count: 2
+			path: tests/Unit/Auth/TotpServiceTest.php
+
+		-
+			message: "#^Anonymous function should return PDO but returns PDO\\|null\\.$#"
+			count: 1
+			path: tests/Unit/Core/Database/DatabaseConnectionPoolTest.php
+
+		-
+			message: "#^Method Tests\\\\Unit\\\\Core\\\\Deployment\\\\DeploymentManagerTest\\:\\:removeDirectory\\(\\) has no return type specified\\.$#"
+			count: 1
+			path: tests/Unit/Core/Deployment/DeploymentManagerTest.php
+
+		-
+			message: "#^Method Tests\\\\Unit\\\\Core\\\\Deployment\\\\DeploymentManagerTest\\:\\:removeDirectory\\(\\) has parameter \\$dir with no type specified\\.$#"
+			count: 1
+			path: tests/Unit/Core/Deployment/DeploymentManagerTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$array of function array_diff expects array, array\\<int, string\\>\\|false given\\.$#"
+			count: 1
+			path: tests/Unit/Core/Deployment/DeploymentManagerTest.php
+
+		-
+			message: "#^Property Tests\\\\Unit\\\\Core\\\\Deployment\\\\DeploymentManagerTest\\:\\:\\$db has no type specified\\.$#"
+			count: 1
+			path: tests/Unit/Core/Deployment/DeploymentManagerTest.php
+
+		-
+			message: "#^Property Tests\\\\Unit\\\\Core\\\\Deployment\\\\DeploymentManagerTest\\:\\:\\$manager has no type specified\\.$#"
+			count: 1
+			path: tests/Unit/Core/Deployment/DeploymentManagerTest.php
+
+		-
+			message: "#^Property Tests\\\\Unit\\\\Core\\\\Deployment\\\\DeploymentManagerTest\\:\\:\\$storagePath has no type specified\\.$#"
+			count: 1
+			path: tests/Unit/Core/Deployment/DeploymentManagerTest.php
+
+		-
+			message: "#^Method class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:350\\:\\:log\\(\\) has parameter \\$message with no type specified\\.$#"
+			count: 1
+			path: tests/Unit/Core/Tenant/TenantContextTest.php
+
+		-
+			message: "#^Method class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:384\\:\\:log\\(\\) has parameter \\$message with no type specified\\.$#"
+			count: 1
+			path: tests/Unit/Core/Tenant/TenantContextTest.php
+
+		-
+			message: "#^Property class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:350\\:\\:\\$records is never read, only written\\.$#"
+			count: 1
+			path: tests/Unit/Core/Tenant/TenantContextTest.php
+
+		-
+			message: "#^Property class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:384\\:\\:\\$records is never read, only written\\.$#"
+			count: 1
+			path: tests/Unit/Core/Tenant/TenantContextTest.php
+
+		-
+			message: "#^Method Tests\\\\Unit\\\\Core\\\\Tenant\\\\TenantPredicateGuardTest\\:\\:scan\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Unit/Core/Tenant/TenantPredicateGuardTest.php
+
+		-
+			message: "#^Access to an undefined property Psr\\\\Log\\\\AbstractLogger\\:\\:\\$records\\.$#"
+			count: 5
+			path: tests/Unit/Http/Middleware/EnforceTenantIsolationTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$email\\.$#"
+			count: 1
+			path: tests/Unit/Http/Middleware/EnforceTenantIsolationTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$tenant_id\\.$#"
+			count: 1
+			path: tests/Unit/Http/Middleware/EnforceTenantIsolationTest.php
+
+		-
+			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			count: 1
+			path: tests/Unit/Http/Middleware/EnforceTenantIsolationTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Auth\\\\JwtParser\\:\\:method\\(\\)\\.$#"
+			count: 17
+			path: tests/Unit/Http/Middleware/EnforceTenantIsolationTest.php
+
+		-
+			message: "#^Method Tests\\\\Unit\\\\Sdk\\\\Tenant\\\\TenantPredicateScannerTest\\:\\:scan\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Unit/Sdk/Tenant/TenantPredicateScannerTest.php

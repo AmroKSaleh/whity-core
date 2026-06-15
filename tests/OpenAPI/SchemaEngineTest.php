@@ -234,6 +234,7 @@ PHP);
     {
         [$router] = $this->loadFixtures();
 
+        /** @var array<string, mixed>|null $typed */
         $typed = null;
         foreach ($router->getRoutes() as $route) {
             if ($route['path'] === '/api/oapi/widgets') {

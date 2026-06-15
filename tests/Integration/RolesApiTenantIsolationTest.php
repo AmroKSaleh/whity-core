@@ -65,7 +65,7 @@ class RolesApiTenantIsolationTest extends TestCase
             function (string $sql) use ($ownerTenantId, $rows): PDOStatement {
                 $stmt = $this->createMock(PDOStatement::class);
                 $stmt->method('execute')->willReturnCallback(
-                    function (?array $params = null) use ($ownerTenantId): bool {
+                    function (?array $params = null): bool {
                         // The scoped list binds the requesting tenant id as param 0.
                         $this->boundTenantId = $params[0] ?? null;
                         return true;

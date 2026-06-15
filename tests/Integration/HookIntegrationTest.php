@@ -293,7 +293,7 @@ class HookIntegrationTest extends TestCase
         $originalEmail = 'USER@EXAMPLE.COM'; // Mixed case
         $expectedModifiedEmail = 'user@example.com'; // Lowercase after filter
 
-        $this->hookManager->listen('user.creating', function($data, $context) use ($expectedModifiedEmail) {
+        $this->hookManager->listen('user.creating', function($data, $context) {
             // Simulate email normalization filter
             $data['email'] = strtolower($data['email']);
             return $data;

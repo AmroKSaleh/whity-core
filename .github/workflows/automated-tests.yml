@@ -42,7 +42,7 @@ jobs:
           git diff --exit-code -- public/openapi.json
 
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse src tests plugins sdk
+        run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=512M
 
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
