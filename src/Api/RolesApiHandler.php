@@ -9,6 +9,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Http\JsonBody;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
 
@@ -215,10 +216,9 @@ class RolesApiHandler
     public function create(Request $request): Response
     {
         try {
-            /** @var array<string, mixed>|null $body */
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
 
-            if (!is_array($body) || empty($body['name'])) {
+            if (empty($body['name'])) {
                 return Response::error('Role name is required', 400);
             }
 
@@ -339,11 +339,7 @@ class RolesApiHandler
                 return Response::error('Role not found', 404);
             }
 
-            /** @var array<string, mixed>|null $body */
-            $body = json_decode($request->getBody(), true);
-            if (!is_array($body)) {
-                $body = [];
-            }
+            $body = JsonBody::parsed($request);
 
             $stmt = $this->db->prepare('SELECT * FROM roles WHERE id = ?');
             $stmt->execute([$id]);

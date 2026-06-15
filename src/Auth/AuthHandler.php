@@ -7,6 +7,7 @@ use Psr\Log\NullLogger;
 use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Http\JsonBody;
 use PDO;
 use PDOStatement;
 
@@ -179,8 +180,8 @@ class AuthHandler
      */
     public function handle(Request $request, array $params = []): Response
     {
-        // Parse request body
-        $body = json_decode($request->getBody(), true);
+        // Parse request body (envelope validated upstream, WC-189).
+        $body = JsonBody::parsed($request);
 
         // Validate request has email and password
         if (!isset($body['email']) || !isset($body['password'])) {
@@ -383,11 +384,7 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
-        /** @var array<string, mixed>|null $body */
-        $body = json_decode($request->getBody(), true);
-        if (!is_array($body)) {
-            $body = [];
-        }
+        $body = JsonBody::parsed($request);
 
         $emailProvided = array_key_exists('email', $body) && is_string($body['email']);
         $passwordProvided = isset($body['password']) && is_string($body['password']) && $body['password'] !== '';
@@ -802,8 +799,8 @@ class AuthHandler
             return Response::error('Invalid temporary token', 401);
         }
 
-        // Parse request body to get 2FA code
-        $body = json_decode($request->getBody(), true);
+        // Parse request body to get 2FA code (envelope validated upstream, WC-189).
+        $body = JsonBody::parsed($request);
 
         if (!isset($body['code']) || empty($body['code'])) {
             return Response::error('2FA code is required', 401);

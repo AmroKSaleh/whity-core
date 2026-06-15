@@ -108,6 +108,7 @@ use Whity\Http\SecurityHeaders;
 use Whity\Http\WorkerRuntime;
 use Whity\Http\Middleware\CsrfGuard;
 use Whity\Http\Middleware\EnforceTenantIsolation;
+use Whity\Http\Middleware\RequestBodyValidator;
 use Whity\Api\UsersApiHandler;
 use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
@@ -363,8 +364,13 @@ $tenantIsolationMiddleware = new EnforceTenantIsolation($jwtParser, $logger);
 
 // 8. Initialize HTTP kernel and register middleware
 $kernel = new HttpKernel($router, $rbacMiddleware);
-// Register middleware in order: CSRF guard first (cheap header check on the
-// state-changing auth POSTs, WC-160), then tenant isolation BEFORE RBAC.
+// Register middleware in order. The body-envelope validator runs FIRST (WC-189):
+// an oversized, wrong-content-type or malformed body is refused with a generic
+// 400 before any CSRF/tenant/RBAC/database work, and a valid JSON object is
+// stashed on the request for handlers (read via \Whity\Http\JsonBody::parsed()).
+// Then the CSRF guard (cheap header check on the state-changing auth POSTs,
+// WC-160), then tenant isolation BEFORE RBAC.
+$kernel->use(new RequestBodyValidator());
 $kernel->use(new CsrfGuard());
 $kernel->use($tenantIsolationMiddleware);
 

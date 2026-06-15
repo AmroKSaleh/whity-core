@@ -12,6 +12,7 @@ use Whity\Core\Delegation\DelegationService;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Http\JsonBody;
 use PDO;
 
 /**
@@ -128,11 +129,7 @@ class DelegationsApiHandler
                 return Response::error('Authenticated user is required', 401);
             }
 
-            /** @var array<string, mixed>|null $body */
-            $body = json_decode($request->getBody(), true);
-            if (!is_array($body)) {
-                return Response::error('Invalid request body', 400);
-            }
+            $body = JsonBody::parsed($request);
 
             $granteeType = isset($body['granteeType']) ? (string) $body['granteeType'] : '';
             if (!$this->isValidGranteeType($granteeType)) {

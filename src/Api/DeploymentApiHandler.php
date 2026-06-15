@@ -5,6 +5,7 @@ namespace Whity\Api;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Deployment\DeploymentManager;
+use Whity\Http\JsonBody;
 use Whity\Core\Tenant\TenantContext;
 
 /**
@@ -32,7 +33,7 @@ class DeploymentApiHandler
             }
 
             $tenantId = TenantContext::getTenantId();
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
 
             if (empty($body['version']) || empty($body['source_path'])) {
                 return Response::error('Version and source_path are required', 400);
@@ -98,7 +99,7 @@ class DeploymentApiHandler
             }
 
             $tenantId = TenantContext::getTenantId();
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
 
             if (empty($body['migration_name'])) {
                 return Response::error('migration_name is required', 400);

@@ -15,6 +15,7 @@ use Whity\Core\Relations\RelationResolver;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Http\JsonBody;
 
 /**
  * Relations API Handler (WC-65 — Family Relations Management System).
@@ -121,11 +122,7 @@ class RelationsApiHandler
                 return Response::error('Tenant context is required', 400);
             }
 
-            /** @var array<string, mixed>|null $body */
-            $body = json_decode($request->getBody(), true);
-            if (!is_array($body)) {
-                return Response::error('Invalid request body', 400);
-            }
+            $body = JsonBody::parsed($request);
 
             $from = $this->parseRef($body, 'from');
             $to = $this->parseRef($body, 'to');

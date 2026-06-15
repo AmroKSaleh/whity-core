@@ -9,6 +9,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Http\JsonBody;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
 
@@ -177,10 +178,10 @@ class UsersApiHandler
     public function create(Request $request): Response
     {
         try {
-            $body = json_decode($request->getBody(), true);
-            if (!is_array($body)) {
-                $body = [];
-            }
+            // The body envelope (size/type/well-formed JSON object) is validated
+            // once in the pipeline (WC-189, RequestBodyValidator); here we read
+            // the already-validated array.
+            $body = JsonBody::parsed($request);
 
             // Validation
             if (empty($body['email']) || empty($body['password'])) {
@@ -305,11 +306,7 @@ class UsersApiHandler
 
             $currentTenantId = TenantContext::getTenantId();
 
-            /** @var array<string, mixed>|null $body */
-            $body = json_decode($request->getBody(), true);
-            if (!is_array($body)) {
-                $body = [];
-            }
+            $body = JsonBody::parsed($request);
 
             // Tenant ownership: a non-system tenant may only see/edit its OWN
             // users; the SYSTEM tenant (id 0) may manage users across all tenants.

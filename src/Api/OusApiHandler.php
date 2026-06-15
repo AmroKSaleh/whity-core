@@ -8,6 +8,7 @@ use Whity\Api\Exception\OuHierarchyCycleException;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Http\JsonBody;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
@@ -78,7 +79,7 @@ class OusApiHandler
     public function create(Request $request): Response
     {
         try {
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
             $tenantId = TenantContext::getTenantId();
 
             // Validation: name is required
@@ -230,7 +231,7 @@ class OusApiHandler
             }
 
             $tenantId = TenantContext::getTenantId();
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
 
             // Get OU to update
             $stmt = $this->db->prepare('
@@ -426,7 +427,7 @@ class OusApiHandler
             }
 
             $tenantId = TenantContext::getTenantId();
-            $body = json_decode($request->getBody(), true);
+            $body = JsonBody::parsed($request);
 
             // Validation: role_id is required
             if (empty($body['role_id'])) {
