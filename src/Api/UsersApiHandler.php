@@ -6,6 +6,7 @@ namespace Whity\Api;
 
 use Psr\Log\LoggerInterface;
 use Whity\Auth\RoleChecker;
+use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
@@ -189,8 +190,11 @@ class UsersApiHandler
                 return Response::error('Email and password are required', 400);
             }
 
-            if (strlen($body['password']) < 6) {
-                return Response::error('Password must be at least 6 characters', 400);
+            try {
+                PasswordPolicy::validate($body['password']);
+            } catch (\InvalidArgumentException $e) {
+                $validationError = $e->getMessage();
+                return Response::error($validationError, 400);
             }
 
             if (!filter_var($body['email'], FILTER_VALIDATE_EMAIL)) {
@@ -352,8 +356,11 @@ class UsersApiHandler
             }
 
             if (isset($body['password']) && !empty($body['password'])) {
-                if (strlen($body['password']) < 6) {
-                    return Response::error('Password must be at least 6 characters', 400);
+                try {
+                    PasswordPolicy::validate($body['password']);
+                } catch (\InvalidArgumentException $e) {
+                    $validationError = $e->getMessage();
+                    return Response::error($validationError, 400);
                 }
                 $updates[] = 'password = ?';
                 $params_array[] = password_hash($body['password'], PASSWORD_BCRYPT);

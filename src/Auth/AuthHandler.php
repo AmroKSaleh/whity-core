@@ -5,6 +5,7 @@ namespace Whity\Auth;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Http\JsonBody;
@@ -326,13 +327,7 @@ class AuthHandler
         ], 200);
     }
 
-    /**
-     * Minimum length enforced for a new password set via self-service profile update.
-     *
-     * Mirrors the bcrypt-backed credential policy used elsewhere and keeps the
-     * self-service path from accepting trivially weak passwords.
-     */
-    private const MIN_PASSWORD_LENGTH = 8;
+    // MIN_PASSWORD_LENGTH is now the single PasswordPolicy::MIN_LENGTH constant.
 
     /**
      * Handle PATCH /api/me - Self-service profile update (WC-64).
@@ -354,8 +349,8 @@ class AuthHandler
      *  - `email`    — validated for RFC format and for uniqueness WITHIN the
      *                 caller's tenant (the schema enforces UNIQUE(tenant_id, email)).
      *  - `password` — requires and verifies the CURRENT password before setting a
-     *                 new bcrypt hash; the new password must be at least
-     *                 {@see self::MIN_PASSWORD_LENGTH} characters.
+     *                 new bcrypt hash; the new password must satisfy
+     *                 {@see \Whity\Core\PasswordPolicy::MIN_LENGTH}.
      *
      * `current_password` is required whenever a change is requested. The display
      * name is derived from the email local-part (there is no `users.name` column),
@@ -446,11 +441,10 @@ class AuthHandler
         $passwordChanged = false;
         if ($passwordProvided) {
             $newPassword = (string) $body['password'];
-            if (strlen($newPassword) < self::MIN_PASSWORD_LENGTH) {
-                return Response::error(
-                    'Password must be at least ' . self::MIN_PASSWORD_LENGTH . ' characters',
-                    400
-                );
+            try {
+                PasswordPolicy::validate($newPassword);
+            } catch (\InvalidArgumentException $e) {
+                return Response::error($e->getMessage(), 400);
             }
 
             $updates[] = 'password = ?';
