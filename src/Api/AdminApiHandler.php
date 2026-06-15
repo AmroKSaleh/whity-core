@@ -193,7 +193,8 @@ class AdminApiHandler
                 ]
             ]);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch system stats: ' . $e->getMessage(), 500);
+            error_log('[AdminApiHandler] stats failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch system stats', 500);
         }
     }
 

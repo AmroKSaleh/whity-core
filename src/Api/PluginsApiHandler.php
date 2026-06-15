@@ -109,7 +109,8 @@ class PluginsApiHandler
 
             return Response::json(['data' => $plugins], 200);
         } catch (\Throwable $e) {
-            return Response::error('Failed to list plugins: ' . $e->getMessage(), 500);
+            error_log('[PluginsApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to list plugins', 500);
         }
     }
 

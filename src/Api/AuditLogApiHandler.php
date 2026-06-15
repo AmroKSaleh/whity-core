@@ -175,7 +175,8 @@ final class AuditLogApiHandler
                 ],
             ], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch audit logs: ' . $e->getMessage(), 500);
+            error_log('[AuditLogApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch audit logs', 500);
         }
     }
 

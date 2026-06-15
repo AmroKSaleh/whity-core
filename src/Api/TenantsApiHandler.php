@@ -126,7 +126,8 @@ class TenantsApiHandler
 
             return Response::json(['data' => $tenants], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch tenant: ' . $e->getMessage(), 500);
+            error_log('[TenantsApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch tenant', 500);
         }
     }
 
@@ -254,7 +255,8 @@ class TenantsApiHandler
                 ])
             ], 201);
         } catch (\Exception $e) {
-            return Response::error('Failed to create tenant: ' . $e->getMessage(), 500);
+            error_log('[TenantsApiHandler] create failed: ' . $e->getMessage());
+            return Response::error('Failed to create tenant', 500);
         }
     }
 
@@ -340,7 +342,8 @@ class TenantsApiHandler
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant updated']], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to update tenant: ' . $e->getMessage(), 500);
+            error_log('[TenantsApiHandler] update failed: ' . $e->getMessage());
+            return Response::error('Failed to update tenant', 500);
         }
     }
 
@@ -409,12 +412,19 @@ class TenantsApiHandler
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant deleted']], 200);
         } catch (SystemTenantProtectedException $e) {
             error_log(sprintf(
-                '[tenants] blocked system tenant deletion: tenant_id=%s',
-                var_export(TenantContext::getTenantId(), true)
+                '[tenants] blocked system tenant deletion: tenant_id=%s, detail=%s',
+                var_export(TenantContext::getTenantId(), true),
+                $e->getMessage()
             ));
-            return Response::error($e->getMessage(), 400);
+            // Safe, explicit domain message — never the raw exception text. This is
+            // a deliberate 400 for a known guard (system tenant id=0 is protected),
+            // not a generic failure, so the client gets actionable but leak-free text.
+            // The literal mirrors SystemTenantProtectedException::forAction('delete')
+            // so the client contract is unchanged while no $e->getMessage() reaches it.
+            return Response::error('Cannot delete system tenant', 400);
         } catch (\Exception $e) {
-            return Response::error('Failed to delete tenant: ' . $e->getMessage(), 500);
+            error_log('[TenantsApiHandler] delete failed: ' . $e->getMessage());
+            return Response::error('Failed to delete tenant', 500);
         }
     }
 

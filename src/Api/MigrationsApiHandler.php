@@ -46,7 +46,8 @@ class MigrationsApiHandler
 
             return Response::json(['data' => $migrations], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to list migrations: ' . $e->getMessage(), 500);
+            error_log('[MigrationsApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to list migrations', 500);
         }
     }
 
@@ -70,7 +71,8 @@ class MigrationsApiHandler
 
             return Response::json(['data' => ['count' => $count]], 200);
         } catch (\Exception $e) {
-            return Response::error('Migration failed: ' . $e->getMessage(), 500);
+            error_log('[MigrationsApiHandler] run failed: ' . $e->getMessage());
+            return Response::error('Migration failed', 500);
         }
     }
 
@@ -102,7 +104,8 @@ class MigrationsApiHandler
 
             return Response::json(['data' => ['message' => "Rolled back {$name}"]], 200);
         } catch (\Exception $e) {
-            return Response::error('Rollback failed: ' . $e->getMessage(), 500);
+            error_log('[MigrationsApiHandler] rollback failed: ' . $e->getMessage());
+            return Response::error('Rollback failed', 500);
         }
     }
 

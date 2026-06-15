@@ -63,7 +63,8 @@ class PermissionsApiHandler
 
             return Response::json(['data' => $permissions], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch permissions: ' . $e->getMessage(), 500);
+            error_log('[PermissionsApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch permissions', 500);
         }
     }
 
