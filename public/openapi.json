@@ -1691,6 +1691,369 @@
                 ]
             }
         },
+        "/api/persons": {
+            "get": {
+                "operationId": "get_api_persons",
+                "summary": "List persons in the caller's tenant",
+                "tags": [
+                    "relations"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The persons",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_persons",
+                "summary": "Create a person record",
+                "tags": [
+                    "relations"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PersonCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created person",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "displayName required, or system tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/persons/{id}": {
+            "delete": {
+                "operationId": "delete_api_persons_id",
+                "summary": "Delete a person record",
+                "tags": [
+                    "relations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Person is linked to a user account",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Person not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "get": {
+                "operationId": "get_api_persons_id",
+                "summary": "Get a single person",
+                "tags": [
+                    "relations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The person",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Person not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_persons_id",
+                "summary": "Update a person record",
+                "tags": [
+                    "relations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PersonUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The updated person",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PersonResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Person is linked to a user account and cannot be edited",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Person not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/persons/{id}/relations": {
+            "get": {
+                "operationId": "get_api_persons_id_relations",
+                "summary": "List a person's relation edges",
+                "tags": [
+                    "relations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The person's relations",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RelationSummaryListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/plugins": {
             "get": {
                 "operationId": "get_api_plugins",
@@ -1909,6 +2272,221 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/relations": {
+            "get": {
+                "operationId": "get_api_relations",
+                "summary": "List all relation edges in the caller's tenant",
+                "tags": [
+                    "relations"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The relation edges",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RelationEdgeListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_relations",
+                "summary": "Create a relation edge between two persons",
+                "tags": [
+                    "relations"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RelationCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created relation",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RelationCreatedResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Person not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Self-relation or duplicate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/relations/{id}": {
+            "delete": {
+                "operationId": "delete_api_relations_id",
+                "summary": "Delete a relation edge",
+                "tags": [
+                    "relations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Relation not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/relationship-types": {
+            "get": {
+                "operationId": "get_api_relationship_types",
+                "summary": "List the relationship-type vocabulary",
+                "tags": [
+                    "relations"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The relationship types",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RelationshipTypeListResponse"
                                 }
                             }
                         }
@@ -2930,6 +3508,62 @@
                     }
                 ]
             }
+        },
+        "/api/users/{id}/relations": {
+            "get": {
+                "operationId": "get_api_users_id_relations",
+                "summary": "Get the person record and relations for a user account",
+                "tags": [
+                    "relations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The user's person and relations",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserRelationsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "components": {
@@ -3892,6 +4526,126 @@
                     "data"
                 ]
             },
+            "Person": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenantId": {
+                        "type": "integer"
+                    },
+                    "displayName": {
+                        "type": "string"
+                    },
+                    "userId": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "hasAccount": {
+                        "type": "boolean"
+                    },
+                    "birthDate": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "deceased": {
+                        "type": "boolean"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "createdAt": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "relationCount": {
+                        "type": "integer"
+                    },
+                    "relations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RelationSummary"
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenantId",
+                    "displayName",
+                    "hasAccount",
+                    "deceased",
+                    "relationCount",
+                    "relations"
+                ]
+            },
+            "PersonCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "displayName": {
+                        "type": "string"
+                    },
+                    "birthDate": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "deceased": {
+                        "type": "boolean"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "displayName"
+                ]
+            },
+            "PersonListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Person"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PersonResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/Person"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PersonUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "displayName": {
+                        "type": "string"
+                    },
+                    "birthDate": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "deceased": {
+                        "type": "boolean"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
             "PluginEntry": {
                 "type": "object",
                 "properties": {
@@ -3935,6 +4689,209 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/PluginEntry"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "RelationCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "from": {
+                        "$ref": "#/components/schemas/RelationRef"
+                    },
+                    "to": {
+                        "$ref": "#/components/schemas/RelationRef"
+                    },
+                    "relationshipTypeId": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "from",
+                    "to",
+                    "relationshipTypeId"
+                ]
+            },
+            "RelationCreatedData": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "fromPersonId": {
+                        "type": "integer"
+                    },
+                    "toPersonId": {
+                        "type": "integer"
+                    },
+                    "relationshipTypeId": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "id",
+                    "fromPersonId",
+                    "toPersonId",
+                    "relationshipTypeId"
+                ]
+            },
+            "RelationCreatedResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/RelationCreatedData"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "RelationEdge": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "fromPersonId": {
+                        "type": "integer"
+                    },
+                    "toPersonId": {
+                        "type": "integer"
+                    },
+                    "typeId": {
+                        "type": "integer"
+                    },
+                    "typeName": {
+                        "type": "string"
+                    },
+                    "inverseTypeName": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "fromPersonId",
+                    "toPersonId",
+                    "typeId",
+                    "typeName"
+                ]
+            },
+            "RelationEdgeListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RelationEdge"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "RelationRef": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "user",
+                            "person"
+                        ]
+                    },
+                    "id": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "type",
+                    "id"
+                ]
+            },
+            "RelationSummary": {
+                "type": "object",
+                "properties": {
+                    "relationId": {
+                        "type": "integer"
+                    },
+                    "otherPersonId": {
+                        "type": "integer"
+                    },
+                    "otherPersonName": {
+                        "type": "string"
+                    },
+                    "otherPersonHasAccount": {
+                        "type": "boolean"
+                    },
+                    "typeId": {
+                        "type": "integer"
+                    },
+                    "typeName": {
+                        "type": "string"
+                    },
+                    "direction": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "relationId",
+                    "otherPersonId",
+                    "otherPersonName",
+                    "otherPersonHasAccount",
+                    "typeId",
+                    "typeName",
+                    "direction"
+                ]
+            },
+            "RelationSummaryListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RelationSummary"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "RelationshipType": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "inverseTypeId": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "symmetric": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "id",
+                    "name",
+                    "symmetric"
+                ]
+            },
+            "RelationshipTypeListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RelationshipType"
                         }
                     }
                 },
@@ -4312,6 +5269,33 @@
                         "items": {
                             "$ref": "#/components/schemas/User"
                         }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "UserRelationsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "personId": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "relations": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/RelationSummary"
+                                }
+                            }
+                        },
+                        "required": [
+                            "personId",
+                            "relations"
+                        ]
                     }
                 },
                 "required": [

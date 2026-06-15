@@ -40,18 +40,6 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'POST /api/auth/2fa/disable',
         'POST /api/auth/2fa/regenerate-codes',
         'GET /api/auth/2fa/status',
-        // Family-Relations surface — to be declared in task f07c870b
-        'GET /api/relationship-types',
-        'GET /api/persons',
-        'POST /api/persons',
-        'GET /api/persons/{id}',
-        'PATCH /api/persons/{id}',
-        'DELETE /api/persons/{id}',
-        'GET /api/persons/{id}/relations',
-        'GET /api/relations',
-        'GET /api/users/{id}/relations',
-        'POST /api/relations',
-        'DELETE /api/relations/{id}',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void
