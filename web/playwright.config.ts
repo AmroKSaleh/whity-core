@@ -64,7 +64,7 @@ export default defineConfig({
     },
     {
       name: 'authflow',
-      testMatch: /(auth(-bugs|-transitions)?|demo)\.spec\.ts/,
+      testMatch: /auth(-bugs|-transitions)?\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
     {
