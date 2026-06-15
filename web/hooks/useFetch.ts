@@ -7,9 +7,13 @@ export function useFetch<T>(
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Incrementing this causes the effect to re-run, updating data/loading/error.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo
   const stableFetch = useCallback(fetchFn, deps);
+
+  const refetch = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,7 +34,8 @@ export function useFetch<T>(
     void run();
 
     return () => { cancelled = true; };
-  }, [stableFetch]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stableFetch, refreshKey]);
 
-  return { data, loading, error, refetch: stableFetch };
+  return { data, loading, error, refetch };
 }
