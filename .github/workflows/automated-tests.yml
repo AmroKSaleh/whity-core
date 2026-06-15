@@ -170,13 +170,17 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # ESLint gate (WC-122): zero errors required; warnings are tolerated.
+      # Runs after the WC-195 debt clearance so the gate starts clean.
+      - name: Lint
+        run: npm run lint
+
       # A full production build gates build-breaking RSC/route errors and a
       # broken prebuild shadcn-registry generation, so they fail CI instead of
       # surfacing at deploy (WC-180). `npm run build` runs the `prebuild`
       # registry hook then `next build`. On Next 16 `next build` no longer runs
       # ESLint (`next lint` was removed), so this validates ONLY the registry
-      # generation plus build-breaking RSC/route/type errors — lint is enforced
-      # by its own CI gate (WC-122, after the WC-254 debt clearance).
+      # generation plus build-breaking RSC/route/type errors.
       - name: Build (production)
         run: npm run build
 
