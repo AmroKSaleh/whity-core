@@ -112,10 +112,12 @@ class RoleCheckerTest extends TestCase
 
     public function testGetPermissionsForUserReturnsAllUserPermissions(): void
     {
-        $this->grant('admin', 'users:read');
-        $this->grant('admin', 'users:write');
-        $this->grant('admin', 'roles:read');
-        $userId = $this->seedUser('admin@example.com', 'admin');
+        // Use a test-only role (viewer) that migrations never grant permissions to,
+        // so the assertSame can enumerate exactly the grants made here.
+        $this->grant('viewer', 'users:read');
+        $this->grant('viewer', 'users:write');
+        $this->grant('viewer', 'roles:read');
+        $userId = $this->seedUser('viewer@example.com', 'viewer');
 
         $permissions = $this->roleChecker->getPermissionsForUser($userId);
 
@@ -171,13 +173,15 @@ class RoleCheckerTest extends TestCase
 
     public function testEffectivePermissionsAreUnionOfChain(): void
     {
-        $this->setParent('admin', 'editor');
+        // Use test-only roles (super_admin, editor, viewer) that migrations never
+        // grant permissions to, so the assertSame can enumerate exactly what's granted.
+        $this->setParent('super_admin', 'editor');
         $this->setParent('editor', 'viewer');
-        $this->grant('admin', 'users:read');
+        $this->grant('super_admin', 'users:read');
         $this->grant('editor', 'posts:write');
         $this->grant('viewer', 'dashboard:read');
 
-        $effective = $this->roleChecker->getEffectivePermissionsForRole($this->roleId('admin'));
+        $effective = $this->roleChecker->getEffectivePermissionsForRole($this->roleId('super_admin'));
 
         sort($effective);
         $this->assertSame(['dashboard:read', 'posts:write', 'users:read'], $effective);
@@ -220,7 +224,11 @@ class RoleCheckerTest extends TestCase
         $logger->expects($this->once())->method('warning');
 
         $this->grant('editor', 'a:read');
-        $this->setParent('editor', 'editor');
+        // Direct self-reference (parent_id = id) violates the production CHECK
+        // constraint. A two-node cycle (editor→viewer→editor) exercises the same
+        // cycle-detection path in RoleChecker without violating the constraint.
+        $this->setParent('editor', 'viewer');
+        $this->setParent('viewer', 'editor');
 
         $checker = new RoleChecker($this->db, $this->registry(), $logger);
 

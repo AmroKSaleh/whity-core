@@ -34,7 +34,7 @@ class AuthFlowTest extends TestCase
     private const TEST_SECRET_KEY = 'test-secret-key-for-integration-tests-padded-min-32-byte-key';
     private const TEST_USER_PASSWORD = 'testpassword123';
     private const TEST_USER_EMAIL = 'testuser@example.com';
-    private const TEST_USER_ID = 1;
+    private const TEST_USER_ID = 2; // id=1 is reserved for the system admin seeded by migration 010
     private const TEST_TENANT_ID = 1;
     private const TEST_ROLE_ID = 1;
     private const TEST_ROLE_NAME = 'admin';
@@ -267,6 +267,9 @@ class AuthFlowTest extends TestCase
     private function makeSchema(): PDO
     {
         $pdo = SchemaFromMigrations::make();
+
+        // Migration 010 seeds system tenant (id=0). The test user lives in tenant 1.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'Test Tenant', datetime('now'))");
 
         // The test user is NOT seeded by migrations — insert it explicitly.
         $stmt = $pdo->prepare(

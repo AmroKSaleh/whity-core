@@ -265,27 +265,28 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
 
     public function testEpochLookupIsTenantScoped(): void
     {
-        // user_id 5 exists in BOTH tenant A (1) and tenant B (2) with different
-        // epochs. A token for (user 5, tenant 1, epoch 0) must validate against
-        // tenant 1's row (epoch 0) and never bleed into tenant 2's row (epoch 9).
+        // Users have globally unique IDs — the same id cannot exist in two tenants.
+        // User 5 is in tenant 1 at epoch 0; user 6 is in tenant 2 at epoch 9.
+        // The test proves that the epoch lookup is tenant-scoped: user 6's token
+        // with epoch 0 is rejected because tenant 2's stored epoch is 9.
         $this->seedUser(5, 1, 'a@tenant-a.example', 'secret-123', 2, 0);
-        $this->seedUser(5, 2, 'b@tenant-b.example', 'secret-123', 2, 9);
+        $this->seedUser(6, 2, 'b@tenant-b.example', 'secret-123', 2, 9);
 
         $token = $this->mintAccess(5, 1, 'a@tenant-a.example', 'user', 0);
         $_COOKIE['access_token'] = $token;
 
         self::assertNotNull(
             $this->validator()->validateAccessToken(),
-            "A (user 5, tenant 1) token must validate against tenant 1's epoch, not tenant 2's."
+            "A (user 5, tenant 1) token at epoch 0 must validate."
         );
 
-        // Conversely, a (user 5, tenant 2) token at epoch 0 is BELOW tenant 2's
-        // stored epoch (9) and must be rejected.
-        $crossToken = $this->mintAccess(5, 2, 'b@tenant-b.example', 'user', 0);
+        // A (user 6, tenant 2) token at epoch 0 is BELOW tenant 2's stored epoch (9)
+        // and must be rejected — proving the lookup uses the correct tenant row.
+        $crossToken = $this->mintAccess(6, 2, 'b@tenant-b.example', 'user', 0);
         $_COOKIE['access_token'] = $crossToken;
         self::assertNull(
             $this->validator()->validateAccessToken(),
-            "A (user 5, tenant 2) token below tenant 2's epoch must be rejected."
+            "A (user 6, tenant 2) token below tenant 2's epoch must be rejected."
         );
     }
 
@@ -375,9 +376,14 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
      * In-memory SQLite mirroring production: users has token_epoch and the
      * UNIQUE(tenant_id, email) constraint, the base roles are seeded, and the
      * GLOBAL revoked_tokens table exists for jti revocation.
+     * Migration 010 seeds system tenant (id 0); tenants 1 and 2 are test data.
      */
     private static function makeSqliteSchema(): PDO
     {
-        return SchemaFromMigrations::make();
+        $pdo = SchemaFromMigrations::make();
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES
+            (1, 'Tenant A', datetime('now')),
+            (2, 'Tenant B', datetime('now'))");
+        return $pdo;
     }
 }

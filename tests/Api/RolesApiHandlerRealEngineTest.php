@@ -87,7 +87,13 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $this->assertSame(201, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertSame(2, $data['permissionCount']);
-        $this->assertSame([1, 2], $this->linkedPermissionIds((int) $data['id']));
+        // Resolve the expected ids from the migrated permissions table (migrations seed
+        // users:read first, then several users:* columns, then roles:read — so their ids
+        // are not necessarily 1 and 2 in the production schema).
+        $this->assertSame(
+            [$this->permIdFor('users:read'), $this->permIdFor('roles:read')],
+            $this->linkedPermissionIds((int) $data['id'])
+        );
     }
 
     public function testCreateWithMixedIdsAndNamesLinksAllAndDeduplicates(): void
@@ -96,14 +102,15 @@ final class RolesApiHandlerRealEngineTest extends TestCase
 
         $response = $handler->create($this->authedRequest('POST', '/api/roles', [
             'name' => 'Mixed',
-            // id 1 == users:read (duplicate), name roles:read == id 2, id 3 == tenants:read.
+            // id 1 == users:read (duplicate when 'users:read' name also given),
+            // 'roles:read' resolves by name to its migrated id, id 3 == users:update.
             'permissions' => [1, 'users:read', 'roles:read', 3],
         ]));
 
         $this->assertSame(201, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertSame(3, $data['permissionCount'], 'Mixed array must de-duplicate id/name overlap.');
-        $this->assertSame([1, 2, 3], $this->linkedPermissionIds((int) $data['id']));
+        $this->assertSame([1, 3, $this->permIdFor('roles:read')], $this->linkedPermissionIds((int) $data['id']));
     }
 
     public function testCreateDropsUnknownIdsAndNames(): void
@@ -434,6 +441,13 @@ final class RolesApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, '', NULL, datetime('now'))"
         );
         $stmt->execute([$id, $name]);
+    }
+
+    private function permIdFor(string $name): int
+    {
+        return (int) $this->pdo->query(
+            'SELECT id FROM permissions WHERE name = ' . $this->pdo->quote($name)
+        )->fetchColumn();
     }
 
     /**

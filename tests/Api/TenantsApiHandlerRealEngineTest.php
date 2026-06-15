@@ -214,18 +214,23 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
     private function seedUser(int $id, int $tenantId, string $email): void
     {
         $stmt = $this->pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, created_at)
-             VALUES (?, ?, ?, 'x', datetime('now'))"
+            "INSERT INTO users (id, tenant_id, role_id, email, password, created_at)
+             VALUES (?, ?, 2, ?, 'x', datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, $email]);
     }
 
     /**
      * Build an in-memory SQLite connection seeded with the full migration schema.
-     * Tenants (System/0, Tenant A/1, Tenant B/2) are seeded by migrations.
+     * Migration 010 seeds the system tenant (id 0). Tenants 1 and 2 are additional
+     * test-data rows inserted here so the handler's LEFT JOIN sees them.
      */
     private static function makeSqliteSchema(): PDO
     {
-        return SchemaFromMigrations::make();
+        $pdo = SchemaFromMigrations::make();
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES
+            (1, 'Tenant A', datetime('now')),
+            (2, 'Tenant B', datetime('now'))");
+        return $pdo;
     }
 }
