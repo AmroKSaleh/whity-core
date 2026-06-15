@@ -160,7 +160,7 @@ PHP);
     {
         TenantContext::reset();
 
-        $this->router = new Router();
+        $this->router = new Router('');
         $this->loader = new PluginLoader(self::$pluginDir, $this->router, new PermissionRegistry(), new HookManager());
         $this->loader->load();
     }

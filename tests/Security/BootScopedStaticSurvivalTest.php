@@ -103,7 +103,7 @@ class BootScopedStaticSurvivalTest extends TestCase
         // Boot-time wiring: logger injected ONCE, exactly like public/index.php.
         TenantContext::setLogger($this->spyLogger($records));
 
-        $router = new Router();
+        $router = new Router('');
 
         // Request #1: an ordinary request. Its only job is to make the kernel run
         // a full handle() + resetRequestState() cycle (worker reuse boundary).
@@ -148,7 +148,7 @@ class BootScopedStaticSurvivalTest extends TestCase
      */
     public function testRequestScopedStaticsAreClearedAcrossReset(): void
     {
-        $router = new Router();
+        $router = new Router('');
 
         // Request #1 dirties every request-scoped static.
         $router->register('GET', '/dirty', static function (Request $req): Response {

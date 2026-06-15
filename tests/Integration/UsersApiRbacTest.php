@@ -65,7 +65,7 @@ final class UsersApiRbacTest extends TestCase
 
         $usersHandler = new UsersApiHandler($this->pdo, $hooks);
 
-        $this->router = new Router();
+        $this->router = new Router('');
         $this->router->register('GET',    '/api/users',       [$usersHandler, 'list'],   null, null, CorePermissions::USERS_READ);
         $this->router->register('POST',   '/api/users',       [$usersHandler, 'create'], null, null, CorePermissions::USERS_WRITE);
         $this->router->register('PATCH',  '/api/users/{id}',  [$usersHandler, 'update'], null, null, CorePermissions::USERS_WRITE);

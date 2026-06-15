@@ -83,7 +83,7 @@ function isFeatureListResponse(body: unknown): body is { data: PluginFeature[] }
  */
 export async function fetchPluginFeatures(): Promise<PluginFeature[]> {
   try {
-    const response = await apiClient('/api/frontend/features');
+    const response = await apiClient('/api/v1/frontend/features');
     if (!response.ok) {
       return [];
     }

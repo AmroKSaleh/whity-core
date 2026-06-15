@@ -58,7 +58,7 @@ test.describe('Delegations (role matrix)', () => {
 
     const listResponse = page.waitForResponse(
       (res) =>
-        res.url().includes('/api/delegations') &&
+        res.url().includes('/api/v1/v1/delegations') &&
         res.request().method() === 'GET'
     );
     await roleSession.shell.clickNav('Delegations');

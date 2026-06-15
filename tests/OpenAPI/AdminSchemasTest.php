@@ -77,7 +77,9 @@ final class AdminSchemasTest extends TestCase
      */
     private static function regenerate(): array
     {
-        $router = new Router();
+        // WC-206: use '/v1' prefix to produce '/api/v1/' paths matching the
+        // live application routing and the committed public/openapi.json.
+        $router = new Router('/v1');
         $loader = new PluginLoader(self::$referencePluginsDir, $router, null, new HookManager());
         CoreApiSchemas::registerRoutes($router);
         $loader->load();
@@ -139,20 +141,20 @@ final class AdminSchemasTest extends TestCase
         $paths = self::committedSpec()['paths'] ?? [];
 
         $cases = [
-            ['/api/users', 'get', 'responses', '200', 'UserListResponse'],
-            ['/api/users', 'post', 'requestBody', null, 'UserCreateRequest'],
-            ['/api/users/{id}', 'patch', 'requestBody', null, 'UserUpdateRequest'],
-            ['/api/roles', 'get', 'responses', '200', 'RoleListResponse'],
-            ['/api/roles/{id}', 'get', 'responses', '200', 'RoleDetailResponse'],
-            ['/api/tenants', 'post', 'requestBody', null, 'TenantCreateRequest'],
-            ['/api/tenants', 'get', 'responses', '200', 'TenantListResponse'],
-            ['/api/ous', 'get', 'responses', '200', 'OuListResponse'],
-            ['/api/ous/{id}', 'get', 'responses', '200', 'OuDetailResponse'],
-            ['/api/permissions', 'get', 'responses', '200', 'PermissionCatalogueResponse'],
-            ['/api/delegations', 'get', 'responses', '200', 'DelegationListResponse'],
-            ['/api/delegations', 'post', 'requestBody', null, 'DelegationCreateRequest'],
-            ['/api/audit-logs', 'get', 'responses', '200', 'AuditLogListResponse'],
-            ['/api/frontend/features', 'get', 'responses', '200', 'FrontendFeatureListResponse'],
+            ['/api/v1/users', 'get', 'responses', '200', 'UserListResponse'],
+            ['/api/v1/users', 'post', 'requestBody', null, 'UserCreateRequest'],
+            ['/api/v1/users/{id}', 'patch', 'requestBody', null, 'UserUpdateRequest'],
+            ['/api/v1/roles', 'get', 'responses', '200', 'RoleListResponse'],
+            ['/api/v1/roles/{id}', 'get', 'responses', '200', 'RoleDetailResponse'],
+            ['/api/v1/tenants', 'post', 'requestBody', null, 'TenantCreateRequest'],
+            ['/api/v1/tenants', 'get', 'responses', '200', 'TenantListResponse'],
+            ['/api/v1/ous', 'get', 'responses', '200', 'OuListResponse'],
+            ['/api/v1/ous/{id}', 'get', 'responses', '200', 'OuDetailResponse'],
+            ['/api/v1/permissions', 'get', 'responses', '200', 'PermissionCatalogueResponse'],
+            ['/api/v1/delegations', 'get', 'responses', '200', 'DelegationListResponse'],
+            ['/api/v1/delegations', 'post', 'requestBody', null, 'DelegationCreateRequest'],
+            ['/api/v1/audit-logs', 'get', 'responses', '200', 'AuditLogListResponse'],
+            ['/api/v1/frontend/features', 'get', 'responses', '200', 'FrontendFeatureListResponse'],
         ];
 
         foreach ($cases as [$path, $method, $kind, $status, $component]) {
@@ -175,7 +177,7 @@ final class AdminSchemasTest extends TestCase
     {
         $paths = self::committedSpec()['paths'] ?? [];
 
-        $op = $paths['/api/users/{id}']['patch'] ?? null;
+        $op = $paths['/api/v1/users/{id}']['patch'] ?? null;
         $this->assertNotNull($op);
         $byName = array_column($op['parameters'] ?? [], null, 'name');
         $this->assertSame('integer', $byName['id']['schema']['type'] ?? null, '{id:\d+} must declare an integer path param');
@@ -187,12 +189,12 @@ final class AdminSchemasTest extends TestCase
 
         $this->assertSame(
             [['bearerAuth' => []]],
-            $paths['/api/delegations']['get']['security'] ?? null,
+            $paths['/api/v1/delegations']['get']['security'] ?? null,
             'Permission-gated routes (requiredPermission, no role) must still declare security'
         );
         $this->assertSame(
             [['bearerAuth' => []]],
-            $paths['/api/audit-logs']['get']['security'] ?? null
+            $paths['/api/v1/audit-logs']['get']['security'] ?? null
         );
     }
 

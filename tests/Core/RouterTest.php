@@ -15,7 +15,7 @@ class RouterTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->router = new Router();
+        $this->router = new Router('');
     }
 
     /**
@@ -335,5 +335,105 @@ class RouterTest extends TestCase
                 $this->assertStringContainsString('constraint', $e->getMessage());
             }
         }
+    }
+
+    // ===== WC-206: URL-prefix versioning =====
+
+    /**
+     * WC-206: register() prepends the version prefix into the path so callers
+     * write '/api/users' and the router stores '/api/v1/users'.
+     */
+    public function testVersionPrefixIsAppliedToRegisteredPath(): void
+    {
+        $router = new Router('/v1');
+        $handler = static fn() => 'ok';
+        $router->register('GET', '/api/users', $handler);
+
+        // Must match at the prefixed path …
+        $this->assertNotNull($router->match(new Request('GET', '/api/v1/users')));
+        // … and NOT at the bare path.
+        $this->assertNull($router->match(new Request('GET', '/api/users')));
+    }
+
+    /**
+     * WC-206: registerUnversioned() stores the path exactly as given, skipping
+     * the version prefix — used for /api/health, /api/version, etc.
+     */
+    public function testRegisterUnversionedStoresExactPath(): void
+    {
+        $router = new Router('/v1');
+        $handler = static fn() => 'probe';
+        $router->registerUnversioned('GET', '/api/health', $handler);
+
+        $this->assertNotNull($router->match(new Request('GET', '/api/health')));
+        $this->assertNull($router->match(new Request('GET', '/api/v1/health')));
+    }
+
+    /**
+     * WC-206: with an empty version prefix register() behaves as before — no
+     * prefix injection — so existing test suites can use new Router('') safely.
+     */
+    public function testEmptyVersionPrefixDisablesInjection(): void
+    {
+        $router = new Router('');
+        $handler = static fn() => 'ok';
+        $router->register('GET', '/api/users', $handler);
+
+        $this->assertNotNull($router->match(new Request('GET', '/api/users')));
+        $this->assertNull($router->match(new Request('GET', '/api/v1/users')));
+    }
+
+    /**
+     * WC-206: getVersionPrefix() returns the string that was supplied at
+     * construction — useful for generating the /api/version payload.
+     */
+    public function testGetVersionPrefixReturnsConfiguredValue(): void
+    {
+        $this->assertSame('', $this->router->getVersionPrefix());
+        $this->assertSame('/v1', (new Router('/v1'))->getVersionPrefix());
+    }
+
+    /**
+     * WC-206: first-registration-wins still applies after prefixing — re-
+     * registering the same bare path on the same versioned router is refused.
+     */
+    public function testVersionedDuplicateRegistrationReturnsFalse(): void
+    {
+        $router = new Router('/v1');
+        $first  = static fn() => 'first';
+        $second = static fn() => 'second';
+
+        $this->assertTrue($router->register('GET', '/api/users', $first));
+        $this->assertFalse($router->register('GET', '/api/users', $second));
+
+        // The first handler is the one that matches.
+        $match = $router->match(new Request('GET', '/api/v1/users'));
+        $this->assertNotNull($match);
+        $this->assertSame($first, $match['handler']);
+    }
+
+    /**
+     * WC-206: unversioned and versioned routes can coexist under the same base
+     * path (e.g. /api/health is unversioned; /api/v1/health could be versioned)
+     * without colliding.
+     */
+    public function testUnversionedAndVersionedCoexist(): void
+    {
+        $router      = new Router('/v1');
+        $unversioned = static fn() => 'probe';
+        $versioned   = static fn() => 'v1';
+
+        $router->registerUnversioned('GET', '/api/health', $unversioned);
+        // A separate versioned route at the same base path is fine.
+        $router->register('GET', '/api/health', $versioned);
+
+        $matchUnversioned = $router->match(new Request('GET', '/api/health'));
+        $matchVersioned   = $router->match(new Request('GET', '/api/v1/health'));
+
+        $this->assertNotNull($matchUnversioned);
+        $this->assertSame($unversioned, $matchUnversioned['handler']);
+
+        $this->assertNotNull($matchVersioned);
+        $this->assertSame($versioned, $matchVersioned['handler']);
     }
 }

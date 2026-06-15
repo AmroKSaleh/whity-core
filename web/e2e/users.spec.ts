@@ -148,7 +148,7 @@ test.describe('Users (admin)', () => {
     // Independent confirmation straight from the API.
     const id = await findUserIdByEmail(adminApi, createdEmail);
     expect(id).not.toBeNull();
-    const res = await adminApi.get('/api/users');
+    const res = await adminApi.get('/api/v1/users');
     const body = (await res.json()) as { data?: Array<{ email: string; role: string }> };
     const persisted = (body.data ?? []).find((u) => u.email === createdEmail);
     expect(persisted?.role).toBe('admin');
@@ -192,7 +192,7 @@ test.describe('Users (admin)', () => {
 
     // Independent confirmation straight from the list API: the persisted role is
     // exactly what was chosen at creation.
-    const res = await adminApi.get('/api/users');
+    const res = await adminApi.get('/api/v1/users');
     const body = (await res.json()) as { data?: Array<{ email: string; role: string }> };
     const persisted = (body.data ?? []).find((u) => u.email === createdEmail);
     expect(persisted?.role).toBe('admin');

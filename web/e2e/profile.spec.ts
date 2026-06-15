@@ -33,7 +33,7 @@ interface Throwaway {
 async function createThrowawayUser(api: APIRequestContext): Promise<Throwaway> {
   const email = `wc64-${uniqueSuffix()}@example.com`;
   const password = 'throwaway-pass-1';
-  const res = await api.post('/api/users', {
+  const res = await api.post('/api/v1/v1/users', {
     data: { email, password, role: 'user', tenantId: 1 },
   });
   expect(res.status(), 'creating the throwaway user should return 201').toBe(201);
@@ -106,7 +106,7 @@ test.describe('Self-service profile management (WC-64)', () => {
       await page.getByLabel('Current Password').fill(throwaway.password);
 
       const patch = page.waitForResponse(
-        (r) => r.url().includes('/api/me') && r.request().method() === 'PATCH'
+        (r) => r.url().includes('/api/v1/v1/me') && r.request().method() === 'PATCH'
       );
       await page.getByRole('button', { name: 'Save Changes' }).click();
       const patchRes = await patch;
@@ -116,7 +116,7 @@ test.describe('Self-service profile management (WC-64)', () => {
 
       // PERSISTENCE: re-fetch GET /api/me in the SAME authenticated session; the
       // backend re-issued the auth cookies, so the new email is returned.
-      const me = await page.request.get('/api/me');
+      const me = await page.request.get('/api/v1/v1/me');
       expect(me.status()).toBe(200);
       const meBody = (await me.json()) as { user: { email: string } };
       expect(meBody.user.email).toBe(newEmail);
@@ -149,7 +149,7 @@ test.describe('Self-service profile management (WC-64)', () => {
       await page.getByLabel('Current Password').fill(throwaway.password);
 
       const patch = page.waitForResponse(
-        (r) => r.url().includes('/api/me') && r.request().method() === 'PATCH'
+        (r) => r.url().includes('/api/v1/v1/me') && r.request().method() === 'PATCH'
       );
       await page.getByRole('button', { name: 'Save Changes' }).click();
       expect((await patch).status()).toBe(200);
@@ -170,7 +170,7 @@ test.describe('Self-service profile management (WC-64)', () => {
       extraHTTPHeaders: { 'X-Requested-With': 'XMLHttpRequest' },
     });
     try {
-      const loginRes = await probe.post('/api/login', {
+      const loginRes = await probe.post('/api/v1/v1/login', {
         data: { email: throwaway.email, password: throwaway.password },
       });
       expect(loginRes.status(), 'the old password must be rejected').toBe(401);
@@ -219,7 +219,7 @@ test.describe('Self-service profile management (WC-64)', () => {
       await page.getByLabel('Current Password').fill('totally-wrong');
 
       const patch = page.waitForResponse(
-        (r) => r.url().includes('/api/me') && r.request().method() === 'PATCH'
+        (r) => r.url().includes('/api/v1/v1/me') && r.request().method() === 'PATCH'
       );
       await page.getByRole('button', { name: 'Save Changes' }).click();
       expect((await patch).status()).toBe(401);

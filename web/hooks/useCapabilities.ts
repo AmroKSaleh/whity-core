@@ -27,7 +27,7 @@ export function useCapabilities(): UseCapabilitiesResult {
   const { apiClient } = useAuth();
 
   const { data, loading } = useFetch(async () => {
-    const response = await apiClient('/api/me/capabilities');
+    const response = await apiClient('/api/v1/me/capabilities');
     if (!response.ok) {
       // Fail closed: a non-ok response yields an empty permission set.
       return [];

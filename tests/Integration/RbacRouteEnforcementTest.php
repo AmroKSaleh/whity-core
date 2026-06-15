@@ -59,7 +59,7 @@ class RbacRouteEnforcementTest extends TestCase
         $this->db = $this->wrapSqlite($this->pdo);
         $this->roleChecker = new RoleChecker($this->db, $this->registry);
         $this->middleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
-        $this->router = new Router();
+        $this->router = new Router('');
 
         TenantContext::reset();
         TenantContext::setTenantId(self::TENANT);

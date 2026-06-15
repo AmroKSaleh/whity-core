@@ -287,7 +287,7 @@ final class HelloWorldGreetingsRealEngineTest extends TestCase
         $db->forceConnect();
         \Whity\register_service(Database::class, $db);
 
-        $router = new Router();
+        $router = new Router('');
         $loader = new PluginLoader(dirname(__DIR__, 2) . '/plugins', $router, new PermissionRegistry(), new HookManager());
         $loader->load();
 

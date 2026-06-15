@@ -467,7 +467,7 @@ PHP);
      */
     public function testFailedMigrationRollsBackAtomically(): void
     {
-        $loader = new PluginLoader(self::$explodingDir, new Router(), null, new HookManager());
+        $loader = new PluginLoader(self::$explodingDir, new Router(''), null, new HookManager());
         $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
 
         $exit = $this->runQuiet($command, ['run']);
@@ -488,7 +488,7 @@ PHP);
      */
     public function testTransactionHijackingMigrationLeavesNoPhantomRecord(): void
     {
-        $loader = new PluginLoader(self::$hijackDir, new Router(), null, new HookManager());
+        $loader = new PluginLoader(self::$hijackDir, new Router(''), null, new HookManager());
         $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
 
         $exit = $this->runQuiet($command, ['run']);
@@ -515,7 +515,7 @@ PHP);
      */
     public function testRollbackThenBeginHijackInUpLeavesNoPhantomRecord(): void
     {
-        $loader = new PluginLoader(self::$restartUpDir, new Router(), null, new HookManager());
+        $loader = new PluginLoader(self::$restartUpDir, new Router(''), null, new HookManager());
         $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
 
         $exit = $this->runQuiet($command, ['run']);
@@ -534,7 +534,7 @@ PHP);
      */
     public function testRollbackThenBeginHijackInDownKeepsRecord(): void
     {
-        $loader = new PluginLoader(self::$restartDownDir, new Router(), null, new HookManager());
+        $loader = new PluginLoader(self::$restartDownDir, new Router(''), null, new HookManager());
         $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
 
         $this->assertSame(0, $this->runQuiet($command, ['run']), 'The well-behaved up() must apply');
@@ -557,7 +557,7 @@ PHP);
      */
     public function testThrowingGetMigrationsIsSkippedAndOthersStillRun(): void
     {
-        $loader = new PluginLoader(self::$mixedDir, new Router(), null, new HookManager());
+        $loader = new PluginLoader(self::$mixedDir, new Router(''), null, new HookManager());
         $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
 
         $exit = $this->runQuiet($command, ['run']);
@@ -622,7 +622,7 @@ PHP);
 
     private function command(): MigrationsCommand
     {
-        $loader = new PluginLoader(self::$pluginsDir, new Router(), null, new HookManager());
+        $loader = new PluginLoader(self::$pluginsDir, new Router(''), null, new HookManager());
 
         return new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
     }

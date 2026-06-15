@@ -46,22 +46,35 @@ final class CoreApiSchemas
         $noop = static fn (): Response => new Response(501, '');
 
         foreach (self::routes() as $route) {
-            $router->register(
-                $route['method'],
-                $route['path'],
-                $noop,
-                $route['requiredRole'],
-                null,
-                $route['requiredPermission'],
-                $route['schema'] + ['components' => self::components()]
-            );
+            $unversioned = $route['unversioned'] ?? false;
+            if ($unversioned) {
+                $router->registerUnversioned(
+                    $route['method'],
+                    $route['path'],
+                    $noop,
+                    $route['requiredRole'],
+                    null,
+                    $route['requiredPermission'],
+                    $route['schema'] + ['components' => self::components()]
+                );
+            } else {
+                $router->register(
+                    $route['method'],
+                    $route['path'],
+                    $noop,
+                    $route['requiredRole'],
+                    null,
+                    $route['requiredPermission'],
+                    $route['schema'] + ['components' => self::components()]
+                );
+            }
         }
     }
 
     /**
      * The admin route declarations.
      *
-     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>, unversioned?: bool}>
      */
     public static function routes(): array
     {
@@ -458,17 +471,20 @@ final class CoreApiSchemas
     }
 
     /**
-     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>, unversioned?: bool}>
      */
     private static function platformOpsRoutes(): array
     {
         return [
-            // No auth gate — any caller (including unauthenticated health checks)
+            // No auth gate — any caller (including unauthenticated health checks).
+            // WC-206: UNVERSIONED — stored at /api/health regardless of the Router
+            // version prefix so load-balancer probes never need updating.
             [
                 'method' => 'GET',
                 'path' => '/api/health',
                 'requiredRole' => null,
                 'requiredPermission' => null,
+                'unversioned' => true,
                 'schema' => [
                     'summary' => 'Platform health probe',
                     'tags' => ['platform-ops'],

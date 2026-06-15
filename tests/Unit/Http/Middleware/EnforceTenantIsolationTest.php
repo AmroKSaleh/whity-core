@@ -390,7 +390,7 @@ class EnforceTenantIsolationTest extends TestCase
      */
     public function testPublicRouteSkipsIsolation(): void
     {
-        $request = new Request('POST', '/api/login');
+        $request = new Request('POST', '/api/v1/login');
         $reached = false;
         $next = function (Request $req) use (&$reached): Response {
             $reached = true;

@@ -13,7 +13,7 @@ use Whity\Http\Middleware\CsrfGuard;
  * WC-160 CSRF defense-in-depth for the state-changing auth endpoints.
  *
  * The guard requires the custom `X-Requested-With: XMLHttpRequest` header on
- * POSTs to /api/login, /api/login/2fa, /api/auth/refresh and /api/auth/logout.
+ * POSTs to /api/v1/login, /api/v1/login/2fa, /api/v1/auth/refresh and /api/v1/auth/logout.
  * Cross-site HTML forms cannot set custom headers, and a cross-origin
  * fetch/XHR that sets one triggers a CORS preflight that the origin allowlist
  * refuses for foreign origins — so a forged cross-site POST can never carry it.
@@ -46,10 +46,10 @@ class CsrfGuardTest extends TestCase
     public static function protectedAuthPosts(): array
     {
         return [
-            ['/api/login'],
-            ['/api/login/2fa'],
-            ['/api/auth/refresh'],
-            ['/api/auth/logout'],
+            ['/api/v1/login'],
+            ['/api/v1/login/2fa'],
+            ['/api/v1/auth/refresh'],
+            ['/api/v1/auth/logout'],
         ];
     }
 
@@ -99,7 +99,7 @@ class CsrfGuardTest extends TestCase
      */
     public function testRejectsWrongHeaderValue(): void
     {
-        $request = new Request('POST', '/api/login', ['X-Requested-With' => 'fetch']);
+        $request = new Request('POST', '/api/v1/login', ['X-Requested-With' => 'fetch']);
 
         $reached = false;
         $response = $this->guard->handle($request, $this->nextHandler($reached));
@@ -113,7 +113,7 @@ class CsrfGuardTest extends TestCase
      */
     public function testAcceptsCaseInsensitiveHeaderValue(): void
     {
-        $request = new Request('POST', '/api/login', ['X-Requested-With' => 'xmlhttprequest']);
+        $request = new Request('POST', '/api/v1/login', ['X-Requested-With' => 'xmlhttprequest']);
 
         $reached = false;
         $this->guard->handle($request, $this->nextHandler($reached));
@@ -126,7 +126,7 @@ class CsrfGuardTest extends TestCase
      */
     public function testProtectedPathWithQueryStringStillGuarded(): void
     {
-        $request = new Request('POST', '/api/login?redirect=/dashboard');
+        $request = new Request('POST', '/api/v1/login?redirect=/dashboard');
 
         $reached = false;
         $response = $this->guard->handle($request, $this->nextHandler($reached));
@@ -181,7 +181,7 @@ class CsrfGuardTest extends TestCase
      */
     public function testCookieAuthenticatedMutationWithHeaderPasses(): void
     {
-        $request = new Request('POST', '/api/auth/2fa/disable', [
+        $request = new Request('POST', '/api/v1/auth/2fa/disable', [
             'Cookie' => 'access_token=some.jwt.value',
             'X-Requested-With' => 'XMLHttpRequest',
         ]);
@@ -246,7 +246,7 @@ class CsrfGuardTest extends TestCase
      */
     public function testGetOnProtectedPathPasses(): void
     {
-        $request = new Request('GET', '/api/login');
+        $request = new Request('GET', '/api/v1/login');
 
         $reached = false;
         $this->guard->handle($request, $this->nextHandler($reached));
@@ -260,7 +260,7 @@ class CsrfGuardTest extends TestCase
      */
     public function testOptionsAlwaysPasses(): void
     {
-        $request = new Request('OPTIONS', '/api/login');
+        $request = new Request('OPTIONS', '/api/v1/login');
 
         $reached = false;
         $this->guard->handle($request, $this->nextHandler($reached));

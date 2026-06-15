@@ -62,7 +62,7 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     await expect(link).toBeVisible();
     const listResponse = page.waitForResponse(
       (res) =>
-        res.url().includes('/api/hello/greetings') &&
+        res.url().includes('/api/v1/v1/hello/greetings') &&
         res.request().method() === 'GET'
     );
     await link.click();
@@ -163,7 +163,7 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
     const message = `Hello from ${greetingMarker}`;
     const seedApi = await createAuthedApi(baseURL, ADMIN);
     try {
-      const created = await seedApi.post('/api/hello/greetings', {
+      const created = await seedApi.post('/api/v1/v1/hello/greetings', {
         data: { message },
       });
       expect(
@@ -176,7 +176,7 @@ test.describe('Plugin screen: HelloWorld greetings (role matrix)', () => {
 
     const listResponse = page.waitForResponse(
       (res) =>
-        res.url().includes('/api/hello/greetings') &&
+        res.url().includes('/api/v1/v1/hello/greetings') &&
         res.request().method() === 'GET'
     );
     await roleSession.shell.clickNav('Greetings');

@@ -24,7 +24,7 @@ class PluginsApiHandlerTest extends TestCase
     {
         $this->tempDir = sys_get_temp_dir() . '/whity_plugins_api_' . uniqid();
         mkdir($this->tempDir, 0755, true);
-        $this->router = new Router();
+        $this->router = new Router('');
     }
 
     protected function tearDown(): void

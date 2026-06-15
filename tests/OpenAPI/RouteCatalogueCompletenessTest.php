@@ -28,7 +28,9 @@ final class RouteCatalogueCompletenessTest extends TestCase
      * @var list<string>
      */
     private const KNOWN_UNDOCUMENTED = [
-        // Auth surface — to be declared once the auth/2FA schema task lands
+        // Auth surface — to be declared once the auth/2FA schema task lands.
+        // WC-206: paths are now versioned; the regex extraction normalises them
+        // to the path-as-written in index.php (no prefix applied by the extractor).
         'POST /api/login',
         'POST /api/login/2fa',
         'GET /api/me',
@@ -40,6 +42,9 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'POST /api/auth/2fa/disable',
         'POST /api/auth/2fa/regenerate-codes',
         'GET /api/auth/2fa/status',
+        // WC-206: unversioned infrastructure probes (registerUnversioned).
+        // Kept undocumented for now — schema to be added in a follow-up task.
+        'GET /api/version',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void
@@ -73,15 +78,18 @@ final class RouteCatalogueCompletenessTest extends TestCase
     }
 
     /**
-     * @return list<string> "METHOD /normalized/path" for every $router->register() in index.php
+     * @return list<string> "METHOD /normalized/path" for every $router->register() and
+     * $router->registerUnversioned() in index.php
      */
     private function extractLiveRoutes(): array
     {
         $indexPhp = file_get_contents(__DIR__ . '/../../public/index.php');
         $this->assertIsString($indexPhp, 'Could not read public/index.php');
 
+        // Capture both register() and registerUnversioned() — paths are as
+        // written in the source (no version prefix applied by this extractor).
         preg_match_all(
-            '/\$router->register\s*\(\s*\'(GET|POST|PATCH|DELETE|PUT)\'\s*,\s*\'([^\']+)\'/',
+            '/\$router->(?:register|registerUnversioned)\s*\(\s*\'(GET|POST|PATCH|DELETE|PUT)\'\s*,\s*\'([^\']+)\'/',
             $indexPhp,
             $matches
         );

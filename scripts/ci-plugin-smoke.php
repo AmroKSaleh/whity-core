@@ -21,7 +21,7 @@ use Whity\Core\Router;
 // Plugins may subscribe hooks during load; register the manager the host provides.
 \Whity\register_service(HookManager::class, new HookManager());
 
-$loader = new PluginLoader(dirname(__DIR__) . '/plugins', new Router());
+$loader = new PluginLoader(dirname(__DIR__) . '/plugins', new Router(''));
 $loader->load();
 
 $plugins = $loader->getPlugins();

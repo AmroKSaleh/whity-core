@@ -104,7 +104,7 @@ class RbacCrossTenantDenialTest extends TestCase
         TenantContext::reset();
         TenantContext::setTenantId($tenantId);
 
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/users', static fn(): Response => new Response(200, '[]'), null, null, CorePermissions::USERS_READ);
 
         $match = $router->match($request);

@@ -610,7 +610,7 @@ PHP);
      */
     public function testPluginRouteCollidingWithAnExistingRouteIsSkippedAndItsDescriptorDropped(): void
     {
-        $router = new Router();
+        $router = new Router('');
         // Simulates a core route registered before plugins load.
         $router->register(
             'GET',
@@ -682,7 +682,7 @@ PHP);
      */
     private function loadDir(string $dir): array
     {
-        $router = new Router();
+        $router = new Router('');
         $loader = new PluginLoader($dir, $router, new PermissionRegistry(), new HookManager());
         $loader->load();
 

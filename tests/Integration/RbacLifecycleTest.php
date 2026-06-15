@@ -162,7 +162,7 @@ class RbacLifecycleTest extends TestCase
         );
         $middleware = new RbacMiddleware($jwtParser, new RoleChecker($db, $registry));
 
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/users', static fn(): Response => new Response(200, '[]'), null, null, CorePermissions::USERS_READ);
 
         // user id 2 -> role id 2 (admin) by the fixture convention.
@@ -200,7 +200,7 @@ class RbacLifecycleTest extends TestCase
         );
         $middleware = new RbacMiddleware($jwtParser, new RoleChecker($db, $registry));
 
-        $router = new Router();
+        $router = new Router('');
         $router->register('DELETE', '/api/users/{id}', static fn(): Response => new Response(204, ''), null, null, CorePermissions::USERS_DELETE);
 
         $token = $jwtParser->create(['user_id' => 4, 'email' => 'viewer@example.com']);
@@ -234,7 +234,7 @@ class RbacLifecycleTest extends TestCase
         );
         $middleware = new RbacMiddleware($jwtParser, new RoleChecker($db, $registry));
 
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/users', static fn(): Response => new Response(200, '[]'), null, null, CorePermissions::USERS_READ);
         $router->register('POST', '/api/users', static fn(): Response => new Response(201, '{}'), null, null, CorePermissions::USERS_WRITE);
         $router->register('DELETE', '/api/users/{id}', static fn(): Response => new Response(204, ''), null, null, CorePermissions::USERS_DELETE);
@@ -312,7 +312,7 @@ class RbacLifecycleTest extends TestCase
         );
         $middleware = new RbacMiddleware($jwtParser, new RoleChecker($db, $registry));
 
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/users', static fn(): Response => new Response(200, '[]'), null, null, CorePermissions::USERS_READ);
 
         $token = $jwtParser->create(['user_id' => 4, 'email' => 'reader@example.com']);

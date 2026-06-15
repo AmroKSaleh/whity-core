@@ -24,7 +24,7 @@ class HttpKernelTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->router = new Router();
+        $this->router = new Router('');
 
         // Create mock dependencies for RbacMiddleware
         $jwtParser = $this->createMock(JwtParser::class);

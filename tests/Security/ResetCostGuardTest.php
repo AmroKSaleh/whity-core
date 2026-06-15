@@ -72,7 +72,7 @@ class ResetCostGuardTest extends TestCase
         $roleChecker = $this->createMock(RoleChecker::class);
         $rbac = new RbacMiddleware($jwtParser, $roleChecker);
 
-        return new HttpKernel(new Router(), $rbac);
+        return new HttpKernel(new Router(''), $rbac);
     }
 
     /**
@@ -235,7 +235,7 @@ class ResetCostGuardTest extends TestCase
 
     private function routerWithNoopRoute(): Router
     {
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/noop', static fn(Request $req): Response => Response::json(['ok' => true]));
 
         return $router;

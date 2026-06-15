@@ -25,7 +25,7 @@ export class LoginPage {
     // navigation against the /api/me response to get a deterministic settle
     // point, then assert the form is interactable.
     const mePromise = this.page
-      .waitForResponse((res) => res.url().includes('/api/me'), { timeout: 15_000 })
+      .waitForResponse((res) => res.url().includes('/api/v1/me'), { timeout: 15_000 })
       .catch(() => null);
     await this.page.goto('/login');
     await expect(this.emailInput).toBeVisible();
@@ -57,7 +57,7 @@ export class LoginPage {
   async loginExpectingSuccess(creds: Credentials): Promise<void> {
     await this.goto();
     const loginResponse = this.page.waitForResponse(
-      (res) => res.url().includes('/api/login') && res.request().method() === 'POST'
+      (res) => res.url().includes('/api/v1/login') && res.request().method() === 'POST'
     );
     await this.submit(creds);
     const res = await loginResponse;
@@ -91,7 +91,7 @@ export class LoginPage {
    */
   async submitExpecting2fa(creds: Credentials): Promise<void> {
     const loginResponse = this.page.waitForResponse(
-      (res) => res.url().includes('/api/login') && res.request().method() === 'POST'
+      (res) => res.url().includes('/api/v1/login') && res.request().method() === 'POST'
     );
     await this.submit(creds);
     const res = await loginResponse;
@@ -172,7 +172,7 @@ export class AppShell {
     // in-flight logout and /login bounces straight back to /dashboard.
     const logoutResponse = this.page.waitForResponse(
       (res) =>
-        res.url().includes('/api/auth/logout') &&
+        res.url().includes('/api/v1/auth/logout') &&
         res.request().method() === 'POST'
     );
     await this.logoutButton.click();

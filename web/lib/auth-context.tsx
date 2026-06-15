@@ -57,11 +57,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize user from /api/me on mount (uses httpOnly cookies)
+  // Initialize user from /api/v1/me on mount (uses httpOnly cookies)
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const response = await fetch('/api/me', {
+        const response = await fetch('/api/v1/me', {
           credentials: 'include',
         });
 
@@ -86,7 +86,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
 
     try {
-      const response = await fetch('/api/login', {
+      const response = await fetch('/api/v1/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -133,7 +133,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = async (): Promise<void> => {
     try {
-      await fetch('/api/auth/logout', {
+      await fetch('/api/v1/auth/logout', {
         method: 'POST',
         credentials: 'include',
         // CSRF defense (WC-160): required on the auth POSTs.
@@ -149,7 +149,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const refreshAuth = async (): Promise<void> => {
     try {
-      const response = await fetch('/api/me', {
+      const response = await fetch('/api/v1/me', {
         credentials: 'include',
       });
 

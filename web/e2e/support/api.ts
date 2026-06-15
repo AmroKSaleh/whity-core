@@ -4,7 +4,7 @@ import { ADMIN, type Credentials } from './constants';
 /**
  * Lightweight API helpers used for test setup and (best-effort) cleanup.
  *
- * All requests go through the frontend's own `/api/*` proxy on the baseURL,
+ * All requests go through the frontend's own `/api/v1/*` proxy on the baseURL,
  * which forwards to the backend at http://localhost:8000 and handles the
  * httpOnly auth cookie transparently. This mirrors exactly how the app talks
  * to the backend, so the helpers exercise the same path the UI uses.
@@ -24,7 +24,7 @@ export async function createAuthedApi(
     // state-changing requests (and the auth POSTs) without this header.
     extraHTTPHeaders: { 'X-Requested-With': 'XMLHttpRequest' },
   });
-  const response = await context.post('/api/login', {
+  const response = await context.post('/api/v1/login', {
     data: { email: creds.email, password: creds.password },
   });
   if (response.status() === 202) {
@@ -48,30 +48,30 @@ export async function createAuthedApi(
  * hooks even if the role was already removed by the test body.
  */
 export async function deleteRole(api: APIRequestContext, id: number): Promise<void> {
-  await api.delete(`/api/roles/${id}`).catch(() => undefined);
+  await api.delete(`/api/v1/roles/${id}`).catch(() => undefined);
 }
 
 /** Best-effort user deletion by id. */
 export async function deleteUser(api: APIRequestContext, id: number): Promise<void> {
-  await api.delete(`/api/users/${id}`).catch(() => undefined);
+  await api.delete(`/api/v1/users/${id}`).catch(() => undefined);
 }
 
 /**
  * Best-effort organizational-unit deletion by id.
  *
- * The `/api/ous/{id}` DELETE endpoint returns HTTP 204 from the backend. The
+ * The `/api/v1/ous/{id}` DELETE endpoint returns HTTP 204 from the backend. The
  * Next.js proxy now forwards null-body statuses (204/205/304) without a body
  * (WC-101), so this resolves with a clean 204 rather than a proxy 500.
  */
 export async function deleteOu(api: APIRequestContext, id: number): Promise<void> {
-  await api.delete(`/api/ous/${id}`).catch(() => undefined);
+  await api.delete(`/api/v1/ous/${id}`).catch(() => undefined);
 }
 
 /** Fetch the current role list (admin-only endpoint). */
 export async function listRoles(
   api: APIRequestContext
 ): Promise<Array<{ id: number; name: string }>> {
-  const res = await api.get('/api/roles');
+  const res = await api.get('/api/v1/roles');
   if (!res.ok()) return [];
   const body = (await res.json()) as { data?: Array<{ id: number; name: string }> };
   return body.data ?? [];
@@ -91,7 +91,7 @@ export async function findRoleIdByName(
 export async function listOus(
   api: APIRequestContext
 ): Promise<Array<{ id: number; name: string }>> {
-  const res = await api.get('/api/ous');
+  const res = await api.get('/api/v1/ous');
   if (!res.ok()) return [];
   const body = (await res.json()) as { data?: Array<{ id: number; name: string }> };
   return body.data ?? [];
@@ -125,7 +125,7 @@ export async function ensureUser(
     return existing;
   }
 
-  const res = await api.post('/api/users', {
+  const res = await api.post('/api/v1/users', {
     data: { email: opts.email, password: opts.password, role: opts.role },
   });
   if (res.status() === 409) {
@@ -161,7 +161,7 @@ export async function ensureDelegation(
   }
 ): Promise<void> {
   const listRes = await api.get(
-    `/api/delegations?granteeType=${opts.granteeType}&granteeId=${opts.granteeId}`
+    `/api/v1/delegations?granteeType=${opts.granteeType}&granteeId=${opts.granteeId}`
   );
   let live: string[] = [];
   if (listRes.ok()) {
@@ -178,7 +178,7 @@ export async function ensureDelegation(
     return;
   }
 
-  const createRes = await api.post('/api/delegations', {
+  const createRes = await api.post('/api/v1/delegations', {
     data: {
       granteeType: opts.granteeType,
       granteeId: opts.granteeId,
@@ -206,7 +206,7 @@ export async function revokeDelegationsFor(
 ): Promise<void> {
   try {
     const res = await api.get(
-      `/api/delegations?granteeType=${granteeType}&granteeId=${granteeId}`
+      `/api/v1/delegations?granteeType=${granteeType}&granteeId=${granteeId}`
     );
     if (!res.ok()) return;
     const body = (await res.json()) as {
@@ -214,7 +214,7 @@ export async function revokeDelegationsFor(
     };
     for (const delegation of body.data ?? []) {
       if (delegation.revokedAt === null) {
-        await api.delete(`/api/delegations/${delegation.id}`).catch(() => undefined);
+        await api.delete(`/api/v1/delegations/${delegation.id}`).catch(() => undefined);
       }
     }
   } catch {
@@ -224,7 +224,7 @@ export async function revokeDelegationsFor(
 
 /** Best-effort person deletion by id (requires relations:manage). */
 export async function deletePerson(api: APIRequestContext, id: number): Promise<void> {
-  await api.delete(`/api/persons/${id}`).catch(() => undefined);
+  await api.delete(`/api/v1/persons/${id}`).catch(() => undefined);
 }
 
 /** Find a person id by exact display name, or null if absent. */
@@ -232,7 +232,7 @@ export async function findPersonIdByName(
   api: APIRequestContext,
   displayName: string
 ): Promise<number | null> {
-  const res = await api.get('/api/persons');
+  const res = await api.get('/api/v1/persons');
   if (!res.ok()) return null;
   const body = (await res.json()) as {
     data?: Array<{ id: number; displayName: string }>;
@@ -252,14 +252,14 @@ export async function deleteGreetingsMatching(
   marker: string
 ): Promise<void> {
   try {
-    const res = await api.get('/api/hello/greetings');
+    const res = await api.get('/api/v1/hello/greetings');
     if (!res.ok()) return;
     const body = (await res.json()) as {
       data?: Array<{ id: number; message: string }>;
     };
     for (const row of body.data ?? []) {
       if (row.message.includes(marker)) {
-        await api.delete(`/api/hello/greetings/${row.id}`).catch(() => undefined);
+        await api.delete(`/api/v1/hello/greetings/${row.id}`).catch(() => undefined);
       }
     }
   } catch {
@@ -272,7 +272,7 @@ export async function findUserIdByEmail(
   api: APIRequestContext,
   email: string
 ): Promise<number | null> {
-  const res = await api.get('/api/users');
+  const res = await api.get('/api/v1/users');
   if (!res.ok()) return null;
   const body = (await res.json()) as { data?: Array<{ id: number; email: string }> };
   const match = (body.data ?? []).find((u) => u.email === email);
@@ -291,7 +291,7 @@ export async function assignUserRole(
   roleName: string
 ): Promise<void> {
   await api
-    .patch(`/api/users/${userId}`, { data: { role: roleName } })
+    .patch(`/api/v1/users/${userId}`, { data: { role: roleName } })
     .catch(() => undefined);
 }
 
@@ -299,7 +299,7 @@ export async function assignUserRole(
 export async function getTwoFactorStatus(
   api: APIRequestContext
 ): Promise<{ enabled: boolean; backup_codes_available: number }> {
-  const res = await api.get('/api/auth/2fa/status');
+  const res = await api.get('/api/v1/auth/2fa/status');
   if (!res.ok()) return { enabled: false, backup_codes_available: 0 };
   return (await res.json()) as { enabled: boolean; backup_codes_available: number };
 }
@@ -319,12 +319,12 @@ export async function enableTwoFactor(
   api: APIRequestContext,
   computeCode: (secret: string) => Promise<string>
 ): Promise<{ secret: string; backupCodes: string[] }> {
-  const setupRes = await api.post('/api/auth/2fa/setup');
+  const setupRes = await api.post('/api/v1/auth/2fa/setup');
   expect(setupRes.status(), '2FA setup should return 200').toBe(200);
   const setup = (await setupRes.json()) as { secret: string };
   const code = await computeCode(setup.secret);
 
-  const confirmRes = await api.post('/api/auth/2fa/confirm', {
+  const confirmRes = await api.post('/api/v1/auth/2fa/confirm', {
     data: { code, secret: setup.secret },
   });
   expect(confirmRes.status(), '2FA confirm should return 200').toBe(200);

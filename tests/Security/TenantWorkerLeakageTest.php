@@ -226,7 +226,7 @@ class TenantWorkerLeakageTest extends TestCase
     private function buildKernel(Database $db): HttpKernel
     {
         $jwtParser = new JwtParser(self::SECRET);
-        $router = new Router();
+        $router = new Router('');
 
         // No required role/permission => RBAC is fail-open; the only enforcement
         // exercised here is tenant resolution + query scoping.

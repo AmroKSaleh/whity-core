@@ -45,8 +45,10 @@ class GenerateOpenApiSchemaCommand
             // Require composer autoloader
             require dirname(__DIR__, 2) . '/vendor/autoload.php';
 
-            // Initialize router and plugin loader
-            $router = new Router();
+            // Initialize router and plugin loader.
+            // WC-206: use '/v1' prefix so the generated spec carries '/api/v1/'
+            // paths matching the live application routing.
+            $router = new Router('/v1');
             $pluginLoader = new PluginLoader(dirname(__DIR__, 2) . '/plugins', $router);
 
             // Register the core admin resources' typed declarations (WC-167)

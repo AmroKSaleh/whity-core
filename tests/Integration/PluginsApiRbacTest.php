@@ -76,7 +76,7 @@ class PluginsApiRbacTest extends TestCase
         // Default to an empty-grant store; each test re-seeds via seedRolePermissions.
         $this->roleChecker = new RoleChecker($this->makeEmptyDb(), $this->registry);
         $this->middleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
-        $this->router = new Router();
+        $this->router = new Router('');
 
         $this->pluginName = 'RbacFixturePlugin' . str_replace('.', '', uniqid('', true));
         $this->pluginPath = '/api/rbacfixture/' . strtolower($this->pluginName);

@@ -54,7 +54,7 @@ test.describe('Family Relations (role matrix)', () => {
 
     const personsResponse = page.waitForResponse(
       (res) =>
-        res.url().includes('/api/persons') && res.request().method() === 'GET'
+        res.url().includes('/api/v1/v1/persons') && res.request().method() === 'GET'
     );
     // /api/relations needs an end-of-path match so it cannot collide with the
     // page's parallel /api/relationship-types call.
@@ -160,16 +160,16 @@ test.describe('Family Relations (role matrix)', () => {
     let aliceId: number | null = null;
     let bobId: number | null = null;
     try {
-      const aliceRes = await admin.post('/api/persons', {
+      const aliceRes = await admin.post('/api/v1/v1/persons', {
         data: { displayName: aliceName },
       });
       aliceId = ((await aliceRes.json()) as { data: { id: number } }).data.id;
-      const bobRes = await admin.post('/api/persons', {
+      const bobRes = await admin.post('/api/v1/v1/persons', {
         data: { displayName: bobName },
       });
       bobId = ((await bobRes.json()) as { data: { id: number } }).data.id;
       // Sibling (symmetric, typeId 4) so the drawer lists one relation row.
-      await admin.post('/api/relations', {
+      await admin.post('/api/v1/v1/relations', {
         data: {
           from: { kind: 'person', id: aliceId },
           to: { kind: 'person', id: bobId },

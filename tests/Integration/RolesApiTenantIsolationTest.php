@@ -169,7 +169,7 @@ class RolesApiTenantIsolationTest extends TestCase
 
         $roleChecker = new RoleChecker($db, $registry);
         $middleware = new RbacMiddleware($jwtParser, $roleChecker);
-        $router = new Router();
+        $router = new Router('');
         $router->register(
             'POST',
             '/api/roles',
@@ -218,7 +218,7 @@ class RolesApiTenantIsolationTest extends TestCase
 
         $roleChecker = new RoleChecker($db, $registry);
         $middleware = new RbacMiddleware($jwtParser, $roleChecker);
-        $router = new Router();
+        $router = new Router('');
         $router->register(
             'POST',
             '/api/roles',
