@@ -97,6 +97,13 @@ services:
     volumes:
       - .:/app
     working_dir: /app
+    # This container reuses the whity-core:dev image but runs a sleep-loop
+    # scheduler, NOT the FrankenPHP HTTP server the base image's HEALTHCHECK
+    # probes — so that inherited probe would always report "unhealthy" and break
+    # `docker compose up --wait` (e2e). Disable it: liveness here is just "the
+    # loop process is running", which `--wait` already treats as ready.
+    healthcheck:
+      disable: true
     restart: unless-stopped
     command:
       - sh
