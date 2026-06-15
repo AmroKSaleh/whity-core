@@ -403,4 +403,224 @@ class EnforceTenantIsolationTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertNull(TenantContext::getTenantId());
     }
+
+    // ===================================================================
+    // WC-193: X-Tenant-Id / tenant_id-query trust boundary
+    //
+    // The JWT-derived TenantContext is the ONLY source of truth for the
+    // caller's tenant. The path /api/tenants/{id}, the tenant_id query
+    // parameter and the X-Tenant-Id header are attacker-suppliable
+    // *declared targets* that feed ONLY this cross-tenant gate; they can
+    // never widen a non-system caller's reach. These tests lock that in.
+    // ===================================================================
+
+    /**
+     * WC-193: a non-system caller declaring ANOTHER tenant via the
+     * X-Tenant-Id header is refused with 403 before any handler runs — the
+     * header can never escalate across tenants.
+     */
+    public function testCrossTenantViaHeaderBlockedWith403(): void
+    {
+        $payload = ['user_id' => 5, 'tenant_id' => 1, 'email' => 'a@t1'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer t1.token',
+            'X-Tenant-Id' => '2',
+        ]);
+
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertFalse($reached, 'X-Tenant-Id of another tenant must not reach the handler');
+        $this->assertSame(403, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $this->assertSame('Access to the requested tenant is forbidden', $data['error']);
+    }
+
+    /**
+     * WC-193: a non-system caller declaring its OWN tenant via X-Tenant-Id is
+     * allowed — the header matches the JWT tenant, so it can only ever match
+     * or 403, never escalate.
+     */
+    public function testOwnTenantViaHeaderPasses(): void
+    {
+        $payload = ['user_id' => 5, 'tenant_id' => 7, 'email' => 'a@t7'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer t7.token',
+            'X-Tenant-Id' => '7',
+        ]);
+
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertTrue($reached, 'A header matching the caller tenant must reach the handler');
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(7, TenantContext::getTenantId());
+    }
+
+    /**
+     * WC-193: a non-system caller declaring ANOTHER tenant via the tenant_id
+     * query parameter is refused with 403 — the query selector can never
+     * escalate across tenants.
+     */
+    public function testCrossTenantViaQueryParamBlockedWith403(): void
+    {
+        $payload = ['user_id' => 5, 'tenant_id' => 1, 'email' => 'a@t1'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $request = new Request('GET', '/api/resource?tenant_id=2', ['Authorization' => 'Bearer t1.token']);
+
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertFalse($reached, 'tenant_id query of another tenant must not reach the handler');
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    /**
+     * WC-193: a refused cross-tenant attempt is audited. An attacker probing
+     * other tenants via X-Tenant-Id/tenant_id must leave a structured trail —
+     * the 403 path is no longer silent.
+     */
+    public function testCrossTenantDenialIsAudited(): void
+    {
+        $logger = $this->collectingLogger();
+        $middleware = new EnforceTenantIsolation($this->mockJwtParser, $logger);
+
+        $payload = ['user_id' => 5, 'tenant_id' => 1, 'email' => 'a@t1'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer t1.token',
+            'X-Tenant-Id' => '2',
+        ]);
+
+        $next = fn(Request $req): Response => new Response(200, 'ok');
+
+        $response = $middleware->handle($request, $next);
+        $this->assertSame(403, $response->getStatusCode());
+
+        $denials = array_values(array_filter(
+            $logger->records,
+            static fn(array $r): bool =>
+                ($r['context']['event'] ?? null) === 'tenant_isolation.cross_tenant_denied'
+        ));
+        $this->assertCount(1, $denials, 'A refused cross-tenant attempt must be audited');
+        $this->assertSame(1, $denials[0]['context']['tenant_id'], 'caller tenant');
+        $this->assertSame(2, $denials[0]['context']['resource_tenant_id'], 'declared target');
+        $this->assertSame(5, $denials[0]['context']['user_id']);
+        $this->assertArrayHasKey('path', $denials[0]['context']);
+    }
+
+    /**
+     * WC-193: the system tenant (id 0) crossing tenants via X-Tenant-Id is
+     * permitted and emits the bypass (not denial) audit record — the
+     * privileged path stays audited and distinct from a denial.
+     */
+    public function testSystemTenantCrossTenantViaHeaderAuditedAsBypass(): void
+    {
+        $logger = $this->collectingLogger();
+        $middleware = new EnforceTenantIsolation($this->mockJwtParser, $logger);
+
+        $payload = ['user_id' => 1, 'tenant_id' => 0, 'email' => 'root@system'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer sys.token',
+            'X-Tenant-Id' => '2',
+        ]);
+
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $middleware->handle($request, $next);
+
+        $this->assertTrue($reached, 'System tenant must cross tenants via the audited bypass');
+        $this->assertSame(200, $response->getStatusCode());
+
+        $bypasses = array_values(array_filter(
+            $logger->records,
+            static fn(array $r): bool =>
+                ($r['context']['event'] ?? null) === 'tenant_isolation.cross_tenant_bypass'
+        ));
+        $denials = array_values(array_filter(
+            $logger->records,
+            static fn(array $r): bool =>
+                ($r['context']['event'] ?? null) === 'tenant_isolation.cross_tenant_denied'
+        ));
+        $this->assertCount(1, $bypasses, 'A permitted system bypass must be audited as a bypass');
+        $this->assertCount(0, $denials, 'A permitted bypass must NOT be logged as a denial');
+        $this->assertSame(2, $bypasses[0]['context']['resource_tenant_id']);
+    }
+
+    /**
+     * WC-193: a malformed X-Tenant-Id (non-digit, signed, whitespace, decimal)
+     * is treated as no-declared-target — it can neither escalate nor coincide
+     * with a numeric tenant id. The request defers to the handler's
+     * JWT-derived scoping.
+     *
+     * @dataProvider malformedTenantSelectorProvider
+     */
+    public function testMalformedHeaderIsIgnoredSafely(string $headerValue): void
+    {
+        $payload = ['user_id' => 5, 'tenant_id' => 1, 'email' => 'a@t1'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer t1.token',
+            'X-Tenant-Id' => $headerValue,
+        ]);
+
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertTrue($reached, 'A malformed header must be ignored, deferring to handler scoping');
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(1, TenantContext::getTenantId());
+    }
+
+    /**
+     * Malformed tenant selectors that must never resolve to a numeric target.
+     *
+     * @return array<string, array{0:string}>
+     */
+    public static function malformedTenantSelectorProvider(): array
+    {
+        return [
+            'negative'      => ['-1'],
+            'signed plus'   => ['+2'],
+            'decimal'       => ['2.0'],
+            'whitespace'    => [' 2 '],
+            'hex'           => ['0x2'],
+            'non-numeric'   => ['two'],
+            'empty'         => [''],
+            'trailing junk' => ['2; DROP'],
+        ];
+    }
 }
