@@ -3427,6 +3427,10 @@
                     "tenantId": {
                         "type": "integer"
                     },
+                    "ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
                     "createdAt": {
                         "type": "string",
                         "nullable": true
@@ -3438,6 +3442,7 @@
                     "email",
                     "role",
                     "tenantId",
+                    "ou_id",
                     "createdAt"
                 ]
             },

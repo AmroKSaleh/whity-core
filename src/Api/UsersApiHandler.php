@@ -92,7 +92,7 @@ class UsersApiHandler
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists users across all tenants; scoped else-branch binds u.tenant_id = ?
                 $stmt = $this->db->prepare('
-                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
+                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
                     FROM users u
                     JOIN roles r ON u.role_id = r.id
                     ORDER BY u.tenant_id, u.created_at DESC
@@ -100,7 +100,7 @@ class UsersApiHandler
                 $stmt->execute();
             } else {
                 $stmt = $this->db->prepare('
-                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
+                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
                     FROM users u
                     JOIN roles r ON u.role_id = r.id
                     WHERE u.tenant_id = ?
@@ -139,7 +139,7 @@ class UsersApiHandler
      * is never included.
      *
      * @param array<string, mixed> $row Raw row from the users SELECT.
-     * @return array{id: int, name: string, email: string, role: string, tenantId: int, createdAt: string|null}
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null}
      */
     private function toPublicUser(array $row): array
     {
@@ -152,6 +152,7 @@ class UsersApiHandler
             'email' => $email,
             'role' => (string)($row['role'] ?? ''),
             'tenantId' => (int)($row['tenant_id'] ?? 0),
+            'ou_id' => isset($row['ou_id']) && $row['ou_id'] !== null ? (int)$row['ou_id'] : null,
             'createdAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
         ];
     }
@@ -537,7 +538,7 @@ class UsersApiHandler
     {
         // @tenant-guard-ignore: by-PK re-read after the scoped guard+write proved this user belongs to the acting tenant
         $stmt = $this->db->prepare('
-            SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
+            SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
             FROM users u
             JOIN roles r ON u.role_id = r.id
             WHERE u.id = ?
@@ -553,6 +554,7 @@ class UsersApiHandler
                 'email' => '',
                 'role' => '',
                 'tenantId' => 0,
+                'ou_id' => null,
                 'createdAt' => null,
             ];
         }
