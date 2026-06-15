@@ -11,6 +11,52 @@
         }
     ],
     "paths": {
+        "/api/admin/stats": {
+            "get": {
+                "operationId": "get_api_admin_stats",
+                "summary": "Platform-wide aggregate statistics",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Aggregate stats",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AdminStatsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/audit-logs": {
             "get": {
                 "operationId": "get_api_audit_logs",
@@ -366,6 +412,164 @@
                 ]
             }
         },
+        "/api/deployments/apply": {
+            "post": {
+                "operationId": "post_api_deployments_apply",
+                "summary": "Apply a deployment artefact",
+                "tags": [
+                    "platform-ops"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DeploymentApplyRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Deployment applied",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SimpleMessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/deployments/rollback": {
+            "post": {
+                "operationId": "post_api_deployments_rollback",
+                "summary": "Roll back the last deployment",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Rollback complete",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SimpleMessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/deployments/status": {
+            "get": {
+                "operationId": "get_api_deployments_status",
+                "summary": "Get the current deployment status",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Current deployment status",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DeploymentStatusResponse"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/example/hello": {
             "get": {
                 "operationId": "get_api_example_hello",
@@ -441,6 +645,37 @@
                     },
                     "403": {
                         "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/health": {
+            "get": {
+                "operationId": "get_api_health",
+                "summary": "Platform health probe",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "System is healthy",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HealthResponse"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "System is degraded",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -712,6 +947,83 @@
                     },
                     "403": {
                         "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/migrations": {
+            "get": {
+                "operationId": "get_api_migrations",
+                "summary": "List database migrations and their execution state",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Migration list",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MigrationListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/navigation": {
+            "get": {
+                "operationId": "get_api_navigation",
+                "summary": "List the navigation items visible to the caller",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The navigation items",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NavigationListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthenticated or tenant not resolved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1363,6 +1675,246 @@
                     },
                     "403": {
                         "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/plugins": {
+            "get": {
+                "operationId": "get_api_plugins",
+                "summary": "List all registered plugins",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Plugin list",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PluginListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/plugins/reload": {
+            "post": {
+                "operationId": "post_api_plugins_reload",
+                "summary": "Reload the plugin registry",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Registry reloaded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SimpleMessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/plugins/{id}/re-enable": {
+            "post": {
+                "operationId": "post_api_plugins_id_re_enable",
+                "summary": "Re-enable a previously disabled plugin by id",
+                "tags": [
+                    "platform-ops"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Plugin re-enabled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SimpleMessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Plugin not found or not disabled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/plugins/{name}/disable": {
+            "post": {
+                "operationId": "post_api_plugins_name_disable",
+                "summary": "Disable a plugin by name",
+                "tags": [
+                    "platform-ops"
+                ],
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Plugin disabled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SimpleMessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Plugin not found or already disabled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/plugins/{name}/enable": {
+            "post": {
+                "operationId": "post_api_plugins_name_enable",
+                "summary": "Enable a plugin by name",
+                "tags": [
+                    "platform-ops"
+                ],
+                "parameters": [
+                    {
+                        "name": "name",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Plugin enabled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SimpleMessageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Plugin not found or already enabled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -2382,6 +2934,76 @@
     },
     "components": {
         "schemas": {
+            "AdminStatsResponse": {
+                "type": "object",
+                "properties": {
+                    "stats": {
+                        "type": "object",
+                        "properties": {
+                            "totals": {
+                                "type": "object",
+                                "properties": {
+                                    "users": {
+                                        "type": "integer"
+                                    },
+                                    "tenants": {
+                                        "type": "integer"
+                                    },
+                                    "roles": {
+                                        "type": "integer"
+                                    }
+                                },
+                                "required": [
+                                    "users",
+                                    "tenants",
+                                    "roles"
+                                ]
+                            },
+                            "breakdown": {
+                                "type": "object",
+                                "additionalProperties": true
+                            },
+                            "growth": {
+                                "type": "object",
+                                "additionalProperties": true
+                            },
+                            "system": {
+                                "type": "object",
+                                "properties": {
+                                    "migrations_executed": {
+                                        "type": "integer"
+                                    },
+                                    "migrations_total": {
+                                        "type": "integer"
+                                    },
+                                    "pending_migrations": {
+                                        "type": "integer"
+                                    },
+                                    "database": {
+                                        "type": "object",
+                                        "additionalProperties": true
+                                    }
+                                },
+                                "required": [
+                                    "migrations_executed",
+                                    "migrations_total",
+                                    "pending_migrations",
+                                    "database"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "totals",
+                            "breakdown",
+                            "growth",
+                            "system"
+                        ]
+                    }
+                },
+                "required": [
+                    "stats"
+                ]
+            },
             "AuditLogEntry": {
                 "type": "object",
                 "properties": {
@@ -2585,6 +3207,33 @@
                     "data"
                 ]
             },
+            "DeploymentApplyRequest": {
+                "type": "object",
+                "properties": {
+                    "version": {
+                        "type": "string"
+                    },
+                    "source_path": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "version",
+                    "source_path"
+                ]
+            },
+            "DeploymentStatusResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "Error": {
                 "type": "object",
                 "properties": {
@@ -2714,6 +3363,42 @@
                     }
                 }
             },
+            "HealthResponse": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "ok",
+                            "degraded"
+                        ]
+                    },
+                    "version": {
+                        "type": "string"
+                    },
+                    "worker_count": {
+                        "type": "integer"
+                    },
+                    "uptime_seconds": {
+                        "type": "integer"
+                    },
+                    "db_connected": {
+                        "type": "boolean"
+                    },
+                    "memory_usage_mb": {
+                        "type": "number",
+                        "format": "float"
+                    }
+                },
+                "required": [
+                    "status",
+                    "version",
+                    "worker_count",
+                    "uptime_seconds",
+                    "db_connected",
+                    "memory_usage_mb"
+                ]
+            },
             "HelloGreeting": {
                 "type": "object",
                 "required": [
@@ -2798,6 +3483,40 @@
                     "data"
                 ]
             },
+            "MigrationEntry": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "executed": {
+                        "type": "boolean"
+                    },
+                    "executed_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "name",
+                    "executed",
+                    "executed_at"
+                ]
+            },
+            "MigrationListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/MigrationEntry"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "MutationResponse": {
                 "type": "object",
                 "properties": {
@@ -2815,6 +3534,59 @@
                             "id",
                             "message"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "NavigationItem": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "href": {
+                        "type": "string"
+                    },
+                    "icon": {
+                        "type": "string"
+                    },
+                    "group": {
+                        "type": "string"
+                    },
+                    "order": {
+                        "type": "integer"
+                    },
+                    "requiredRole": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "requiredPermission": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "label",
+                    "href",
+                    "icon",
+                    "group",
+                    "order"
+                ]
+            },
+            "NavigationListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/NavigationItem"
+                        }
                     }
                 },
                 "required": [
@@ -3120,6 +3892,56 @@
                     "data"
                 ]
             },
+            "PluginEntry": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "file": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "version": {
+                        "type": "string"
+                    },
+                    "routes_count": {
+                        "type": "integer"
+                    },
+                    "permissions_count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "id",
+                    "name",
+                    "enabled",
+                    "file"
+                ]
+            },
+            "PluginListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PluginEntry"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "Role": {
                 "type": "object",
                 "properties": {
@@ -3327,6 +4149,17 @@
                         }
                     }
                 }
+            },
+            "SimpleMessageResponse": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "message"
+                ]
             },
             "Tenant": {
                 "type": "object",
