@@ -234,7 +234,7 @@ final class AdminSchemasTest extends TestCase
     {
         $source = (string) file_get_contents(__DIR__ . '/../../public/index.php');
         preg_match_all(
-            "/\\\$router->register\\(\\s*'(GET|POST|PATCH|PUT|DELETE)',\\s*'([^']+)'/",
+            "/\\\$router->register(?:Unversioned)?\\(\\s*'(GET|POST|PATCH|PUT|DELETE)',\\s*'([^']+)'/",
             $source,
             $matches,
             PREG_SET_ORDER
