@@ -6,6 +6,7 @@ namespace Tests\Auth;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
@@ -264,27 +265,28 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
 
     public function testEpochLookupIsTenantScoped(): void
     {
-        // user_id 5 exists in BOTH tenant A (1) and tenant B (2) with different
-        // epochs. A token for (user 5, tenant 1, epoch 0) must validate against
-        // tenant 1's row (epoch 0) and never bleed into tenant 2's row (epoch 9).
+        // Users have globally unique IDs — the same id cannot exist in two tenants.
+        // User 5 is in tenant 1 at epoch 0; user 6 is in tenant 2 at epoch 9.
+        // The test proves that the epoch lookup is tenant-scoped: user 6's token
+        // with epoch 0 is rejected because tenant 2's stored epoch is 9.
         $this->seedUser(5, 1, 'a@tenant-a.example', 'secret-123', 2, 0);
-        $this->seedUser(5, 2, 'b@tenant-b.example', 'secret-123', 2, 9);
+        $this->seedUser(6, 2, 'b@tenant-b.example', 'secret-123', 2, 9);
 
         $token = $this->mintAccess(5, 1, 'a@tenant-a.example', 'user', 0);
         $_COOKIE['access_token'] = $token;
 
         self::assertNotNull(
             $this->validator()->validateAccessToken(),
-            "A (user 5, tenant 1) token must validate against tenant 1's epoch, not tenant 2's."
+            "A (user 5, tenant 1) token at epoch 0 must validate."
         );
 
-        // Conversely, a (user 5, tenant 2) token at epoch 0 is BELOW tenant 2's
-        // stored epoch (9) and must be rejected.
-        $crossToken = $this->mintAccess(5, 2, 'b@tenant-b.example', 'user', 0);
+        // A (user 6, tenant 2) token at epoch 0 is BELOW tenant 2's stored epoch (9)
+        // and must be rejected — proving the lookup uses the correct tenant row.
+        $crossToken = $this->mintAccess(6, 2, 'b@tenant-b.example', 'user', 0);
         $_COOKIE['access_token'] = $crossToken;
         self::assertNull(
             $this->validator()->validateAccessToken(),
-            "A (user 5, tenant 2) token below tenant 2's epoch must be rejected."
+            "A (user 6, tenant 2) token below tenant 2's epoch must be rejected."
         );
     }
 
@@ -374,50 +376,14 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
      * In-memory SQLite mirroring production: users has token_epoch and the
      * UNIQUE(tenant_id, email) constraint, the base roles are seeded, and the
      * GLOBAL revoked_tokens table exists for jti revocation.
+     * Migration 010 seeds system tenant (id 0); tenants 1 and 2 are test data.
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT
-            )
-        ');
-        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES (1, 'admin', datetime('now')), (2, 'user', datetime('now'))");
-
-        // Note: a real `users` PK is (id) auto-increment; here the same user_id
-        // can appear under two tenants (id is not the PK) so the tenant-scoping
-        // test can seed (5, tenant 1) and (5, tenant 2) distinctly.
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER NOT NULL,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                created_at TEXT,
-                two_factor_enabled INTEGER DEFAULT 0,
-                two_factor_secret TEXT,
-                two_factor_backup_codes_version INTEGER DEFAULT 0,
-                token_epoch INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(tenant_id, email)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE revoked_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jti TEXT NOT NULL UNIQUE,
-                expires_at TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime(\'now\'))
-            )
-        ');
-
+        $pdo = SchemaFromMigrations::make();
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES
+            (1, 'Tenant A', datetime('now')),
+            (2, 'Tenant B', datetime('now'))");
         return $pdo;
     }
 }

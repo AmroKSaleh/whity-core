@@ -7,6 +7,7 @@ namespace Tests\Api;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\MockRequestFactory;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\TenantsApiHandler;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
@@ -213,51 +214,23 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
     private function seedUser(int $id, int $tenantId, string $email): void
     {
         $stmt = $this->pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, created_at)
-             VALUES (?, ?, ?, 'x', datetime('now'))"
+            "INSERT INTO users (id, tenant_id, role_id, email, password, created_at)
+             VALUES (?, ?, 2, ?, 'x', datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, $email]);
     }
 
     /**
-     * Build an in-memory SQLite connection seeded with a tenants/users schema
-     * close enough to production to exercise the handler's real list SQL (the
-     * LEFT JOIN + COUNT aggregate). Two non-system tenants are seeded plus the
-     * reserved system tenant (id 0), which the listing must exclude.
+     * Build an in-memory SQLite connection seeded with the full migration schema.
+     * Migration 010 seeds the system tenant (id 0). Tenants 1 and 2 are additional
+     * test-data rows inserted here so the handler's LEFT JOIN sees them.
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        // create() inserts with PostgreSQL's NOW(); register a UDF so the handler's
-        // statement runs unmodified against SQLite (mirrors the Roles real-engine test).
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        $pdo->exec('
-            CREATE TABLE tenants (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                slug TEXT,
-                created_at TEXT
-            )
-        ');
-        $pdo->exec("
-            INSERT INTO tenants (id, name, slug, created_at) VALUES
-                (0, 'System', 'system', datetime('now')),
-                (1, 'Tenant A', 'tenant-a', datetime('now')),
-                (2, 'Tenant B', 'tenant-b', datetime('now'))
-        ");
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                created_at TEXT
-            )
-        ');
-
+        $pdo = SchemaFromMigrations::make();
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES
+            (1, 'Tenant A', datetime('now')),
+            (2, 'Tenant B', datetime('now'))");
         return $pdo;
     }
 }

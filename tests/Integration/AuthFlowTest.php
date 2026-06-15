@@ -3,6 +3,7 @@
 namespace Tests\Integration;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
@@ -33,7 +34,7 @@ class AuthFlowTest extends TestCase
     private const TEST_SECRET_KEY = 'test-secret-key-for-integration-tests-padded-min-32-byte-key';
     private const TEST_USER_PASSWORD = 'testpassword123';
     private const TEST_USER_EMAIL = 'testuser@example.com';
-    private const TEST_USER_ID = 1;
+    private const TEST_USER_ID = 2; // id=1 is reserved for the system admin seeded by migration 010
     private const TEST_TENANT_ID = 1;
     private const TEST_ROLE_ID = 1;
     private const TEST_ROLE_NAME = 'admin';
@@ -265,34 +266,12 @@ class AuthFlowTest extends TestCase
 
     private function makeSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo = SchemaFromMigrations::make();
 
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT
-            )
-        ');
-        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES (1, 'admin', datetime('now')), (2, 'user', datetime('now'))");
+        // Migration 010 seeds system tenant (id=0). The test user lives in tenant 1.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'Test Tenant', datetime('now'))");
 
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                created_at TEXT,
-                two_factor_enabled INTEGER DEFAULT 0,
-                two_factor_secret TEXT,
-                two_factor_backup_codes_version INTEGER DEFAULT 0,
-                token_epoch INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(tenant_id, email)
-            )
-        ');
+        // The test user is NOT seeded by migrations — insert it explicitly.
         $stmt = $pdo->prepare(
             "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
              VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
@@ -304,15 +283,6 @@ class AuthFlowTest extends TestCase
             password_hash(self::TEST_USER_PASSWORD, PASSWORD_BCRYPT),
             self::TEST_ROLE_ID,
         ]);
-
-        $pdo->exec('
-            CREATE TABLE revoked_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jti TEXT NOT NULL UNIQUE,
-                expires_at TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime(\'now\'))
-            )
-        ');
 
         return $pdo;
     }

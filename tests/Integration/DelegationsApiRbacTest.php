@@ -6,6 +6,7 @@ namespace Tests\Integration;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\DelegationsApiHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
@@ -304,35 +305,11 @@ class DelegationsApiRbacTest extends TestCase
 
     private static function makeSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-        $pdo->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, true);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+        $pdo = SchemaFromMigrations::make(true);
 
-        $pdo->exec("CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT)");
-        $pdo->exec("INSERT INTO tenants (id, name) VALUES (0,'system'),(1,'tenant-a'),(2,'tenant-b')");
-        $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, parent_id INTEGER, tenant_id INTEGER, created_at TEXT)');
-        $pdo->exec("INSERT INTO roles (id, name, created_at) VALUES (1,'admin',NOW()),(2,'user',NOW())");
-        $pdo->exec('CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT)');
-        $pdo->exec('CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT, UNIQUE(role_id, permission_id))');
-        $pdo->exec('CREATE TABLE organizational_units (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, slug TEXT, created_at TEXT)');
-        $pdo->exec('CREATE TABLE ou_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, ou_id INTEGER NOT NULL, role_id INTEGER NOT NULL, created_at TEXT, UNIQUE(ou_id, role_id))');
-        $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, email TEXT NOT NULL, password TEXT NOT NULL, role_id INTEGER, ou_id INTEGER, created_at TEXT)');
-        $pdo->exec('
-            CREATE TABLE permission_delegations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                grantor_user_id INTEGER NOT NULL,
-                grantee_type TEXT NOT NULL,
-                grantee_id INTEGER NOT NULL,
-                permission TEXT NOT NULL,
-                ou_id INTEGER,
-                granted_at TEXT,
-                revoked_at TEXT,
-                CHECK (grantee_type IN (\'role\', \'user\'))
-            )
-        ');
+        // system tenant (id=0) and global roles (1=admin, 2=user) come from migrations.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (0,'system'),(1,'tenant-a'),(2,'tenant-b')");
+        $pdo->exec("INSERT OR IGNORE INTO roles (id, name, created_at) VALUES (1,'admin',NOW()),(2,'user',NOW())");
 
         return $pdo;
     }

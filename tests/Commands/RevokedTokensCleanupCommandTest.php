@@ -6,6 +6,7 @@ namespace Whity\Tests\Commands;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Commands\RevokedTokensCleanupCommand;
 
 /**
@@ -143,21 +144,6 @@ final class RevokedTokensCleanupCommandTest extends TestCase
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-        $pdo->exec('
-            CREATE TABLE revoked_tokens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                jti TEXT NOT NULL UNIQUE,
-                expires_at TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime(\'now\'))
-            )
-        ');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_revoked_tokens_jti ON revoked_tokens(jti)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at ON revoked_tokens(expires_at)');
-
-        return $pdo;
+        return SchemaFromMigrations::make();
     }
 }

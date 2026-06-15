@@ -8,6 +8,7 @@ use PDO;
 use PDOStatement;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\MockRequestFactory;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\RolesApiHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
@@ -258,17 +259,7 @@ class RolesApiTenantIsolationTest extends TestCase
      */
     private function roleCheckerDbGranting(int $userId, array $granted): Database
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, parent_id INTEGER, tenant_id INTEGER, created_at TEXT)');
-        $pdo->exec('CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT)');
-        $pdo->exec('CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT, UNIQUE(role_id, permission_id))');
-        $pdo->exec('CREATE TABLE organizational_units (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, slug TEXT NOT NULL, created_at TEXT)');
-        $pdo->exec('CREATE TABLE ou_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, ou_id INTEGER NOT NULL, role_id INTEGER NOT NULL, created_at TEXT, UNIQUE(ou_id, role_id))');
-        $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL, email TEXT NOT NULL, password TEXT NOT NULL, role_id INTEGER, ou_id INTEGER, created_at TEXT)');
+        $pdo = SchemaFromMigrations::make();
 
         $pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute(['role_' . $userId]);
         $roleId = (int) $pdo->lastInsertId();

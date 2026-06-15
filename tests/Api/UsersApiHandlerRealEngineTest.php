@@ -6,6 +6,7 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Api\UsersApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Hooks\HookManager;
@@ -432,75 +433,16 @@ final class UsersApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * Build an in-memory SQLite connection seeded with a users/roles/permissions
-     * schema close enough to the production migrations to exercise the handler's
-     * real SQL. The seeded base roles `admin` (id 1) and `user` (id 2) are GLOBAL
-     * (NULL tenant_id), matching the post-migration-018 production state.
+     * Build an in-memory SQLite connection seeded with the full migration schema.
+     * The seeded base roles `admin` (id 1) and `user` (id 2) come from migrations;
+     * `moderator` (id 3) is test-only and is inserted here.
      */
     private static function makeSqliteSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
+        $pdo = SchemaFromMigrations::make();
 
-        $pdo->exec('CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT)');
-        $pdo->exec("INSERT INTO tenants (id, name) VALUES (0, 'system'), (1, 'tenant-a'), (2, 'tenant-b')");
-
-        $pdo->exec('
-            CREATE TABLE roles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT DEFAULT \'\',
-                parent_id INTEGER,
-                tenant_id INTEGER,
-                created_at TEXT
-            )
-        ');
-        // Global base roles (NULL tenant_id), mirroring the seeded admin/user roles.
-        $pdo->exec("
-            INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES
-                (1, 'admin', '', NULL, datetime('now')),
-                (2, 'user', '', NULL, datetime('now')),
-                (3, 'moderator', '', NULL, datetime('now'))
-        ");
-
-        $pdo->exec('
-            CREATE TABLE permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                description TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE role_permissions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
-                permission_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(role_id, permission_id)
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                ou_id INTEGER,
-                created_at TEXT
-            )
-        ');
-
-        $pdo->exec('
-            CREATE TABLE organizational_units (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                name TEXT
-            )
-        ');
+        // moderator is not a migration-seeded role; insert it for these tests.
+        $pdo->exec("INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES (3, 'moderator', '', NULL, datetime('now'))");
 
         return $pdo;
     }

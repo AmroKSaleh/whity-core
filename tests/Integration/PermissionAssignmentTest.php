@@ -6,6 +6,7 @@ namespace Tests\Integration;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\PermissionRegistry;
@@ -67,13 +68,13 @@ class PermissionAssignmentTest extends TestCase
     public function testUserWithAssignedPermissionCanAccess(): void
     {
         $this->permissionRegistry->register('core-users', ['users:create']);
-        // Role 'admin' is granted users:create; user 1 holds that role.
+        // Role 'admin' is granted users:create; the seeded user holds that role.
         $roleId = $this->seedRole('admin');
         $this->grant($roleId, 'users:create');
-        $this->seedUser(1, $roleId);
+        $userId = $this->seedUser($roleId);
 
         $token = $this->jwtParser->create([
-            'user_id' => 1,
+            'user_id' => $userId,
             'email' => 'admin@example.com',
             'tenant_id' => self::TENANT,
             'exp' => time() + 3600,
@@ -91,7 +92,7 @@ class PermissionAssignmentTest extends TestCase
         $this->assertTrue($handlerCalled, 'Handler should be called when permission is granted');
         $this->assertSame(200, $response->getStatusCode());
         $this->assertNotNull($request->user);
-        $this->assertSame(1, $request->user->user_id);
+        $this->assertSame($userId, $request->user->user_id);
         $this->assertSame('admin@example.com', $request->user->email);
     }
 
@@ -104,10 +105,10 @@ class PermissionAssignmentTest extends TestCase
         $this->permissionRegistry->register('core-users', ['users:delete']);
         // Role grants nothing relevant; no parent, no OU.
         $roleId = $this->seedRole('user');
-        $this->seedUser(2, $roleId);
+        $userId = $this->seedUser($roleId);
 
         $token = $this->jwtParser->create([
-            'user_id' => 2,
+            'user_id' => $userId,
             'email' => 'user@example.com',
             'tenant_id' => self::TENANT,
             'exp' => time() + 3600,
@@ -139,10 +140,10 @@ class PermissionAssignmentTest extends TestCase
 
         $roleId = $this->seedRole('plugin-role');
         $this->grant($roleId, 'custom_plugin:action');
-        $this->seedUser(3, $roleId);
+        $userId = $this->seedUser($roleId);
 
         $token = $this->jwtParser->create([
-            'user_id' => 3,
+            'user_id' => $userId,
             'email' => 'user@example.com',
             'tenant_id' => self::TENANT,
             'exp' => time() + 3600,
@@ -185,9 +186,11 @@ class PermissionAssignmentTest extends TestCase
 
     private function seedRole(string $name): int
     {
-        $this->pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute([$name]);
+        $this->pdo->prepare('INSERT OR IGNORE INTO roles (name, created_at) VALUES (?, NOW())')->execute([$name]);
+        $stmt = $this->pdo->prepare('SELECT id FROM roles WHERE name = ?');
+        $stmt->execute([$name]);
 
-        return (int) $this->pdo->lastInsertId();
+        return (int) $stmt->fetchColumn();
     }
 
     private function grant(int $roleId, string $permission): void
@@ -200,12 +203,15 @@ class PermissionAssignmentTest extends TestCase
             ->execute([$roleId, $permissionId]);
     }
 
-    private function seedUser(int $userId, int $roleId): void
+    private function seedUser(int $roleId): int
     {
-        $this->pdo->prepare(
-            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([$userId, self::TENANT, "u{$userId}@example.com", 'x', $roleId]);
+        $stmt = $this->pdo->prepare(
+            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at)
+             VALUES (?, ?, ?, ?, NULL, NOW())'
+        );
+        $stmt->execute([self::TENANT, 'test-user@example.com', 'x', $roleId]);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     private function wrapSqlite(PDO $pdo): Database
@@ -220,17 +226,10 @@ class PermissionAssignmentTest extends TestCase
 
     private function makeSchema(): PDO
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-        $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
-
-        $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, parent_id INTEGER, tenant_id INTEGER, created_at TEXT)');
-        $pdo->exec('CREATE TABLE permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT)');
-        $pdo->exec('CREATE TABLE role_permissions (id INTEGER PRIMARY KEY AUTOINCREMENT, role_id INTEGER NOT NULL, permission_id INTEGER NOT NULL, created_at TEXT, UNIQUE(role_id, permission_id))');
-        $pdo->exec('CREATE TABLE organizational_units (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, parent_id INTEGER, name TEXT NOT NULL, slug TEXT NOT NULL, created_at TEXT)');
-        $pdo->exec('CREATE TABLE ou_role_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, ou_id INTEGER NOT NULL, role_id INTEGER NOT NULL, created_at TEXT, UNIQUE(ou_id, role_id))');
-        $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL, email TEXT NOT NULL, password TEXT NOT NULL, role_id INTEGER, ou_id INTEGER, created_at TEXT)');
+        $pdo = SchemaFromMigrations::make();
+        // Migrations seed only the System tenant (id=0); tests insert users with
+        // tenant_id=1 (TENANT constant), so add the test tenant to satisfy the FK.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'test-tenant')");
 
         return $pdo;
     }
