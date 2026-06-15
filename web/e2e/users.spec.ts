@@ -76,7 +76,7 @@ test.describe('Users (admin)', () => {
     await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
     // WC-100: Name and Tenant are pre-filled (read-only) from the list payload,
     // so only the field we intend to change (role) needs touching.
-    await editDialog.getByRole('combobox').click();
+    await editDialog.getByRole('combobox', { name: 'Role' }).click();
     await page.getByRole('option', { name: 'Admin' }).click();
     await editDialog.getByRole('button', { name: 'Save Changes' }).click();
     await expect(page.getByText('User updated successfully')).toBeVisible();
@@ -92,7 +92,7 @@ test.describe('Users (admin)', () => {
     await page.getByRole('menuitem', { name: 'Edit' }).click();
     const reopened = page.getByRole('dialog');
     await expect(reopened.getByRole('heading', { name: 'Edit User' })).toBeVisible();
-    await expect(reopened.getByRole('combobox')).toContainText('Admin');
+    await expect(reopened.getByRole('combobox', { name: 'Role' })).toContainText('Admin');
     await reopened.getByRole('button', { name: 'Cancel' }).click();
 
     // --- Delete ---
@@ -133,7 +133,7 @@ test.describe('Users (admin)', () => {
     await row.getByRole('button').click();
     await page.getByRole('menuitem', { name: 'Edit' }).click();
     const editDialog = page.getByRole('dialog');
-    await editDialog.getByRole('combobox').click();
+    await editDialog.getByRole('combobox', { name: 'Role' }).click();
     await page.getByRole('option', { name: 'Admin' }).click();
     await editDialog.getByRole('button', { name: 'Save Changes' }).click();
     await expect(page.getByText('User updated successfully')).toBeVisible();
@@ -251,7 +251,7 @@ test.describe('Edit User pre-fill (WC-100)', () => {
     await expect(editDialog.getByLabel('Tenant')).toHaveValue('1');
 
     // Change the role (user -> admin) and Save: it must succeed and persist.
-    await editDialog.getByRole('combobox').click();
+    await editDialog.getByRole('combobox', { name: 'Role' }).click();
     await page.getByRole('option', { name: 'Admin' }).click();
     await editDialog.getByRole('button', { name: 'Save Changes' }).click();
     await expect(page.getByText('User updated successfully')).toBeVisible();
@@ -381,7 +381,7 @@ test.describe('Users role dropdown is driven from real roles (WC-121)', () => {
       const editDialog = page.getByRole('dialog');
       await expect(editDialog.getByRole('heading', { name: 'Edit User' })).toBeVisible();
 
-      await editDialog.getByRole('combobox').click();
+      await editDialog.getByRole('combobox', { name: 'Role' }).click();
       await expect(page.getByRole('option', { name: 'User' })).toBeVisible();
       await expect(page.getByRole('option', { name: 'Admin' })).toBeVisible();
       await expect(page.getByRole('option', { name: 'Moderator' })).toHaveCount(0);
