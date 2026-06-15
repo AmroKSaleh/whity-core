@@ -75,6 +75,7 @@ final class GreetingsApiHandler
 
         try {
             if ($tenantId === self::SYSTEM_TENANT_ID) {
+                // @tenant-guard-ignore: system-tenant (id 0) branch — sees every tenant's greetings by design
                 $stmt = $this->db->prepare(
                     'SELECT id, tenant_id, message, created_at FROM hello_greetings
                      ORDER BY created_at DESC, id DESC'
@@ -168,6 +169,7 @@ final class GreetingsApiHandler
 
         try {
             if ($tenantId === self::SYSTEM_TENANT_ID) {
+                // @tenant-guard-ignore: system-tenant (id 0) branch — may update any tenant's greeting by design
                 $stmt = $this->db->prepare('UPDATE hello_greetings SET message = :message WHERE id = :id');
                 $stmt->execute([':message' => $message, ':id' => $id]);
             } else {
@@ -212,6 +214,7 @@ final class GreetingsApiHandler
 
         try {
             if ($tenantId === self::SYSTEM_TENANT_ID) {
+                // @tenant-guard-ignore: system-tenant (id 0) branch — may delete any tenant's greeting by design
                 $stmt = $this->db->prepare('DELETE FROM hello_greetings WHERE id = :id');
                 $stmt->execute([':id' => $id]);
             } else {
@@ -241,6 +244,7 @@ final class GreetingsApiHandler
     private function findScoped(int $id, int $tenantId): ?array
     {
         if ($tenantId === self::SYSTEM_TENANT_ID) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch — may read any tenant's greeting by design
             $stmt = $this->db->prepare(
                 'SELECT id, tenant_id, message, created_at FROM hello_greetings WHERE id = :id'
             );

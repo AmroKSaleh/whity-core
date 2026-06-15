@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications (KeyHub, Elmak, …) without
 dragging a host framework along.
 
-## Contract surface (v1.2.0)
+## Contract surface (v1.3.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -18,6 +18,10 @@ dragging a host framework along.
 | `Whity\Sdk\Sdk` | 1.1 | SDK identity: `Sdk::VERSION`, what hosts evaluate plugin SDK-constraints against. |
 | `Whity\Sdk\PluginRequirementsInterface` | 1.1 | OPTIONAL declaration of a required SDK constraint + inter-plugin dependencies (composer constraint syntax). Unsatisfied plugins are quarantined (`PluginState::Failed` + reason); satisfied ones load in topological dependency order. |
 | `Whity\Sdk\PluginFrontendInterface` | 1.2 | OPTIONAL declaration of the admin-UI screens a plugin contributes (frontend feature descriptors). UI metadata only — descriptors grant nothing; the host validates, permission-filters, and serves them via `GET /api/frontend/features`. |
+| `Whity\Sdk\Tenant\TenantTableRegistry` | 1.3 | The portable, dependency-free model of a host's / plugin's tenant-owned and sanctioned-global tables, consumed by the scanner and linter. |
+| `Whity\Sdk\Tenant\TenantPredicateScanner` | 1.3 | The tokenizer-based static scanner that flags any `SELECT`/`UPDATE`/`DELETE` on a tenant-owned table missing a `tenant_id` predicate (honours `@tenant-guard-ignore:` + the global allowlist). |
+| `Whity\Sdk\Tenant\MigrationTenantColumnLinter` | 1.3 | Lints a plugin's `CREATE TABLE` migrations: every tenant table must declare a `tenant_id` column (or be a declared global / transitively-scoped exception). |
+| `Whity\Sdk\Testing\TenantIsolationConformanceTestCase` | 1.3 | The shared PHPUnit base case a plugin extends to PROVE its tenant isolation: wires the linter + scanner + a RealEngine schema check. Requires `phpunit/phpunit` (dev-only `suggest`). |
 
 ## Versioning policy
 
@@ -30,6 +34,10 @@ optional surface existing plugins can ignore —
   route-array `requiredPermission` key is now **enforced by the host**: the
   RBAC middleware denies callers without the permission (403 naming it), and
   a malformed value fails closed (the route is not registered).
+- **1.3** — tenant-isolation conformance kit (`Whity\Sdk\Tenant\*` +
+  `Whity\Sdk\Testing\TenantIsolationConformanceTestCase`): a reusable
+  migration linter + tenant-predicate scanner + shared base test case a plugin
+  runs in its OWN CI to prove its tenant tables and queries are scoped.
 
 Breaking contract changes require a new major. A plugin declares the range it
 supports via `getSdkConstraint()` (e.g. `'^1.1'`) and the host refuses to load
@@ -100,6 +108,63 @@ final class MyPlugin implements PluginInterface, PluginRequirementsInterface
     // ... PluginInterface methods ...
 }
 ```
+
+### Proving tenant isolation (1.3)
+
+Whity is multi-tenant: a **tenant-owned** table carries a `tenant_id` column,
+and every `SELECT`/`UPDATE`/`DELETE` on it must bind a `tenant_id` predicate.
+The conformance kit lets a plugin prove — in its own CI, with nothing but this
+SDK + PHPUnit — that its migrations and handlers uphold that invariant. Extend
+the shared base case:
+
+```php
+use Whity\Sdk\Tenant\TenantTableRegistry;
+use Whity\Sdk\Testing\TenantIsolationConformanceTestCase;
+use MyPlugin\Migrations\CreateNotesTable;
+
+final class MyPluginTenantConformanceTest extends TenantIsolationConformanceTestCase
+{
+    protected function tenantTableRegistry(): TenantTableRegistry
+    {
+        // Declare YOUR tenant tables, and merge in the host's so an unscoped
+        // query against a core tenant table is flagged too. A standalone plugin
+        // builds the host portion from a small published table list:
+        return TenantTableRegistry::for([
+            'notes' => 'MyPlugin notes; carries tenant_id (CreateNotesTable).',
+        ])->merge(TenantTableRegistry::for(
+            ['users' => 'host', 'roles' => 'host', /* … */],
+            ['revoked_tokens' => 'host global', 'core_schema_migrations' => 'host global']
+        ));
+    }
+
+    protected function migrationsDirectory(): string { return __DIR__ . '/../Migrations'; }
+
+    /** @return list<string> */
+    protected function handlerSourceDirectories(): array { return [__DIR__ . '/../Api']; }
+
+    /** @return list<\Whity\Sdk\MigrationInterface> */
+    protected function schemaMigrations(): array { return [new CreateNotesTable()]; }
+
+    /** @return list<string> */
+    protected function ownTenantTables(): array { return ['notes']; }
+}
+```
+
+The case enforces three checks (each a separate test):
+
+1. **Migration linter** — every `CREATE TABLE` declares a `tenant_id` column,
+   or is declared global / transitively-scoped (with a reason) in the registry.
+2. **Handler-scoping scanner** — every tenant-table query in your source binds
+   a `tenant_id` predicate, honouring `// @tenant-guard-ignore: <reason>` for
+   sanctioned exceptions (e.g. a system-tenant "sees all" branch).
+3. **RealEngine** — your migrations are applied to a real SQL engine (in-memory
+   SQLite by default; override `makePdo()` to point at Postgres in CI) and each
+   declared tenant table is asserted to physically carry `tenant_id`.
+
+You can also run the linter / scanner directly (no PHPUnit) in a CI script —
+see `scripts/ci-plugin-tenant-conformance.php` in whity-core for the pattern.
+PHPUnit is a **dev-only** requirement (`suggest`); the runtime SDK still
+depends on nothing but PHP.
 
 ## Minimal plugin
 
