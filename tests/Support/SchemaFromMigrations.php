@@ -146,6 +146,7 @@ final class SchemaFromMigrations
                 return $result;
             }
 
+            /** @param array<int, mixed> $options */
             public function prepare(string $query, array $options = []): \PDOStatement|false
             {
                 return parent::prepare(self::translate($query), $options);
