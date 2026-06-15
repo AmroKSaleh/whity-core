@@ -73,7 +73,8 @@ final class CoreApiSchemas
             self::delegationRoutes(),
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
-            self::meRoutes()
+            self::meRoutes(),
+            self::platformOpsRoutes()
         );
     }
 
@@ -456,6 +457,137 @@ final class CoreApiSchemas
     }
 
     /**
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function platformOpsRoutes(): array
+    {
+        return [
+            // No auth gate — any caller (including unauthenticated health checks)
+            [
+                'method' => 'GET',
+                'path' => '/api/health',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Platform health probe',
+                    'tags' => ['platform-ops'],
+                    'responses' => [
+                        200 => self::jsonResponse('System is healthy', 'HealthResponse'),
+                        503 => self::errorResponse('System is degraded'),
+                    ],
+                ],
+            ],
+            // No auth gate — any authenticated caller may read navigation
+            [
+                'method' => 'GET',
+                'path' => '/api/navigation',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the navigation items visible to the caller',
+                    'tags' => ['platform-ops'],
+                    'responses' => [
+                        200 => self::jsonResponse('The navigation items', 'NavigationListResponse'),
+                        403 => self::errorResponse('Unauthenticated or tenant not resolved'),
+                        500 => self::errorResponse('Internal error'),
+                    ],
+                ],
+            ],
+            // Deployment management — admin role required
+            self::adminRoute('POST', '/api/deployments/apply', [
+                'summary' => 'Apply a deployment artefact',
+                'tags' => ['platform-ops'],
+                'request' => 'DeploymentApplyRequest',
+                'responses' => [
+                    201 => self::jsonResponse('Deployment applied', 'SimpleMessageResponse'),
+                    400 => self::errorResponse('Validation failed'),
+                    403 => self::errorResponse('Insufficient permissions'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::adminRoute('POST', '/api/deployments/rollback', [
+                'summary' => 'Roll back the last deployment',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Rollback complete', 'SimpleMessageResponse'),
+                    403 => self::errorResponse('Insufficient permissions'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::adminRoute('GET', '/api/deployments/status', [
+                'summary' => 'Get the current deployment status',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Current deployment status', 'DeploymentStatusResponse'),
+                    403 => self::errorResponse('Insufficient permissions'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::adminRoute('GET', '/api/migrations', [
+                'summary' => 'List database migrations and their execution state',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Migration list', 'MigrationListResponse'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::adminRoute('GET', '/api/admin/stats', [
+                'summary' => 'Platform-wide aggregate statistics',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Aggregate stats', 'AdminStatsResponse'),
+                    403 => self::errorResponse('Insufficient permissions'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            // Plugin lifecycle management — plugins:manage permission required
+            self::permissionRoute('GET', '/api/plugins', 'plugins:manage', [
+                'summary' => 'List all registered plugins',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Plugin list', 'PluginListResponse'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('POST', '/api/plugins/{name}/enable', 'plugins:manage', [
+                'summary' => 'Enable a plugin by name',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Plugin enabled', 'SimpleMessageResponse'),
+                    400 => self::errorResponse('Plugin not found or already enabled'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('POST', '/api/plugins/{name}/disable', 'plugins:manage', [
+                'summary' => 'Disable a plugin by name',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Plugin disabled', 'SimpleMessageResponse'),
+                    400 => self::errorResponse('Plugin not found or already disabled'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('POST', '/api/plugins/{id}/re-enable', 'plugins:manage', [
+                'summary' => 'Re-enable a previously disabled plugin by id',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Plugin re-enabled', 'SimpleMessageResponse'),
+                    400 => self::errorResponse('Plugin not found or not disabled'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('POST', '/api/plugins/reload', 'plugins:manage', [
+                'summary' => 'Reload the plugin registry',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Registry reloaded', 'SimpleMessageResponse'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+        ];
+    }
+
+    /**
      * The component schemas the admin resources publish.
      *
      * @return array<string, array<string, mixed>>
@@ -725,6 +857,85 @@ final class CoreApiSchemas
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('AuditLogEntry')],
                 'pagination' => SchemaBuilder::ref('Pagination'),
             ], ['data', 'pagination']),
+
+            // ---- Platform-ops schemas (WC-62133b3f) ----
+
+            // GET /api/health — top-level (not data-enveloped)
+            'HealthResponse' => self::object([
+                'status' => ['type' => 'string', 'enum' => ['ok', 'degraded']],
+                'version' => self::str(),
+                'worker_count' => self::int(),
+                'uptime_seconds' => self::int(),
+                'db_connected' => self::bool(),
+                'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
+            ], ['status', 'version', 'worker_count', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+
+            // GET /api/navigation
+            'NavigationItem' => self::object([
+                'id' => self::str(),
+                'label' => self::str(),
+                'href' => self::str(),
+                'icon' => self::str(),
+                'group' => self::str(),
+                'order' => self::int(),
+                'requiredRole' => self::str(true),
+                'requiredPermission' => self::str(true),
+            ], ['id', 'label', 'href', 'icon', 'group', 'order']),
+            'NavigationListResponse' => self::listEnvelope('NavigationItem'),
+
+            // Shared bare { message } response (deployment and plugin handlers)
+            'SimpleMessageResponse' => self::object(['message' => self::str()], ['message']),
+
+            // POST /api/deployments/apply request body
+            'DeploymentApplyRequest' => self::object([
+                'version' => self::str(),
+                'source_path' => self::str(),
+            ], ['version', 'source_path']),
+
+            // GET /api/deployments/status — free-form data object
+            'DeploymentStatusResponse' => self::object([
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['data']),
+
+            // GET /api/migrations
+            'MigrationEntry' => self::object([
+                'name' => self::str(),
+                'executed' => self::bool(),
+                'executed_at' => self::str(true),
+            ], ['name', 'executed', 'executed_at']),
+            'MigrationListResponse' => self::listEnvelope('MigrationEntry'),
+
+            // GET /api/plugins
+            'PluginEntry' => self::object([
+                'id' => self::str(),
+                'name' => self::str(),
+                'enabled' => self::bool(),
+                'file' => self::str(true),
+                'status' => self::str(),
+                'version' => self::str(),
+                'routes_count' => self::int(),
+                'permissions_count' => self::int(),
+            ], ['id', 'name', 'enabled', 'file']),
+            'PluginListResponse' => self::listEnvelope('PluginEntry'),
+
+            // GET /api/admin/stats
+            'AdminStatsResponse' => self::object([
+                'stats' => self::object([
+                    'totals' => self::object([
+                        'users' => self::int(),
+                        'tenants' => self::int(),
+                        'roles' => self::int(),
+                    ], ['users', 'tenants', 'roles']),
+                    'breakdown' => ['type' => 'object', 'additionalProperties' => true],
+                    'growth' => ['type' => 'object', 'additionalProperties' => true],
+                    'system' => self::object([
+                        'migrations_executed' => self::int(),
+                        'migrations_total' => self::int(),
+                        'pending_migrations' => self::int(),
+                        'database' => ['type' => 'object', 'additionalProperties' => true],
+                    ], ['migrations_executed', 'migrations_total', 'pending_migrations', 'database']),
+                ], ['totals', 'breakdown', 'growth', 'system']),
+            ], ['stats']),
         ];
     }
 
