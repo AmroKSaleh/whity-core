@@ -247,10 +247,10 @@ export default function LoginPage() {
                     }
                   }}
                   disabled={isFormDisabled}
-                  className={fieldErrors.email ? 'border-red-500' : ''}
+                  className={fieldErrors.email ? 'border-destructive' : ''}
                 />
                 {fieldErrors.email && (
-                  <p className="text-xs text-red-500">{fieldErrors.email}</p>
+                  <p className="text-xs text-destructive">{fieldErrors.email}</p>
                 )}
               </div>
 
@@ -274,10 +274,10 @@ export default function LoginPage() {
                     }
                   }}
                   disabled={isFormDisabled}
-                  className={fieldErrors.password ? 'border-red-500' : ''}
+                  className={fieldErrors.password ? 'border-destructive' : ''}
                 />
                 {fieldErrors.password && (
-                  <p className="text-xs text-red-500">{fieldErrors.password}</p>
+                  <p className="text-xs text-destructive">{fieldErrors.password}</p>
                 )}
               </div>
 
@@ -337,7 +337,7 @@ export default function LoginPage() {
                   {/* Submit Button */}
                   <Button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    className="w-full bg-primary hover:bg-primary/90"
                     disabled={twoFactorCode.length !== 6 || twoFactorLoading}
                   >
                     {twoFactorLoading ? 'Verifying...' : 'Verify'}
@@ -372,8 +372,8 @@ export default function LoginPage() {
                   )}
 
                   {/* Recovery Instructions Box */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
-                    <p className="text-sm text-slate-600">
+                  <div className="bg-muted/50 border border-border rounded-md p-3">
+                    <p className="text-sm text-muted-foreground">
                       <strong>Recovery codes</strong> are the XXXX-XXXX-XXXX codes you saved when setting up two-factor authentication. Enter one exactly as it was issued.
                     </p>
                   </div>
@@ -399,13 +399,13 @@ export default function LoginPage() {
                       maxLength={BACKUP_CODE_LENGTH}
                       className="text-center text-lg tracking-wider font-mono"
                     />
-                    <p className="text-xs text-slate-500">Format: XXXX-XXXX-XXXX (e.g., A1B2-C3D4-E5F6)</p>
+                    <p className="text-xs text-muted-foreground">Format: XXXX-XXXX-XXXX (e.g., A1B2-C3D4-E5F6)</p>
                   </div>
 
                   {/* Verify Recovery Button */}
                   <Button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
                     disabled={twoFactorCode.length !== BACKUP_CODE_LENGTH || twoFactorLoading}
                   >
                     {twoFactorLoading ? 'Verifying...' : 'Verify Recovery Code'}
@@ -446,7 +446,7 @@ export default function LoginPage() {
                       setTimeout(() => twoFactorInputRef.current?.focus(), 0);
                     }
                   }}
-                  className="text-blue-600 hover:text-blue-700 underline"
+                  className="text-primary hover:text-primary/80 underline"
                 >
                   Can&apos;t access your authenticator? Use a recovery code instead
                 </button>

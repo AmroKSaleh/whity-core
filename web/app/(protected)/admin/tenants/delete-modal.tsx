@@ -69,19 +69,19 @@ export function DeleteTenantModal({
         </DialogHeader>
 
         <div className="space-y-3 py-4">
-          <div className="rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
-            <div className="text-sm font-medium text-slate-900 dark:text-slate-50">
+          <div className="rounded-lg bg-muted p-3">
+            <div className="text-sm font-medium text-foreground">
               {tenant.name}
             </div>
-            <div className="text-xs text-slate-600 dark:text-slate-400">
+            <div className="text-xs text-muted-foreground">
               Slug: {tenant.slug}
             </div>
           </div>
 
           {tenant.userCount > 0 && (
-            <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950">
-              <IconAlertCircle size={16} className="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-500" />
-              <div className="text-sm text-amber-800 dark:text-amber-200">
+            <div className="flex gap-2 rounded-lg border border-warning/50 bg-warning/10 p-3">
+              <IconAlertCircle size={16} className="mt-0.5 shrink-0 text-warning" />
+              <div className="text-sm text-warning-foreground">
                 This tenant has {tenant.userCount} associated user{tenant.userCount !== 1 ? 's' : ''}. Deleting it may impact those users.
               </div>
             </div>

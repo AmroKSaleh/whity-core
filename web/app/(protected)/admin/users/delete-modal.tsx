@@ -64,11 +64,11 @@ export function DeleteUserModal({
         </DialogHeader>
 
         <div className="space-y-3 py-4">
-          <div className="rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
-            <div className="text-sm font-medium text-slate-900 dark:text-slate-50">
+          <div className="rounded-lg bg-muted p-3">
+            <div className="text-sm font-medium text-foreground">
               {user.name}
             </div>
-            <div className="text-xs text-slate-600 dark:text-slate-400">
+            <div className="text-xs text-muted-foreground">
               {user.email}
             </div>
           </div>

@@ -157,7 +157,7 @@ export default function AuditLogsPage() {
       {/* Filters */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+          <label className="text-xs font-medium text-muted-foreground">
             Action
           </label>
           <Input
@@ -167,7 +167,7 @@ export default function AuditLogsPage() {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+          <label className="text-xs font-medium text-muted-foreground">
             Target Type
           </label>
           <Input
@@ -177,7 +177,7 @@ export default function AuditLogsPage() {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+          <label className="text-xs font-medium text-muted-foreground">
             Actor (User ID)
           </label>
           <Input
@@ -188,7 +188,7 @@ export default function AuditLogsPage() {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+          <label className="text-xs font-medium text-muted-foreground">
             From
           </label>
           <Input
@@ -198,7 +198,7 @@ export default function AuditLogsPage() {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+          <label className="text-xs font-medium text-muted-foreground">
             To
           </label>
           <Input
@@ -218,30 +218,30 @@ export default function AuditLogsPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="rounded-lg border border-border overflow-hidden">
         {isLoading ? (
-          <div className="flex h-64 items-center justify-center bg-slate-50 dark:bg-slate-900">
+          <div className="flex h-64 items-center justify-center bg-muted/50">
             <div className="text-center">
               <div className="mx-auto mb-2 h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
-              <p className="text-sm text-slate-600 dark:text-slate-400">Loading...</p>
+              <p className="text-sm text-muted-foreground">Loading...</p>
             </div>
           </div>
         ) : entries.length === 0 ? (
-          <div className="flex h-64 items-center justify-center bg-slate-50 dark:bg-slate-900">
-            <p className="text-sm text-slate-600 dark:text-slate-400">
+          <div className="flex h-64 items-center justify-center bg-muted/50">
+            <p className="text-sm text-muted-foreground">
               No audit entries found
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="border-b border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800">
+              <thead className="border-b border-border bg-muted">
                 <tr>
                   {['Time', 'Action', 'Actor', 'Target', 'IP', 'Details'].map(
                     (heading) => (
                       <th
                         key={heading}
-                        className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-slate-700 dark:text-slate-300"
+                        className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground"
                       >
                         {heading}
                       </th>
@@ -249,28 +249,28 @@ export default function AuditLogsPage() {
                   )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+              <tbody className="divide-y divide-border">
                 {entries.map((entry) => (
                   <tr
                     key={entry.id}
-                    className="transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    className="transition-colors hover:bg-muted/50"
                   >
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-900 dark:text-slate-100">
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground">
                       {formatTimestamp(entry.createdAt)}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-900 dark:text-slate-100">
+                    <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
                       {entry.action}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-muted-foreground">
                       {entry.actorUserId !== null ? `#${entry.actorUserId}` : 'system'}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-muted-foreground">
                       {formatTarget(entry)}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-700 dark:text-slate-300">
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-muted-foreground">
                       {entry.ipAddress ?? '-'}
                     </td>
-                    <td className="max-w-md truncate px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
+                    <td className="max-w-md truncate px-6 py-4 text-sm text-muted-foreground">
                       {formatMetadata(entry.metadata)}
                     </td>
                   </tr>
@@ -284,7 +284,7 @@ export default function AuditLogsPage() {
       {/* Pagination */}
       {!isLoading && entries.length > 0 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-slate-600 dark:text-slate-400">
+          <p className="text-sm text-muted-foreground">
             {total} {total === 1 ? 'entry' : 'entries'} &middot; page {page} of{' '}
             {totalPages}
           </p>

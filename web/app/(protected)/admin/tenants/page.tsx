@@ -91,7 +91,7 @@ export default function TenantsPage() {
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => handleDeleteClick(tenant)}
-          className="text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400"
+          className="text-destructive focus:text-destructive"
         >
           Delete
         </DropdownMenuItem>
