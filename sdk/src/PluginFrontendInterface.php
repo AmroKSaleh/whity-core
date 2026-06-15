@@ -29,10 +29,16 @@ namespace Whity\Sdk;
  *   plugins claim the same id the host keeps the first (discovery order),
  *   drops the duplicate, and logs a warning.
  * - `label` (string, REQUIRED, non-empty): human-readable menu/screen title.
- * - `screen` (string, REQUIRED): either `'crud'` — the host renders a
- *   schema-driven list/create/edit/delete screen over the declared resource —
- *   or `'custom'` — the host application must register a bespoke component
- *   for this id in its UI registry, otherwise a placeholder renders.
+ * - `screen` (string, REQUIRED): one of
+ *   - `'crud'` — the host renders a schema-driven list/create/edit/delete
+ *     screen over the declared `resource`;
+ *   - `'action'` — the host renders a generic form (declared by `action.fields`)
+ *     that submits a JSON body to the plugin's `action.{method,path}` route and
+ *     either downloads a returned file (response carries `Content-Disposition`)
+ *     or shows the returned JSON report — for upload/transform/run-style tools
+ *     that are not CRUD resources, with zero per-app frontend code;
+ *   - `'custom'` — the host application must register a bespoke component for
+ *     this id in its UI registry, otherwise a placeholder renders.
  * - `requiredPermission` (string, REQUIRED — fail-closed, there are no
  *   permissionless screens): must match
  *   `/^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$/` and be a permission this plugin
@@ -56,6 +62,18 @@ namespace Whity\Sdk;
  *       differs from the data route's gate, is REJECTED.
  *     - `titleField` (string, optional): the item field used as the display
  *       name in confirmations.
+ * - `action` (array, REQUIRED when `screen` is `'action'`): describes the form
+ *   and where it submits:
+ *     - `method` (string): `'POST'` or `'PUT'`.
+ *     - `path` (string): the plugin's OWN handler path, starting with `'/api/'`.
+ *       Validated like `resource.basePath` but against the plugin's ACTUALLY
+ *       REGISTERED POST/PUT routes, and that route's `requiredPermission` must
+ *       EQUAL the descriptor's.
+ *     - `fields` (list, optional): the inputs the form renders, each
+ *       `{name, label?, kind?: 'text'|'textarea'|'file', accept?, required?}`.
+ *       A `'file'` field is read client-side as TEXT into the named JSON
+ *       property (the host is a JSON API); binary uploads are out of scope.
+ *     - `submitLabel` (string, optional): the submit button label.
  * - `icon` (string, optional): kebab-case tabler icon name. Default: none.
  * - `group` (string, optional non-empty): navigation group. Default `'plugins'`.
  * - `order` (int, optional): sort order within the group. Default `100`.

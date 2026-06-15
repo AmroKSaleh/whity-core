@@ -1328,6 +1328,10 @@ class PluginLoader
         // judged against this — what registered, not what was declared — so a
         // route refused for colliding with core can never back a screen.
         $registeredGetRoutes = [];
+        // POST/PUT routes the router ACTUALLY accepted, mapped to their
+        // requiredPermission — the ownership basis for an 'action' frontend
+        // screen, exactly as $registeredGetRoutes backs a 'crud' screen.
+        $registeredActionRoutes = [];
 
         // 1. Register routes with the router, each wrapped in an error boundary
         //    so a throwing handler cannot crash the host or other plugins.
@@ -1382,8 +1386,11 @@ class PluginLoader
                     continue;
                 }
 
-                if (strtoupper((string) $method) === 'GET') {
+                $upperMethod = strtoupper((string) $method);
+                if ($upperMethod === 'GET') {
                     $registeredGetRoutes[$path] = $requiredPermission;
+                } elseif ($upperMethod === 'POST' || $upperMethod === 'PUT') {
+                    $registeredActionRoutes[$path] = $requiredPermission;
                 }
             }
         }
@@ -1436,7 +1443,12 @@ class PluginLoader
         //    (WC-169). Inside the same per-plugin error boundary philosophy:
         //    invalid descriptors are dropped with a warning, a throwing
         //    declaration contributes nothing, and the plugin keeps loading.
-        $frontendFeatures = $this->collectFrontendFeatures($plugin, $pluginKey, $registeredGetRoutes);
+        $frontendFeatures = $this->collectFrontendFeatures(
+            $plugin,
+            $pluginKey,
+            $registeredGetRoutes,
+            $registeredActionRoutes
+        );
 
         return ['hooks' => $registeredHooks, 'frontendFeatures' => $frontendFeatures];
     }
@@ -1449,7 +1461,7 @@ class PluginLoader
      * present, and the exact reason — the plugin itself keeps loading):
      *
      *  (a) shape — id/label/screen/requiredPermission present and well-typed;
-     *      id matches the kebab-case slug pattern; screen ∈ {crud, custom};
+     *      id matches the kebab-case slug pattern; screen ∈ {crud, custom, action};
      *  (b) requiredPermission matches the `resource:action` pattern, is one of
      *      the permissions THIS plugin declares via getPermissions(), is NOT a
      *      core permission name (self-declaring 'users:read' does not make it
@@ -1462,19 +1474,30 @@ class PluginLoader
      *      a core route — does not count), and that route's requiredPermission
      *      must EQUAL the descriptor's (a menu gated on X over a data route
      *      gated on Y, or unprotected, fails closed);
+     *  (c2) screen='action' requires an action.{method,path} pointing at a
+     *      POST/PUT route THIS plugin actually registered, whose
+     *      requiredPermission EQUALS the descriptor's — same ownership +
+     *      gate-alignment rule as (c), for a route rather than a collection.
+     *      action.fields (optional) declare the generic form's inputs;
      *  (d) ids are unique across all plugins (first claimant wins).
      *
      * Surviving descriptors are normalized: defaults filled (group 'plugins',
      * order 100, icon null, titleField null, resource null for resource-less
-     * custom screens) and the owning plugin name attached under 'plugin'.
+     * custom/action screens, action null for non-action screens) and the owning
+     * plugin name attached under 'plugin'.
      *
      * @param PluginInterface $plugin The plugin being registered.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
+     * @param array<string, string|null> $registeredActionRoutes POST/PUT path => requiredPermission, ACTUALLY registered for this plugin.
      * @return list<array<string, mixed>> The validated, normalized descriptors.
      */
-    private function collectFrontendFeatures(PluginInterface $plugin, string $pluginKey, array $registeredGetRoutes): array
-    {
+    private function collectFrontendFeatures(
+        PluginInterface $plugin,
+        string $pluginKey,
+        array $registeredGetRoutes,
+        array $registeredActionRoutes = []
+    ): array {
         if (!$plugin instanceof PluginFrontendInterface) {
             return [];
         }
@@ -1498,7 +1521,8 @@ class PluginLoader
                 $plugin->getName(),
                 $pluginKey,
                 $ownPermissions,
-                $registeredGetRoutes
+                $registeredGetRoutes,
+                $registeredActionRoutes
             );
             if ($normalized !== null) {
                 $validated[] = $normalized;
@@ -1520,6 +1544,7 @@ class PluginLoader
      * @param string $pluginKey Stable identity (original FQCN) for log messages.
      * @param array<int|string, mixed> $ownPermissions The plugin's own declared permissions.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
+     * @param array<string, string|null> $registeredActionRoutes POST/PUT path => requiredPermission, ACTUALLY registered for this plugin.
      * @return array<string, mixed>|null The normalized descriptor, or null when dropped.
      */
     private function validateFrontendFeature(
@@ -1527,7 +1552,8 @@ class PluginLoader
         string $pluginName,
         string $pluginKey,
         array $ownPermissions,
-        array $registeredGetRoutes
+        array $registeredGetRoutes,
+        array $registeredActionRoutes = []
     ): ?array {
         $drop = function (string $reason, ?string $id) use ($pluginKey): null {
             $idLabel = $id !== null ? "'{$id}'" : '(no id)';
@@ -1553,8 +1579,8 @@ class PluginLoader
         }
 
         $screen = $descriptor['screen'] ?? null;
-        if ($screen !== 'crud' && $screen !== 'custom') {
-            return $drop("screen must be 'crud' or 'custom'", $id);
+        if ($screen !== 'crud' && $screen !== 'custom' && $screen !== 'action') {
+            return $drop("screen must be 'crud', 'custom', or 'action'", $id);
         }
 
         // (b) requiredPermission: well-formed AND owned by THIS plugin. A
@@ -1631,6 +1657,94 @@ class PluginLoader
             $resource = ['basePath' => $basePath, 'titleField' => $titleField];
         }
 
+        // (c2) action: REQUIRED for action screens. Declares the POST/PUT route
+        // the host's generic action form submits to (a JSON body) and the
+        // optional input fields it renders. Ownership is judged exactly like
+        // crud's basePath — the plugin must have ACTUALLY REGISTERED that
+        // POST/PUT route and its requiredPermission must EQUAL the descriptor's.
+        $action = null;
+        if ($screen === 'action') {
+            $rawAction = $descriptor['action'] ?? null;
+            if (!is_array($rawAction)) {
+                return $drop("screen 'action' requires an action array with method/path", $id);
+            }
+
+            $method = $rawAction['method'] ?? null;
+            if (!is_string($method) || !in_array(strtoupper($method), ['POST', 'PUT'], true)) {
+                return $drop("action.method must be 'POST' or 'PUT'", $id);
+            }
+            $method = strtoupper($method);
+
+            $path = $rawAction['path'] ?? null;
+            if (!is_string($path) || !str_starts_with($path, '/api/')) {
+                return $drop("action.path must be a string starting with '/api/'", $id);
+            }
+            if (!array_key_exists($path, $registeredActionRoutes)) {
+                return $drop("action.path '{$path}' is not a {$method} route this plugin registered", $id);
+            }
+            if ($registeredActionRoutes[$path] !== $permission) {
+                return $drop(
+                    "action.path '{$path}' route requiredPermission '"
+                    . ($registeredActionRoutes[$path] ?? 'none')
+                    . "' does not match the descriptor's '{$permission}'",
+                    $id
+                );
+            }
+
+            // Input fields the generic form renders (optional). A 'file' field
+            // is read client-side as TEXT into the named JSON property (the host
+            // is a JSON API); binary uploads are out of scope here.
+            $fields = [];
+            $rawFields = $rawAction['fields'] ?? [];
+            if (!is_array($rawFields)) {
+                return $drop('action.fields must be a list when present', $id);
+            }
+            foreach ($rawFields as $rawField) {
+                if (!is_array($rawField)) {
+                    return $drop('each action.fields entry must be an array', $id);
+                }
+                $fieldName = $rawField['name'] ?? null;
+                if (!is_string($fieldName) || $fieldName === '') {
+                    return $drop('action.fields[].name must be a non-empty string', $id);
+                }
+                $fieldLabel = $rawField['label'] ?? $fieldName;
+                if (!is_string($fieldLabel) || $fieldLabel === '') {
+                    return $drop("action.fields '{$fieldName}' label must be a non-empty string", $id);
+                }
+                $fieldKind = $rawField['kind'] ?? 'text';
+                if (!in_array($fieldKind, ['text', 'textarea', 'file'], true)) {
+                    return $drop("action.fields '{$fieldName}' kind must be text, textarea, or file", $id);
+                }
+                $fieldAccept = $rawField['accept'] ?? null;
+                if ($fieldAccept !== null && !is_string($fieldAccept)) {
+                    return $drop("action.fields '{$fieldName}' accept must be a string when present", $id);
+                }
+                $fieldRequired = $rawField['required'] ?? false;
+                if (!is_bool($fieldRequired)) {
+                    return $drop("action.fields '{$fieldName}' required must be a boolean when present", $id);
+                }
+                $fields[] = [
+                    'name' => $fieldName,
+                    'label' => $fieldLabel,
+                    'kind' => $fieldKind,
+                    'accept' => $fieldAccept,
+                    'required' => $fieldRequired,
+                ];
+            }
+
+            $submitLabel = $rawAction['submitLabel'] ?? null;
+            if ($submitLabel !== null && !is_string($submitLabel)) {
+                return $drop('action.submitLabel must be a string when present', $id);
+            }
+
+            $action = [
+                'method' => $method,
+                'path' => $path,
+                'submitLabel' => $submitLabel,
+                'fields' => $fields,
+            ];
+        }
+
         // Optional presentation fields: type-checked fail-closed (a mistyped
         // declaration is a bug worth surfacing, not silently defaulting).
         $icon = $descriptor['icon'] ?? null;
@@ -1663,6 +1777,7 @@ class PluginLoader
             'order' => $order,
             'screen' => $screen,
             'resource' => $resource,
+            'action' => $action,
             'requiredPermission' => $permission,
         ];
     }

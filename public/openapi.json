@@ -2625,7 +2625,8 @@
                         "type": "string",
                         "enum": [
                             "crud",
-                            "custom"
+                            "custom",
+                            "action"
                         ]
                     },
                     "resource": {
@@ -2643,6 +2644,64 @@
                         "required": [
                             "basePath",
                             "titleField"
+                        ]
+                    },
+                    "action": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                            "method": {
+                                "type": "string"
+                            },
+                            "path": {
+                                "type": "string"
+                            },
+                            "submitLabel": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "fields": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        },
+                                        "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                                "text",
+                                                "textarea",
+                                                "file"
+                                            ]
+                                        },
+                                        "accept": {
+                                            "type": "string",
+                                            "nullable": true
+                                        },
+                                        "required": {
+                                            "type": "boolean"
+                                        }
+                                    },
+                                    "required": [
+                                        "name",
+                                        "label",
+                                        "kind",
+                                        "accept",
+                                        "required"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": [
+                            "method",
+                            "path",
+                            "submitLabel",
+                            "fields"
                         ]
                     },
                     "requiredPermission": {
@@ -2677,6 +2736,7 @@
                     "order",
                     "screen",
                     "resource",
+                    "action",
                     "requiredPermission",
                     "capabilities"
                 ]

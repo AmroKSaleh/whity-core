@@ -36,6 +36,7 @@ final class PluginFrontendFeaturesTest extends TestCase
     private static string $hardeningDir;
     private static string $mismatchDir;
     private static string $shadowDir;
+    private static string $actionDir;
 
     public static function setUpBeforeClass(): void
     {
@@ -47,6 +48,7 @@ final class PluginFrontendFeaturesTest extends TestCase
         self::$hardeningDir = sys_get_temp_dir() . '/whity_feat_hardening_' . uniqid();
         self::$mismatchDir = sys_get_temp_dir() . '/whity_feat_mismatch_' . uniqid();
         self::$shadowDir = sys_get_temp_dir() . '/whity_feat_shadow_' . uniqid();
+        self::$actionDir = sys_get_temp_dir() . '/whity_feat_action_' . uniqid();
 
         // ---- mainDir: one healthy plugin with a crud + a custom descriptor ----
         self::writePlugin(self::$mainDir, 'FeatGood', <<<'PHP'
@@ -321,6 +323,58 @@ PHP);
     }
     public function getFrontendFeatures(): array { return []; }
 PHP);
+
+        // ---- actionDir: screen='action' descriptors (valid + every fail) ----
+        self::writePlugin(self::$actionDir, 'FeatAction', <<<'PHP'
+    public function getPermissions(): array { return ['featact:run', 'featact:other']; }
+    public function getRoutes(): array
+    {
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/api/featact/run',
+                'handler' => static fn (Request $r): Response => Response::json(['ok' => true]),
+                'requiredRole' => null,
+                'requiredPermission' => 'featact:run',
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/featact/other',
+                'handler' => static fn (Request $r): Response => Response::json(['ok' => true]),
+                'requiredRole' => null,
+                'requiredPermission' => 'featact:other',
+            ],
+        ];
+    }
+    public function getFrontendFeatures(): array
+    {
+        return [
+            // missing action object
+            ['id' => 'act-no-action', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run'],
+            // GET is not allowed for an action route
+            ['id' => 'act-bad-method', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run',
+             'action' => ['method' => 'GET', 'path' => '/api/featact/run']],
+            // path the plugin does not serve as POST/PUT
+            ['id' => 'act-foreign', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run',
+             'action' => ['method' => 'POST', 'path' => '/api/somebody/else']],
+            // descriptor permission != the route's permission
+            ['id' => 'act-mismatch', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run',
+             'action' => ['method' => 'POST', 'path' => '/api/featact/other']],
+            // malformed field
+            ['id' => 'act-bad-field', 'label' => 'X', 'screen' => 'action', 'requiredPermission' => 'featact:run',
+             'action' => ['method' => 'POST', 'path' => '/api/featact/run',
+                          'fields' => [['label' => 'No name', 'kind' => 'text']]]],
+            // the single VALID survivor
+            ['id' => 'act-valid', 'label' => 'Run It', 'screen' => 'action', 'requiredPermission' => 'featact:run',
+             'icon' => 'bolt', 'order' => 7,
+             'action' => ['method' => 'POST', 'path' => '/api/featact/run', 'submitLabel' => 'Go',
+                          'fields' => [
+                              ['name' => 'csv', 'label' => 'CSV', 'kind' => 'file', 'accept' => '.csv', 'required' => true],
+                              ['name' => 'note', 'kind' => 'text'],
+                          ]]],
+        ];
+    }
+PHP);
     }
 
     public static function tearDownAfterClass(): void
@@ -328,6 +382,7 @@ PHP);
         $dirs = [
             self::$mainDir, self::$invalidDir, self::$dupDir, self::$throwingDir,
             self::$routePermDir, self::$hardeningDir, self::$mismatchDir, self::$shadowDir,
+            self::$actionDir,
         ];
         foreach ($dirs as $dir) {
             self::removeDirectory($dir);
@@ -385,6 +440,7 @@ PHP);
             'order' => 5,
             'screen' => 'crud',
             'resource' => ['basePath' => '/api/feat/items', 'titleField' => 'name'],
+            'action' => null,
             'requiredPermission' => 'feat:view',
         ], $byId['feat-items']);
 
@@ -399,6 +455,7 @@ PHP);
             'order' => 100,
             'screen' => 'custom',
             'resource' => null,
+            'action' => null,
             'requiredPermission' => 'feat:manage',
         ], $byId['feat-dashboard']);
     }
@@ -495,6 +552,50 @@ PHP);
 
         $this->assertNotContains('pm-mismatch', $ids, 'Descriptor permission != route permission must be dropped');
         $this->assertContains('pm-ok', $ids, 'An aligned descriptor survives');
+    }
+
+    // ==================== screen='action' (declarative action screens) ====================
+
+    /**
+     * An `action` descriptor must point at a POST/PUT route the plugin actually
+     * registered, gated on the SAME permission, and declare well-typed fields.
+     * Every violation drops fail-closed; the one valid descriptor normalizes
+     * (defaults filled, file/text fields, resource null, action populated).
+     */
+    public function testActionDescriptorValidationAndNormalization(): void
+    {
+        [$loader] = $this->loadDir(self::$actionDir);
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $ids = array_keys($byId);
+
+        $this->assertSame(['act-valid'], $ids, 'Only the single valid action descriptor survives');
+        $this->assertNotContains('act-no-action', $ids, "screen='action' without an action object must drop");
+        $this->assertNotContains('act-bad-method', $ids, 'action.method must be POST or PUT');
+        $this->assertNotContains('act-foreign', $ids, 'action.path must be a POST/PUT route this plugin registered');
+        $this->assertNotContains('act-mismatch', $ids, "action route permission must equal the descriptor's");
+        $this->assertNotContains('act-bad-field', $ids, 'a malformed action.fields entry fails closed');
+
+        $this->assertSame([
+            'id' => 'act-valid',
+            'plugin' => 'FeatAction',
+            'label' => 'Run It',
+            'icon' => 'bolt',
+            'group' => 'plugins',
+            'order' => 7,
+            'screen' => 'action',
+            'resource' => null,
+            'action' => [
+                'method' => 'POST',
+                'path' => '/api/featact/run',
+                'submitLabel' => 'Go',
+                'fields' => [
+                    ['name' => 'csv', 'label' => 'CSV', 'kind' => 'file', 'accept' => '.csv', 'required' => true],
+                    ['name' => 'note', 'label' => 'note', 'kind' => 'text', 'accept' => null, 'required' => false],
+                ],
+            ],
+            'requiredPermission' => 'featact:run',
+        ], $byId['act-valid']);
     }
 
     /**
