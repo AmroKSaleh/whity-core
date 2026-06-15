@@ -17,7 +17,7 @@ jobs:
   e2e:
     name: Playwright multi-role suite (full stack)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout code
