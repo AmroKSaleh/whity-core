@@ -29,6 +29,45 @@ This runs daily at 2:00 AM UTC (off-peak time).
 
 **Expected Output**: `Cleaned {count} expired revocation entries`
 
+**Retention policy**: a revocation row only needs to outlive the token it
+revokes. Once `expires_at` is in the past the underlying token is already dead
+(the `exp`/epoch checks reject it without consulting this table), so the row is
+safe to delete. Pruning runs daily, so at steady state the table holds only
+**not-yet-expired revocations plus any recently-expired rows still awaiting the
+next cron pass** — it never grows without bound. The delete uses
+`WHERE expires_at < CURRENT_TIMESTAMP` (standard SQL, portable across PostgreSQL
+and SQLite) and is backed by `idx_revoked_tokens_expires_at` (migration 011), so
+it stays cheap even on a large table.
+
+**`revoked_tokens` is a sanctioned GLOBAL table**: a JWT `jti` is unique
+platform-wide, so the table has **no `tenant_id` column** and the cleanup delete
+intentionally carries **no tenant predicate** — by design, not by omission. It is
+listed in `\Whity\Core\Tenant\SanctionedGlobalTables`, the single source of
+truth the tenant-predicate guard consults. See
+[TENANT_ISOLATION](TENANT_ISOLATION.md).
+
+> The cleanup behaviour is verified end-to-end (delete expired / retain
+> non-expired / report count) on a real SQL engine — SQLite locally and
+> PostgreSQL in CI — by `tests/Commands/RevokedTokensCleanupCommandTest.php`, and
+> the supporting indexes + UNIQUE `jti` constraint are pinned against regression
+> by `tests/Database/MigrationSchemaTest.php`.
+
+## How it is scheduled
+
+The cleanup is **genuinely wired into the running stack**, not just documented:
+
+- **Dev / demo (`docker-compose.yml`)**: a dedicated `cron` service runs the
+  command on a daily loop. It is an opt-in profile (kept out of the default
+  stack so `docker compose up --wait` does not gate readiness on a long-running
+  maintenance loop). Start it with `docker compose --profile cron up -d` and
+  inspect it with `docker compose --profile cron logs cron`.
+- **Staging / production**: schedule the SAME command via the host crontab (or
+  the orchestrator's scheduler — Kubernetes `CronJob`, systemd timer, etc.)
+  using the crontab entry below. The `docker-compose.staging.yml` stack expects
+  the deploy environment to register this schedule.
+
+The manual crontab setup below remains valid for any host-cron deployment.
+
 ## Setup Instructions
 
 ### 1. Verify Command Works

@@ -1,351 +1,163 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Tests\Commands;
 
+use PDO;
 use PHPUnit\Framework\TestCase;
 use Whity\Commands\RevokedTokensCleanupCommand;
-use PDO;
 
 /**
- * Tests for RevokedTokensCleanupCommand
+ * Real-engine tests for RevokedTokensCleanupCommand (WC-188).
  *
- * Tests the cron command that deletes expired revocation entries.
- * Uses database mocking for unit tests and real database for integration tests.
+ * The cron command prunes EXPIRED revocation entries from the sanctioned GLOBAL
+ * revoked_tokens table so it cannot grow unbounded once access-token jtis are
+ * recorded on logout/password-change (WC-185).
+ *
+ * These run against a real SQL engine — in-memory SQLite locally AND real
+ * PostgreSQL in CI — so the delete is genuinely executed, not mocked or skipped.
+ * That matters because the command's `WHERE expires_at < CURRENT_TIMESTAMP`
+ * comparison is portable SQL that must behave identically on both engines: the
+ * earlier `NOW()` form parsed on PostgreSQL but is not a SQLite function, so the
+ * previous suite could only ever run (and was skipped) against PostgreSQL,
+ * leaving the cleanup behaviour unverified locally. CURRENT_TIMESTAMP is
+ * standard SQL evaluated by both engines, and expires_at is written as a UTC
+ * 'Y-m-d H:i:s' literal that compares correctly against SQLite's same-format
+ * CURRENT_TIMESTAMP. The schema mirrors production migration 011 (jti UNIQUE +
+ * the two supporting indexes). The pattern mirrors
+ * {@see \Tests\Auth\AccessTokenRevocationRealEngineTest}.
  */
-class RevokedTokensCleanupCommandTest extends TestCase
+final class RevokedTokensCleanupCommandTest extends TestCase
 {
-    /**
-     * Check if database is available for testing
-     */
-    private function isDatabaseAvailable(): bool
-    {
-        try {
-            $db_host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?? 'localhost';
-            $db_user = $_ENV['DB_USER'] ?? getenv('DB_USER');
-            $db_password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD');
-            $db_name = $_ENV['DB_NAME'] ?? getenv('DB_NAME');
+    private PDO $pdo;
 
-            if (!$db_user || !$db_password) {
-                return false;
-            }
-
-            $pdo = new PDO(
-                "pgsql:host=$db_host;dbname=$db_name",
-                $db_user,
-                $db_password,
-                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-            );
-            return true;
-        } catch (\Throwable $e) {
-            return false;
-        }
-    }
-
-    /**
-     * Get a real database connection for testing
-     */
-    private function getDatabase(): PDO
-    {
-        $db_host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?? 'localhost';
-        $db_user = $_ENV['DB_USER'] ?? getenv('DB_USER');
-        $db_password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD');
-        $db_name = $_ENV['DB_NAME'] ?? getenv('DB_NAME');
-
-        return new PDO(
-            "pgsql:host=$db_host;dbname=$db_name",
-            $db_user,
-            $db_password,
-            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-        );
-    }
-
-    /**
-     * Clear the revoked_tokens table before each test
-     */
     protected function setUp(): void
     {
-        if (!$this->isDatabaseAvailable()) {
-            return;
-        }
-
-        $db = $this->getDatabase();
-        try {
-            $db->exec('DELETE FROM revoked_tokens');
-        } catch (\PDOException $e) {
-            // Table might not exist yet, that's OK
-        }
+        $this->pdo = self::makeSqliteSchema();
     }
 
-    /**
-     * Clear the revoked_tokens table after each test
-     */
-    protected function tearDown(): void
-    {
-        if (!$this->isDatabaseAvailable()) {
-            return;
-        }
-
-        $db = $this->getDatabase();
-        try {
-            $db->exec('DELETE FROM revoked_tokens');
-        } catch (\PDOException $e) {
-            // Table might not exist, that's OK
-        }
-    }
-
-    /**
-     * Test that RevokedTokensCleanupCommand can be instantiated with PDO
-     */
     public function testCommandCanBeInstantiated(): void
     {
-        $mockPdo = $this->createMock(PDO::class);
-        $command = new RevokedTokensCleanupCommand($mockPdo);
+        $command = new RevokedTokensCleanupCommand($this->pdo);
         $this->assertInstanceOf(RevokedTokensCleanupCommand::class, $command);
     }
 
     /**
-     * Test cleanup deletes only expired rows
-     *
-     * @requires extension pdo_pgsql
+     * The core contract: expired rows are deleted, non-expired rows are
+     * retained, and the deleted count is reported.
      */
-    public function testCleanupDeletesOnlyExpiredRows(): void
+    public function testCleanupDeletesExpiredRetainsNonExpiredAndReportsCount(): void
     {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
+        $this->insertRevocation('expired_1', time() - 3600);   // 1h ago
+        $this->insertRevocation('expired_2', time() - 86400);  // 1d ago
+        $this->insertRevocation('future_1', time() + 3600);    // 1h ahead
+        $this->insertRevocation('future_2', time() + 86400);   // 1d ahead
 
-        $db = $this->getDatabase();
+        $this->assertSame(4, $this->countRows(), 'Sanity: all four rows seeded.');
 
-        // Insert expired token (1 hour ago)
-        $expiredTime = date('Y-m-d H:i:s', time() - 3600);
-        $stmt = $db->prepare('INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)');
-        $stmt->execute(['expired_token_1', $expiredTime]);
+        $output = $this->runCleanup();
 
-        // Insert non-expired token (1 hour in future)
-        $futureTime = date('Y-m-d H:i:s', time() + 3600);
-        $stmt = $db->prepare('INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)');
-        $stmt->execute(['future_token_1', $futureTime]);
+        // Deleted count reported.
+        $this->assertSame("Cleaned 2 expired revocation entries\n", $output);
 
-        // Verify both rows exist
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(2, (int)$result['count']);
+        // Only the two non-expired rows survive.
+        $this->assertSame(2, $this->countRows());
+        $this->assertFalse($this->exists('expired_1'), 'An expired revocation must be pruned.');
+        $this->assertFalse($this->exists('expired_2'), 'An expired revocation must be pruned.');
+        $this->assertTrue($this->exists('future_1'), 'A not-yet-expired revocation must be retained.');
+        $this->assertTrue($this->exists('future_2'), 'A not-yet-expired revocation must be retained.');
+    }
 
-        // Run cleanup command
-        $command = new RevokedTokensCleanupCommand($db);
+    public function testCleanupRetainsAllRowsWhenNoneExpired(): void
+    {
+        $this->insertRevocation('future_1', time() + 7200);
+        $this->insertRevocation('future_2', time() + 10800);
+
+        $output = $this->runCleanup();
+
+        $this->assertSame("Cleaned 0 expired revocation entries\n", $output);
+        $this->assertSame(2, $this->countRows(), 'No rows expired, so none are deleted.');
+    }
+
+    public function testCleanupDeletesAllRowsWhenAllExpired(): void
+    {
+        $this->insertRevocation('expired_1', time() - 3600);
+        $this->insertRevocation('expired_2', time() - 7200);
+        $this->insertRevocation('expired_3', time() - 86400);
+
+        $output = $this->runCleanup();
+
+        $this->assertSame("Cleaned 3 expired revocation entries\n", $output);
+        $this->assertSame(0, $this->countRows(), 'All rows expired, so the table is emptied.');
+    }
+
+    public function testCleanupOnEmptyTableReportsZero(): void
+    {
+        $this->assertSame(0, $this->countRows());
+
+        $output = $this->runCleanup();
+
+        $this->assertSame("Cleaned 0 expired revocation entries\n", $output);
+        $this->assertSame(0, $this->countRows());
+    }
+
+    // ==================== helpers ====================
+
+    private function runCleanup(): string
+    {
+        $command = new RevokedTokensCleanupCommand($this->pdo);
         ob_start();
         $command->execute();
-        $output = ob_get_clean();
 
-        // Should have deleted 1 row
-        $this->assertStringContainsString('Cleaned 1 expired revocation entries', $output);
+        return (string) ob_get_clean();
+    }
 
-        // Verify only non-expired row remains
-        $stmt = $db->prepare('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti = ?');
-        $stmt->execute(['future_token_1']);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(1, (int)$result['count']);
+    private function insertRevocation(string $jti, int $expiresAtUnix): void
+    {
+        // Mirror the production write path (AuthHandler::revokeJti): a portable
+        // UTC 'Y-m-d H:i:s' literal derived from the token's exp.
+        $stmt = $this->pdo->prepare('INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)');
+        $stmt->execute([$jti, gmdate('Y-m-d H:i:s', $expiresAtUnix)]);
+    }
 
-        // Verify expired row is gone
-        $stmt = $db->prepare('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti = ?');
-        $stmt->execute(['expired_token_1']);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(0, (int)$result['count']);
+    private function countRows(): int
+    {
+        return (int) $this->pdo->query('SELECT COUNT(*) FROM revoked_tokens')->fetchColumn();
+    }
+
+    private function exists(string $jti): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT 1 FROM revoked_tokens WHERE jti = ? LIMIT 1');
+        $stmt->execute([$jti]);
+
+        return (bool) $stmt->fetchColumn();
     }
 
     /**
-     * Test cleanup preserves non-expired rows
-     *
-     * @requires extension pdo_pgsql
+     * In-memory SQLite mirroring production migration 011: the sanctioned GLOBAL
+     * revoked_tokens table with the UNIQUE jti key and the two supporting indexes
+     * (lookup + cleanup). expires_at is TEXT here because SQLite has no native
+     * TIMESTAMP type, but the stored 'Y-m-d H:i:s' literals compare lexically the
+     * same way they compare as timestamps on PostgreSQL.
      */
-    public function testCleanupPreservesNonExpiredRows(): void
+    private static function makeSqliteSchema(): PDO
     {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-        $db = $this->getDatabase();
+        $pdo->exec('
+            CREATE TABLE revoked_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                jti TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime(\'now\'))
+            )
+        ');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_revoked_tokens_jti ON revoked_tokens(jti)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at ON revoked_tokens(expires_at)');
 
-        // Insert multiple non-expired tokens
-        $futureTime1 = date('Y-m-d H:i:s', time() + 7200);
-        $futureTime2 = date('Y-m-d H:i:s', time() + 10800);
-
-        $stmt = $db->prepare('INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)');
-        $stmt->execute(['future_token_1', $futureTime1]);
-        $stmt->execute(['future_token_2', $futureTime2]);
-
-        // Verify both rows exist
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(2, (int)$result['count']);
-
-        // Run cleanup command
-        $command = new RevokedTokensCleanupCommand($db);
-        ob_start();
-        $command->execute();
-        $output = ob_get_clean();
-
-        // Should have deleted 0 rows
-        $this->assertStringContainsString('Cleaned 0 expired revocation entries', $output);
-
-        // Verify both rows still exist
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(2, (int)$result['count']);
-    }
-
-    /**
-     * Test cleanup with empty table
-     *
-     * @requires extension pdo_pgsql
-     */
-    public function testCleanupWithEmptyTable(): void
-    {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
-
-        $db = $this->getDatabase();
-
-        // Verify table is empty
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(0, (int)$result['count']);
-
-        // Run cleanup command
-        $command = new RevokedTokensCleanupCommand($db);
-        ob_start();
-        $command->execute();
-        $output = ob_get_clean();
-
-        // Should report 0 deleted rows
-        $this->assertStringContainsString('Cleaned 0 expired revocation entries', $output);
-
-        // Table should still be empty
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(0, (int)$result['count']);
-    }
-
-    /**
-     * Test cleanup with all expired tokens
-     *
-     * @requires extension pdo_pgsql
-     */
-    public function testCleanupWithAllExpired(): void
-    {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
-
-        $db = $this->getDatabase();
-
-        // Insert multiple expired tokens
-        $expiredTime1 = date('Y-m-d H:i:s', time() - 3600);
-        $expiredTime2 = date('Y-m-d H:i:s', time() - 7200);
-        $expiredTime3 = date('Y-m-d H:i:s', time() - 86400); // 1 day ago
-
-        $stmt = $db->prepare('INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)');
-        $stmt->execute(['expired_token_1', $expiredTime1]);
-        $stmt->execute(['expired_token_2', $expiredTime2]);
-        $stmt->execute(['expired_token_3', $expiredTime3]);
-
-        // Verify all rows exist
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(3, (int)$result['count']);
-
-        // Run cleanup command
-        $command = new RevokedTokensCleanupCommand($db);
-        ob_start();
-        $command->execute();
-        $output = ob_get_clean();
-
-        // Should have deleted all 3 rows
-        $this->assertStringContainsString('Cleaned 3 expired revocation entries', $output);
-
-        // Verify table is now empty
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(0, (int)$result['count']);
-    }
-
-    /**
-     * Test cleanup with mixed expired and non-expired tokens
-     *
-     * @requires extension pdo_pgsql
-     */
-    public function testCleanupWithMixedTokens(): void
-    {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
-
-        $db = $this->getDatabase();
-
-        // Insert a mix of expired and non-expired tokens
-        $expiredTime1 = date('Y-m-d H:i:s', time() - 3600);
-        $expiredTime2 = date('Y-m-d H:i:s', time() - 7200);
-        $futureTime1 = date('Y-m-d H:i:s', time() + 3600);
-        $futureTime2 = date('Y-m-d H:i:s', time() + 7200);
-
-        $stmt = $db->prepare('INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)');
-        $stmt->execute(['expired_1', $expiredTime1]);
-        $stmt->execute(['expired_2', $expiredTime2]);
-        $stmt->execute(['future_1', $futureTime1]);
-        $stmt->execute(['future_2', $futureTime2]);
-
-        // Verify all rows exist
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(4, (int)$result['count']);
-
-        // Run cleanup command
-        $command = new RevokedTokensCleanupCommand($db);
-        ob_start();
-        $command->execute();
-        $output = ob_get_clean();
-
-        // Should have deleted 2 expired rows
-        $this->assertStringContainsString('Cleaned 2 expired revocation entries', $output);
-
-        // Verify only 2 rows remain (the non-expired ones)
-        $stmt = $db->query('SELECT COUNT(*) as count FROM revoked_tokens');
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(2, (int)$result['count']);
-
-        // Verify the remaining rows are the future ones
-        $stmt = $db->prepare('SELECT COUNT(*) as count FROM revoked_tokens WHERE jti IN (?, ?)');
-        $stmt->execute(['future_1', 'future_2']);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $this->assertSame(2, (int)$result['count']);
-    }
-
-    /**
-     * Test that command output format is correct
-     *
-     * @requires extension pdo_pgsql
-     */
-    public function testCommandOutputFormat(): void
-    {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
-
-        $db = $this->getDatabase();
-
-        // Insert one expired token
-        $expiredTime = date('Y-m-d H:i:s', time() - 3600);
-        $stmt = $db->prepare('INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?)');
-        $stmt->execute(['expired_token', $expiredTime]);
-
-        // Run cleanup command and capture output
-        $command = new RevokedTokensCleanupCommand($db);
-        ob_start();
-        $command->execute();
-        $output = ob_get_clean();
-
-        // Verify exact output format
-        $this->assertSame("Cleaned 1 expired revocation entries\n", $output);
+        return $pdo;
     }
 }

@@ -67,6 +67,57 @@ services:
         condition: service_completed_successfully
     working_dir: /app
 
+  # Scheduled maintenance (WC-188). A dedicated long-running container that runs
+  # the revoked_tokens:cleanup cron on a schedule, so the cleanup is GENUINELY
+  # wired into the running stack — not merely documented. It reuses the same
+  # whity-core:dev image and bind-mounts the checkout, waits for the one-shot
+  # db-init to finish, then loops: prune expired revocations, then sleep ~24h.
+  # A lightweight sleep loop (rather than a system crond) keeps the container
+  # single-purpose and its log readable via `docker compose logs cron`. The job
+  # is idempotent and safe to run any time — it only deletes already-expired
+  # rows. Staging/production schedule the SAME command via their own scheduler
+  # (see docs/wiki/Cron-Operations.md).
+  cron:
+    image: whity-core:dev
+    container_name: whity_cron
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    working_dir: /app
+    # Opt-in auxiliary service: run with `docker compose --profile cron up`.
+    # Kept out of the DEFAULT stack so `docker compose up --wait` (used by the
+    # e2e job) does not try to gate readiness on a long-running maintenance
+    # loop — `--wait` errors on such a service whether it has the base image's
+    # (HTTP) healthcheck (reports "unhealthy") or none ("no healthcheck
+    # configured"). Scheduling for staging/production is the orchestrator's job
+    # (see docs/wiki/Cron-Operations.md); this service is a dev convenience.
+    profiles:
+      - cron
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        echo "[cron] revoked-tokens cleanup scheduler started (daily)";
+        while true; do
+          echo "[cron] $$(date -u +%FT%TZ) running revoked-tokens:cleanup";
+          php public/index.php revoked-tokens:cleanup || echo "[cron] cleanup failed (will retry next cycle)";
+          sleep 86400;
+        done
+
   # Dev-only one-shot bootstrap (#174): on `docker compose up`, wait for Postgres then —
   # only when APP_ENV=development — run migrations + seed so a fresh/empty dev DB is
   # immediately usable (no manual `make setup`). Idempotent: migrations are IF NOT EXISTS
