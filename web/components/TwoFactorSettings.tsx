@@ -4,6 +4,17 @@ import React, { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { IconCheck } from '@tabler/icons-react';
 import QRCode from 'react-qr-code';
@@ -18,10 +29,6 @@ interface TwoFactorSetupWizardProps {
   onCancel: () => void;
 }
 
-/**
- * Placeholder for TwoFactorSetupWizard component
- * This will be implemented in Task 6
- */
 const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete, onCancel }) => {
   const { apiClient } = useAuth();
   const [step, setStep] = useState<'setup' | 'verify'>('setup');
@@ -108,18 +115,18 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
                     value={qrCodeUrl}
                     size={200}
                     level="H"
-                    className="border border-gray-200 rounded p-2"
+                    className="border border-border rounded p-2"
                   />
                 </div>
               )}
             </div>
             <div>
-              <p className="text-sm text-gray-600 mb-2">
+              <p className="text-sm text-muted-foreground mb-2">
                 Can&apos;t scan? Enter this code manually:
               </p>
               <div className="flex items-center gap-2">
                 <code
-                  className="flex-1 bg-gray-100 p-2 rounded text-sm font-mono break-all cursor-pointer hover:bg-gray-200 select-all"
+                  className="flex-1 bg-muted p-2 rounded text-sm font-mono break-all cursor-pointer hover:bg-muted/80 select-all"
                   title={secret}>
                   {secret}
                 </code>
@@ -128,7 +135,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
                   onClick={() => {
                     navigator.clipboard.writeText(secret);
                   }}
-                  className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm whitespace-nowrap flex-shrink-0"
+                  className="px-3 py-2 bg-primary hover:bg-primary/80 text-primary-foreground rounded text-sm whitespace-nowrap shrink-0"
                 >
                   Copy
                 </button>
@@ -136,7 +143,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
             </div>
             <Button
               onClick={() => setStep('verify')}
-              className="w-full bg-blue-500 hover:bg-blue-600"
+              className="w-full"
             >
               Next
             </Button>
@@ -156,20 +163,20 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
               <label className="block text-sm font-medium mb-2">
                 Enter the 6-digit code from your authenticator app:
               </label>
-              <input
+              <Input
                 type="text"
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="000000"
                 maxLength={6}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-center text-2xl tracking-widest"
+                className="text-center text-2xl tracking-widest h-12"
               />
             </div>
             {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
             <Button
               onClick={handleVerify}
               disabled={loading || code.length !== 6}
-              className="w-full bg-blue-500 hover:bg-blue-600"
+              className="w-full"
             >
               {loading ? 'Verifying...' : 'Verify'}
             </Button>
@@ -187,14 +194,6 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
   );
 };
 
-/**
- * TwoFactorSettings Component
- *
- * Displays the user's 2FA status and allows them to:
- * - Enable 2FA (opens setup wizard)
- * - Regenerate backup codes
- * - Disable 2FA
- */
 export const TwoFactorSettings: React.FC = () => {
   const { apiClient } = useAuth();
   const [enabled, setEnabled] = useState<boolean>(false);
@@ -202,11 +201,11 @@ export const TwoFactorSettings: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [showWizard, setShowWizard] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [statusMessage, setStatusMessage] = useState<string>('');
   const [actionLoading, setActionLoading] = useState<boolean>(false);
+  const [disableConfirmOpen, setDisableConfirmOpen] = useState<boolean>(false);
+  const [regenerateConfirmOpen, setRegenerateConfirmOpen] = useState<boolean>(false);
 
-  /**
-   * Fetch the current 2FA status
-   */
   const fetchStatus = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -232,18 +231,11 @@ export const TwoFactorSettings: React.FC = () => {
     }
   }, [apiClient]);
 
-  /**
-   * Disable 2FA after confirmation
-   */
   const handleDisable = async () => {
-    if (!window.confirm(
-      'Are you sure? You will need to enable 2FA again to restore this protection. This cannot be undone immediately.'
-    )) {
-      return;
-    }
-
+    setDisableConfirmOpen(false);
     setActionLoading(true);
     setError('');
+    setStatusMessage('');
 
     try {
       const response = await apiClient('/api/auth/2fa/disable', {
@@ -259,6 +251,7 @@ export const TwoFactorSettings: React.FC = () => {
 
       setEnabled(false);
       setBackupCodesAvailable(0);
+      setStatusMessage('Two-factor authentication has been disabled.');
     } catch {
       setError('Failed to disable 2FA');
     } finally {
@@ -266,18 +259,11 @@ export const TwoFactorSettings: React.FC = () => {
     }
   };
 
-  /**
-   * Regenerate backup codes after confirmation
-   */
   const handleRegenerateCodes = async () => {
-    if (!window.confirm(
-      'This will invalidate your current backup codes. Make sure to download the new ones. Continue?'
-    )) {
-      return;
-    }
-
+    setRegenerateConfirmOpen(false);
     setActionLoading(true);
     setError('');
+    setStatusMessage('');
 
     try {
       const response = await apiClient('/api/auth/2fa/regenerate-codes', {
@@ -303,8 +289,8 @@ export const TwoFactorSettings: React.FC = () => {
       element.setAttribute('download', 'whity-backup-codes.txt');
       element.click();
 
-      // Update state - 15 new codes generated
-      setBackupCodesAvailable(15);
+      setBackupCodesAvailable(data.backup_codes.length);
+      setStatusMessage('Backup codes regenerated and downloaded.');
     } catch {
       setError('Failed to regenerate backup codes');
     } finally {
@@ -312,9 +298,6 @@ export const TwoFactorSettings: React.FC = () => {
     }
   };
 
-  /**
-   * Handle wizard completion
-   */
   const handleWizardComplete = async (codes: string[]) => {
     setShowWizard(false);
 
@@ -343,7 +326,7 @@ export const TwoFactorSettings: React.FC = () => {
     return (
       <div className="max-w-md mx-auto p-6">
         <div className="flex justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
       </div>
     );
@@ -351,34 +334,39 @@ export const TwoFactorSettings: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto p-6">
+      {/* aria-live region for status announcements */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only">
+        {statusMessage}
+      </div>
+
       {error && (
         <Alert variant="destructive" className="mb-4">
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      <div className="bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200">
+      <div className="bg-muted rounded-lg p-4 mb-4 border border-border">
         <div className="flex items-center gap-2 mb-2">
           {enabled ? (
             <>
-              <IconCheck className="w-5 h-5 text-green-600" />
-              <span className="font-semibold text-green-700">Enabled</span>
+              <IconCheck className="w-5 h-5 text-success" />
+              <span className="font-semibold text-success">Enabled</span>
             </>
           ) : (
-            <span className="font-semibold text-gray-700">Not Enabled</span>
+            <span className="font-semibold text-foreground">Not Enabled</span>
           )}
         </div>
-        <p className="text-sm text-gray-600">
+        <p className="text-sm text-muted-foreground">
           Two-Factor Authentication {enabled ? 'is' : 'is not'} currently enabled
         </p>
       </div>
 
       {enabled && (
-        <div className="bg-blue-50 rounded-lg p-4 mb-4 border border-blue-200">
-          <p className="text-sm text-gray-700">
+        <div className="bg-card rounded-lg p-4 mb-4 border border-border">
+          <p className="text-sm text-card-foreground">
             You have <strong>{backupCodesAvailable}</strong> backup codes available
           </p>
-          <p className="text-xs text-gray-600 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Use these codes if you lose access to your authenticator app
           </p>
         </div>
@@ -388,7 +376,7 @@ export const TwoFactorSettings: React.FC = () => {
         {!enabled && (
           <Button
             onClick={() => setShowWizard(true)}
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white"
+            className="w-full"
           >
             Enable 2FA
           </Button>
@@ -397,22 +385,63 @@ export const TwoFactorSettings: React.FC = () => {
         {enabled && (
           <>
             <Button
-              onClick={handleRegenerateCodes}
+              variant="secondary"
+              onClick={() => setRegenerateConfirmOpen(true)}
               disabled={actionLoading}
-              className="w-full bg-gray-500 hover:bg-gray-600 text-white"
+              className="w-full"
             >
               {actionLoading ? 'Regenerating...' : 'Regenerate Backup Codes'}
             </Button>
             <Button
-              onClick={handleDisable}
+              variant="destructive"
+              onClick={() => setDisableConfirmOpen(true)}
               disabled={actionLoading}
-              className="w-full bg-red-500 hover:bg-red-600 text-white"
+              className="w-full"
             >
               {actionLoading ? 'Disabling...' : 'Disable 2FA'}
             </Button>
           </>
         )}
       </div>
+
+      {/* Disable 2FA confirmation dialog */}
+      <AlertDialog open={disableConfirmOpen} onOpenChange={setDisableConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disable Two-Factor Authentication?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You will need to enable 2FA again to restore this protection. This cannot be undone immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/80"
+              onClick={handleDisable}
+            >
+              Disable 2FA
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Regenerate backup codes confirmation dialog */}
+      <AlertDialog open={regenerateConfirmOpen} onOpenChange={setRegenerateConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Regenerate Backup Codes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will invalidate your current backup codes. Make sure to download the new ones.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRegenerateCodes}>
+              Regenerate Codes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {showWizard && (
         <TwoFactorSetupWizard
