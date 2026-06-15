@@ -97,13 +97,15 @@ services:
     volumes:
       - .:/app
     working_dir: /app
-    # This container reuses the whity-core:dev image but runs a sleep-loop
-    # scheduler, NOT the FrankenPHP HTTP server the base image's HEALTHCHECK
-    # probes — so that inherited probe would always report "unhealthy" and break
-    # `docker compose up --wait` (e2e). Disable it: liveness here is just "the
-    # loop process is running", which `--wait` already treats as ready.
-    healthcheck:
-      disable: true
+    # Opt-in auxiliary service: run with `docker compose --profile cron up`.
+    # Kept out of the DEFAULT stack so `docker compose up --wait` (used by the
+    # e2e job) does not try to gate readiness on a long-running maintenance
+    # loop — `--wait` errors on such a service whether it has the base image's
+    # (HTTP) healthcheck (reports "unhealthy") or none ("no healthcheck
+    # configured"). Scheduling for staging/production is the orchestrator's job
+    # (see docs/wiki/Cron-Operations.md); this service is a dev convenience.
+    profiles:
+      - cron
     restart: unless-stopped
     command:
       - sh

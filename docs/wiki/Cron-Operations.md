@@ -57,7 +57,10 @@ truth the tenant-predicate guard consults. See
 The cleanup is **genuinely wired into the running stack**, not just documented:
 
 - **Dev / demo (`docker-compose.yml`)**: a dedicated `cron` service runs the
-  command on a daily loop. Inspect it with `docker compose logs cron`.
+  command on a daily loop. It is an opt-in profile (kept out of the default
+  stack so `docker compose up --wait` does not gate readiness on a long-running
+  maintenance loop). Start it with `docker compose --profile cron up -d` and
+  inspect it with `docker compose --profile cron logs cron`.
 - **Staging / production**: schedule the SAME command via the host crontab (or
   the orchestrator's scheduler — Kubernetes `CronJob`, systemd timer, etc.)
   using the crontab entry below. The `docker-compose.staging.yml` stack expects
