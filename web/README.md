@@ -57,17 +57,6 @@ cleaned up via the API in `afterEach`. The suite never mutates or deletes the
 seeded accounts, the seeded `admin`/`user` roles, or tenants `0`/`1`. Runs are
 deterministic and re-runnable.
 
-### Known application bugs (tracked as `test.fixme`)
-
-A few flows hit real app bugs (not test issues); they are kept as `test.fixme`
-so they are visible without failing the suite:
-
-- Invalid login shows no error message (`app/login/page.tsx`).
-- Edit User modal does not pre-fill Name/Tenant (the users list API omits both).
-- OU delete via the UI errors because the `/api/*` proxy turns the backend's
-  HTTP 204 into a 500 (`app/api/[...path]/route.ts`); the backend delete itself
-  still succeeds.
-
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
