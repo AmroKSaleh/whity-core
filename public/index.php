@@ -104,6 +104,7 @@ use Whity\Auth\AuthHandler;
 use Whity\Http\RbacMiddleware;
 use Whity\Http\HttpKernel;
 use Whity\Http\Cors;
+use Whity\Http\SecurityHeaders;
 use Whity\Http\WorkerRuntime;
 use Whity\Http\Middleware\CsrfGuard;
 use Whity\Http\Middleware\EnforceTenantIsolation;
@@ -566,6 +567,12 @@ $pluginLoader->load();
 // Handle requests (persistent worker mode or fallback single-request mode)
 $isWorker = function_exists('frankenphp_handle_request');
 
+// Resolve the security hardening headers once (WC-187). They depend only on
+// APP_ENV, which is fixed for the worker's lifetime, so this is computed outside
+// the request loop and merged into EVERY response below (success, OPTIONS/204
+// preflight and the 500 error path) alongside the per-request CORS headers.
+$securityHeaders = SecurityHeaders::headers($appEnv);
+
 if ($isWorker) {
     // Dispatch boot hook
     error_log("[FrankenPHP Worker] Booting...");
@@ -580,7 +587,7 @@ if ($isWorker) {
         // are gated behind development/DEBUG. Decision is computed once per
         // iteration and captured by the request closure below.
         $logLifecycle = WorkerRuntime::shouldLogLifecycle($_ENV);
-        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle) {
+        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle, $securityHeaders) {
             try {
                 // Dispatch request start hook
                 if ($logLifecycle) {
@@ -609,7 +616,8 @@ if ($isWorker) {
 
                 // Handle OPTIONS preflight requests for CORS
                 if ($request->getMethod() === 'OPTIONS') {
-                    $response = new Response(204, '', $corsHeaders);
+                    // Even the empty 204 preflight carries the hardening headers (WC-187).
+                    $response = new Response(204, '', array_merge($corsHeaders, $securityHeaders));
                     $response->send();
                     return;
                 }
@@ -617,8 +625,8 @@ if ($isWorker) {
                 // Handle request through kernel
                 $response = $kernel->handle($request);
 
-                // Merge CORS headers into the response.
-                $headers = array_merge($response->getHeaders(), $corsHeaders);
+                // Merge CORS + security hardening headers into the response (WC-53, WC-187).
+                $headers = array_merge($response->getHeaders(), $corsHeaders, $securityHeaders);
 
                 // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
                 $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
@@ -629,9 +637,12 @@ if ($isWorker) {
                 // Handle any uncaught exceptions
                 try {
                     $errorResponse = Response::error('Internal server error', 500);
+                    // The 500 path is a response a client can receive, so it gets the
+                    // hardening headers too (WC-187).
                     $errorHeaders = array_merge(
                         $errorResponse->getHeaders(),
-                        Cors::headers($_SERVER['HTTP_ORIGIN'] ?? null)
+                        Cors::headers($_SERVER['HTTP_ORIGIN'] ?? null),
+                        $securityHeaders
                     );
                     $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
                     $errorResponse->send();
@@ -696,7 +707,8 @@ if ($isWorker) {
 
         // Handle OPTIONS preflight requests for CORS
         if ($request->getMethod() === 'OPTIONS') {
-            $response = new Response(204, '', $corsHeaders);
+            // Even the empty 204 preflight carries the hardening headers (WC-187).
+            $response = new Response(204, '', array_merge($corsHeaders, $securityHeaders));
             $response->send();
             exit;
         }
@@ -704,8 +716,8 @@ if ($isWorker) {
         // Handle request through kernel
         $response = $kernel->handle($request);
 
-        // Merge CORS headers into the response.
-        $headers = array_merge($response->getHeaders(), $corsHeaders);
+        // Merge CORS + security hardening headers into the response (WC-53, WC-187).
+        $headers = array_merge($response->getHeaders(), $corsHeaders, $securityHeaders);
 
         // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
         $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
@@ -716,9 +728,12 @@ if ($isWorker) {
         // Handle any uncaught exceptions
         try {
             $errorResponse = Response::error('Internal server error', 500);
+            // The 500 path is a response a client can receive, so it gets the
+            // hardening headers too (WC-187).
             $errorHeaders = array_merge(
                 $errorResponse->getHeaders(),
-                Cors::headers($_SERVER['HTTP_ORIGIN'] ?? null)
+                Cors::headers($_SERVER['HTTP_ORIGIN'] ?? null),
+                $securityHeaders
             );
             $errorResponse = new Response(500, $errorResponse->getBody(), $errorHeaders);
             $errorResponse->send();
