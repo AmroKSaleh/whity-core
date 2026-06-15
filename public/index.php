@@ -260,9 +260,11 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'users',
         'group' => 'admin',
         'order' => 2,
-        // WC-175 (#191): mirrors GET /api/users, gated on the 'admin' ROLE (the
-        // admin role does not hold a users:read permission grant).
-        'requiredRole' => 'admin',
+        // WC-203: mirrors GET /api/users, now gated on users:read permission
+        // (migration 022 grants this to admin). requiredRole is cleared so the
+        // nav item is visible to any user who holds the permission, not just
+        // those with the 'admin' role name.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::USERS_READ,
     ];
     $items[] = [
         'id' => 'roles',
@@ -418,10 +420,13 @@ $router->register('GET', '/api/auth/2fa/status', [$twoFactorHandler, 'status'], 
 
 // 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
-$router->register('GET', '/api/users', [$usersHandler, 'list'], 'admin');
-$router->register('POST', '/api/users', [$usersHandler, 'create'], 'admin');
-$router->register('PATCH', '/api/users/{id:\d+}', [$usersHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/users/{id:\d+}', [$usersHandler, 'delete'], 'admin');
+// WC-203: gate users routes on fine-grained permission grants instead of the
+// bare 'admin' role. requiredRole is cleared (null) so the check is driven
+// entirely by requiredPermission; migration 022 grants all three to admin.
+$router->register('GET',    '/api/users',           [$usersHandler, 'list'],   null, null, CorePermissions::USERS_READ);
+$router->register('POST',   '/api/users',           [$usersHandler, 'create'], null, null, CorePermissions::USERS_WRITE);
+$router->register('PATCH',  '/api/users/{id:\d+}',  [$usersHandler, 'update'], null, null, CorePermissions::USERS_WRITE);
+$router->register('DELETE', '/api/users/{id:\d+}',  [$usersHandler, 'delete'], null, null, CorePermissions::USERS_DELETE);
 
 $rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
 $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');

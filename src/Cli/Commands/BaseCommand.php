@@ -77,11 +77,12 @@ abstract class BaseCommand
         $pluginLoader->load();
 
         // Register API handlers (copied from public/index.php)
+        // WC-203: permission-gated, mirroring public/index.php.
         $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
-        $router->register('GET', '/api/users', [$usersHandler, 'list'], 'admin');
-        $router->register('POST', '/api/users', [$usersHandler, 'create'], 'admin');
-        $router->register('PATCH', '/api/users/{id}', [$usersHandler, 'update'], 'admin');
-        $router->register('DELETE', '/api/users/{id}', [$usersHandler, 'delete'], 'admin');
+        $router->register('GET',    '/api/users',          [$usersHandler, 'list'],   null, null, \Whity\Core\RBAC\CorePermissions::USERS_READ);
+        $router->register('POST',   '/api/users',          [$usersHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::USERS_WRITE);
+        $router->register('PATCH',  '/api/users/{id}',     [$usersHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::USERS_WRITE);
+        $router->register('DELETE', '/api/users/{id}',     [$usersHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::USERS_DELETE);
 
         $rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
         $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
