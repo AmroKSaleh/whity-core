@@ -1001,26 +1001,6 @@ parameters:
 			path: tests/Integration/TwoFactorKeyConsistencyTest.php
 
 		-
-			message: "#^Method Tests\\\\Local\\\\SeedUniversityTest\\:\\:createOUs\\(\\) has parameter \\$ous with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
-
-		-
-			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$ouIds type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
-
-		-
-			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$relTypeIds type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
-
-		-
-			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$roleIds type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
-
-		-
 			message: "#^Offset 'schema' on array\\{method\\: string, path\\: string, pattern\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null\\} on left side of \\?\\? does not exist\\.$#"
 			count: 1
 			path: tests/OpenAPI/SchemaEngineTest.php
