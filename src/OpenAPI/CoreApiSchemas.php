@@ -74,7 +74,8 @@ final class CoreApiSchemas
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
             self::meRoutes(),
-            self::platformOpsRoutes()
+            self::platformOpsRoutes(),
+            self::familyRelationsRoutes()
         );
     }
 
@@ -588,6 +589,125 @@ final class CoreApiSchemas
     }
 
     /**
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function familyRelationsRoutes(): array
+    {
+        return [
+            // ---- Read surface (relations:read) ----
+            self::permissionRoute('GET', '/api/relationship-types', 'relations:read', [
+                'summary' => 'List the relationship-type vocabulary',
+                'tags' => ['relations'],
+                'responses' => [
+                    200 => self::jsonResponse('The relationship types', 'RelationshipTypeListResponse'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('GET', '/api/persons', 'relations:read', [
+                'summary' => 'List persons in the caller\'s tenant',
+                'tags' => ['relations'],
+                'responses' => [
+                    200 => self::jsonResponse('The persons', 'PersonListResponse'),
+                    400 => self::errorResponse('Bad request'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('GET', '/api/persons/{id:\d+}', 'relations:read', [
+                'summary' => 'Get a single person',
+                'tags' => ['relations'],
+                'responses' => [
+                    200 => self::jsonResponse('The person', 'PersonResponse'),
+                    400 => self::errorResponse('Bad request'),
+                    404 => self::errorResponse('Person not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('GET', '/api/persons/{id:\d+}/relations', 'relations:read', [
+                'summary' => 'List a person\'s relation edges',
+                'tags' => ['relations'],
+                'responses' => [
+                    200 => self::jsonResponse('The person\'s relations', 'RelationSummaryListResponse'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('GET', '/api/relations', 'relations:read', [
+                'summary' => 'List all relation edges in the caller\'s tenant',
+                'tags' => ['relations'],
+                'responses' => [
+                    200 => self::jsonResponse('The relation edges', 'RelationEdgeListResponse'),
+                    400 => self::errorResponse('Bad request'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('GET', '/api/users/{id:\d+}/relations', 'relations:read', [
+                'summary' => 'Get the person record and relations for a user account',
+                'tags' => ['relations'],
+                'responses' => [
+                    200 => self::jsonResponse('The user\'s person and relations', 'UserRelationsResponse'),
+                    400 => self::errorResponse('Bad request'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            // ---- Write surface (relations:manage) ----
+            self::permissionRoute('POST', '/api/persons', 'relations:manage', [
+                'summary' => 'Create a person record',
+                'tags' => ['relations'],
+                'request' => 'PersonCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created person', 'PersonResponse'),
+                    400 => self::errorResponse('displayName required, or system tenant'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('PATCH', '/api/persons/{id:\d+}', 'relations:manage', [
+                'summary' => 'Update a person record',
+                'tags' => ['relations'],
+                'request' => 'PersonUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated person', 'PersonResponse'),
+                    400 => self::errorResponse('Validation failed'),
+                    403 => self::errorResponse('Person is linked to a user account and cannot be edited'),
+                    404 => self::errorResponse('Person not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('DELETE', '/api/persons/{id:\d+}', 'relations:manage', [
+                'summary' => 'Delete a person record',
+                'tags' => ['relations'],
+                'responses' => [
+                    204 => ['description' => 'Deleted'],
+                    400 => self::errorResponse('Bad request'),
+                    403 => self::errorResponse('Person is linked to a user account'),
+                    404 => self::errorResponse('Person not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('POST', '/api/relations', 'relations:manage', [
+                'summary' => 'Create a relation edge between two persons',
+                'tags' => ['relations'],
+                'request' => 'RelationCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created relation', 'RelationCreatedResponse'),
+                    400 => self::errorResponse('Validation failed'),
+                    404 => self::errorResponse('Person not found'),
+                    422 => self::errorResponse('Self-relation or duplicate'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('DELETE', '/api/relations/{id:\d+}', 'relations:manage', [
+                'summary' => 'Delete a relation edge',
+                'tags' => ['relations'],
+                'responses' => [
+                    204 => ['description' => 'Deleted'],
+                    400 => self::errorResponse('Bad request'),
+                    404 => self::errorResponse('Relation not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+        ];
+    }
+
+    /**
      * The component schemas the admin resources publish.
      *
      * @return array<string, array<string, mixed>>
@@ -936,6 +1056,95 @@ final class CoreApiSchemas
                     ], ['migrations_executed', 'migrations_total', 'pending_migrations', 'database']),
                 ], ['totals', 'breakdown', 'growth', 'system']),
             ], ['stats']),
+
+            // ---- Family-Relations schemas (WC-f07c870b) ----
+
+            // Relationship-type vocabulary
+            'RelationshipType' => self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'inverseTypeId' => self::int(true),
+                'symmetric' => self::bool(),
+            ], ['id', 'name', 'symmetric']),
+            'RelationshipTypeListResponse' => self::listEnvelope('RelationshipType'),
+
+            // RelationSummary — one directed edge from a person's perspective
+            'RelationSummary' => self::object([
+                'relationId' => self::int(),
+                'otherPersonId' => self::int(),
+                'otherPersonName' => self::str(),
+                'otherPersonHasAccount' => self::bool(),
+                'typeId' => self::int(),
+                'typeName' => self::str(),
+                'direction' => self::str(),
+            ], ['relationId', 'otherPersonId', 'otherPersonName', 'otherPersonHasAccount', 'typeId', 'typeName', 'direction']),
+            'RelationSummaryListResponse' => self::listEnvelope('RelationSummary'),
+
+            // Person — includes embedded relations array
+            'Person' => self::object([
+                'id' => self::int(),
+                'tenantId' => self::int(),
+                'displayName' => self::str(),
+                'userId' => self::int(true),
+                'hasAccount' => self::bool(),
+                'birthDate' => self::str(true),
+                'deceased' => self::bool(),
+                'notes' => self::str(true),
+                'createdAt' => self::str(true),
+                'relationCount' => self::int(),
+                'relations' => ['type' => 'array', 'items' => SchemaBuilder::ref('RelationSummary')],
+            ], ['id', 'tenantId', 'displayName', 'hasAccount', 'deceased', 'relationCount', 'relations']),
+            'PersonListResponse' => self::listEnvelope('Person'),
+            'PersonResponse' => self::dataEnvelope(SchemaBuilder::ref('Person')),
+
+            // Person create / update request bodies
+            'PersonCreateRequest' => self::object([
+                'displayName' => self::str(),
+                'birthDate' => self::str(true),
+                'deceased' => self::bool(),
+                'notes' => self::str(true),
+            ], ['displayName']),
+            'PersonUpdateRequest' => self::object([
+                'displayName' => self::str(),
+                'birthDate' => self::str(true),
+                'deceased' => self::bool(),
+                'notes' => self::str(true),
+            ], []),
+
+            // RelationEdge — full edge row with both type names
+            'RelationEdge' => self::object([
+                'id' => self::int(),
+                'fromPersonId' => self::int(),
+                'toPersonId' => self::int(),
+                'typeId' => self::int(),
+                'typeName' => self::str(),
+                'inverseTypeName' => self::str(true),
+            ], ['id', 'fromPersonId', 'toPersonId', 'typeId', 'typeName']),
+            'RelationEdgeListResponse' => self::listEnvelope('RelationEdge'),
+
+            // GET /api/users/{id}/relations — inline data envelope (personId may be null)
+            'UserRelationsResponse' => self::dataEnvelope(self::object([
+                'personId' => self::int(true),
+                'relations' => ['type' => 'array', 'items' => SchemaBuilder::ref('RelationSummary')],
+            ], ['personId', 'relations'])),
+
+            // Relation create request and response
+            'RelationRef' => self::object([
+                'type' => ['type' => 'string', 'enum' => ['user', 'person']],
+                'id' => self::int(),
+            ], ['type', 'id']),
+            'RelationCreateRequest' => self::object([
+                'from' => SchemaBuilder::ref('RelationRef'),
+                'to' => SchemaBuilder::ref('RelationRef'),
+                'relationshipTypeId' => self::int(),
+            ], ['from', 'to', 'relationshipTypeId']),
+            'RelationCreatedData' => self::object([
+                'id' => self::int(),
+                'fromPersonId' => self::int(),
+                'toPersonId' => self::int(),
+                'relationshipTypeId' => self::int(),
+            ], ['id', 'fromPersonId', 'toPersonId', 'relationshipTypeId']),
+            'RelationCreatedResponse' => self::dataEnvelope(SchemaBuilder::ref('RelationCreatedData')),
         ];
     }
 
