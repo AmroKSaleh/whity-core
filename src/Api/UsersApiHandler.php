@@ -413,8 +413,19 @@ class UsersApiHandler
                 return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);
             }
 
+            // WC-190: the UPDATE itself carries the tenant predicate, not just the
+            // prior guard SELECT, so a cross-tenant id can never mutate another
+            // tenant's user even if the guard were bypassed (TOCTOU / defense in
+            // depth). The SYSTEM tenant (id 0) edits across tenants by design and
+            // stays unscoped; any other tenant is pinned to the row's OWNING tenant
+            // (which the guard already proved equals the acting tenant).
             $params_array[] = $id;
-            $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ?';
+            if ($currentTenantId === 0) {
+                $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ?';
+            } else {
+                $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ? AND tenant_id = ?';
+                $params_array[] = $ownerTenantId;
+            }
             $stmt = $this->db->prepare($sql);
             $stmt->execute($params_array);
 

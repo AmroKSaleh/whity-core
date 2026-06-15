@@ -375,16 +375,18 @@ class RolesApiHandler
             }
 
             if ($updates !== []) {
-                $updateParams[] = $id;
-                $sql = 'UPDATE roles SET ' . implode(', ', $updates) . ' WHERE id = ?';
-                $updateStmt = $this->db->prepare($sql);
-                $updateStmt->execute($updateParams);
+                // WC-190: the UPDATE itself carries the tenant predicate, not just
+                // the prior guard SELECT, so a cross-tenant id can never mutate
+                // another tenant's role even if the guard were bypassed (TOCTOU).
+                $this->updateRoleScoped((int)$id, $updates, $updateParams, $tenantId);
             }
 
             // Replace permissions when the canonical `permissions` key is present.
             if (array_key_exists('permissions', $body) && is_array($body['permissions'])) {
-                $delStmt = $this->db->prepare('DELETE FROM role_permissions WHERE role_id = ?');
-                $delStmt->execute([$id]);
+                // WC-190: scope the junction DELETE to grants whose OWNING role is
+                // manageable by this tenant (role_permissions has no tenant_id of
+                // its own; the boundary is the parent role's tenant_id).
+                $this->deleteRolePermissionsScoped((int)$id, $tenantId);
 
                 /** @var array<int, string|int> $permissions */
                 $permissions = $this->normalizePermissionRefs($body['permissions']);
@@ -461,14 +463,14 @@ class RolesApiHandler
             ]);
 
             // Remove permission grants, tenant assignments, then the role itself.
-            $permStmt = $this->db->prepare('DELETE FROM role_permissions WHERE role_id = ?');
-            $permStmt->execute([$id]);
-
-            $assignStmt = $this->db->prepare('DELETE FROM user_roles WHERE role_id = ?');
-            $assignStmt->execute([$id]);
-
-            $deleteStmt = $this->db->prepare('DELETE FROM roles WHERE id = ?');
-            $deleteStmt->execute([$id]);
+            // WC-190: every one of these mutating statements carries its own
+            // tenant predicate (scoped via the owning role for the junction
+            // tables, directly for user_roles, and on roles itself), so a
+            // cross-tenant id can never delete another tenant's rows even if the
+            // guard SELECT above were bypassed (defense in depth / TOCTOU).
+            $this->deleteRolePermissionsScoped((int)$id, $tenantId);
+            $this->deleteUserRolesScoped((int)$id, $tenantId);
+            $this->deleteRoleScoped((int)$id, $tenantId);
 
             // Synchronous post-delete hook.
             $this->hookManager->dispatch('role.deleted', [
@@ -604,6 +606,137 @@ class RolesApiHandler
         ');
         $stmt->execute([$roleId, $tenantId]);
         return $stmt->fetch() !== false;
+    }
+
+    /**
+     * Apply a scoped `UPDATE roles` whose WHERE clause itself carries the tenant
+     * boundary (WC-190), not merely a preceding guard SELECT.
+     *
+     * Convention: the SYSTEM tenant (id 0) is unscoped and may update any role
+     * (including global NULL-tenant roles); any other tenant is scoped with
+     * `AND tenant_id = ?`, which — because a global role's `tenant_id` is NULL —
+     * also correctly excludes global roles from a tenant write, matching
+     * {@see self::roleManageableByTenant()}. A null/unresolved tenant updates
+     * nothing.
+     *
+     * @param int                $roleId   The role id to update.
+     * @param array<int, string> $sets     SQL `column = ?` assignment fragments.
+     * @param array<int, mixed>  $values   Bound values for the assignment fragments.
+     * @param int|null           $tenantId The acting tenant (0 = SYSTEM).
+     * @return void
+     */
+    protected function updateRoleScoped(int $roleId, array $sets, array $values, ?int $tenantId): void
+    {
+        if ($sets === []) {
+            return;
+        }
+
+        $assignments = implode(', ', $sets);
+
+        if ($tenantId === 0) {
+            $sql = 'UPDATE roles SET ' . $assignments . ' WHERE id = ?';
+            $params = array_merge($values, [$roleId]);
+        } elseif ($tenantId === null) {
+            // No resolvable tenant: never mutate (use an impossible predicate).
+            $sql = 'UPDATE roles SET ' . $assignments . ' WHERE id = ? AND 1 = 0';
+            $params = array_merge($values, [$roleId]);
+        } else {
+            $sql = 'UPDATE roles SET ' . $assignments . ' WHERE id = ? AND tenant_id = ?';
+            $params = array_merge($values, [$roleId, $tenantId]);
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    /**
+     * Apply a scoped `DELETE FROM roles` whose WHERE clause itself carries the
+     * tenant boundary (WC-190). SYSTEM tenant (0) is unscoped; any other tenant
+     * is scoped with `AND tenant_id = ?` (a global NULL-tenant role is therefore
+     * never deletable by a tenant); a null tenant deletes nothing.
+     *
+     * @param int      $roleId   The role id to delete.
+     * @param int|null $tenantId The acting tenant (0 = SYSTEM).
+     * @return void
+     */
+    protected function deleteRoleScoped(int $roleId, ?int $tenantId): void
+    {
+        if ($tenantId === 0) {
+            $stmt = $this->db->prepare('DELETE FROM roles WHERE id = ?');
+            $stmt->execute([$roleId]);
+            return;
+        }
+
+        if ($tenantId === null) {
+            return;
+        }
+
+        $stmt = $this->db->prepare('DELETE FROM roles WHERE id = ? AND tenant_id = ?');
+        $stmt->execute([$roleId, $tenantId]);
+    }
+
+    /**
+     * Scoped `DELETE FROM role_permissions` for a role's grants (WC-190).
+     *
+     * `role_permissions` has NO `tenant_id` column of its own — a grant inherits
+     * its tenant transitively from the owning role — so the predicate scopes the
+     * delete to grants whose parent role is manageable by the acting tenant via a
+     * correlated EXISTS on `roles`. SYSTEM tenant (0) is unscoped; any other
+     * tenant requires the parent role's `tenant_id` to equal it (excluding global
+     * NULL-tenant roles); a null tenant deletes nothing.
+     *
+     * @param int      $roleId   The owning role id.
+     * @param int|null $tenantId The acting tenant (0 = SYSTEM).
+     * @return void
+     */
+    protected function deleteRolePermissionsScoped(int $roleId, ?int $tenantId): void
+    {
+        if ($tenantId === 0) {
+            $stmt = $this->db->prepare('DELETE FROM role_permissions WHERE role_id = ?');
+            $stmt->execute([$roleId]);
+            return;
+        }
+
+        if ($tenantId === null) {
+            return;
+        }
+
+        $stmt = $this->db->prepare(
+            'DELETE FROM role_permissions
+             WHERE role_id = ?
+               AND EXISTS (
+                   SELECT 1 FROM roles r
+                   WHERE r.id = role_permissions.role_id AND r.tenant_id = ?
+               )'
+        );
+        $stmt->execute([$roleId, $tenantId]);
+    }
+
+    /**
+     * Scoped `DELETE FROM user_roles` for a role's assignments (WC-190).
+     *
+     * `user_roles` DOES carry a `tenant_id` column (migration 012), so the
+     * predicate scopes directly on it. SYSTEM tenant (0) is unscoped; any other
+     * tenant is scoped with `AND tenant_id = ?`; a null tenant deletes nothing.
+     *
+     * @param int      $roleId   The role id whose assignments are removed.
+     * @param int|null $tenantId The acting tenant (0 = SYSTEM).
+     * @return void
+     */
+    protected function deleteUserRolesScoped(int $roleId, ?int $tenantId): void
+    {
+        if ($tenantId === 0) {
+            $stmt = $this->db->prepare('DELETE FROM user_roles WHERE role_id = ?');
+            $stmt->execute([$roleId]);
+            return;
+        }
+
+        if ($tenantId === null) {
+            return;
+        }
+
+        $stmt = $this->db->prepare('DELETE FROM user_roles WHERE role_id = ? AND tenant_id = ?');
+        $stmt->execute([$roleId, $tenantId]);
     }
 
     /**
