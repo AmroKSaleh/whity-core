@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -11,8 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { IconX } from '@tabler/icons-react';
-import type { Permission, Role, RoleWithPermissions } from './types';
+import type { Permission, Role } from './types';
 
 interface PermissionsPanelProps {
   isOpen: boolean;
@@ -30,7 +29,7 @@ export function PermissionsPanel({
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  const fetchRolePermissions = async () => {
+  const fetchRolePermissions = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await apiClient(`/api/roles/${role.id}/permissions`);
@@ -48,13 +47,15 @@ export function PermissionsPanel({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [apiClient, role.id, addToast]);
 
   useEffect(() => {
     if (isOpen) {
-      fetchRolePermissions();
+      void (async () => {
+        await fetchRolePermissions();
+      })();
     }
-  }, [isOpen, role.id, apiClient, addToast]);
+  }, [isOpen, fetchRolePermissions]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>

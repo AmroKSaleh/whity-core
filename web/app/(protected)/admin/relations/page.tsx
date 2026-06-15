@@ -133,7 +133,9 @@ export default function RelationsPage() {
   }, [apiClient, addToast]);
 
   useEffect(() => {
-    void fetchAll();
+    void (async () => {
+      await fetchAll();
+    })();
   }, [fetchAll]);
 
   const selectedPerson = useMemo(

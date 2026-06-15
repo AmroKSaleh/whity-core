@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
@@ -35,7 +35,7 @@ export default function TenantsPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
 
-  const fetchTenants = async () => {
+  const fetchTenants = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await apiClient('/api/tenants');
@@ -53,11 +53,13 @@ export default function TenantsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [apiClient, addToast]);
 
   useEffect(() => {
-    fetchTenants();
-  }, []);
+    void (async () => {
+      await fetchTenants();
+    })();
+  }, [fetchTenants]);
 
   const handleEditClick = (tenant: Tenant) => {
     setSelectedTenant(tenant);

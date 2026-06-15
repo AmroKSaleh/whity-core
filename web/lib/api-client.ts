@@ -33,7 +33,7 @@ async function refreshAccessToken(): Promise<boolean> {
 
     // Refresh successful if response is 200-399
     return response.ok;
-  } catch (error) {
+  } catch {
     // Network errors or other failures - refresh failed
     return false;
   }

@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
+import { useAuth } from '@/lib/auth-context';
 
 // Mock global fetch before any imports
 global.fetch = jest.fn();
@@ -26,37 +26,32 @@ jest.mock('@tabler/icons-react', () => ({
 
 // Mock dialog component
 jest.mock('@/components/ui/dialog', () => ({
-  Dialog: ({ children, open, onOpenChange }: any) => open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: any) => <div data-testid="dialog-content">{children}</div>,
-  DialogHeader: ({ children }: any) => <div>{children}</div>,
-  DialogTitle: ({ children }: any) => <h2>{children}</h2>,
-  DialogDescription: ({ children }: any) => <p>{children}</p>,
+  Dialog: ({ children, open }: React.PropsWithChildren<{ open?: boolean }>) =>
+    open ? <div data-testid="dialog">{children}</div> : null,
+  DialogContent: ({ children }: React.PropsWithChildren) => <div data-testid="dialog-content">{children}</div>,
+  DialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogTitle: ({ children }: React.PropsWithChildren) => <h2>{children}</h2>,
+  DialogDescription: ({ children }: React.PropsWithChildren) => <p>{children}</p>,
 }));
 
-// Mock button component
+// Mock button component. The real Button has a custom `variant` prop that is
+// not a valid DOM attribute, so drop it from the props before spreading the
+// rest onto the <button>.
 jest.mock('@/components/ui/button', () => ({
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    className,
-    variant,
-    ...props
-  }: any) => (
-    <button onClick={onClick} disabled={disabled} className={className} {...props}>
-      {children}
-    </button>
-  ),
+  Button: ({ children, variant, ...props }: React.ComponentProps<'button'> & { variant?: string }) => {
+    void variant;
+    return <button {...props}>{children}</button>;
+  },
 }));
 
 // Mock alert component
 jest.mock('@/components/ui/alert', () => ({
-  Alert: ({ children, variant }: any) => (
+  Alert: ({ children, variant }: React.PropsWithChildren<{ variant?: string }>) => (
     <div data-testid={`alert-${variant}`} role="alert">
       {children}
     </div>
   ),
-  AlertDescription: ({ children }: any) => <p>{children}</p>,
+  AlertDescription: ({ children }: React.PropsWithChildren) => <p>{children}</p>,
 }));
 
 // Mock window.confirm
@@ -67,15 +62,15 @@ const mockClick = jest.fn();
 const mockSetAttribute = jest.fn();
 const originalCreateElement = document.createElement.bind(document);
 
-document.createElement = jest.fn((tagName) => {
+document.createElement = jest.fn((tagName: string) => {
   if (tagName === 'a') {
     return {
       setAttribute: mockSetAttribute,
       click: mockClick,
-    } as any;
+    } as unknown as HTMLAnchorElement;
   }
   return originalCreateElement(tagName);
-});
+}) as typeof document.createElement;
 
 describe('TwoFactorSettings', () => {
   let mockApiClient: jest.Mock;
@@ -86,9 +81,8 @@ describe('TwoFactorSettings', () => {
     mockSetAttribute.mockClear();
     (global.confirm as jest.Mock).mockClear();
 
-    const { useAuth } = require('@/lib/auth-context');
     mockApiClient = jest.fn();
-    useAuth.mockReturnValue({
+    (useAuth as jest.Mock).mockReturnValue({
       apiClient: mockApiClient,
       user: { id: 1, email: 'test@example.com' },
       isAuthenticated: jest.fn(() => true),

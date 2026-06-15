@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -47,7 +47,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
         const data = await response.json();
         setSecret(data.secret);
         setQrCodeUrl(data.qrCodeUrl);
-      } catch (err) {
+      } catch {
         setError('Failed to fetch setup data');
       }
     };
@@ -82,7 +82,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
 
       const data = await response.json();
       onComplete(data.backup_codes);
-    } catch (err) {
+    } catch {
       setError('Failed to verify code');
       setLoading(false);
     }
@@ -115,7 +115,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
             </div>
             <div>
               <p className="text-sm text-gray-600 mb-2">
-                Can't scan? Enter this code manually:
+                Can&apos;t scan? Enter this code manually:
               </p>
               <div className="flex items-center gap-2">
                 <code
@@ -207,7 +207,7 @@ export const TwoFactorSettings: React.FC = () => {
   /**
    * Fetch the current 2FA status
    */
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     setLoading(true);
     setError('');
 
@@ -225,12 +225,12 @@ export const TwoFactorSettings: React.FC = () => {
       const data: TwoFactorStatus = await response.json();
       setEnabled(data.enabled);
       setBackupCodesAvailable(data.backup_codes_available);
-    } catch (err) {
+    } catch {
       setError('Failed to fetch 2FA status');
     } finally {
       setLoading(false);
     }
-  };
+  }, [apiClient]);
 
   /**
    * Disable 2FA after confirmation
@@ -259,7 +259,7 @@ export const TwoFactorSettings: React.FC = () => {
 
       setEnabled(false);
       setBackupCodesAvailable(0);
-    } catch (err) {
+    } catch {
       setError('Failed to disable 2FA');
     } finally {
       setActionLoading(false);
@@ -305,7 +305,7 @@ export const TwoFactorSettings: React.FC = () => {
 
       // Update state - 15 new codes generated
       setBackupCodesAvailable(15);
-    } catch (err) {
+    } catch {
       setError('Failed to regenerate backup codes');
     } finally {
       setActionLoading(false);
@@ -334,8 +334,10 @@ export const TwoFactorSettings: React.FC = () => {
 
   // Fetch status on mount
   useEffect(() => {
-    fetchStatus();
-  }, []);
+    void (async () => {
+      await fetchStatus();
+    })();
+  }, [fetchStatus]);
 
   if (loading) {
     return (

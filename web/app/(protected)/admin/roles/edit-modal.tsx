@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -65,25 +65,7 @@ export function EditRoleModal({
     },
   });
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchPermissions();
-      fetchRole();
-    }
-  }, [isOpen, role.id, apiClient, addToast]);
-
-  useEffect(() => {
-    if (roleData) {
-      const permissionIds = roleData.permissions.map(p => p.id);
-      form.reset({
-        name: roleData.name,
-        description: roleData.description,
-        permissionIds,
-      });
-    }
-  }, [roleData, form]);
-
-  const fetchPermissions = async () => {
+  const fetchPermissions = useCallback(async () => {
     try {
       setIsLoadingPermissions(true);
       const response = await apiClient('/api/permissions');
@@ -101,9 +83,9 @@ export function EditRoleModal({
     } finally {
       setIsLoadingPermissions(false);
     }
-  };
+  }, [apiClient, addToast]);
 
-  const fetchRole = async () => {
+  const fetchRole = useCallback(async () => {
     try {
       setIsLoadingRole(true);
       const response = await apiClient(`/api/roles/${role.id}`);
@@ -121,7 +103,26 @@ export function EditRoleModal({
     } finally {
       setIsLoadingRole(false);
     }
-  };
+  }, [apiClient, role.id, addToast]);
+
+  useEffect(() => {
+    if (isOpen) {
+      void (async () => {
+        await Promise.all([fetchPermissions(), fetchRole()]);
+      })();
+    }
+  }, [isOpen, fetchPermissions, fetchRole]);
+
+  useEffect(() => {
+    if (roleData) {
+      const permissionIds = roleData.permissions.map(p => p.id);
+      form.reset({
+        name: roleData.name,
+        description: roleData.description,
+        permissionIds,
+      });
+    }
+  }, [roleData, form]);
 
   const onSubmit = async (data: EditRoleFormData) => {
     try {
@@ -178,7 +179,7 @@ export function EditRoleModal({
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
-                control={form.control as any}
+                control={form.control}
                 name="name"
                 render={({ field }) => (
                   <FormItem>
@@ -192,7 +193,7 @@ export function EditRoleModal({
               />
 
               <FormField
-                control={form.control as any}
+                control={form.control}
                 name="description"
                 render={({ field }) => (
                   <FormItem>

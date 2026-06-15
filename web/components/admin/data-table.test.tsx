@@ -56,7 +56,7 @@ function UserTableExample() {
     <DataTable<User>
       columns={userColumns}
       data={sampleUsers}
-      rowActions={(user) => (
+      rowActions={() => (
         <div className="flex gap-2">
           <Button variant="outline" size="sm">
             Edit
@@ -115,7 +115,7 @@ function RoleTableExample() {
     <DataTable<Role>
       columns={roleColumns}
       data={sampleRoles}
-      rowActions={(role) => (
+      rowActions={() => (
         <div className="flex gap-2">
           <Button variant="outline" size="sm">
             Edit
@@ -179,7 +179,7 @@ function TenantTableExample() {
     <DataTable<Tenant>
       columns={tenantColumns}
       data={sampleTenants}
-      rowActions={(tenant) => (
+      rowActions={() => (
         <div className="flex gap-2">
           <Button variant="outline" size="sm">
             Edit

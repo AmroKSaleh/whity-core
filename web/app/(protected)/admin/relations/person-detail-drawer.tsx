@@ -79,7 +79,9 @@ export function PersonDetailDrawer({
 
   useEffect(() => {
     if (personId !== null) {
-      void loadRelations();
+      void (async () => {
+        await loadRelations();
+      })();
     }
   }, [personId, loadRelations]);
 

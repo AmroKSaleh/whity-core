@@ -53,7 +53,9 @@ export default function UsersPage() {
   }, [addToast]);
 
   useEffect(() => {
-    void fetchUsers();
+    void (async () => {
+      await fetchUsers();
+    })();
   }, [fetchUsers]);
 
   const handleEditClick = (user: User) => {

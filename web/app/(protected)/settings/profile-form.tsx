@@ -87,6 +87,8 @@ export function ProfileForm() {
   });
 
   // Keep the email field in sync once the auth context resolves /api/me.
+  // `form` is stable from react-hook-form, so listing it does not re-run the
+  // sync on every render — only a changed email triggers a reset.
   useEffect(() => {
     if (currentEmail) {
       form.reset({
@@ -96,9 +98,7 @@ export function ProfileForm() {
         confirmPassword: '',
       });
     }
-    // form is stable from react-hook-form; only re-sync when the email changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentEmail]);
+  }, [currentEmail, form]);
 
   const onSubmit = async (data: ProfileFormData) => {
     const emailChanged = data.email !== currentEmail;
@@ -184,7 +184,7 @@ export function ProfileForm() {
         </div>
 
         <FormField
-          control={form.control as never}
+          control={form.control}
           name="email"
           render={({ field }) => (
             <FormItem>
@@ -198,7 +198,7 @@ export function ProfileForm() {
         />
 
         <FormField
-          control={form.control as never}
+          control={form.control}
           name="newPassword"
           render={({ field }) => (
             <FormItem>
@@ -220,7 +220,7 @@ export function ProfileForm() {
         />
 
         <FormField
-          control={form.control as never}
+          control={form.control}
           name="confirmPassword"
           render={({ field }) => (
             <FormItem>
@@ -239,7 +239,7 @@ export function ProfileForm() {
         />
 
         <FormField
-          control={form.control as never}
+          control={form.control}
           name="currentPassword"
           render={({ field }) => (
             <FormItem>
