@@ -374,6 +374,53 @@ final class MigrationSchemaTest extends TestCase
         $this->assertMatchesRegularExpression('/expires_at\s+TIMESTAMP\s+NOT\s+NULL/i', $sql);
     }
 
+    /**
+     * WC-188: revoked_tokens lifecycle. The table grows once access-token jtis
+     * are recorded on logout/password-change (WC-185), so its hot paths must stay
+     * indexed and the cleanup cron must be able to prune cheaply. These
+     * assertions pin the schema so the supporting indexes and the UNIQUE jti
+     * constraint cannot silently regress:
+     *
+     *  - jti UNIQUE: the validation lookup key (and the ON CONFLICT target the
+     *    revoke writers de-duplicate on) is unique platform-wide;
+     *  - idx_revoked_tokens_jti: backs the per-request "is this jti revoked?"
+     *    lookup in TokenValidator;
+     *  - idx_revoked_tokens_expires_at: backs the daily cleanup cron's
+     *    `WHERE expires_at < CURRENT_TIMESTAMP` range delete.
+     */
+    public function testRevokedTokensTableHasLookupAndCleanupIndexes(): void
+    {
+        $sql = $this->readFile('011_create_revoked_tokens.php');
+
+        // jti is the platform-unique lookup key (also the ON CONFLICT de-dup target).
+        $this->assertMatchesRegularExpression(
+            '/jti\s+VARCHAR\(\d+\)\s+NOT\s+NULL\s+UNIQUE/i',
+            $sql,
+            'revoked_tokens.jti must be NOT NULL UNIQUE — it is the platform-unique revocation key.'
+        );
+
+        // Index backing the hot per-request revocation lookup.
+        $this->assertMatchesRegularExpression(
+            '/CREATE INDEX IF NOT EXISTS\s+idx_revoked_tokens_jti\s+ON\s+revoked_tokens\s*\(\s*jti\s*\)/i',
+            $sql,
+            'revoked_tokens must keep idx_revoked_tokens_jti for fast validation-time lookups.'
+        );
+
+        // Index backing the daily cleanup cron's expires_at range delete.
+        $this->assertMatchesRegularExpression(
+            '/CREATE INDEX IF NOT EXISTS\s+idx_revoked_tokens_expires_at\s+ON\s+revoked_tokens\s*\(\s*expires_at\s*\)/i',
+            $sql,
+            'revoked_tokens must keep idx_revoked_tokens_expires_at so the cleanup cron prunes cheaply.'
+        );
+
+        // Reversible: down() drops the table.
+        $this->assertMatchesRegularExpression(
+            '/DROP TABLE IF EXISTS\s+revoked_tokens/i',
+            $sql,
+            'revoked_tokens migration down() must drop the table.'
+        );
+    }
+
     public function testTwoFactorColumnsAndBackupCodesTableExist(): void
     {
         $sql = $this->readFile('007_add_two_factor_support.php');
