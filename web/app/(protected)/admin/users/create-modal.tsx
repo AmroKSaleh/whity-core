@@ -32,6 +32,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRoleOptions } from './use-role-options';
+import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicator';
 
 // Only the fields the API actually reads (UserCreateRequest): the server
 // derives `name` from the email local-part and always creates the user in the
@@ -142,6 +143,7 @@ export function CreateUserModal({
                       {...field}
                     />
                   </FormControl>
+                  <PasswordStrengthIndicator password={field.value} />
                   <FormMessage />
                 </FormItem>
               )}

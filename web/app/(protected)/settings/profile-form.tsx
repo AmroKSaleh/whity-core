@@ -17,6 +17,7 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicator';
 
 /**
  * Self-service profile editor (WC-64).
@@ -211,6 +212,7 @@ export function ProfileForm() {
                   {...field}
                 />
               </FormControl>
+              <PasswordStrengthIndicator password={field.value ?? ''} />
               <FormDescription>
                 Leave blank to keep your current password.
               </FormDescription>
