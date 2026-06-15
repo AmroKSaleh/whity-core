@@ -437,7 +437,7 @@ class MigrationsCommand
         );
 
         /** @var list<string> $names */
-        $names = array_unique(array_filter(array_map('trim', $matches[2] ?? [])));
+        $names = array_unique(array_filter(array_map('trim', $matches[2])));
         return array_values($names);
     }
 
