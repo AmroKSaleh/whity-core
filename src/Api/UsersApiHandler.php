@@ -193,7 +193,8 @@ class UsersApiHandler
             try {
                 PasswordPolicy::validate($body['password']);
             } catch (\InvalidArgumentException $e) {
-                return Response::error($e->getMessage(), 400);
+                $validationError = $e->getMessage();
+                return Response::error($validationError, 400);
             }
 
             if (!filter_var($body['email'], FILTER_VALIDATE_EMAIL)) {
@@ -358,7 +359,8 @@ class UsersApiHandler
                 try {
                     PasswordPolicy::validate($body['password']);
                 } catch (\InvalidArgumentException $e) {
-                    return Response::error($e->getMessage(), 400);
+                    $validationError = $e->getMessage();
+                    return Response::error($validationError, 400);
                 }
                 $updates[] = 'password = ?';
                 $params_array[] = password_hash($body['password'], PASSWORD_BCRYPT);
