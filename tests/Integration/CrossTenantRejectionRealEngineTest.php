@@ -10,8 +10,15 @@ use PHPUnit\Framework\TestCase;
 use Whity\Api\AuditLogApiHandler;
 use Whity\Api\OusApiHandler;
 use Whity\Api\RolesApiHandler;
+use Whity\Api\TwoFactorHandler;
 use Whity\Api\UsersApiHandler;
+use Whity\Auth\AuthHandler;
+use Whity\Auth\BackupCodesService;
+use Whity\Auth\DatabaseQueryWrapper;
+use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
+use Whity\Auth\TokenValidator;
+use Whity\Auth\TotpService;
 use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
@@ -59,7 +66,13 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     {
         RoleChecker::clearCache();
         TenantContext::reset();
+        // The 2FA-handler tests mint real access tokens into the cookie jar; clear
+        // them so they cannot leak into a later test (WC-191).
+        unset($_COOKIE['access_token']);
     }
+
+    /** Shared HS256 secret for the real JwtParser/TotpService in 2FA tests (WC-191). */
+    private const JWT_SECRET = 'cross-tenant-2fa-test-secret-padded-for-hs256-min-32-byte-key';
 
     // ==================== users ====================
 
@@ -155,6 +168,186 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             $this->pdo->query('SELECT email FROM users WHERE id = 20')->fetchColumn(),
             'The system-tenant user UPDATE must remain unscoped and land on the foreign row'
         );
+    }
+
+    // ==================== users: 2FA reads/writes (WC-191) ====================
+
+    /**
+     * WC-191: a 2FA WRITE (disable) executed in Tenant A's context must never
+     * touch a Tenant B user even when the caller's token points at that foreign
+     * id. The handler reads its own id from the token but scopes every users
+     * statement to the request tenant (TenantContext), so the disable UPDATE
+     * resolves to zero rows and Tenant B's 2FA state is byte-for-byte intact.
+     */
+    public function testTenantCannotDisable2faOnForeignUserAndRowIsUntouched(): void
+    {
+        // Token is internally valid for Tenant B user 20, but the REQUEST runs in
+        // Tenant A's context — simulating an attacker driving a foreign id through
+        // a Tenant A request. The users predicate, scoped to Tenant A, must reject.
+        $this->authCookieFor(20, self::TENANT_B);
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $response = $this->twoFactorHandler()->disable($this->req('POST', '/api/auth/2fa/disable'));
+
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT two_factor_enabled FROM users WHERE id = 20')->fetchColumn(),
+            "Tenant B's 2FA must remain ENABLED after a Tenant-A-scoped disable cannot reach the foreign row"
+        );
+    }
+
+    /**
+     * WC-191: a 2FA WRITE (regenerate-codes) in Tenant A's context must not bump
+     * a Tenant B user's backup-codes version. The guard SELECT is tenant-scoped
+     * (so it 404-equivalents), AND the version UPDATE carries the predicate too.
+     */
+    public function testTenantCannotRegenerate2faCodesForForeignUserAndVersionIsUntouched(): void
+    {
+        $this->authCookieFor(20, self::TENANT_B);
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $this->twoFactorHandler()->regenerateCodes($this->req('POST', '/api/auth/2fa/regenerate-codes'));
+
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT two_factor_backup_codes_version FROM users WHERE id = 20')->fetchColumn(),
+            "Tenant B's backup-codes version must be untouched by a Tenant-A-scoped regenerate"
+        );
+    }
+
+    /**
+     * WC-191: a 2FA READ (status) in Tenant A's context must not read a Tenant B
+     * user's row — it reports 2FA-not-enabled (the scoped SELECT finds no row),
+     * never leaking the foreign user's real enabled state.
+     */
+    public function testTenant2faStatusCannotReadForeignUser(): void
+    {
+        $this->authCookieFor(20, self::TENANT_B);
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $response = $this->twoFactorHandler()->status($this->req('GET', '/api/auth/2fa/status'));
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign-scoped 2FA status read must report not-found');
+    }
+
+    /**
+     * WC-191 (positive control): the legitimate same-tenant 2FA status read is
+     * unaffected — Tenant A reading its OWN user 10 returns the real enabled
+     * state. Also exercises the read path end-to-end on a real (string-fetching)
+     * engine.
+     */
+    public function testTenant2faStatusReadsOwnUser(): void
+    {
+        $this->authCookieFor(10, self::TENANT_A);
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $response = $this->twoFactorHandler()->status($this->req('GET', '/api/auth/2fa/status'));
+
+        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own 2FA status read must succeed");
+        $data = json_decode($response->getBody(), true);
+        $this->assertTrue($data['enabled'], "Tenant A's own user must report 2FA enabled");
+    }
+
+    /**
+     * WC-191 (positive control): the legitimate same-tenant 2FA write is
+     * unaffected — Tenant A disabling its OWN user 10's 2FA still lands.
+     */
+    public function testTenantCanDisable2faOnOwnUser(): void
+    {
+        $this->authCookieFor(10, self::TENANT_A);
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $response = $this->twoFactorHandler()->disable($this->req('POST', '/api/auth/2fa/disable'));
+
+        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own 2FA disable must succeed");
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT two_factor_enabled FROM users WHERE id = 10')->fetchColumn(),
+            "Tenant A's own 2FA must be disabled by the legitimate same-tenant write"
+        );
+    }
+
+    /**
+     * WC-191: the 2FA-LOGIN lookup (AuthHandler::handle2fa) re-fetches the user
+     * by the temp token's id; it must be scoped to the temp token's tenant_id so
+     * a temp token claiming Tenant A but pointing at a Tenant B user id can never
+     * read/complete login against the foreign row. The lookup finds nothing and
+     * Tenant B's row is left untouched.
+     */
+    public function testTwoFaLoginLookupCannotReachForeignTenantUser(): void
+    {
+        // Temp token: user_id 20 (Tenant B's user) but tenant_id 1 (Tenant A) —
+        // a forged/mismatched tenant claim. The scoped lookup must reject it.
+        $tempToken = (new JwtParser(self::JWT_SECRET))->create(
+            ['user_id' => 20, 'tenant_id' => self::TENANT_A, 'email' => 'b1@t2.example'],
+            300,
+            'temp'
+        );
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        try {
+            $response = $this->authHandler()->handle2fa(
+                $this->req('POST', '/api/login/2fa', ['code' => '000000'])
+            );
+
+            $this->assertSame(
+                401,
+                $response->getStatusCode(),
+                'A temp token whose tenant_id does not own the user id must not resolve a user'
+            );
+            // The scoped lookup finds NO row, so the handler returns 'User not
+            // found' BEFORE any 2FA verification. An unscoped lookup would instead
+            // resolve Tenant B's row and reach verification ('Invalid 2FA code'),
+            // so the specific message — not the bare 401 — is what proves the
+            // tenant predicate rejected the foreign id.
+            $this->assertStringContainsString(
+                'User not found',
+                $response->getBody(),
+                'The cross-tenant 2FA-login lookup must reject at the user lookup, not at 2FA verification'
+            );
+            $this->assertSame(
+                1,
+                (int) $this->pdo->query('SELECT two_factor_enabled FROM users WHERE id = 20')->fetchColumn(),
+                "Tenant B's row must be untouched by a cross-tenant 2FA-login lookup"
+            );
+        } finally {
+            unset($_COOKIE['temp_auth_token']);
+        }
+    }
+
+    /**
+     * WC-191 (positive control): a temp token that correctly owns its user (id 20
+     * in Tenant B) resolves the user — the cross-tenant scoping does not break the
+     * legitimate 2FA-login lookup. The code is wrong, so login fails at 2FA
+     * verification (401 'Invalid 2FA code'), proving the row WAS found and the
+     * second-factor check ran (distinct from the 'User not found' rejection).
+     */
+    public function testTwoFaLoginLookupResolvesOwnTenantUser(): void
+    {
+        $tempToken = (new JwtParser(self::JWT_SECRET))->create(
+            ['user_id' => 20, 'tenant_id' => self::TENANT_B, 'email' => 'b1@t2.example'],
+            300,
+            'temp'
+        );
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        try {
+            $response = $this->authHandler()->handle2fa(
+                $this->req('POST', '/api/login/2fa', ['code' => '000000'])
+            );
+
+            // The user WAS resolved (so we reach 2FA verification); the bogus code
+            // then fails verification — proving the lookup succeeded for the
+            // same-tenant temp token rather than being rejected as not-found.
+            $this->assertSame(401, $response->getStatusCode());
+            $this->assertStringContainsString(
+                'Invalid 2FA code',
+                $response->getBody(),
+                'A same-tenant temp token must resolve the user and reach 2FA verification'
+            );
+        } finally {
+            unset($_COOKIE['temp_auth_token']);
+        }
     }
 
     // ==================== roles ====================
@@ -486,6 +679,69 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         return new UsersApiHandler($this->pdo, $this->hooks());
     }
 
+    /**
+     * Real {@see TwoFactorHandler} wired to the in-memory engine with a real
+     * TokenValidator/TotpService/BackupCodesService (WC-191).
+     */
+    private function twoFactorHandler(): TwoFactorHandler
+    {
+        $jwtParser = new JwtParser(self::JWT_SECRET);
+
+        return new TwoFactorHandler(
+            $this->pdo,
+            new TotpService(self::JWT_SECRET),
+            new BackupCodesService($this->dbWrapper()),
+            new TokenValidator($jwtParser, $this->pdo)
+        );
+    }
+
+    /**
+     * Build the PDO->query adapter BackupCodesService expects. DatabaseQueryWrapper
+     * is declared inside AuthHandler.php (not its own PSR-4 file), so reference
+     * AuthHandler first to guarantee that file — and thus the wrapper class — is
+     * loaded regardless of test execution order.
+     */
+    private function dbWrapper(): DatabaseQueryWrapper
+    {
+        class_exists(AuthHandler::class);
+
+        return new DatabaseQueryWrapper($this->pdo);
+    }
+
+    /**
+     * Real {@see AuthHandler} wired to the in-memory engine for the 2FA-login
+     * lookup test (WC-191).
+     */
+    private function authHandler(): AuthHandler
+    {
+        $jwtParser = new JwtParser(self::JWT_SECRET);
+
+        return new AuthHandler($this->pdo, $jwtParser, new TokenValidator($jwtParser, $this->pdo));
+    }
+
+    /**
+     * Mint a real, internally-valid access token for the given (user, tenant)
+     * and drop it in the cookie jar so the real TokenValidator accepts it. The
+     * embedded epoch matches the seeded users.token_epoch (0), so the token is
+     * not rejected before reaching the 2FA handler's own tenant predicate.
+     */
+    private function authCookieFor(int $userId, int $tenantId): void
+    {
+        $token = (new JwtParser(self::JWT_SECRET))->create(
+            [
+                'user_id' => $userId,
+                'tenant_id' => $tenantId,
+                'email' => 'u@example',
+                'role' => 'admin',
+                'token_epoch' => 0,
+            ],
+            900,
+            'access'
+        );
+
+        $_COOKIE['access_token'] = $token;
+    }
+
     private function rolesHandler(): RolesApiHandler
     {
         return new RolesApiHandler($this->pdo, $this->hooks());
@@ -624,6 +880,10 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (21, 200, 2, datetime(\'now\'))
         ');
 
+        // The 2FA columns (two_factor_*) and token_epoch mirror the production
+        // users table after migrations 007 (two-factor support) and the WC-185
+        // epoch bump, so the REAL 2FA handlers and TokenValidator run unmodified
+        // here (WC-191).
         $pdo->exec('
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -632,16 +892,49 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 password TEXT NOT NULL,
                 role_id INTEGER,
                 ou_id INTEGER,
+                two_factor_secret TEXT,
+                two_factor_enabled BOOLEAN DEFAULT 0,
+                two_factor_backup_codes_version INTEGER DEFAULT 0,
+                token_epoch INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT
             )
         ');
+        // Tenant A user 10 and Tenant B user 20 both have 2FA ENABLED at version
+        // 1, so a cross-tenant 2FA read/write can be proven to leave the foreign
+        // row's 2FA state byte-for-byte intact (WC-191).
         $pdo->exec("
-            INSERT INTO users (id, tenant_id, email, password, role_id, created_at) VALUES
-                (10, 1, 'a1@t1.example', 'x', 1, datetime('now')),
-                (11, 1, 'a2@t1.example', 'x', 2, datetime('now')),
-                (20, 2, 'b1@t2.example', 'x', 1, datetime('now')),
-                (21, 2, 'b2@t2.example', 'x', 2, datetime('now'))
+            INSERT INTO users (id, tenant_id, email, password, role_id, two_factor_secret, two_factor_enabled, two_factor_backup_codes_version, created_at) VALUES
+                (10, 1, 'a1@t1.example', 'x', 1, 'a-secret', 1, 1, datetime('now')),
+                (11, 1, 'a2@t1.example', 'x', 2, NULL,       0, 0, datetime('now')),
+                (20, 2, 'b1@t2.example', 'x', 1, 'b-secret', 1, 1, datetime('now')),
+                (21, 2, 'b2@t2.example', 'x', 2, NULL,       0, 0, datetime('now'))
         ");
+
+        // Global (non-tenant-scoped) JWT revocation table; the real TokenValidator
+        // checks every access token against it, so it must exist for the 2FA
+        // handler tests that mint real tokens (WC-191).
+        $pdo->exec('
+            CREATE TABLE revoked_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                jti TEXT NOT NULL UNIQUE,
+                expires_at TEXT NOT NULL
+            )
+        ');
+
+        // backup_codes is keyed on user_id only (no tenant_id column — it inherits
+        // its tenant transitively from the owning user, FK ON DELETE CASCADE).
+        // Seeded so the real BackupCodesService runs during regenerate/disable.
+        $pdo->exec('
+            CREATE TABLE backup_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                used BOOLEAN NOT NULL DEFAULT 0,
+                used_at TEXT,
+                created_at TEXT
+            )
+        ');
 
         $pdo->exec('
             CREATE TABLE organizational_units (
