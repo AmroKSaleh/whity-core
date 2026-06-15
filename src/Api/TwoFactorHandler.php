@@ -11,6 +11,7 @@ use Whity\Auth\TotpService;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Tenant\TenantContext;
 use PDO;
 
 /**
@@ -63,6 +64,25 @@ class TwoFactorHandler
     }
 
     /**
+     * Resolve the tenant predicate for self-scoped 2FA user-row statements.
+     *
+     * The authenticated 2FA endpoints run behind EnforceTenantIsolation, so the
+     * request tenant is locked into {@see TenantContext}. A non-system tenant
+     * pins every users read/write to `(id, tenant_id)` so a row is never touched
+     * outside its tenant (defense-in-depth, even though these are keyed on the
+     * caller's own id). The SYSTEM tenant (id 0) — and an unresolved context —
+     * stay unscoped, matching the platform convention used across the admin
+     * handlers (WC-190).
+     *
+     * @return int|null The tenant id to scope on, or null for an unscoped lookup.
+     */
+    private function scopeTenantId(): ?int
+    {
+        $tenantId = TenantContext::getTenantId();
+        return ($tenantId === null || $tenantId === 0) ? null : $tenantId;
+    }
+
+    /**
      * Record a 2FA audit entry when an audit logger is configured.
      *
      * The 2FA routes run behind tenant isolation, so the tenant, actor and IP are
@@ -110,8 +130,15 @@ class TwoFactorHandler
             }
 
             // Get user email for QR code
-            $stmt = $this->db->prepare('SELECT email, two_factor_enabled FROM users WHERE id = ?');
-            $stmt->execute([$userId]);
+            // WC-191: pin the self read to the caller's tenant (system stays unscoped).
+            $tenantId = $this->scopeTenantId();
+            if ($tenantId === null) {
+                $stmt = $this->db->prepare('SELECT email, two_factor_enabled FROM users WHERE id = ?');
+                $stmt->execute([$userId]);
+            } else {
+                $stmt = $this->db->prepare('SELECT email, two_factor_enabled FROM users WHERE id = ? AND tenant_id = ?');
+                $stmt->execute([$userId, $tenantId]);
+            }
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user) {
@@ -183,12 +210,23 @@ class TwoFactorHandler
             $encryptedSecret = $this->totpService->encryptSecret($secret);
 
             // Update user: set 2FA enabled and store encrypted secret
-            $stmt = $this->db->prepare('
-                UPDATE users
-                SET two_factor_secret = ?, two_factor_enabled = true, two_factor_backup_codes_version = 1
-                WHERE id = ?
-            ');
-            $stmt->execute([$encryptedSecret, $userId]);
+            // WC-191: pin the self write to the caller's tenant (system stays unscoped).
+            $tenantId = $this->scopeTenantId();
+            if ($tenantId === null) {
+                $stmt = $this->db->prepare('
+                    UPDATE users
+                    SET two_factor_secret = ?, two_factor_enabled = true, two_factor_backup_codes_version = 1
+                    WHERE id = ?
+                ');
+                $stmt->execute([$encryptedSecret, $userId]);
+            } else {
+                $stmt = $this->db->prepare('
+                    UPDATE users
+                    SET two_factor_secret = ?, two_factor_enabled = true, two_factor_backup_codes_version = 1
+                    WHERE id = ? AND tenant_id = ?
+                ');
+                $stmt->execute([$encryptedSecret, $userId, $tenantId]);
+            }
 
             // Generate 15 backup codes
             $codes = $this->backupCodesService->generateCodes(15);
@@ -237,27 +275,55 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
+            // WC-191: pin the self read/write to the caller's tenant (system stays unscoped).
+            $tenantId = $this->scopeTenantId();
+
             // Get current version before disabling
-            $stmt = $this->db->prepare('
-                SELECT two_factor_backup_codes_version
-                FROM users
-                WHERE id = ?
-            ');
-            $stmt->execute([$userId]);
+            if ($tenantId === null) {
+                $stmt = $this->db->prepare('
+                    SELECT two_factor_backup_codes_version
+                    FROM users
+                    WHERE id = ?
+                ');
+                $stmt->execute([$userId]);
+            } else {
+                $stmt = $this->db->prepare('
+                    SELECT two_factor_backup_codes_version
+                    FROM users
+                    WHERE id = ? AND tenant_id = ?
+                ');
+                $stmt->execute([$userId, $tenantId]);
+            }
             $user = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-            if ($user && $user['two_factor_backup_codes_version'] > 0) {
-                // Invalidate all backup codes for this version
-                $this->backupCodesService->invalidateOldCodes($userId, $user['two_factor_backup_codes_version']);
+            if ($user && (int) $user['two_factor_backup_codes_version'] > 0) {
+                // Invalidate all backup codes for this version. Cast both args to
+                // int: under PostgreSQL (and the RealEngine SQLite harness with
+                // STRINGIFY_FETCHES) the version and the token-derived id come
+                // back as strings, but BackupCodesService is strictly int-typed.
+                $this->backupCodesService->invalidateOldCodes(
+                    (int) $userId,
+                    (int) $user['two_factor_backup_codes_version']
+                );
             }
 
             // Disable 2FA
-            $updateStmt = $this->db->prepare('
-                UPDATE users
-                SET two_factor_enabled = false
-                WHERE id = ?
-            ');
-            $updateStmt->execute([$userId]);
+            // WC-191: pin the self write to the caller's tenant (system stays unscoped).
+            if ($tenantId === null) {
+                $updateStmt = $this->db->prepare('
+                    UPDATE users
+                    SET two_factor_enabled = false
+                    WHERE id = ?
+                ');
+                $updateStmt->execute([$userId]);
+            } else {
+                $updateStmt = $this->db->prepare('
+                    UPDATE users
+                    SET two_factor_enabled = false
+                    WHERE id = ? AND tenant_id = ?
+                ');
+                $updateStmt->execute([$userId, $tenantId]);
+            }
 
             $this->audit('auth.2fa.disabled', (int) $userId);
 
@@ -293,13 +359,25 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
+            // WC-191: pin the self read/write to the caller's tenant (system stays unscoped).
+            $tenantId = $this->scopeTenantId();
+
             // Get user and check if 2FA is enabled
-            $stmt = $this->db->prepare('
-                SELECT two_factor_enabled, two_factor_backup_codes_version
-                FROM users
-                WHERE id = ?
-            ');
-            $stmt->execute([$userId]);
+            if ($tenantId === null) {
+                $stmt = $this->db->prepare('
+                    SELECT two_factor_enabled, two_factor_backup_codes_version
+                    FROM users
+                    WHERE id = ?
+                ');
+                $stmt->execute([$userId]);
+            } else {
+                $stmt = $this->db->prepare('
+                    SELECT two_factor_enabled, two_factor_backup_codes_version
+                    FROM users
+                    WHERE id = ? AND tenant_id = ?
+                ');
+                $stmt->execute([$userId, $tenantId]);
+            }
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user) {
@@ -314,16 +392,27 @@ class TwoFactorHandler
             $oldVersion = (int) $user['two_factor_backup_codes_version'];
             $newVersion = $oldVersion + 1;
 
-            // Invalidate old codes
-            $this->backupCodesService->invalidateOldCodes($userId, $oldVersion);
+            // Invalidate old codes. Cast the id: it originates from the token
+            // claim and may be a string, but BackupCodesService is strictly typed.
+            $this->backupCodesService->invalidateOldCodes((int) $userId, $oldVersion);
 
             // Increment version in users table
-            $updateStmt = $this->db->prepare('
-                UPDATE users
-                SET two_factor_backup_codes_version = ?
-                WHERE id = ?
-            ');
-            $updateStmt->execute([$newVersion, $userId]);
+            // WC-191: pin the self write to the caller's tenant (system stays unscoped).
+            if ($tenantId === null) {
+                $updateStmt = $this->db->prepare('
+                    UPDATE users
+                    SET two_factor_backup_codes_version = ?
+                    WHERE id = ?
+                ');
+                $updateStmt->execute([$newVersion, $userId]);
+            } else {
+                $updateStmt = $this->db->prepare('
+                    UPDATE users
+                    SET two_factor_backup_codes_version = ?
+                    WHERE id = ? AND tenant_id = ?
+                ');
+                $updateStmt->execute([$newVersion, $userId, $tenantId]);
+            }
 
             // Generate 15 new codes
             $codes = $this->backupCodesService->generateCodes(15);
@@ -371,21 +460,37 @@ class TwoFactorHandler
             }
 
             // Get user's 2FA status and backup codes version
-            $stmt = $this->db->prepare('
-                SELECT two_factor_enabled, two_factor_backup_codes_version
-                FROM users
-                WHERE id = ?
-            ');
-            $stmt->execute([$userId]);
+            // WC-191: pin the self read to the caller's tenant (system stays unscoped).
+            $tenantId = $this->scopeTenantId();
+            if ($tenantId === null) {
+                $stmt = $this->db->prepare('
+                    SELECT two_factor_enabled, two_factor_backup_codes_version
+                    FROM users
+                    WHERE id = ?
+                ');
+                $stmt->execute([$userId]);
+            } else {
+                $stmt = $this->db->prepare('
+                    SELECT two_factor_enabled, two_factor_backup_codes_version
+                    FROM users
+                    WHERE id = ? AND tenant_id = ?
+                ');
+                $stmt->execute([$userId, $tenantId]);
+            }
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user) {
                 return Response::error('User not found', 404);
             }
 
-            // Get available backup code count for current version only
-            $codeCount = $user['two_factor_backup_codes_version'] > 0
-                ? $this->backupCodesService->getAvailableCodeCount($userId, $user['two_factor_backup_codes_version'])
+            // Get available backup code count for current version only. Cast both
+            // args to int: under a real engine the id (from the token) and the
+            // version come back as strings, but BackupCodesService is int-typed.
+            $codeCount = (int) $user['two_factor_backup_codes_version'] > 0
+                ? $this->backupCodesService->getAvailableCodeCount(
+                    (int) $userId,
+                    (int) $user['two_factor_backup_codes_version']
+                )
                 : 0;
 
             return Response::json([

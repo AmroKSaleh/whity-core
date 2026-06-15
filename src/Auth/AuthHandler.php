@@ -799,6 +799,9 @@ class AuthHandler
             return Response::error('Invalid temporary token', 401);
         }
 
+        // WC-191: tenant claim from the temp token scopes the second-factor re-fetch.
+        $tenantId = $claims['tenant_id'] ?? null;
+
         // Parse request body to get 2FA code (envelope validated upstream, WC-189).
         $body = JsonBody::parsed($request);
 
@@ -809,12 +812,25 @@ class AuthHandler
         $code = $body['code'];
 
         // Fetch user's 2FA secret and backup codes version
-        $stmt = $this->db->prepare('
-            SELECT id, email, role_id, tenant_id, two_factor_secret, two_factor_backup_codes_version
-            FROM users
-            WHERE id = ?
-        ');
-        $stmt->execute([$userId]);
+        // WC-191: scope the 2FA-login user lookup to the temp token's tenant so the
+        // second-factor re-fetch can never touch a same-id user in another tenant.
+        // The SYSTEM tenant (id 0) — and a token missing the claim — stay unscoped,
+        // matching the platform convention.
+        if ($tenantId === null || (int) $tenantId === 0) {
+            $stmt = $this->db->prepare('
+                SELECT id, email, role_id, tenant_id, two_factor_secret, two_factor_backup_codes_version
+                FROM users
+                WHERE id = ?
+            ');
+            $stmt->execute([$userId]);
+        } else {
+            $stmt = $this->db->prepare('
+                SELECT id, email, role_id, tenant_id, two_factor_secret, two_factor_backup_codes_version
+                FROM users
+                WHERE id = ? AND tenant_id = ?
+            ');
+            $stmt->execute([$userId, (int) $tenantId]);
+        }
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$user) {
