@@ -307,6 +307,33 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
         $this->assertSame(404, $response->getStatusCode());
     }
 
+    public function testUserRelationsResponseContainsOtherPersonHasAccount(): void
+    {
+        // Arrange: two users with a relation between their shadows.
+        $userId1 = RelationsSchema::seedUser($this->pdo, 1, 'alice@example.com');
+        $userId2 = RelationsSchema::seedUser($this->pdo, 1, 'bob@example.com');
+        // Provision shadows via the write path.
+        $shadow1 = $this->personRepo->insert(1, 'Alice', $userId1);
+        $shadow2 = $this->personRepo->insert(1, 'Bob', $userId2);
+        $this->relationRepo->insert(1, $shadow1, $shadow2, RelationsSchema::TYPE_PARENT);
+
+        $response = $this->relations->userRelations(
+            new Request('GET', "/api/users/{$userId1}/relations"),
+            ['id' => (string) $userId1]
+        );
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame($shadow1, $data['personId']);
+        $this->assertCount(1, $data['relations']);
+        $rel = $data['relations'][0];
+        // Field shape must match PersonsApiHandler.toPublicRelation() contract.
+        $this->assertArrayHasKey('otherPersonHasAccount', $rel);
+        $this->assertArrayNotHasKey('otherPersonUserId', $rel);
+        $this->assertTrue($rel['otherPersonHasAccount']); // Bob has a user account
+        $this->assertSame($shadow2, $rel['otherPersonId']);
+        $this->assertSame('Bob', $rel['otherPersonName']);
+    }
+
     // ==================== relationship-types ====================
 
     public function testListTypesReturnsSeededVocabulary(): void
