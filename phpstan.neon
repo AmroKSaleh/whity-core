@@ -1,5 +1,8 @@
+includes:
+    - phpstan-baseline.neon
+
 parameters:
-    level: 0
+    level: 8
     # Plugins are loaded at runtime by Whity\Core\PluginLoader's dynamic PSR-4
     # autoloader (directory name => namespace prefix), not by Composer. Tell
     # PHPStan where those symbols live so it can resolve plugin classes
