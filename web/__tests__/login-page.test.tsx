@@ -173,7 +173,7 @@ describe('LoginPage - 2FA Flow', () => {
     // Wait for API call
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/login/2fa'),
+        expect.stringContaining('/api/v1/login/2fa'),
         expect.objectContaining({
           method: 'POST',
           body: expect.stringContaining('123456'),
