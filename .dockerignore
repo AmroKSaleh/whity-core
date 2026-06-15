@@ -26,10 +26,9 @@ load-tests
 node_modules
 
 # vendor/ is produced INSIDE the release stage (composer install --no-dev).
-# composer.lock is gitignored, so CI release builds resolve fresh from
-# composer.json — exclude any local lock file for parity.
+# composer.lock is committed to git and intentionally included in the build
+# context so the release stage can pin exact dependency versions.
 vendor
-composer.lock
 
 # Real plugins are deploy-time content (docs/wiki/Plugin-Distribution.md) and
 # must NEVER enter the core image — only the committed reference plugins ship.
