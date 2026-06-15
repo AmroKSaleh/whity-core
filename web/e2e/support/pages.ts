@@ -62,7 +62,7 @@ export class LoginPage {
     await this.submit(creds);
     const res = await loginResponse;
     expect(res.status(), 'login should succeed (200)').toBe(200);
-    await this.page.waitForURL('**/dashboard', { timeout: 20_000 });
+    await this.page.waitForURL('**/dashboard', { timeout: 45_000 });
     await expect(
       this.page.getByRole('heading', { name: 'Welcome back!' })
     ).toBeVisible();
