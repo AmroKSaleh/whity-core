@@ -14,7 +14,7 @@ use Whity\Sdk\Http\Response;
  * A single pipeline middleware that validates the request-body ENVELOPE
  * UNIFORMLY for the body-carrying, state-changing methods (POST/PUT/PATCH/DELETE)
  * so each auth + CRUD handler no longer re-implements ad-hoc
- * `json_decode($body, true)` + null/shape checks. Three rules, all collapsing to
+ * `json_decode($body, true)` + null/shape checks. Two rules, both collapsing to
  * a single GENERIC 400 that never leaks parser/exception detail (consistent with
  * the WC-186 no-leakage rule):
  *
@@ -24,15 +24,17 @@ use Whity\Sdk\Http\Response;
  *     surface never legitimately receives a megabyte-scale body, so the cap is a
  *     cheap DoS / accidental-upload guard applied before any decode allocates.
  *
- *  2. Type  — a NON-EMPTY body must declare `Content-Type: application/json`
- *     (an optional `; charset=...`/parameter suffix is allowed). This rejects
- *     form-encoded, multipart and mislabeled payloads up front so the JSON
- *     handlers below never have to defend against them.
- *
- *  3. Shape — a non-empty body must be WELL-FORMED JSON and a JSON OBJECT
+ *  2. Shape — a non-empty body must be WELL-FORMED JSON and a JSON OBJECT
  *     (`{...}`). Malformed JSON, a top-level array, or a bare scalar/null are all
  *     refused. Crucially the raw `json_last_error` text is NEVER returned; the
  *     client only ever sees the generic message.
+ *
+ * The `Content-Type` header is INTENTIONALLY NOT enforced. CSRF protection is
+ * handled separately via the `X-Requested-With: XMLHttpRequest` requirement
+ * (WC-160), and the platform's own API clients send JSON bodies without always
+ * setting `Content-Type: application/json` (a string `fetch` body defaults to
+ * `text/plain`). Requiring the header here rejected legitimate same-origin CRUD
+ * writes, so the contract is the body SHAPE/SIZE — not its declared media type.
  *
  * On success the decoded associative array is stashed on the request under
  * {@see JsonBody::ATTR_PARSED_BODY} so downstream handlers read it via
@@ -94,7 +96,7 @@ final class RequestBodyValidator
         $body = $request->getBody();
 
         // An empty body is always legitimate (e.g. a no-op PATCH/DELETE). It is
-        // not subjected to content-type or shape checks; the handler sees [].
+        // not subjected to a shape check; the handler sees [].
         if (trim($body) === '') {
             $request->setAttribute(JsonBody::ATTR_PARSED_BODY, []);
             return $next($request);
@@ -106,12 +108,11 @@ final class RequestBodyValidator
             return $this->reject();
         }
 
-        // 2. Type — require a JSON content type for any non-empty body.
-        if (!$this->isJsonContentType($request->getHeader('Content-Type'))) {
-            return $this->reject();
-        }
+        // Content-Type is deliberately NOT inspected — see the class docblock.
+        // CSRF is enforced via X-Requested-With (WC-160) and the platform's API
+        // clients post JSON bodies without always labeling them application/json.
 
-        // 3. Shape — well-formed JSON object only. json_decode never throws here;
+        // 2. Shape — well-formed JSON object only. json_decode never throws here;
         //    a null result with a non-"null" body signals a parse error, which we
         //    collapse into the generic rejection WITHOUT exposing json_last_error.
         //    A NON-EMPTY top-level list (`[1,2,3]`) and bare scalars/null are
@@ -127,28 +128,6 @@ final class RequestBodyValidator
         $request->setAttribute(JsonBody::ATTR_PARSED_BODY, $decoded);
 
         return $next($request);
-    }
-
-    /**
-     * Whether a Content-Type header declares `application/json`.
-     *
-     * Accepts an optional parameter suffix (e.g. `; charset=utf-8`) and is
-     * case-insensitive, matching how browsers and HTTP clients emit the header.
-     *
-     * @param string|null $contentType The raw Content-Type header value.
-     * @return bool True when the media type is application/json.
-     */
-    private function isJsonContentType(?string $contentType): bool
-    {
-        if ($contentType === null) {
-            return false;
-        }
-
-        // Strip any `; charset=...` / parameter suffix, then compare the bare
-        // media type case-insensitively.
-        $mediaType = strtolower(trim(explode(';', $contentType, 2)[0]));
-
-        return $mediaType === 'application/json';
     }
 
     /**

@@ -14,11 +14,14 @@ use Whity\Http\Middleware\RequestBodyValidator;
  * WC-189 centralized request-body validation layer.
  *
  * A single pipeline middleware enforces the request-body ENVELOPE uniformly for
- * body-carrying methods (POST/PUT/PATCH): a sane size cap, an
- * `application/json` content type, and well-formed JSON OBJECT shape. Every
- * rejection collapses to a GENERIC 400 that never leaks parser/exception text,
- * mirroring the WC-186 no-leakage rule. Valid envelopes are stashed for the
- * handler (no re-decode) and the request proceeds untouched.
+ * body-carrying methods (POST/PUT/PATCH): a sane size cap and well-formed JSON
+ * OBJECT shape. The `Content-Type` header is INTENTIONALLY NOT enforced — CSRF
+ * is handled via `X-Requested-With` (WC-160) and the platform's API clients post
+ * JSON bodies without always labeling them `application/json`, so the contract is
+ * the body shape/size, not its declared media type. Every rejection collapses to
+ * a GENERIC 400 that never leaks parser/exception text, mirroring the WC-186
+ * no-leakage rule. Valid envelopes are stashed for the handler (no re-decode) and
+ * the request proceeds untouched.
  */
 class RequestBodyValidatorTest extends TestCase
 {
@@ -92,33 +95,50 @@ class RequestBodyValidatorTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
     }
 
-    // ---- content type ----------------------------------------------------
+    // ---- content type (intentionally NOT enforced) -----------------------
 
-    public function testNonJsonContentTypeRejectedWith400(): void
+    /**
+     * Regression guard (WC-189 e2e fix): a well-formed JSON OBJECT body must be
+     * ACCEPTED even when the request carries a NON-json content type. The
+     * platform's API clients (web/lib/api/client.ts, web/lib/api-client.ts) send
+     * a string `fetch` body — which defaults to `text/plain;charset=UTF-8` — and
+     * rely on `X-Requested-With` (WC-160), not Content-Type, for CSRF defense.
+     * Rejecting on the header here broke OU/role CRUD writes; it must not return.
+     */
+    public function testAcceptsJsonObjectBodyWithoutApplicationJsonContentType(): void
     {
         $request = new Request(
             'POST',
-            '/api/users',
-            ['Content-Type' => 'text/plain'],
-            'email=a@b.c&password=secret'
+            '/api/ous',
+            ['Content-Type' => 'text/plain;charset=UTF-8', 'X-Requested-With' => 'XMLHttpRequest'],
+            '{"name":"Engineering"}'
         );
 
         $reached = false;
-        $response = $this->validator->handle($request, $this->nextHandler($reached));
+        $seen = null;
+        $response = $this->validator->handle($request, $this->nextHandler($reached, $seen));
 
-        $this->assertFalse($reached, 'Non-JSON content type must not reach the handler');
-        $this->assertGenericRejection($response);
+        $this->assertTrue($reached, 'A JSON object body must pass regardless of Content-Type');
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertInstanceOf(Request::class, $seen);
+        // The body is still decoded and stashed for the handler.
+        $this->assertSame(['name' => 'Engineering'], JsonBody::parsed($seen));
     }
 
-    public function testMissingContentTypeOnNonEmptyBodyRejected(): void
+    public function testAcceptsJsonObjectBodyWithMissingContentType(): void
     {
+        // No Content-Type header at all: still accepted as long as the body is a
+        // well-formed JSON object. (Content-Type is not part of the contract.)
         $request = new Request('POST', '/api/users', [], '{"email":"a@b.c"}');
 
         $reached = false;
-        $response = $this->validator->handle($request, $this->nextHandler($reached));
+        $seen = null;
+        $response = $this->validator->handle($request, $this->nextHandler($reached, $seen));
 
-        $this->assertFalse($reached);
-        $this->assertGenericRejection($response);
+        $this->assertTrue($reached);
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertInstanceOf(Request::class, $seen);
+        $this->assertSame(['email' => 'a@b.c'], JsonBody::parsed($seen));
     }
 
     public function testJsonContentTypeWithCharsetParamAccepted(): void
@@ -135,6 +155,24 @@ class RequestBodyValidatorTest extends TestCase
 
         $this->assertTrue($reached);
         $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function testNonJsonContentTypeWithMalformedBodyStillRejected(): void
+    {
+        // The shape check still applies regardless of Content-Type: a non-json
+        // content type does NOT exempt a malformed/non-object body from rejection.
+        $request = new Request(
+            'POST',
+            '/api/users',
+            ['Content-Type' => 'text/plain'],
+            'email=a@b.c&password=secret'
+        );
+
+        $reached = false;
+        $response = $this->validator->handle($request, $this->nextHandler($reached));
+
+        $this->assertFalse($reached, 'A non-object body must still be rejected on shape');
+        $this->assertGenericRejection($response);
     }
 
     // ---- shape -----------------------------------------------------------
