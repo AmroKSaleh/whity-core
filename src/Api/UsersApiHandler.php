@@ -118,7 +118,12 @@ class UsersApiHandler
 
             return Response::json(['data' => $users], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch users: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch users', [
+                'event' => 'users.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch users', 500);
         }
     }
 
@@ -264,7 +269,12 @@ class UsersApiHandler
 
             return Response::json(['data' => $this->fetchPublicUser($userId)], 201);
         } catch (\Exception $e) {
-            return Response::error('Failed to create user: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to create user', [
+                'event' => 'users.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to create user', 500);
         }
     }
 
@@ -437,7 +447,12 @@ class UsersApiHandler
 
             return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to update user: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to update user', [
+                'event' => 'users.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to update user', 500);
         }
     }
 
@@ -579,7 +594,12 @@ class UsersApiHandler
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'User deleted']], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to delete user: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to delete user', [
+                'event' => 'users.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to delete user', 500);
         }
     }
 }

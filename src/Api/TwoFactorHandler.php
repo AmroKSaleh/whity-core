@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Api;
 
 use Whity\Core\Request;
@@ -131,7 +133,8 @@ class TwoFactorHandler
                 'qrCodeUrl' => $qrCodeUrl
             ], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to setup 2FA: ' . $e->getMessage(), 500);
+            error_log('[TwoFactorHandler] setup failed: ' . $e->getMessage());
+            return Response::error('Failed to setup 2FA', 500);
         }
     }
 
@@ -206,7 +209,8 @@ class TwoFactorHandler
                 'message' => 'Two-factor authentication enabled successfully'
             ], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to confirm 2FA: ' . $e->getMessage(), 500);
+            error_log('[TwoFactorHandler] confirm failed: ' . $e->getMessage());
+            return Response::error('Failed to confirm 2FA', 500);
         }
     }
 
@@ -260,7 +264,8 @@ class TwoFactorHandler
                 'message' => 'Two-factor authentication disabled'
             ], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to disable 2FA: ' . $e->getMessage(), 500);
+            error_log('[TwoFactorHandler] disable failed: ' . $e->getMessage());
+            return Response::error('Failed to disable 2FA', 500);
         }
     }
 
@@ -337,7 +342,8 @@ class TwoFactorHandler
                 'message' => 'Backup codes regenerated successfully'
             ], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to regenerate backup codes: ' . $e->getMessage(), 500);
+            error_log('[TwoFactorHandler] regenerateBackupCodes failed: ' . $e->getMessage());
+            return Response::error('Failed to regenerate backup codes', 500);
         }
     }
 
@@ -386,7 +392,8 @@ class TwoFactorHandler
                 'backup_codes_available' => $codeCount
             ], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to get 2FA status: ' . $e->getMessage(), 500);
+            error_log('[TwoFactorHandler] status failed: ' . $e->getMessage());
+            return Response::error('Failed to get 2FA status', 500);
         }
     }
 }

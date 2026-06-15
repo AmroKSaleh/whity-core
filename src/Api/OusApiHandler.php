@@ -67,7 +67,8 @@ class OusApiHandler
 
             return Response::json(['data' => $ous], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch organizational units: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch organizational units', 500);
         }
     }
 
@@ -169,7 +170,8 @@ class OusApiHandler
                 ]
             ], 201);
         } catch (\Exception $e) {
-            return Response::error('Failed to create organizational unit: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] create failed: ' . $e->getMessage());
+            return Response::error('Failed to create organizational unit', 500);
         }
     }
 
@@ -211,7 +213,8 @@ class OusApiHandler
 
             return Response::json(['data' => $ou], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch organizational unit: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] get failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch organizational unit', 500);
         }
     }
 
@@ -332,7 +335,8 @@ class OusApiHandler
             ));
             return Response::error('Setting this parent would create a cycle in the hierarchy', 422);
         } catch (\Exception $e) {
-            return Response::error('Failed to update organizational unit: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] update failed: ' . $e->getMessage());
+            return Response::error('Failed to update organizational unit', 500);
         }
     }
 
@@ -405,7 +409,8 @@ class OusApiHandler
 
             return Response::json([], 204);
         } catch (\Exception $e) {
-            return Response::error('Failed to delete organizational unit: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] delete failed: ' . $e->getMessage());
+            return Response::error('Failed to delete organizational unit', 500);
         }
     }
 
@@ -497,7 +502,8 @@ class OusApiHandler
                 throw $e;
             }
         } catch (\Exception $e) {
-            return Response::error('Failed to assign role: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] assignRole failed: ' . $e->getMessage());
+            return Response::error('Failed to assign role', 500);
         }
     }
 
@@ -547,7 +553,8 @@ class OusApiHandler
 
             return Response::json([], 204);
         } catch (\Exception $e) {
-            return Response::error('Failed to remove role: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] removeRole failed: ' . $e->getMessage());
+            return Response::error('Failed to remove role', 500);
         }
     }
 
@@ -599,7 +606,8 @@ class OusApiHandler
 
             return Response::json(['data' => $data], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch organizational unit roles: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] listRoles failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch organizational unit roles', 500);
         }
     }
 
@@ -640,7 +648,8 @@ class OusApiHandler
 
             return Response::json(['data' => $data], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch organizational unit members: ' . $e->getMessage(), 500);
+            error_log('[OusApiHandler] listMembers failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch organizational unit members', 500);
         }
     }
 

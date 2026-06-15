@@ -42,7 +42,8 @@ class DeploymentApiHandler
 
             return Response::json(['message' => 'Deployment applied successfully'], 201);
         } catch (\Exception $e) {
-            return Response::error('Deployment failed: ' . $e->getMessage(), 500);
+            error_log('[DeploymentApiHandler] deploy failed: ' . $e->getMessage());
+            return Response::error('Deployment failed', 500);
         }
     }
 
@@ -61,7 +62,8 @@ class DeploymentApiHandler
 
             return Response::json(['message' => 'Rollback successful'], 200);
         } catch (\Exception $e) {
-            return Response::error('Rollback failed: ' . $e->getMessage(), 500);
+            error_log('[DeploymentApiHandler] rollback failed: ' . $e->getMessage());
+            return Response::error('Rollback failed', 500);
         }
     }
 
@@ -80,7 +82,8 @@ class DeploymentApiHandler
 
             return Response::json(['data' => $status], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch status: ' . $e->getMessage(), 500);
+            error_log('[DeploymentApiHandler] status failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch status', 500);
         }
     }
 
@@ -105,7 +108,8 @@ class DeploymentApiHandler
 
             return Response::json(['message' => 'Migration rollback recorded'], 200);
         } catch (\Exception $e) {
-            return Response::error('Migration rollback failed: ' . $e->getMessage(), 500);
+            error_log('[DeploymentApiHandler] rollbackMigration failed: ' . $e->getMessage());
+            return Response::error('Migration rollback failed', 500);
         }
     }
 }

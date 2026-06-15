@@ -143,7 +143,12 @@ class RolesApiHandler
 
             return Response::json(['data' => $roles], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch roles: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch roles', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch roles', 500);
         }
     }
 
@@ -187,7 +192,12 @@ class RolesApiHandler
 
             return Response::json(['data' => $role], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch role: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch role', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch role', 500);
         }
     }
 
@@ -291,7 +301,12 @@ class RolesApiHandler
                 ],
             ], 201);
         } catch (\Exception $e) {
-            return Response::error('Failed to create role: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to create role', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to create role', 500);
         }
     }
 
@@ -399,7 +414,12 @@ class RolesApiHandler
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role updated']], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to update role: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to update role', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to update role', 500);
         }
     }
 
@@ -478,7 +498,12 @@ class RolesApiHandler
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role deleted']], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to delete role: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to delete role', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to delete role', 500);
         }
     }
 
@@ -505,7 +530,12 @@ class RolesApiHandler
 
             return Response::json(['data' => $this->fetchRolePermissions((int)$id)], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch role permissions: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch role permissions', [
+                'event' => 'roles.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch role permissions', 500);
         }
     }
 

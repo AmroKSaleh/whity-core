@@ -96,7 +96,12 @@ class DelegationsApiHandler
 
             return Response::json(['data' => array_map([$this, 'toPublic'], $rows)], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to fetch delegations: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to fetch delegations', [
+                'event' => 'delegations.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch delegations', 500);
         }
     }
 
@@ -205,7 +210,12 @@ class DelegationsApiHandler
                 422
             );
         } catch (\Exception $e) {
-            return Response::error('Failed to create delegation: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to create delegation', [
+                'event' => 'delegations.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to create delegation', 500);
         }
     }
 
@@ -246,7 +256,12 @@ class DelegationsApiHandler
 
             return Response::json(['data' => ['id' => (int) $id, 'message' => 'Delegation revoked']], 200);
         } catch (\Exception $e) {
-            return Response::error('Failed to revoke delegation: ' . $e->getMessage(), 500);
+            $this->log('error', 'Failed to revoke delegation', [
+                'event' => 'delegations.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to revoke delegation', 500);
         }
     }
 
