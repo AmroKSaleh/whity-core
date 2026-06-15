@@ -20,4 +20,11 @@ export interface OuViewProps {
   onSelect: (id: number) => void;
   /** Emitted when a node's action menu item is chosen. */
   onAction: (action: OuAction, node: OuNode) => void;
+  /**
+   * Capability gates (WC-204). All default to `false` when omitted so renderers
+   * are fail-closed until the page resolves capabilities.
+   */
+  canCreate?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }

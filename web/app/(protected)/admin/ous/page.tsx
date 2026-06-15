@@ -5,6 +5,8 @@ import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { OUS_WRITE, OUS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -32,6 +34,11 @@ const VIEW_STORAGE_KEY = 'wc:ous:view';
 export default function OUsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const { hasPermission } = useCapabilities();
+  const canCreate = hasPermission(OUS_WRITE);
+  const canEdit = hasPermission(OUS_WRITE);
+  const canDelete = hasPermission(OUS_DELETE);
+
   // Lazily restore the persisted view choice. The initializer runs on the
   // client (this is a 'use client' route); the typeof guard keeps it safe under
   // SSR pre-render, where window is undefined.
@@ -138,10 +145,12 @@ export default function OUsPage() {
         title="Organizational Units"
         description="Visualize and manage your organizational hierarchy, role assignments, and members."
         action={
-          <Button onClick={openCreateRoot} className="gap-2">
-            <IconPlus />
-            Create OU
-          </Button>
+          canCreate ? (
+            <Button onClick={openCreateRoot} className="gap-2">
+              <IconPlus />
+              Create OU
+            </Button>
+          ) : undefined
         }
       />
 
@@ -157,10 +166,12 @@ export default function OUsPage() {
           <p className="mt-1 text-xs text-muted-foreground">
             Create an organizational unit to structure your organization.
           </p>
-          <Button onClick={openCreateRoot} variant="outline" className="mt-4 gap-2">
-            <IconPlus />
-            Create the first OU
-          </Button>
+          {canCreate && (
+            <Button onClick={openCreateRoot} variant="outline" className="mt-4 gap-2">
+              <IconPlus />
+              Create the first OU
+            </Button>
+          )}
         </div>
       ) : view === 'tree' ? (
         <OuTree
@@ -168,6 +179,9 @@ export default function OUsPage() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           onAction={(action, node) => handleAction(action, node)}
+          canCreate={canCreate}
+          canEdit={canEdit}
+          canDelete={canDelete}
         />
       ) : (
         <OuGraph
@@ -175,6 +189,9 @@ export default function OUsPage() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           onAction={(action, node) => handleAction(action, node)}
+          canCreate={canCreate}
+          canEdit={canEdit}
+          canDelete={canDelete}
         />
       )}
 

@@ -32,7 +32,7 @@ import type { OuViewProps } from './ou-view';
  * Each item is focusable; Enter/Space select, ArrowRight expands (or moves to
  * the first child), ArrowLeft collapses (or moves to the parent).
  */
-export function OuTree({ tree, selectedId, onSelect, onAction }: OuViewProps) {
+export function OuTree({ tree, selectedId, onSelect, onAction, canCreate = false, canEdit = false, canDelete = false }: OuViewProps) {
   // Expanded by default so the seeded hierarchy is visible on first paint.
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
 
@@ -67,6 +67,9 @@ export function OuTree({ tree, selectedId, onSelect, onAction }: OuViewProps) {
           onToggle={toggle}
           onSelect={onSelect}
           onAction={onAction}
+          canCreate={canCreate}
+          canEdit={canEdit}
+          canDelete={canDelete}
         />
       ))}
     </div>
@@ -80,6 +83,9 @@ interface OuTreeItemProps {
   onToggle: (id: number) => void;
   onSelect: (id: number) => void;
   onAction: OuViewProps['onAction'];
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
 }
 
 function OuTreeItem({
@@ -89,6 +95,9 @@ function OuTreeItem({
   onToggle,
   onSelect,
   onAction,
+  canCreate,
+  canEdit,
+  canDelete,
 }: OuTreeItemProps) {
   const hasChildren = node.children.length > 0;
   const isExpanded = hasChildren && !collapsed.has(node.id);
@@ -181,18 +190,26 @@ function OuTreeItem({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onAction('create-child', node)}>
-              Create child OU
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onAction('edit', node)}>Edit</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onAction('move', node)}>Move to&hellip;</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => onAction('delete', node)}
-            >
-              Delete
-            </DropdownMenuItem>
+            {canCreate && (
+              <DropdownMenuItem onClick={() => onAction('create-child', node)}>
+                Create child OU
+              </DropdownMenuItem>
+            )}
+            {canEdit && (
+              <DropdownMenuItem onClick={() => onAction('edit', node)}>Edit</DropdownMenuItem>
+            )}
+            {canEdit && (
+              <DropdownMenuItem onClick={() => onAction('move', node)}>Move to&hellip;</DropdownMenuItem>
+            )}
+            {(canCreate || canEdit) && canDelete && <DropdownMenuSeparator />}
+            {canDelete && (
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => onAction('delete', node)}
+              >
+                Delete
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -208,6 +225,9 @@ function OuTreeItem({
               onToggle={onToggle}
               onSelect={onSelect}
               onAction={onAction}
+              canCreate={canCreate}
+              canEdit={canEdit}
+              canDelete={canDelete}
             />
           ))}
         </div>

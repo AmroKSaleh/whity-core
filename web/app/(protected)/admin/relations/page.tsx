@@ -22,7 +22,8 @@ import { DeletePersonModal } from './delete-person-modal';
 import { AddRelationModal } from './add-relation-modal';
 import type { PersonAction } from './relations-view';
 import type { Person, RelationEdge, RelationshipType } from './types';
-import { RELATIONS_MANAGE, parsePermissions } from '@/lib/capabilities';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { RELATIONS_MANAGE } from '@/lib/capabilities';
 
 // react-flow is heavy and touches browser-only APIs, so the graph view is loaded
 // on demand and never server-rendered (ssr:false) — mirrors the OU hub.
@@ -51,6 +52,11 @@ interface PersonRow {
 export default function RelationsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  // Caller's relations:manage capability (WC-177, WC-204). Fail-closed via
+  // useCapabilities: write controls stay hidden until proven otherwise, so a
+  // delegate holding only relations:read never sees affordances that would 403.
+  const { hasPermission } = useCapabilities();
+  const canManage = hasPermission(RELATIONS_MANAGE);
 
   const [persons, setPersons] = useState<Person[]>([]);
   const [edges, setEdges] = useState<RelationEdge[]>([]);
@@ -58,10 +64,6 @@ export default function RelationsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isForbidden, setIsForbidden] = useState(false);
   const [search, setSearch] = useState('');
-  // Caller's relations:manage capability (WC-177, #205). Fail-closed: write
-  // controls stay hidden until proven otherwise, so a delegate holding only
-  // relations:read never sees affordances that would 403 server-side.
-  const [canManage, setCanManage] = useState(false);
 
   // Lazily restore the persisted view (List default). The typeof guard keeps the
   // initializer safe under SSR pre-render where window is undefined.
@@ -88,22 +90,11 @@ export default function RelationsPage() {
   const fetchAll = useCallback(async () => {
     try {
       setIsLoading(true);
-      const [personsRes, edgesRes, typesRes, capsRes] = await Promise.all([
+      const [personsRes, edgesRes, typesRes] = await Promise.all([
         apiClient('/api/persons'),
         apiClient('/api/relations'),
         apiClient('/api/relationship-types'),
-        apiClient('/api/me/capabilities'),
       ]);
-
-      // Derive the caller's manage capability before the read gate so the UI
-      // hides write controls (WC-177). FAIL CLOSED: any non-ok response or
-      // parse failure leaves canManage false.
-      if (capsRes.ok) {
-        const permissions = parsePermissions(await capsRes.json());
-        setCanManage(permissions.includes(RELATIONS_MANAGE));
-      } else {
-        setCanManage(false);
-      }
 
       if (personsRes.status === 403) {
         setIsForbidden(true);
@@ -124,8 +115,6 @@ export default function RelationsPage() {
         setTypes(((await typesRes.json()).data ?? []) as RelationshipType[]);
       }
     } catch (error) {
-      // Fail closed: an aborted fetch must not leave stale write affordances.
-      setCanManage(false);
       addToast(error instanceof Error ? error.message : 'Failed to fetch relations', 'error');
     } finally {
       setIsLoading(false);

@@ -17,6 +17,22 @@
 /** Permission required to create/edit/delete persons and relations. */
 export const RELATIONS_MANAGE = 'relations:manage';
 
+/** Permissions for user management. */
+export const USERS_WRITE = 'users:write';
+export const USERS_DELETE = 'users:delete';
+
+/** Permissions for role management. */
+export const ROLES_WRITE = 'roles:write';
+export const ROLES_DELETE = 'roles:delete';
+
+/** Permissions for organizational unit management. */
+export const OUS_WRITE = 'ous:write';
+export const OUS_DELETE = 'ous:delete';
+
+/** Permissions for tenant management. */
+export const TENANTS_WRITE = 'tenants:write';
+export const TENANTS_DELETE = 'tenants:delete';
+
 /**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.
  *
