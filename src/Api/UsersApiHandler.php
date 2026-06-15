@@ -90,6 +90,7 @@ class UsersApiHandler
 
             // System users (tenant_id=0) can see all users from all tenants
             if ($tenantId === 0) {
+                // @tenant-guard-ignore: system-tenant (id 0) lists users across all tenants; scoped else-branch binds u.tenant_id = ?
                 $stmt = $this->db->prepare('
                     SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
                     FROM users u
@@ -313,6 +314,7 @@ class UsersApiHandler
             // A user outside the caller's tenant is reported as 404 so tenant
             // existence is never leaked, mirroring the other admin handlers.
             if ($currentTenantId === 0) {
+                // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
                 $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ?');
                 $stmt->execute([$id]);
             } else {
@@ -502,6 +504,7 @@ class UsersApiHandler
 
         if ($isSystem) {
             // SYSTEM tenant may assign any role regardless of ownership.
+            // @tenant-guard-ignore: system-tenant role resolution; scoped else-branch binds (tenant_id = ? OR tenant_id IS NULL)
             $stmt = $this->db->prepare("SELECT id FROM roles WHERE {$column} = ? LIMIT 1");
             $stmt->execute([$value]);
         } else {
@@ -532,6 +535,7 @@ class UsersApiHandler
      */
     private function fetchPublicUser(int $id): array
     {
+        // @tenant-guard-ignore: by-PK re-read after the scoped guard+write proved this user belongs to the acting tenant
         $stmt = $this->db->prepare('
             SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, r.name as role
             FROM users u

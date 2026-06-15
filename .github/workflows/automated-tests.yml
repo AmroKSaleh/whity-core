@@ -47,6 +47,13 @@ jobs:
       - name: Plugin-load smoke
         run: php scripts/ci-plugin-smoke.php
 
+      # Tenant-isolation static guard (WC-192): fail CI if any SELECT/UPDATE/
+      # DELETE touches a tenant-owned table without a tenant_id predicate and
+      # without a reasoned `@tenant-guard-ignore:` annotation. Turns the #1
+      # product risk (cross-tenant data exposure) into a CI-enforced invariant.
+      - name: Tenant-predicate guard
+        run: php scripts/ci-tenant-predicate-guard.php
+
   postgres-integration:
     name: Migrations + seed on real PostgreSQL
     runs-on: ubuntu-latest

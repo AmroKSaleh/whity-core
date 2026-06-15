@@ -39,6 +39,7 @@ class Seeder
         $tenantId = $tenant['id'] ?? 1;
 
         // Get role IDs dynamically
+        // @tenant-guard-ignore: seed-time bootstrap resolves global default role ids by name; no tenant context exists during seeding
         $adminRoleResult = $db->query(
             'SELECT id FROM roles WHERE name = :name',
             [':name' => 'admin']
@@ -46,6 +47,7 @@ class Seeder
         $adminRole = $adminRoleResult->fetch();
         $adminRoleId = $adminRole['id'] ?? 1;
 
+        // @tenant-guard-ignore: seed-time bootstrap resolves global default role ids by name; no tenant context exists during seeding
         $userRoleResult = $db->query(
             'SELECT id FROM roles WHERE name = :name',
             [':name' => 'user']

@@ -36,6 +36,7 @@ final class TotpSecretReencryptor
         $skipped = 0;
         $failed = 0;
 
+        // @tenant-guard-ignore: platform-maintenance re-encryption sweep runs across all tenants by design (no tenant context)
         $select = $pdo->query('SELECT id, two_factor_secret FROM users WHERE two_factor_secret IS NOT NULL');
         if ($select === false) {
             return ['migrated' => 0, 'skipped' => 0, 'failed' => 0];
@@ -43,6 +44,7 @@ final class TotpSecretReencryptor
 
         /** @var list<array{id: mixed, two_factor_secret: mixed}> $rows */
         $rows = $select->fetchAll(PDO::FETCH_ASSOC);
+        // @tenant-guard-ignore: platform-maintenance re-encryption sweep; PK-targeted write inside the cross-tenant migration loop
         $update = $pdo->prepare('UPDATE users SET two_factor_secret = ? WHERE id = ?');
 
         foreach ($rows as $row) {

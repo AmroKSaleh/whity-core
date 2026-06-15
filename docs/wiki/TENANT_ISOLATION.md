@@ -108,6 +108,35 @@ if ($tenantId === 0) { /* unscoped variant */ } else { /* scoped variant */ }
 
 **Because the predicates are hand-written, they are enforced by tests rather than by structure:** `tests/Integration/CrossTenantRejectionRealEngineTest.php` drives the real handlers/repositories against a real SQL engine and proves, per tenant-owned table (users, roles, organizational units, audit log, delegations — persons/relations have the same proof in their own real-engine suites): list/read scoping, cross-tenant read rejection, cross-tenant **write** rejection with the row verified untouched, and system-tenant visibility. Dropping a single predicate makes the suite fail. **When you add a tenant-owned table, extend that suite.**
 
+## CI tenant-predicate guard (WC-192)
+
+The runtime tests above prove the predicates that *exist* are correct; the **static guard** proves a predicate was not *forgotten*. `scripts/ci-tenant-predicate-guard.php` (wired as the `Tenant-predicate guard` step in `.github/workflows/automated-tests.yml`, alongside PHPStan and the plugin smoke) scans `src/` and **fails CI** when a `SELECT`/`UPDATE`/`DELETE` touches a tenant-owned table without a `tenant_id` predicate. It turns the platform's #1 risk — cross-tenant data exposure — into a CI-enforced invariant.
+
+The guard is two small classes plus the script:
+
+- **`TenantOwnedTables`** (`src/Core/Tenant/TenantOwnedTables.php`) — the canonical set of tables that carry a `tenant_id` column, derived from the migrations. `TenantOwnedTablesTest` re-derives the set straight from `database/migrations/` and fails if the list drifts, so the guard can never go stale against the schema.
+- **`SanctionedGlobalTables`** (`src/Core/Tenant/SanctionedGlobalTables.php`) — the allowlist of intentionally non-tenant tables (`revoked_tokens`, `core_schema_migrations`). The guard never flags these.
+- **`TenantPredicateGuard`** (`src/Core/Tenant/TenantPredicateGuard.php`) — the tokenizer-based scanner. For each SQL statement it reassembles the string literals that build it (`.` concatenation, `implode()`-built `SET`/`WHERE`, the `$sql .= '...'` builder pattern, and `{$col}` interpolation), then passes the statement when it binds a `tenant_id` **predicate** (`tenant_id =`/`IN`/`IS …`, including aliased `u.tenant_id = ?` and transitive joins `p.tenant_id = r.tenant_id`), or only touches global tables, or carries an ignore annotation. A `tenant_id` that appears only in a `SELECT`/`INSERT` column list is **not** a predicate. `INSERT` (and `INSERT … ON CONFLICT … DO UPDATE` upserts) is out of scope — it sets `tenant_id` as a value, not a predicate.
+
+> **Tables with no `tenant_id` column** — `role_permissions` (scopes via `roles`) and `backup_codes` (scopes via `users.user_id`) — are deliberately **not** in `TenantOwnedTables`. They are not directly scannable for a `tenant_id` predicate; isolation for them is enforced at the parent join / owning user id, so listing them would only produce false positives on correct `WHERE role_id = ?` / `WHERE user_id = ?` access.
+
+### The ignore annotation
+
+Some unscoped queries are legitimate and intentional: the **system tenant (id 0)** sees across tenants by design, by-PK lookups use globally-unique `SERIAL` ids, login resolves by globally-unique email, and platform-maintenance/seed paths run with no tenant context. The guard does **not** silently pass these — each must be explicitly annotated so the exception is reviewable:
+
+```php
+// @tenant-guard-ignore: system-tenant (id 0) sees all tenants; scoped else-branch binds tenant_id
+$stmt = $this->db->prepare('SELECT * FROM users WHERE id = ?');
+```
+
+Rules:
+
+- Format is `// @tenant-guard-ignore: <reason>`. The **reason is mandatory** — a reason-less annotation does **not** suppress the flag.
+- Place it on the statement's own line(s) or on the comment line(s) directly above it.
+- Adding one is a deliberate, reviewed decision: it opts a single statement out of the isolation invariant, so the reason must justify *why* the access is safe without a `tenant_id` predicate.
+
+The detection logic (unscoped → flagged; scoped/global/annotated/INSERT → not) is pinned by `tests/Unit/Core/Tenant/TenantPredicateGuardTest.php`, so the guard's teeth cannot regress.
+
 ## The system tenant (id 0)
 
 Migration `011_create_system_tenant.php` provisions tenant id **0** ("System") and a `system@whity.local` admin user. A caller resolved to tenant 0 holds cross-tenant authority: `EnforceTenantIsolation` lets it cross tenant boundaries (audited), and `RolesApiHandler` lets it see and manage every tenant's roles. This is the same mechanism trusted tooling uses via `TenantContext::isSystemMode()` — there is no separate super-admin flag.
@@ -147,5 +176,6 @@ Tenant safety also depends on the shared worker connection not carrying state be
 - `TenantContext` resolves the tenant from the JWT, locks it, and is reset between requests (no silent fallback; tenant 0 = system).
 - `EnforceTenantIsolation` resolves + refuses cross-tenant requests at the HTTP layer before routing/DB; public routes bypass it.
 - Query-level isolation is the explicit, bound `tenant_id` predicate every handler/repository statement carries (no rewriting layer); `CrossTenantRejectionRealEngineTest` proves read AND write rejection per table on a real engine and fails if a predicate is dropped.
+- The WC-192 CI guard (`scripts/ci-tenant-predicate-guard.php`) statically fails the build on any unscoped tenant-owned-table query; sanctioned exceptions (system-tenant branches, by-PK/global-unique lookups, maintenance/seed paths) must carry a reasoned `// @tenant-guard-ignore: <reason>` annotation.
 - The system tenant (id 0) and `isSystemMode()` are the audited cross-tenant bypass; `DISCARD ALL` keeps the shared worker connection clean between requests.
 </content>

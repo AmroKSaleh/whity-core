@@ -86,6 +86,7 @@ class TenantsApiHandler
 
             if ($isSystemUser) {
                 // System user: return all tenants except system tenant itself
+                // @tenant-guard-ignore: system-tenant (isSystemUser) lists all tenants; the users join is for per-tenant counts, scoped else-branch binds t.id = ?
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
                            COUNT(u.id) as userCount
@@ -98,6 +99,7 @@ class TenantsApiHandler
                 $stmt->execute();
             } else {
                 // Regular user: return only their tenant
+                // @tenant-guard-ignore: caller's own tenant; the users join is constrained by the WHERE t.id = ? on the tenants row (per-tenant user count)
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
                            COUNT(u.id) as userCount

@@ -89,6 +89,7 @@ class DelegationRepository
     public function findById(int $id, int $tenantId): ?array
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT * FROM permission_delegations WHERE id = :id');
             $stmt->execute([':id' => $id]);
         } else {
@@ -154,6 +155,7 @@ class DelegationRepository
             $where[] = 'revoked_at IS NULL';
         }
 
+        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all delegations by design
         $sql = 'SELECT * FROM permission_delegations';
         if ($where !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $where);
@@ -243,6 +245,7 @@ class DelegationRepository
     public function revoke(int $id, int $tenantId): int
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare(
                 'UPDATE permission_delegations SET revoked_at = NOW()
                  WHERE id = :id AND revoked_at IS NULL'

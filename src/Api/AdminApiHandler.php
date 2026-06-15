@@ -59,11 +59,14 @@ class AdminApiHandler
 
             if ($isSystemUser) {
                 // 1. Basic Totals (platform-wide)
+                // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
                 $totalUsers = $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
                 $totalTenants = $pdo->query('SELECT COUNT(*) FROM tenants')->fetchColumn();
+                // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
                 $totalRoles = $pdo->query('SELECT COUNT(*) FROM roles')->fetchColumn();
 
                 // 2. Role Breakdown (all roles, all users)
+                // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
                 $usersPerRole = $pdo->query('
                     SELECT r.name, COUNT(u.id) as count
                     FROM roles r
@@ -72,6 +75,7 @@ class AdminApiHandler
                 ')->fetchAll(PDO::FETCH_ASSOC);
 
                 // 3. Growth Trends (Last 7 Days, platform-wide)
+                // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
                 $userGrowth = $pdo->query("
                     SELECT DATE(created_at) as date, COUNT(*) as count
                     FROM users

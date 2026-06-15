@@ -81,6 +81,7 @@ class PersonRepository
     public function findById(int $id, int $tenantId): ?array
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT * FROM persons WHERE id = :id');
             $stmt->execute([':id' => $id]);
         } else {
@@ -106,6 +107,7 @@ class PersonRepository
     public function findByUserId(int $userId, int $tenantId): ?array
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('SELECT * FROM persons WHERE user_id = :user_id');
             $stmt->execute([':user_id' => $userId]);
         } else {
@@ -148,6 +150,7 @@ class PersonRepository
             $params[':search'] = '%' . strtolower(trim($search)) . '%';
         }
 
+        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all persons by design
         $sql = 'SELECT * FROM persons';
         if ($where !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $where);
@@ -220,6 +223,7 @@ class PersonRepository
     public function delete(int $id, int $tenantId): int
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare('DELETE FROM persons WHERE id = :id');
             $stmt->execute([':id' => $id]);
         } else {
@@ -243,6 +247,7 @@ class PersonRepository
     public function relationCount(int $personId, int $tenantId): int
     {
         if ($tenantId === 0) {
+            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
             $stmt = $this->db->prepare(
                 'SELECT COUNT(*) FROM relations WHERE from_person_id = :p OR to_person_id = :p2'
             );
