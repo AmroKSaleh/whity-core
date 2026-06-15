@@ -159,9 +159,8 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
     await enableTwoFactor(api, computeTotp);
     await api.dispose();
 
-    // The regenerate action is gated behind window.confirm and triggers a
-    // download — accept both.
-    page.on('dialog', (dialog) => dialog.accept());
+    // The regenerate action is gated behind an AlertDialog — confirm it; also
+    // accept the automatic backup-code download.
     const downloadPromise = page
       .waitForEvent('download', { timeout: 5_000 })
       .catch(() => null);
@@ -170,6 +169,8 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
     await settings.goto();
     await expect(settings.statusChip('Enabled')).toBeVisible();
     await settings.regenerateButton.click();
+    // Confirm the AlertDialog that replaced window.confirm.
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Regenerate Codes' }).click();
 
     // After regeneration the panel reports a fresh set of 15 codes available.
     await expect(page.getByText(/backup codes available/)).toBeVisible();
@@ -185,12 +186,12 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
     const api = await createAuthedApi(baseURL as string, ADMIN);
     await enableTwoFactor(api, computeTotp);
 
-    // Disable is gated behind window.confirm — accept it.
-    page.on('dialog', (dialog) => dialog.accept());
     const settings = new SettingsPage(page);
     await settings.goto();
     await expect(settings.statusChip('Enabled')).toBeVisible();
     await settings.disableButton.click();
+    // Confirm the AlertDialog that replaced window.confirm.
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Disable 2FA' }).click();
     await expect(settings.statusChip('Not Enabled')).toBeVisible();
 
     // Independent confirmation: the account is back to plain login (no 202).

@@ -34,6 +34,24 @@ jest.mock('@/components/ui/dialog', () => ({
   DialogDescription: ({ children }: React.PropsWithChildren) => <p>{children}</p>,
 }));
 
+// Mock alert-dialog component — renders a simple controlled dialog with
+// Cancel and Action buttons so tests can interact with it.
+jest.mock('@/components/ui/alert-dialog', () => ({
+  AlertDialog: ({ children, open }: React.PropsWithChildren<{ open?: boolean }>) =>
+    open ? <div data-testid="alert-dialog">{children}</div> : null,
+  AlertDialogContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  AlertDialogFooter: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: React.PropsWithChildren) => <h2>{children}</h2>,
+  AlertDialogDescription: ({ children }: React.PropsWithChildren) => <p>{children}</p>,
+  AlertDialogCancel: ({ children, onClick }: React.PropsWithChildren<{ onClick?: React.MouseEventHandler<HTMLButtonElement> }>) => (
+    <button data-testid="alert-dialog-cancel" onClick={onClick}>{children}</button>
+  ),
+  AlertDialogAction: ({ children, onClick, className }: React.PropsWithChildren<{ onClick?: React.MouseEventHandler<HTMLButtonElement>; className?: string }>) => (
+    <button data-testid="alert-dialog-action" className={className} onClick={onClick}>{children}</button>
+  ),
+}));
+
 // Mock button component. The real Button has a custom `variant` prop that is
 // not a valid DOM attribute, so drop it from the props before spreading the
 // rest onto the <button>.
@@ -54,8 +72,10 @@ jest.mock('@/components/ui/alert', () => ({
   AlertDescription: ({ children }: React.PropsWithChildren) => <p>{children}</p>,
 }));
 
-// Mock window.confirm
-global.confirm = jest.fn(() => true);
+// Mock input component
+jest.mock('@/components/ui/input', () => ({
+  Input: (props: React.ComponentProps<'input'>) => <input {...props} />,
+}));
 
 // Mock document.createElement for file downloads
 const mockClick = jest.fn();
@@ -79,7 +99,6 @@ describe('TwoFactorSettings', () => {
     jest.clearAllMocks();
     mockClick.mockClear();
     mockSetAttribute.mockClear();
-    (global.confirm as jest.Mock).mockClear();
 
     mockApiClient = jest.fn();
     (useAuth as jest.Mock).mockReturnValue({
@@ -271,7 +290,9 @@ describe('TwoFactorSettings', () => {
       const disableButton = await screen.findByRole('button', { name: /Disable 2FA/i });
       fireEvent.click(disableButton);
 
-      expect(global.confirm).toHaveBeenCalled();
+      // AlertDialog should now be open — click the confirm action
+      const confirmButton = await screen.findByTestId('alert-dialog-action');
+      fireEvent.click(confirmButton);
 
       await waitFor(() => {
         expect(mockApiClient).toHaveBeenCalledWith('/api/auth/2fa/disable', {
@@ -296,6 +317,9 @@ describe('TwoFactorSettings', () => {
       const disableButton = await screen.findByRole('button', { name: /Disable 2FA/i });
       fireEvent.click(disableButton);
 
+      const confirmButton = await screen.findByTestId('alert-dialog-action');
+      fireEvent.click(confirmButton);
+
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /Enable 2FA/i })).toBeInTheDocument();
       });
@@ -317,6 +341,9 @@ describe('TwoFactorSettings', () => {
       const disableButton = await screen.findByRole('button', { name: /Disable 2FA/i });
       fireEvent.click(disableButton);
 
+      const confirmButton = await screen.findByTestId('alert-dialog-action');
+      fireEvent.click(confirmButton);
+
       await waitFor(() => {
         expect(screen.getByTestId('alert-destructive')).toBeInTheDocument();
       });
@@ -328,14 +355,15 @@ describe('TwoFactorSettings', () => {
         json: async () => ({ enabled: true, backup_codes_available: 10 }),
       });
 
-      (global.confirm as jest.Mock).mockReturnValueOnce(false);
-
       render(<TwoFactorSettings />);
 
       const disableButton = await screen.findByRole('button', { name: /Disable 2FA/i });
       fireEvent.click(disableButton);
 
-      // API should not be called if user cancels
+      // Click Cancel in the AlertDialog — API should not be called
+      const cancelButton = await screen.findByTestId('alert-dialog-cancel');
+      fireEvent.click(cancelButton);
+
       await waitFor(() => {
         expect(mockApiClient).toHaveBeenCalledTimes(1); // Only the initial status fetch
       });
@@ -364,7 +392,8 @@ describe('TwoFactorSettings', () => {
       });
       fireEvent.click(regenerateButton);
 
-      expect(global.confirm).toHaveBeenCalled();
+      const confirmButton = await screen.findByTestId('alert-dialog-action');
+      fireEvent.click(confirmButton);
 
       await waitFor(() => {
         expect(mockApiClient).toHaveBeenCalledWith('/api/auth/2fa/regenerate-codes', {
@@ -396,6 +425,9 @@ describe('TwoFactorSettings', () => {
       });
       fireEvent.click(regenerateButton);
 
+      const confirmButton = await screen.findByTestId('alert-dialog-action');
+      fireEvent.click(confirmButton);
+
       await waitFor(() => {
         expect(mockClick).toHaveBeenCalled();
         expect(mockSetAttribute).toHaveBeenCalledWith('download', 'whity-backup-codes.txt');
@@ -422,6 +454,9 @@ describe('TwoFactorSettings', () => {
         name: /Regenerate Backup Codes/i,
       });
       fireEvent.click(regenerateButton);
+
+      const confirmButton = await screen.findByTestId('alert-dialog-action');
+      fireEvent.click(confirmButton);
 
       await waitFor(
         () => {
@@ -452,6 +487,9 @@ describe('TwoFactorSettings', () => {
       });
       fireEvent.click(regenerateButton);
 
+      const confirmButton = await screen.findByTestId('alert-dialog-action');
+      fireEvent.click(confirmButton);
+
       await waitFor(() => {
         expect(screen.getByTestId('alert-destructive')).toBeInTheDocument();
       });
@@ -463,8 +501,6 @@ describe('TwoFactorSettings', () => {
         json: async () => ({ enabled: true, backup_codes_available: 8 }),
       });
 
-      (global.confirm as jest.Mock).mockReturnValueOnce(false);
-
       render(<TwoFactorSettings />);
 
       const regenerateButton = await screen.findByRole('button', {
@@ -472,7 +508,10 @@ describe('TwoFactorSettings', () => {
       });
       fireEvent.click(regenerateButton);
 
-      // API should not be called if user cancels
+      // Click Cancel in the AlertDialog — API should not be called
+      const cancelButton = await screen.findByTestId('alert-dialog-cancel');
+      fireEvent.click(cancelButton);
+
       await waitFor(() => {
         expect(mockApiClient).toHaveBeenCalledTimes(1); // Only the initial status fetch
       });
