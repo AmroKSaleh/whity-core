@@ -33,13 +33,16 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { User } from './page';
 import { useRoleOptions } from './use-role-options';
+import { useOuOptions } from './use-ou-options';
 
-// Only `role` is editable on this endpoint (WC-113). `name` is derived from the
-// email local-part (no users.name column) and `tenant` moves are intentionally
-// out of scope server-side, so both are presented read-only and excluded from
-// the editable schema.
+// Only `role` and `ou_id` are editable on this endpoint (WC-113/WC-205). `name`
+// is derived from the email local-part (no users.name column) and `tenant` moves
+// are intentionally out of scope server-side, so both are presented read-only and
+// excluded from the editable schema. `ou_id` is nullable — clearing the picker
+// removes the user from any OU.
 const editUserSchema = z.object({
   role: z.string().min(1, 'Role is required'),
+  ou_id: z.string().nullable(),
 });
 
 type EditUserFormData = z.infer<typeof editUserSchema>;
@@ -63,11 +66,14 @@ export function EditUserModal({
   // roles that actually exist (and resolve server-side) are offered. This
   // removes the phantom "Moderator" option that 404'd on save (WC-121).
   const { roleOptions, isLoadingRoles } = useRoleOptions(isOpen);
+  // OU dropdown options come from the live tenant-scoped OU list (WC-205).
+  const { ouOptions, isLoadingOus } = useOuOptions(isOpen);
 
-  // Only the editable field (`role`) is bound to the form. Name and tenant are
-  // displayed read-only directly from the user record (see below).
+  // Only the editable fields (`role`, `ou_id`) are bound to the form. Name and
+  // tenant are displayed read-only directly from the user record (see below).
   const toFormValues = (u: User): EditUserFormData => ({
     role: u.role ?? '',
+    ou_id: u.ou_id != null ? String(u.ou_id) : null,
   });
 
   const form = useForm<EditUserFormData>({
@@ -85,13 +91,15 @@ export function EditUserModal({
     try {
       setIsSubmitting(true);
 
-      // Only `role` is editable here. `name` is derived from the email
+      // `role` and `ou_id` are editable here. `name` is derived from the email
       // local-part (there is no users.name column) and `tenant` moves are out
-      // of scope server-side (WC-113), so both are shown read-only and never
-      // submitted — sending them would be ignored anyway.
+      // of scope server-side (WC-113/WC-205), so both are shown read-only and
+      // never submitted — sending them would be ignored anyway.
+      // Convert the string picker value back to a number (or null when cleared).
+      const ouId = data.ou_id !== null && data.ou_id !== '' ? Number(data.ou_id) : null;
       const { data: payload, error, response } = await api.PATCH('/api/users/{id}', {
         params: { path: { id: user.id } },
-        body: { role: data.role },
+        body: { role: data.role, ou_id: ouId },
       });
 
       if (error !== undefined || !response.ok) {
@@ -179,6 +187,39 @@ export function EditUserModal({
                       {roleOptions.map((role) => (
                         <SelectItem key={role.value} value={role.value}>
                           {role.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="ou_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Organisational Unit</FormLabel>
+                  <Select
+                    onValueChange={(val) => field.onChange(val === '__none__' ? null : val)}
+                    value={field.value ?? '__none__'}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue
+                          placeholder={
+                            isLoadingOus ? 'Loading OUs…' : 'None (root)'
+                          }
+                        />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="__none__">None (root)</SelectItem>
+                      {ouOptions.map((ou) => (
+                        <SelectItem key={ou.value} value={ou.value}>
+                          {ou.label}
                         </SelectItem>
                       ))}
                     </SelectContent>

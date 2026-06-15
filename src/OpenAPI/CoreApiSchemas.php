@@ -468,6 +468,7 @@ final class CoreApiSchemas
             'email' => self::str(),
             'role' => self::str(),
             'tenantId' => self::int(),
+            'ou_id' => self::int(true),
             'createdAt' => self::str(true),
         ], ['id', 'name', 'email', 'role', 'tenantId', 'createdAt']);
 
