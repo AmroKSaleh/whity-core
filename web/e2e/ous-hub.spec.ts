@@ -22,7 +22,7 @@ async function createOu(
   name: string,
   parentId?: number
 ): Promise<number> {
-  const res = await api.post('/api/v1/v1/ous', {
+  const res = await api.post('/api/v1/ous', {
     data: parentId ? { name, parent_id: parentId } : { name },
   });
   expect(res.ok(), `create OU ${name} should succeed`).toBeTruthy();

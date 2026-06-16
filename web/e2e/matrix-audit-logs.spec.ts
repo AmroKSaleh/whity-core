@@ -27,7 +27,7 @@ test.describe('Audit Logs (role matrix)', () => {
 
     const listResponse = page.waitForResponse(
       (res) =>
-        res.url().includes('/api/v1/v1/audit-logs') &&
+        res.url().includes('/api/v1/audit-logs') &&
         res.request().method() === 'GET'
     );
     await roleSession.shell.clickNav('Audit Logs');
@@ -73,7 +73,7 @@ test.describe('Audit Logs (role matrix)', () => {
       .fill(impossibleAction);
     const filtered = page.waitForResponse(
       (res) =>
-        res.url().includes('/api/v1/v1/audit-logs') &&
+        res.url().includes('/api/v1/audit-logs') &&
         res.url().includes(`action=${impossibleAction}`)
     );
     await page.getByRole('button', { name: 'Apply' }).click();
@@ -83,7 +83,7 @@ test.describe('Audit Logs (role matrix)', () => {
     // Clear restores the unfiltered query (and whatever data it yields).
     const cleared = page.waitForResponse(
       (res) =>
-        res.url().includes('/api/v1/v1/audit-logs') &&
+        res.url().includes('/api/v1/audit-logs') &&
         !res.url().includes('action=')
     );
     await page.getByRole('button', { name: 'Clear' }).click();

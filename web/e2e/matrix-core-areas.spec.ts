@@ -111,7 +111,7 @@ test.describe('Core admin areas (role matrix)', () => {
     }
 
     const statsResponse = page.waitForResponse((res) =>
-      res.url().includes('/api/v1/v1/admin/stats')
+      res.url().includes('/api/v1/admin/stats')
     );
     // The "Dashboard" nav item points at /admin, which redirects to the
     // System Statistics page.

@@ -378,7 +378,7 @@ test.describe('Roles delete guards (admin)', () => {
     // Seed a user and assign it to the new role via the API (create ignores the
     // role name and lands on `user`; PATCH resolves names — WC-113). This sets
     // up the "role has active user assignments" precondition for the 409.
-    const create = await adminApi.post('/api/v1/v1/users', {
+    const create = await adminApi.post('/api/v1/users', {
       data: {
         name: 'probe',
         email: createdEmail,
