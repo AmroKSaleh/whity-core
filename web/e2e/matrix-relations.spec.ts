@@ -60,7 +60,7 @@ test.describe('Family Relations (role matrix)', () => {
     // page's parallel /api/relationship-types call.
     const relationsResponse = page.waitForResponse(
       (res) =>
-        /\/api\/relations(\?.*)?$/.test(res.url()) &&
+        /\/api\/v1\/relations(\?.*)?$/.test(res.url()) &&
         res.request().method() === 'GET'
     );
     await roleSession.shell.clickNav('Family Relations');
