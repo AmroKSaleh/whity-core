@@ -31,7 +31,7 @@ export interface PluginFeature {
   screen: 'crud' | 'custom' | 'action';
   /** REST resource backing a crud screen; null for custom/action screens. */
   resource: {
-    /** Collection endpoint, e.g. "/api/hello/greetings". */
+    /** Collection endpoint, e.g. "/api/v1/hello/greetings". */
     basePath: string;
     /** Item property naming a row in confirmations (falls back to id). */
     titleField: string | null;
@@ -40,7 +40,7 @@ export interface PluginFeature {
   action: {
     /** HTTP method the form submits with ("POST" or "PUT"). */
     method: string;
-    /** Handler endpoint the form submits to, e.g. "/api/bom/documents". */
+    /** Handler endpoint the form submits to, e.g. "/api/v1/bom/documents". */
     path: string;
     /** Submit-button label, or null for the default. */
     submitLabel: string | null;
