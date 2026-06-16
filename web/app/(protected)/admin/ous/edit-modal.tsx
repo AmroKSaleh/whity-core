@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -65,7 +65,7 @@ export function EditOuModal({ isOpen, onClose, onSuccess, ou, ous }: EditOuModal
         payload.parent_id = nextParentId;
       }
 
-      const response = await apiClient(`/api/ous/${ou.id}`, {
+      const response = await apiClient(`/api/v1/ous/${ou.id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -88,7 +88,7 @@ export function EditRoleModal({
   const fetchRole = useCallback(async () => {
     try {
       setIsLoadingRole(true);
-      const response = await apiClient(`/api/roles/${role.id}`);
+      const response = await apiClient(`/api/v1/roles/${role.id}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch role');
@@ -128,7 +128,7 @@ export function EditRoleModal({
     try {
       setIsSubmitting(true);
 
-      const response = await apiClient(`/api/roles/${role.id}`, {
+      const response = await apiClient(`/api/v1/roles/${role.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           name: data.name,

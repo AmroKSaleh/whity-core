@@ -61,9 +61,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        const response = await fetch('/api/v1/me', {
+        let response = await fetch('/api/v1/me', {
           credentials: 'include',
         });
+
+        // access_token has a 15-min TTL; silently refresh before giving up so
+        // that a stored browser session (e.g. Playwright storageState) survives
+        // longer test runs without requiring a fresh login.
+        if (response.status === 401) {
+          const refresh = await fetch('/api/v1/auth/refresh', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          });
+          if (refresh.ok) {
+            response = await fetch('/api/v1/me', { credentials: 'include' });
+          }
+        }
 
         if (response.ok) {
           const data = await response.json();

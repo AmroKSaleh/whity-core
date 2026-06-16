@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -32,7 +32,7 @@ export function PermissionsPanel({
   const fetchRolePermissions = useCallback(async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient(`/api/roles/${role.id}/permissions`);
+      const response = await apiClient(`/api/v1/roles/${role.id}/permissions`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch role permissions');

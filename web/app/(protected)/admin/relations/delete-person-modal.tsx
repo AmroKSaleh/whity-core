@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -34,7 +34,7 @@ export function DeletePersonModal({ isOpen, onClose, onSuccess, person }: Delete
   const handleDelete = async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient(`/api/persons/${person.id}`, { method: 'DELETE' });
+      const response = await apiClient(`/api/v1/persons/${person.id}`, { method: 'DELETE' });
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
