@@ -41,7 +41,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
   useEffect(() => {
     const fetchSetup = async () => {
       try {
-        const response = await apiClient('/api/auth/2fa/setup', {
+        const response = await apiClient('/api/v1/auth/2fa/setup', {
           method: 'POST',
         });
 
@@ -72,7 +72,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
     setError('');
 
     try {
-      const response = await apiClient('/api/auth/2fa/confirm', {
+      const response = await apiClient('/api/v1/auth/2fa/confirm', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -211,7 +211,7 @@ export const TwoFactorSettings: React.FC = () => {
     setError('');
 
     try {
-      const response = await apiClient('/api/auth/2fa/status', {
+      const response = await apiClient('/api/v1/auth/2fa/status', {
         method: 'GET',
       });
 
@@ -238,7 +238,7 @@ export const TwoFactorSettings: React.FC = () => {
     setStatusMessage('');
 
     try {
-      const response = await apiClient('/api/auth/2fa/disable', {
+      const response = await apiClient('/api/v1/auth/2fa/disable', {
         method: 'POST',
       });
 
@@ -266,7 +266,7 @@ export const TwoFactorSettings: React.FC = () => {
     setStatusMessage('');
 
     try {
-      const response = await apiClient('/api/auth/2fa/regenerate-codes', {
+      const response = await apiClient('/api/v1/auth/2fa/regenerate-codes', {
         method: 'POST',
       });
 

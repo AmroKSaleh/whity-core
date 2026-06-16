@@ -121,7 +121,7 @@ export function ProfileForm() {
         payload.password = data.newPassword;
       }
 
-      const response = await apiClient('/api/me', {
+      const response = await apiClient('/api/v1/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
