@@ -98,6 +98,10 @@
   }
 }
 
+/* katex dark-mode overrides */
+.dark .katex { color: var(--foreground); }
+.dark .katex-error { color: var(--destructive); }
+
 /* === AUTO-GENERATED TOKENS: do not edit between markers — run `npm run tokens:generate` === */
 :root {
   --background: oklch(1 0 0);
