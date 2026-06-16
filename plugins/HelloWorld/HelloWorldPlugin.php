@@ -12,6 +12,7 @@ use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
+use Whity\Sdk\PluginRolesInterface;
 
 /**
  * HelloWorldPlugin
@@ -44,7 +45,7 @@ use Whity\Sdk\PluginRequirementsInterface;
  * time (see {@see self::resolvePdo()}), analogous to the migration runner
  * injecting a PDO into plugin migrations.
  */
-final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface
 {
     /**
      * @inheritDoc
@@ -311,6 +312,35 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
         return [
             'hello:view',
             'hello:manage',
+        ];
+    }
+
+    /**
+     * Declare a hello_viewer role to seed on activation (PluginRolesInterface).
+     *
+     * The hello_viewer role demonstrates the native role-seeding capability: when
+     * this plugin activates, the host creates this role (if absent) and grants it
+     * the hello:view permission so users assigned the role can access the greetings
+     * read endpoints out-of-the-box without any manual configuration.
+     *
+     * @inheritDoc
+     */
+    public function getRoles(): array
+    {
+        return [
+            'hello_viewer' => ['description' => 'Can view Hello World content'],
+        ];
+    }
+
+    /**
+     * Grant hello:view to the hello_viewer role on activation.
+     *
+     * @inheritDoc
+     */
+    public function getRolePermissions(): array
+    {
+        return [
+            'hello_viewer' => ['hello:view'],
         ];
     }
 

@@ -18,6 +18,7 @@ use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
+use Whity\Sdk\PluginRolesInterface;
 use Whity\Sdk\Sdk;
 
 /**
@@ -68,6 +69,15 @@ class PluginLoader
      * @var LoggerInterface|null Logger instance
      */
     private ?LoggerInterface $logger;
+
+    /**
+     * Optional seeder for plugin-declared roles and permission grants.
+     *
+     * When wired, it is invoked after a plugin registers successfully so that
+     * custom roles and grants are persisted to the database. On reload/unregister
+     * it removes the grants (but retains the role rows — conservative approach).
+     */
+    private ?PluginRoleSeeder $roleSeeder;
 
     /**
      * @var array<PluginInterface> Registered plugins
@@ -181,24 +191,27 @@ class PluginLoader
     /**
      * Constructor
      *
-     * @param string $pluginDir Directory path containing plugin files
-     * @param Router $router Router instance to register plugins with
+     * @param string               $pluginDir          Directory path containing plugin files
+     * @param Router               $router             Router instance to register plugins with
      * @param PermissionRegistry|null $permissionRegistry Optional permission registry
-     * @param HookManager|null $hookManager Optional hook manager
-     * @param LoggerInterface|null $logger Optional logger instance
+     * @param HookManager|null     $hookManager        Optional hook manager
+     * @param LoggerInterface|null $logger             Optional logger instance
+     * @param PluginRoleSeeder|null $roleSeeder         Optional seeder for plugin-declared roles
      */
     public function __construct(
         string $pluginDir,
         Router $router,
         ?PermissionRegistry $permissionRegistry = null,
         ?HookManager $hookManager = null,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        ?PluginRoleSeeder $roleSeeder = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
         $this->permissionRegistry = $permissionRegistry;
         $this->hookManager = $hookManager;
         $this->logger = $logger;
+        $this->roleSeeder = $roleSeeder;
 
         $this->registerAutoloader();
     }
@@ -830,6 +843,14 @@ class PluginLoader
         $this->registeredPlugins[$pluginKey]['hooks'] = [];
         $this->administrativelyDisabled[$pluginKey] = true;
 
+        // Remove seeded role_permissions grants for the plugin (uninstall path).
+        // Role rows themselves are retained — conservative approach documented on
+        // PluginRoleSeeder::removeGrants(). Errors are swallowed by the seeder.
+        if ($this->roleSeeder !== null && $info['plugin'] instanceof PluginRolesInterface) {
+            $tenantId = TenantContext::getTenantId() ?? PluginRoleSeeder::SYSTEM_TENANT_ID;
+            $this->roleSeeder->removeGrants($info['plugin'], $tenantId);
+        }
+
         $lifecycle->disable();
 
         return true;
@@ -1285,6 +1306,15 @@ class PluginLoader
         $this->lifecycles[$pluginKey] = $lifecycle;
 
         $registered = $this->registerCapabilities($plugin, $namespacePrefix, $pluginKey);
+
+        // Seed plugin-declared roles and permission grants into the database.
+        // The seeder is optional (not wired in tests that lack a DB); errors
+        // are swallowed internally so a seeding failure never prevents the
+        // plugin from becoming active.
+        if ($this->roleSeeder !== null && $plugin instanceof PluginRolesInterface) {
+            $tenantId = TenantContext::getTenantId() ?? PluginRoleSeeder::SYSTEM_TENANT_ID;
+            $this->roleSeeder->seed($plugin, $tenantId);
+        }
 
         // Store the plugin instance and its registration bookkeeping
         $this->plugins[] = $plugin;
