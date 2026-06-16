@@ -22,7 +22,10 @@ describe('LoginPage - 2FA Flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (useRouter as jest.Mock).mockReturnValue(mockRouter);
-    (global.fetch as jest.Mock).mockClear();
+    // Default: fail with 401 so the silent-refresh fetch in initializeAuth
+    // (POST /api/v1/auth/refresh) doesn't consume a Once-mock intended for the
+    // login endpoint.
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 401 });
   });
 
   // Test 1: 202 response triggers 2FA input
