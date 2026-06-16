@@ -293,7 +293,7 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
                 'order' => 10,
                 'screen' => 'crud',
                 'resource' => [
-                    'basePath' => '/api/v1/hello/greetings',
+                    'basePath' => '/api/hello/greetings',
                     'titleField' => 'message',
                 ],
                 'requiredPermission' => 'hello:view',

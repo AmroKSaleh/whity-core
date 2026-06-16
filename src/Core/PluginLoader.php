@@ -1654,6 +1654,17 @@ class PluginLoader
                 return $drop('resource.titleField must be a string when present', $id);
             }
 
+            // The plugin declared the unversioned path (e.g. /api/hello/greetings).
+            // Rewrite it to the versioned URL the browser must actually call so the
+            // normalized descriptor is ready to use without further transformation.
+            $vp = $this->router->getVersionPrefix();
+            if ($vp !== '') {
+                $pos = strpos($basePath, '/', 1);
+                $basePath = $pos === false
+                    ? $basePath . $vp
+                    : substr($basePath, 0, $pos) . $vp . substr($basePath, $pos);
+            }
+
             $resource = ['basePath' => $basePath, 'titleField' => $titleField];
         }
 
@@ -1736,6 +1747,15 @@ class PluginLoader
             $submitLabel = $rawAction['submitLabel'] ?? null;
             if ($submitLabel !== null && !is_string($submitLabel)) {
                 return $drop('action.submitLabel must be a string when present', $id);
+            }
+
+            // Same versioning rewrite as for resource.basePath above.
+            $vp = $this->router->getVersionPrefix();
+            if ($vp !== '') {
+                $pos = strpos($path, '/', 1);
+                $path = $pos === false
+                    ? $path . $vp
+                    : substr($path, 0, $pos) . $vp . substr($path, $pos);
             }
 
             $action = [
