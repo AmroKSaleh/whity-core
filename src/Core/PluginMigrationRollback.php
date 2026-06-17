@@ -86,7 +86,14 @@ class PluginMigrationRollback
                 $deleteStmt->execute([$name]);
                 $rolledBack[] = $name;
             } catch (\PDOException $e) {
-                $errors[] = "Failed to remove tracking row '{$name}': " . $e->getMessage();
+                // Log the raw DB error server-side for diagnosis, but never leak
+                // it to the client (WC-186): the client array keeps only the
+                // migration NAME and a generic, non-sensitive message.
+                error_log(
+                    "[PluginMigrationRollback] failed to remove tracking row '{$name}': "
+                    . $e->getMessage()
+                );
+                $errors[] = "rollback failed for migration {$name}";
             }
         }
 
