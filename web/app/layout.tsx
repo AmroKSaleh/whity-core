@@ -7,6 +7,7 @@ import { ToastProvider } from "@/lib/toast-context";
 import { NavigationProvider } from "@/lib/navigation-context";
 import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
 import { ToastContainer } from "@/components/ui/toast-container";
+import "@/lib/plugin-screens";
 
 // Design-token font families (see src/design/tokens/base.json):
 // Inter drives --font-sans / --font-heading, Geist Mono drives --font-mono.
