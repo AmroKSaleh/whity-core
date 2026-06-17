@@ -46,6 +46,19 @@ class PluginLoader
     private const FEATURE_ID_PATTERN = '/^[a-z][a-z0-9-]*$/';
 
     /**
+     * Sentinel marker file written inside a directory plugin to persist an
+     * administrative disable across workers (WC-210).
+     *
+     * Single-file plugins persist a disable by renaming `Foo.php` to
+     * `Foo.php.disabled` (which discovery already skips), but renaming a
+     * directory plugin's entry file would break its PSR-4 autoload path, so a
+     * directory plugin is instead disabled by writing an empty `.disabled`
+     * marker into its folder. Discovery honours both signals so any FRESH
+     * loader (i.e. another FrankenPHP worker) converges on the same state.
+     */
+    public const DIR_DISABLED_SENTINEL = '.disabled';
+
+    /**
      * @var string Directory containing plugin files
      */
     private string $pluginDir;
@@ -131,6 +144,17 @@ class PluginLoader
      * @var array<string, true>
      */
     private array $administrativelyDisabled = [];
+
+    /**
+     * FQCNs discovered inside a directory carrying a {@see DIR_DISABLED_SENTINEL}
+     * marker, captured by {@see discover()} so {@see loadDiscovered()} can
+     * register them into the Disabled lifecycle state (routes NOT registered)
+     * rather than Active. This is how a fresh worker converges on a persisted
+     * administrative disable for a directory plugin (WC-210).
+     *
+     * @var array<string, true>
+     */
+    private array $discoveredDisabledByDisk = [];
 
     /**
      * Per-plugin lifecycle state machines, keyed by the plugin's original FQCN.
@@ -339,6 +363,16 @@ class PluginLoader
 
         foreach ($ordered as $candidate) {
             $this->registerPlugin($candidate['plugin'], $candidate['namespacePrefix'], $candidate['fqcn']);
+
+            // WC-210: a plugin carrying a persisted disable signal on disk (a
+            // directory `.disabled` sentinel) is registered exactly as if
+            // disablePlugin() had been called — its routes/hooks are torn down
+            // and its lifecycle is Disabled — so a FRESH loader (another worker)
+            // converges on the administratively disabled state. The signal is
+            // already on disk, so this teardown must NOT re-persist it.
+            if (isset($this->discoveredDisabledByDisk[$candidate['fqcn']])) {
+                $this->disableInMemory($candidate['fqcn']);
+            }
         }
 
         foreach ($quarantined as $entry) {
@@ -486,6 +520,11 @@ class PluginLoader
             return [];
         }
 
+        // Recompute the persisted-disable signal for directory plugins on every
+        // discovery pass (WC-210). A fresh loader converges on whatever is on
+        // disk now, not on a stale snapshot.
+        $this->discoveredDisabledByDisk = [];
+
         // 1. Initialize namespaces for all direct subdirectories of pluginDir
         $this->registerPluginNamespaces();
 
@@ -503,6 +542,9 @@ class PluginLoader
                             $reflection = new ReflectionClass($fqcn);
                             if ($reflection->implementsInterface(PluginInterface::class)) {
                                 $validDiscovered[$fqcn] = $filePath;
+                                if ($this->hasDirectoryDisableSentinel($filePath)) {
+                                    $this->discoveredDisabledByDisk[$fqcn] = true;
+                                }
                                 continue;
                             }
                         } catch (\Throwable) {
@@ -516,6 +558,10 @@ class PluginLoader
             if ($cacheValid) {
                 return $validDiscovered;
             }
+
+            // The cache was invalidated; discard the partial sentinel snapshot
+            // and let the full scan below rebuild it from scratch.
+            $this->discoveredDisabledByDisk = [];
         }
 
         // 3. Scan the plugins directory
@@ -540,6 +586,12 @@ class PluginLoader
                 $phpFiles = $this->findPhpFilesRecursively($itemPath);
                 $foundValidPluginInDir = false;
 
+                // A directory plugin carries a persisted administrative disable
+                // as an empty `.disabled` marker in its folder (WC-210). When
+                // present, every plugin discovered in this directory is loaded
+                // into the Disabled lifecycle state instead of Active.
+                $dirDisabled = file_exists($itemPath . '/' . self::DIR_DISABLED_SENTINEL);
+
                 foreach ($phpFiles as $filePath) {
                     $fqcn = $this->resolveClassFromFile($filePath);
                     if ($fqcn === null) {
@@ -556,6 +608,9 @@ class PluginLoader
                             if ($reflection->implementsInterface(PluginInterface::class)) {
                                 $discovered[$fqcn] = $filePath;
                                 $foundValidPluginInDir = true;
+                                if ($dirDisabled) {
+                                    $this->discoveredDisabledByDisk[$fqcn] = true;
+                                }
                             }
                         } catch (\Throwable) {
                             // Ignore
@@ -804,6 +859,13 @@ class PluginLoader
             unset($this->administrativelyDisabled[$pluginKey]);
         }
 
+        // WC-210: clear any persisted disable signal so a fresh worker loading
+        // this plugin sees it Active again, converging the fleet on re-enable.
+        if ($info !== null) {
+            $this->clearDisableSignal($pluginKey, $info['plugin']->getName());
+        }
+        unset($this->discoveredDisabledByDisk[$pluginKey]);
+
         return true;
     }
 
@@ -821,6 +883,37 @@ class PluginLoader
      * @return bool True if the plugin existed and was disabled, false if unknown.
      */
     public function disablePlugin(string $pluginKey): bool
+    {
+        if (!$this->disableInMemory($pluginKey)) {
+            return false;
+        }
+
+        // WC-210: persist the disable to disk so every OTHER FrankenPHP worker
+        // converges on this state at its next load()/reload(), instead of
+        // continuing to serve the plugin from its own in-memory bookkeeping.
+        $info = $this->registeredPlugins[$pluginKey] ?? null;
+        if ($info !== null) {
+            $this->persistDisableSignal($pluginKey, $info['plugin']->getName());
+        }
+
+        return true;
+    }
+
+    /**
+     * Tear down a plugin's runtime capabilities and mark it Disabled in-memory.
+     *
+     * Shared by the public {@see disablePlugin()} (which then persists the
+     * disable to disk) and by {@see loadDiscovered()} when a plugin is
+     * discovered already carrying a persisted disable signal (so the signal must
+     * NOT be re-written). Routes are dropped from the router, hook subscriptions
+     * removed, and the lifecycle transitioned to {@see PluginState::Disabled};
+     * the plugin instance and namespace prefix are retained so
+     * {@see reEnablePlugin()} can restore it without a disk reload.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return bool True if the plugin existed and was disabled, false if unknown.
+     */
+    private function disableInMemory(string $pluginKey): bool
     {
         $lifecycle = $this->lifecycles[$pluginKey] ?? null;
         $info = $this->registeredPlugins[$pluginKey] ?? null;
@@ -1012,6 +1105,122 @@ class PluginLoader
         }
 
         return null;
+    }
+
+    /**
+     * Whether the directory plugin owning $filePath carries a persisted disable.
+     *
+     * Walks up from the plugin's entry file to the immediate child directory of
+     * the plugin root and checks for the {@see DIR_DISABLED_SENTINEL} marker.
+     * Single-file plugins (whose entry sits directly under the plugin root) have
+     * no enclosing directory and therefore never match here — they persist a
+     * disable via the `.php.disabled` rename instead.
+     *
+     * @param string $filePath Absolute path to a discovered plugin entry file.
+     * @return bool
+     */
+    private function hasDirectoryDisableSentinel(string $filePath): bool
+    {
+        $realPluginDir = realpath($this->pluginDir);
+        $realFile = realpath($filePath);
+        if ($realPluginDir === false || $realFile === false) {
+            return false;
+        }
+
+        $normalizedRoot = rtrim(str_replace('\\', '/', $realPluginDir), '/');
+        $dir = rtrim(str_replace('\\', '/', dirname($realFile)), '/');
+
+        // Walk up until the directory immediately under the plugin root.
+        while ($dir !== $normalizedRoot && str_starts_with($dir . '/', $normalizedRoot . '/')) {
+            $parent = dirname($dir);
+            if ($parent === $normalizedRoot) {
+                return file_exists($dir . '/' . self::DIR_DISABLED_SENTINEL);
+            }
+            if ($parent === $dir) {
+                break;
+            }
+            $dir = $parent;
+        }
+
+        return false;
+    }
+
+    /**
+     * Persist an administrative disable to disk so other workers converge (WC-210).
+     *
+     * Single-file plugins are renamed `Foo.php` -> `Foo.php.disabled` (discovery
+     * already skips the latter). Directory plugins keep their entry file intact
+     * (renaming it breaks PSR-4 autoloading) and instead get an empty
+     * {@see DIR_DISABLED_SENTINEL} marker written into their folder, which
+     * discovery honours. Idempotent: a no-op when the plugin is already
+     * persistently disabled. The plugin identity is resolved through the
+     * traversal-guarded {@see resolvePluginDirectory()}.
+     *
+     * @param string $pluginKey  The plugin's stable identity (original FQCN).
+     * @param string $pluginName The plugin's declared getName() value.
+     * @return void
+     */
+    private function persistDisableSignal(string $pluginKey, string $pluginName): void
+    {
+        $path = $this->resolvePluginDirectory($pluginKey, $pluginName);
+        if ($path === null) {
+            return;
+        }
+
+        if (is_dir($path)) {
+            $sentinel = rtrim($path, '/\\') . '/' . self::DIR_DISABLED_SENTINEL;
+            if (!file_exists($sentinel)) {
+                @file_put_contents($sentinel, '');
+            }
+            return;
+        }
+
+        // Single-file plugin. Already-disabled file: nothing to do (idempotent).
+        if (str_ends_with($path, '.php.disabled')) {
+            return;
+        }
+
+        if (str_ends_with($path, '.php')) {
+            $disabledPath = $path . '.disabled';
+            if (!file_exists($disabledPath)) {
+                @rename($path, $disabledPath);
+            }
+        }
+    }
+
+    /**
+     * Clear a persisted administrative disable so other workers converge (WC-210).
+     *
+     * Reverses {@see persistDisableSignal()}: removes the directory sentinel, or
+     * renames `Foo.php.disabled` back to `Foo.php`. Idempotent: a no-op when the
+     * plugin is already persistently enabled.
+     *
+     * @param string $pluginKey  The plugin's stable identity (original FQCN).
+     * @param string $pluginName The plugin's declared getName() value.
+     * @return void
+     */
+    private function clearDisableSignal(string $pluginKey, string $pluginName): void
+    {
+        $path = $this->resolvePluginDirectory($pluginKey, $pluginName);
+        if ($path === null) {
+            return;
+        }
+
+        if (is_dir($path)) {
+            $sentinel = rtrim($path, '/\\') . '/' . self::DIR_DISABLED_SENTINEL;
+            if (file_exists($sentinel)) {
+                @unlink($sentinel);
+            }
+            return;
+        }
+
+        // Single-file plugin: rename the `.php.disabled` file back to `.php`.
+        if (str_ends_with($path, '.php.disabled')) {
+            $enabledPath = substr($path, 0, -strlen('.disabled'));
+            if (!file_exists($enabledPath)) {
+                @rename($path, $enabledPath);
+            }
+        }
     }
 
     /**
