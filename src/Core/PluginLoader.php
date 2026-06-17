@@ -959,6 +959,9 @@ class PluginLoader
         $lastPart = (string) end($parts);
         $candidates = array_unique([$pluginName, $lastPart]);
 
+        // Hoist realpath() outside the loop — one syscall per call, not one per candidate.
+        $realPluginDir = realpath($this->pluginDir);
+
         foreach ($candidates as $candidate) {
             if ($candidate === '') {
                 continue;
@@ -976,19 +979,22 @@ class PluginLoader
             $disabledPath = $this->pluginDir . '/' . $candidate . '.php.disabled';
 
             // Validate the resolved path sits under the plugin directory.
-            $realPluginDir = realpath($this->pluginDir);
             if ($realPluginDir !== false) {
+                // Anchor with a trailing separator so "/var/plugins_evil" cannot
+                // pass a prefix check against "/var/plugins".
+                $anchor = rtrim($realPluginDir, '/\\') . DIRECTORY_SEPARATOR;
+
                 $realDir = realpath($dirPath);
                 $realFile = realpath($filePath);
                 $realDisabled = realpath($disabledPath);
 
-                if ($realDir !== false && str_starts_with($realDir, $realPluginDir)) {
+                if ($realDir !== false && str_starts_with($realDir . DIRECTORY_SEPARATOR, $anchor)) {
                     return $dirPath;
                 }
-                if ($realFile !== false && str_starts_with($realFile, $realPluginDir)) {
+                if ($realFile !== false && str_starts_with($realFile . DIRECTORY_SEPARATOR, $anchor)) {
                     return $filePath;
                 }
-                if ($realDisabled !== false && str_starts_with($realDisabled, $realPluginDir)) {
+                if ($realDisabled !== false && str_starts_with($realDisabled . DIRECTORY_SEPARATOR, $anchor)) {
                     return $disabledPath;
                 }
             } else {
@@ -1019,7 +1025,7 @@ class PluginLoader
     private function removeRecursive(string $path): void
     {
         if (is_file($path) || is_link($path)) {
-            unlink($path);
+            @unlink($path);
             return;
         }
 
@@ -1027,12 +1033,16 @@ class PluginLoader
             return;
         }
 
-        $files = array_diff((array) scandir($path), ['.', '..']);
+        $entries = scandir($path);
+        if ($entries === false) {
+            return;
+        }
+        $files = array_diff($entries, ['.', '..']);
         foreach ($files as $file) {
             $this->removeRecursive($path . '/' . (string) $file);
         }
 
-        rmdir($path);
+        @rmdir($path);
     }
 
     /**
