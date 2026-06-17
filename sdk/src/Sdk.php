@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.3).
+ * SDK identity (v1.4).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -19,13 +19,16 @@ namespace Whity\Sdk;
  * conformance kit: {@see \Whity\Sdk\Tenant\TenantPredicateScanner},
  * {@see \Whity\Sdk\Tenant\MigrationTenantColumnLinter}, and the shared
  * {@see \Whity\Sdk\Testing\TenantIsolationConformanceTestCase} a plugin
- * extends to prove its tenant tables and queries are scoped). Breaking changes
- * require a new major version.
+ * extends to prove its tenant tables and queries are scoped) →
+ * 1.4 (host CORE-version constraint declaration,
+ * {@see PluginRequirementsInterface::getCoreConstraint()}, gated against the
+ * host's core version independently of the SDK gate). Breaking changes require
+ * a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.3.0';
+    public const VERSION = '1.4.0';
 
     /**
      * Static identity only — never instantiated.

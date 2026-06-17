@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications (KeyHub, Elmak, …) without
 dragging a host framework along.
 
-## Contract surface (v1.3.0)
+## Contract surface (v1.4.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ dragging a host framework along.
 | `Whity\Sdk\Http\Response` | 1.0 | The response shape handlers return; `Response::json()` / `Response::error()` factories. |
 | `Whity\Sdk\Hooks\Events` | 1.0 | Catalogue of hook event names (`user.creating`, `tenant.deleted`, `worker.request.start`, …). |
 | `Whity\Sdk\Sdk` | 1.1 | SDK identity: `Sdk::VERSION`, what hosts evaluate plugin SDK-constraints against. |
-| `Whity\Sdk\PluginRequirementsInterface` | 1.1 | OPTIONAL declaration of a required SDK constraint + inter-plugin dependencies (composer constraint syntax). Unsatisfied plugins are quarantined (`PluginState::Failed` + reason); satisfied ones load in topological dependency order. |
+| `Whity\Sdk\PluginRequirementsInterface` | 1.1 (core constraint: 1.4) | OPTIONAL declaration of a required SDK constraint, a host CORE-version constraint (`getCoreConstraint()`, since 1.4), and inter-plugin dependencies (composer constraint syntax). Unsatisfied plugins are quarantined (`PluginState::Failed` + reason); satisfied ones load in topological dependency order. |
 | `Whity\Sdk\PluginFrontendInterface` | 1.2 | OPTIONAL declaration of the admin-UI screens a plugin contributes (frontend feature descriptors). UI metadata only — descriptors grant nothing; the host validates, permission-filters, and serves them via `GET /api/frontend/features`. |
 | `Whity\Sdk\Tenant\TenantTableRegistry` | 1.3 | The portable, dependency-free model of a host's / plugin's tenant-owned and sanctioned-global tables, consumed by the scanner and linter. |
 | `Whity\Sdk\Tenant\TenantPredicateScanner` | 1.3 | The tokenizer-based static scanner that flags any `SELECT`/`UPDATE`/`DELETE` on a tenant-owned table missing a `tenant_id` predicate (honours `@tenant-guard-ignore:` + the global allowlist). |
@@ -38,11 +38,16 @@ optional surface existing plugins can ignore —
   `Whity\Sdk\Testing\TenantIsolationConformanceTestCase`): a reusable
   migration linter + tenant-predicate scanner + shared base test case a plugin
   runs in its OWN CI to prove its tenant tables and queries are scoped.
+- **1.4** — host CORE-version constraint declaration
+  (`PluginRequirementsInterface::getCoreConstraint()`): a plugin built for a
+  specific or newer host core can be quarantined cleanly at load, gated against
+  the host's core version independently of the SDK gate.
 
-Breaking contract changes require a new major. A plugin declares the range it
-supports via `getSdkConstraint()` (e.g. `'^1.1'`) and the host refuses to load
-it when its own `Sdk::VERSION` falls outside that range — with the reason
-visible in the admin plugin list.
+Breaking contract changes require a new major. A plugin declares the SDK range
+it supports via `getSdkConstraint()` (e.g. `'^1.1'`) and, optionally, the host
+CORE range via `getCoreConstraint()` (e.g. `'^0.1'`); the host refuses to load
+a plugin when its own `Sdk::VERSION` or `CoreVersion::VERSION` falls outside the
+respective range — with the reason visible in the admin plugin list.
 
 ### Declaring frontend features (1.2)
 
@@ -97,6 +102,12 @@ final class MyPlugin implements PluginInterface, PluginRequirementsInterface
     public function getSdkConstraint(): string
     {
         return '^1.1';
+    }
+
+    /** Optional host CORE-version constraint (SDK 1.4); '' = no constraint. */
+    public function getCoreConstraint(): string
+    {
+        return '^0.1';
     }
 
     /** @return array<string, string> plugin name => version constraint */

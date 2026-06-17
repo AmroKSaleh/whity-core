@@ -11,7 +11,9 @@ namespace Whity\Sdk;
  * {@see PluginInterface} — to declare what it needs from the host:
  *
  * - an SDK version constraint ({@see getSdkConstraint()}), evaluated against
- *   {@see Sdk::VERSION}; and
+ *   {@see Sdk::VERSION};
+ * - a host CORE version constraint ({@see getCoreConstraint()}), evaluated
+ *   against the host platform's core version; and
  * - inter-plugin dependencies with version ranges
  *   ({@see getPluginDependencies()}), evaluated against the other plugins'
  *   {@see PluginInterface::getVersion()}.
@@ -38,6 +40,20 @@ interface PluginRequirementsInterface
      * @return string e.g. '^1.1' — evaluated against {@see Sdk::VERSION}.
      */
     public function getSdkConstraint(): string;
+
+    /**
+     * The composer-style constraint the host's CORE version must satisfy.
+     *
+     * Return an empty string to declare no core constraint.
+     *
+     * The SDK is standalone (it must never reference a host symbol), so this is
+     * described in prose rather than via `@see`: the host evaluates it against
+     * its own platform core version constant (the `CoreVersion::VERSION` of
+     * whity-core).
+     *
+     * @return string e.g. '^0.1'.
+     */
+    public function getCoreConstraint(): string;
 
     /**
      * Inter-plugin dependencies as plugin name => version constraint.

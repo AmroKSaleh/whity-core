@@ -29,6 +29,7 @@ final class PluginVersionGateTest extends TestCase
     private static string $cycleDir;
     private static string $cascadeDir;
     private static string $throwingDir;
+    private static string $coreDir;
 
     public static function setUpBeforeClass(): void
     {
@@ -37,6 +38,7 @@ final class PluginVersionGateTest extends TestCase
         self::$mismatchDir = sys_get_temp_dir() . '/whity_vgate_mismatch_' . uniqid();
         self::$cycleDir = sys_get_temp_dir() . '/whity_vgate_cycle_' . uniqid();
         self::$cascadeDir = sys_get_temp_dir() . '/whity_vgate_cascade_' . uniqid();
+        self::$coreDir = sys_get_temp_dir() . '/whity_vgate_core_' . uniqid();
 
         // mainDir: scandir yields AaDependent BEFORE ZzBase, so topological
         // ordering (not directory order) must put ZzBase first.
@@ -44,6 +46,19 @@ final class PluginVersionGateTest extends TestCase
         self::writePlugin(self::$mainDir, 'MmIncompatible', '1.0.0', '^99.0', [], '/api/vgate/mm');
         self::writePlainPlugin(self::$mainDir, 'NnPlain', '/api/vgate/nn');
         self::writePlugin(self::$mainDir, 'ZzBase', '1.2.3', '^1.0', [], '/api/vgate/zz');
+
+        // coreDir (WC-211): the parallel CORE-version gate against
+        // CoreVersion::VERSION, mirroring the SDK gate above.
+        //  - CoreTooNew declares a core constraint guaranteed to fail.
+        //  - CoreGarbage declares an unparseable core constraint.
+        //  - CoreOk declares a constraint computed from the live core version
+        //    so it always matches and the plugin loads.
+        //  - CoreEmpty declares '' (opt-out) and must keep loading (BC).
+        $coreVersion = \Whity\Core\CoreVersion::VERSION;
+        self::writePlugin(self::$coreDir, 'CoreTooNew', '1.0.0', null, [], '/api/vgate/coretoonew', '^99.0');
+        self::writePlugin(self::$coreDir, 'CoreGarbage', '1.0.0', null, [], '/api/vgate/coregarbage', 'not a constraint!!');
+        self::writePlugin(self::$coreDir, 'CoreOk', '1.0.0', null, [], '/api/vgate/coreok', '>=' . $coreVersion);
+        self::writePlugin(self::$coreDir, 'CoreEmpty', '1.0.0', null, [], '/api/vgate/coreempty', '');
 
         self::writePlugin(self::$ghostDir, 'DependsOnGhost', '1.0.0', null, ['GhostPlugin' => '^1.0'], '/api/vgate/ghostdep');
 
@@ -78,6 +93,7 @@ final class Plugin implements PluginInterface, PluginRequirementsInterface
     {
         throw new \RuntimeException('declaration explosion');
     }
+    public function getCoreConstraint(): string { return ''; }
     public function getPluginDependencies(): array { return []; }
     public function getRoutes(): array
     {
@@ -104,6 +120,7 @@ PHP);
             self::$cycleDir,
             self::$cascadeDir,
             self::$throwingDir,
+            self::$coreDir,
         ];
         foreach ($dirs as $dir) {
             self::removeDirectory($dir);
@@ -157,6 +174,83 @@ PHP);
         $states = $this->statesByName($loader);
         $this->assertSame('active', $states['NnPlain']['state'] ?? null, 'Plugins without declared requirements keep loading (BC)');
         $this->assertNotNull($router->match(new Request('GET', '/api/vgate/nn')));
+    }
+
+    // ==================== core-version constraint gate (WC-211) ====================
+
+    public function testCoreIncompatiblePluginIsQuarantinedWithReason(): void
+    {
+        [$loader, $router] = $this->loadDir(self::$coreDir);
+
+        $states = $this->statesByName($loader);
+        $this->assertSame('failed', $states['CoreTooNew']['state'] ?? null, 'A core-incompatible plugin must be Failed');
+
+        $reason = $states['CoreTooNew']['last_error']['message'] ?? '';
+        $this->assertStringContainsString('^99.0', $reason, 'The reason must name the unsatisfied core constraint');
+        $this->assertStringContainsString(
+            \Whity\Core\CoreVersion::VERSION,
+            $reason,
+            'The reason must name the host core version'
+        );
+
+        $names = array_map(static fn ($p): string => $p->getName(), $loader->getPlugins());
+        $this->assertNotContains('CoreTooNew', $names, 'A quarantined plugin must not be among the loaded plugins');
+        $this->assertNull(
+            $router->match(new Request('GET', '/api/vgate/coretoonew')),
+            'A quarantined plugin must register NO routes'
+        );
+    }
+
+    public function testUnparseableCoreConstraintQuarantines(): void
+    {
+        [$loader, $router] = $this->loadDir(self::$coreDir);
+
+        $states = $this->statesByName($loader);
+        $this->assertSame('failed', $states['CoreGarbage']['state'] ?? null, 'A garbage core constraint must quarantine');
+
+        $reason = $states['CoreGarbage']['last_error']['message'] ?? '';
+        $this->assertStringContainsString('unparseable core constraint', $reason);
+        $this->assertNull($router->match(new Request('GET', '/api/vgate/coregarbage')));
+    }
+
+    public function testCoreCompatiblePluginLoads(): void
+    {
+        [$loader, $router] = $this->loadDir(self::$coreDir);
+
+        $states = $this->statesByName($loader);
+        $this->assertSame(
+            'active',
+            $states['CoreOk']['state'] ?? null,
+            'A plugin whose core constraint matches CoreVersion::VERSION must load'
+        );
+        $this->assertNotNull($router->match(new Request('GET', '/api/vgate/coreok')));
+    }
+
+    public function testEmptyCoreConstraintStillLoads(): void
+    {
+        [$loader, $router] = $this->loadDir(self::$coreDir);
+
+        $states = $this->statesByName($loader);
+        $this->assertSame(
+            'active',
+            $states['CoreEmpty']['state'] ?? null,
+            'An empty core constraint is an opt-out and must keep loading (BC)'
+        );
+        $this->assertNotNull($router->match(new Request('GET', '/api/vgate/coreempty')));
+    }
+
+    /**
+     * The core gate must evaluate against CoreVersion::VERSION, not a
+     * hard-coded string, so it can never drift from the platform version.
+     */
+    public function testCoreGateUsesTheCoreVersionConstant(): void
+    {
+        $loaderSource = (string) file_get_contents(__DIR__ . '/../../src/Core/PluginLoader.php');
+        $this->assertStringContainsString(
+            'CoreVersion::VERSION',
+            $loaderSource,
+            'The loader must evaluate core constraints against CoreVersion::VERSION'
+        );
     }
 
     // ==================== dependency gates ====================
@@ -312,10 +406,12 @@ PHP);
         string $version,
         ?string $sdkConstraint,
         array $dependencies,
-        string $routePath
+        string $routePath,
+        string $coreConstraint = ''
     ): void {
         mkdir($baseDir . '/' . $name, 0755, true);
         $sdkConstraintCode = $sdkConstraint === null ? "''" : var_export($sdkConstraint, true);
+        $coreConstraintCode = var_export($coreConstraint, true);
         $depsCode = var_export($dependencies, true);
 
         file_put_contents($baseDir . '/' . $name . '/Plugin.php', <<<PHP
@@ -335,6 +431,7 @@ final class Plugin implements PluginInterface, PluginRequirementsInterface
     public function getName(): string { return '{$name}'; }
     public function getVersion(): string { return '{$version}'; }
     public function getSdkConstraint(): string { return {$sdkConstraintCode}; }
+    public function getCoreConstraint(): string { return {$coreConstraintCode}; }
     public function getPluginDependencies(): array { return {$depsCode}; }
     public function getRoutes(): array
     {

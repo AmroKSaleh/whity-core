@@ -34,9 +34,11 @@ whity-plugin-announcements/
   provided by the host at runtime and stubbed for the package's own PHPStan
   (`stubs/whity-host.stub.php`). The package's test suite runs against the SDK
   alone; that is the proof of independence.
-- **Versioning:** semver; declare `getSdkConstraint()` (e.g. `'^1.2'`). The
-  host's version gate refuses incompatible plugins at load (quarantine), so a
-  plugin never half-loads against the wrong contract.
+- **Versioning:** semver; declare `getSdkConstraint()` (e.g. `'^1.2'`) and,
+  optionally, `getCoreConstraint()` (e.g. `'^0.1'`, SDK 1.4) to pin the host
+  CORE version too. The host's version gate refuses incompatible plugins at
+  load (quarantine) on either axis, so a plugin never half-loads against the
+  wrong contract.
 
 ## Installing into a host
 
