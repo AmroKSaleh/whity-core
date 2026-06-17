@@ -21,7 +21,7 @@ class RequestIsolationTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->router = new Router();
+        $this->router = new Router('');
         $jwtParser = $this->createMock(JwtParser::class);
         $roleChecker = $this->createMock(RoleChecker::class);
         $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);

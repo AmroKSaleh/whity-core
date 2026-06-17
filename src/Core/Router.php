@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Core;
 
 use Whity\Sdk\Http\Request;
@@ -9,6 +11,13 @@ use Whity\Sdk\Http\Request;
  *
  * Manages route registration and matching for different HTTP methods and paths.
  * Supports path parameters (e.g., /users/{id}) and middleware support.
+ *
+ * All routes registered via register() are considered versioned and have the
+ * version prefix (default '/v1') prepended to their path automatically.
+ * Routes registered via registerUnversioned() bypass the prefix entirely and
+ * are stored exactly as given — use this for infrastructure paths such as
+ * GET /api/health, GET /api/version, and GET /api/openapi.json that must
+ * never move under a version segment.
  */
 class Router
 {
@@ -23,10 +32,34 @@ class Router
     private array $middleware = [];
 
     /**
-     * Register a route
+     * URL version prefix prepended to every versioned route path.
+     *
+     * Defaults to '/v1'. Pass an empty string in tests that do not care about
+     * versioning to keep existing fixture paths working unchanged.
+     */
+    private string $versionPrefix;
+
+    /**
+     * Constructor
+     *
+     * @param string $versionPrefix URL segment prepended to every versioned
+     *   route path (e.g. '/v1'). Pass an empty string to disable prefixing —
+     *   useful in unit tests that register plain /api/... paths directly.
+     */
+    public function __construct(string $versionPrefix = '/v1')
+    {
+        $this->versionPrefix = $versionPrefix;
+    }
+
+    /**
+     * Register a versioned route
+     *
+     * The $versionPrefix (default '/v1') is prepended to $path before storage,
+     * so callers pass bare resource paths (e.g. '/api/users') and the router
+     * writes '/api/v1/users' automatically.
      *
      * @param string $method HTTP method (GET, POST, etc.)
-     * @param string $path Route path (supports {param} syntax for path parameters)
+     * @param string $path Route path WITHOUT the version prefix (supports {param} syntax for path parameters)
      * @param callable $handler Route handler callback
      * @param string|null $requiredRole Optional required role for authorization
      * @param string|null $namespacePrefix Optional plugin namespace prefix
@@ -46,6 +79,52 @@ class Router
         ?string $namespacePrefix = null,
         ?string $requiredPermission = null,
         ?array $schema = null
+    ): bool {
+        // Prepend the version prefix so '/api/users' becomes '/api/v1/users'.
+        $prefixedPath = $this->versionPrefix !== '' ? $this->versionPrefix($path) : $path;
+        return $this->doRegister($method, $prefixedPath, $handler, $requiredRole, $namespacePrefix, $requiredPermission, $schema);
+    }
+
+    /**
+     * Register an unversioned route (no version prefix applied)
+     *
+     * Use this for infrastructure endpoints that must never move under a version
+     * segment: GET /api/health, GET /api/version, GET /api/openapi.json.
+     *
+     * @param string $method HTTP method (GET, POST, etc.)
+     * @param string $path Full route path stored exactly as given
+     * @param callable $handler Route handler callback
+     * @param string|null $requiredRole Optional required role for authorization
+     * @param string|null $namespacePrefix Optional plugin namespace prefix
+     * @param string|null $requiredPermission Optional required permission (resource:action) for authorization
+     * @param array<string, mixed>|null $schema Optional OpenAPI declaration for the route
+     * @return bool True when the route registered; false when a duplicate method+path exists
+     */
+    public function registerUnversioned(
+        string $method,
+        string $path,
+        callable $handler,
+        ?string $requiredRole = null,
+        ?string $namespacePrefix = null,
+        ?string $requiredPermission = null,
+        ?array $schema = null
+    ): bool {
+        return $this->doRegister($method, $path, $handler, $requiredRole, $namespacePrefix, $requiredPermission, $schema);
+    }
+
+    /**
+     * Internal registration shared by register() and registerUnversioned().
+     *
+     * @param array<string, mixed>|null $schema
+     */
+    private function doRegister(
+        string $method,
+        string $path,
+        callable $handler,
+        ?string $requiredRole,
+        ?string $namespacePrefix,
+        ?string $requiredPermission,
+        ?array $schema
     ): bool {
         $method = strtoupper($method);
 
@@ -72,6 +151,41 @@ class Router
         ];
 
         return true;
+    }
+
+    /**
+     * Get the version prefix applied to versioned routes.
+     */
+    public function getVersionPrefix(): string
+    {
+        return $this->versionPrefix;
+    }
+
+    /**
+     * Inject the version prefix into a path after its first path segment.
+     *
+     * The version prefix is inserted after the first slash-delimited segment so
+     * that '/api/users' becomes '/api/v1/users', not '/v1/api/users'.
+     *
+     * For paths that have no prefix segment (i.e. start immediately with a
+     * resource name like '/users'), the version is prepended directly:
+     * '/users' → '/v1/users'.
+     *
+     * @param string $path The bare path (e.g. '/api/users')
+     * @return string The prefixed path (e.g. '/api/v1/users')
+     */
+    private function versionPrefix(string $path): string
+    {
+        // Paths begin with '/'. Split off the first segment ('/api') and
+        // insert the version between it and the remainder.
+        // '/api/users'  → ['', 'api', 'users']  → '/api' + '/v1' + '/users'
+        // '/api'        → ['', 'api']            → '/api' + '/v1'
+        $pos = strpos($path, '/', 1); // find the second '/'
+        if ($pos === false) {
+            // e.g. '/api'  — just append the prefix
+            return $path . $this->versionPrefix;
+        }
+        return substr($path, 0, $pos) . $this->versionPrefix . substr($path, $pos);
     }
 
     /**

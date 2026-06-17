@@ -67,7 +67,7 @@ class DelegationsApiRbacTest extends TestCase
 
         $this->handler = new DelegationsApiHandler($this->pdo, $service);
 
-        $this->router = new Router();
+        $this->router = new Router('');
         $this->router->register('GET', '/api/delegations', [$this->handler, 'list'], null, null, CorePermissions::DELEGATION_MANAGE);
         $this->router->register('POST', '/api/delegations', [$this->handler, 'create'], null, null, CorePermissions::DELEGATION_MANAGE);
         $this->router->register('DELETE', '/api/delegations/{id}', [$this->handler, 'revoke'], null, null, CorePermissions::DELEGATION_MANAGE);

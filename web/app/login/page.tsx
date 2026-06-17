@@ -96,7 +96,7 @@ export default function LoginPage() {
     setLoginError(null);
     try {
       // Check for 2FA requirement first
-      const response = await fetch('/api/login', {
+      const response = await fetch('/api/v1/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -162,7 +162,7 @@ export default function LoginPage() {
     setTwoFactorError(null);
 
     try {
-      const response = await fetch('/api/login/2fa', {
+      const response = await fetch('/api/v1/login/2fa', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

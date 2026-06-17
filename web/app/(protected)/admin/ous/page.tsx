@@ -63,7 +63,7 @@ export default function OUsPage() {
   };
 
   const { data, loading: isLoading, error, refetch: fetchOUs } = useFetch(async () => {
-    const response = await apiClient('/api/ous');
+    const response = await apiClient('/api/v1/ous');
     if (!response.ok) {
       throw new Error('Failed to fetch organizational units');
     }

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -36,7 +36,7 @@ export function DeleteTenantModal({
     try {
       setIsDeleting(true);
 
-      const response = await apiClient(`/api/tenants/${tenant.id}`, {
+      const response = await apiClient(`/api/v1/tenants/${tenant.id}`, {
         method: 'DELETE',
       });
 

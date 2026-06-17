@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -53,7 +53,7 @@ export function EditPersonModal({ isOpen, onClose, onSuccess, person }: EditPers
         notes: notes.trim() || null,
       };
 
-      const response = await apiClient(`/api/persons/${person.id}`, {
+      const response = await apiClient(`/api/v1/persons/${person.id}`, {
         method: 'PATCH',
         body: JSON.stringify(payload),
       });

@@ -3,7 +3,7 @@
  *
  * This module provides an apiClient function that:
  * 1. Makes fetch requests with credentials (httpOnly cookies auto-attach)
- * 2. On 401 response, automatically calls /api/auth/refresh
+ * 2. On 401 response, automatically calls /api/v1/auth/refresh
  * 3. If refresh succeeds, retries the original request
  * 4. If refresh fails or skipRefresh is true, returns the original response
  */
@@ -23,7 +23,7 @@ export interface ApiClientOptions extends RequestInit {
 async function refreshAccessToken(): Promise<boolean> {
   try {
     // Use relative URL to go through Next.js proxy (handles CORS with credentials)
-    const response = await fetch('/api/auth/refresh', {
+    const response = await fetch('/api/v1/auth/refresh', {
       method: 'POST',
       credentials: 'include',
       // CSRF defense (WC-160): the backend rejects auth POSTs without this
@@ -50,7 +50,7 @@ async function refreshAccessToken(): Promise<boolean> {
  * - Makes request with credentials: 'include' for httpOnly cookies
  * - If 200-399: returns immediately
  * - If 401 and skipRefresh not set:
- *   - Calls /api/auth/refresh
+ *   - Calls /api/v1/auth/refresh
  *   - If refresh succeeds: retries original request with skipRefresh: true
  *   - If refresh fails: returns original 401 response
  * - For any other status: returns as-is

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -86,9 +86,9 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
     setPendingRoleId('');
     try {
       const [rolesRes, membersRes, allRolesRes] = await Promise.all([
-        apiClient(`/api/ous/${ouId}/roles`),
-        apiClient(`/api/ous/${ouId}/members`),
-        apiClient('/api/roles'),
+        apiClient(`/api/v1/ous/${ouId}/roles`),
+        apiClient(`/api/v1/ous/${ouId}/members`),
+        apiClient('/api/v1/roles'),
       ]);
 
       if (rolesRes.ok) {
@@ -124,7 +124,7 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
     }
     setIsMutating(true);
     try {
-      const res = await apiClient(`/api/ous/${ouId}/roles`, {
+      const res = await apiClient(`/api/v1/ous/${ouId}/roles`, {
         method: 'POST',
         body: JSON.stringify({ role_id: parseInt(pendingRoleId, 10) }),
       });
@@ -149,7 +149,7 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
     }
     setIsMutating(true);
     try {
-      const res = await apiClient(`/api/ous/${ouId}/roles/${roleId}`, { method: 'DELETE' });
+      const res = await apiClient(`/api/v1/ous/${ouId}/roles/${roleId}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || 'Failed to remove role');

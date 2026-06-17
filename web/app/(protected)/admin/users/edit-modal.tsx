@@ -97,7 +97,7 @@ export function EditUserModal({
       // never submitted — sending them would be ignored anyway.
       // Convert the string picker value back to a number (or null when cleared).
       const ouId = data.ou_id !== null && data.ou_id !== '' ? Number(data.ou_id) : null;
-      const { data: payload, error, response } = await api.PATCH('/api/users/{id}', {
+      const { data: payload, error, response } = await api.PATCH('/api/v1/users/{id}', {
         params: { path: { id: user.id } },
         body: { role: data.role, ou_id: ouId },
       });

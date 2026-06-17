@@ -82,20 +82,23 @@ class EnforceTenantIsolation
      * @var list<string>
      */
     private const PUBLIC_ROUTES = [
-        '/api/login',
-        '/api/login/2fa',
-        '/api/me',
-        '/api/auth/refresh',
-        '/api/auth/logout',
+        // WC-206: versioned auth surface under /api/v1/.
+        '/api/v1/login',
+        '/api/v1/login/2fa',
+        '/api/v1/me',
+        '/api/v1/auth/refresh',
+        '/api/v1/auth/logout',
         // WC-175 (#191): /api/navigation is NO LONGER public. It is now
         // caller-aware — NavigationApiHandler resolves the authenticated user
         // and tenant and RBAC-filters items — so an unauthenticated request
         // must resolve to 401 here instead of enumerating gated items, exactly
         // like /api/frontend/features.
         // Health monitoring (WC-4): unauthenticated liveness/readiness probe.
-        // Must stay reachable without a JWT or tenant context so external
-        // monitors can poll it even while auth/tenant subsystems are unhealthy.
+        // Kept UNVERSIONED (/api/health, not /api/v1/health) so load-balancer
+        // probes targeting /api/health always work regardless of the API version.
+        // WC-206: /api/version is also unversioned and probe-safe.
         '/api/health',
+        '/api/version',
     ];
 
     private JwtParser $jwtParser;

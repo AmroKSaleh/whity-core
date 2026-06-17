@@ -104,7 +104,7 @@ PHP);
 
         // The plugin registers its route (with requiredPermission) AND its
         // permission catalogue entry through the loader, as in production.
-        $this->router = new Router();
+        $this->router = new Router('');
         $this->loader = new PluginLoader(self::$pluginDir, $this->router, $this->registry, new HookManager());
         $this->loader->load();
 

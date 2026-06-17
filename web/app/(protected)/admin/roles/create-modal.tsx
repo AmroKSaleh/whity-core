@@ -64,7 +64,7 @@ export function CreateRoleModal({
   const fetchPermissions = useCallback(async () => {
     try {
       setIsLoadingPermissions(true);
-      const response = await apiClient('/api/permissions');
+      const response = await apiClient('/api/v1/permissions');
 
       if (!response.ok) {
         throw new Error('Failed to fetch permissions');
@@ -91,7 +91,7 @@ export function CreateRoleModal({
     try {
       setIsSubmitting(true);
 
-      const response = await apiClient('/api/roles', {
+      const response = await apiClient('/api/v1/roles', {
         method: 'POST',
         body: JSON.stringify({
           name: data.name,

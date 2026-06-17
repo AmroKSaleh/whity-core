@@ -630,7 +630,7 @@ class MigrationsCommand
         if ($this->pluginLoader === null) {
             $this->pluginLoader = new PluginLoader(
                 dirname(__DIR__, 3) . '/plugins',
-                new Router(),
+                new Router(''),
                 null,
                 new HookManager()
             );

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -76,7 +76,7 @@ export function EditTenantModal({
     try {
       setIsSubmitting(true);
 
-      const response = await apiClient(`/api/tenants/${tenant.id}`, {
+      const response = await apiClient(`/api/v1/tenants/${tenant.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           name: data.name,

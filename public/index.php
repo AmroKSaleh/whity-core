@@ -200,7 +200,11 @@ $db = Database::connect();
 \Whity\register_service(Database::class, $db); // @phpstan-ignore-line
 
 // 2. Initialize router
-$router = new Router();
+// WC-206: '/v1' prefix applied to all versioned routes automatically so
+// handlers can be registered as '/api/users' and resolve to '/api/v1/users'.
+// Infrastructure probes (/api/health, /api/version, /api/openapi.json) use
+// registerUnversioned() and are never prefixed.
+$router = new Router('/v1');
 
 // 3. Initialize JWT parser
 $appEnv = $_ENV['APP_ENV'] ?? 'production';
@@ -479,14 +483,32 @@ $router->register('GET', '/api/me/capabilities', [$meCapabilitiesHandler, 'list'
 $frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
-// Health monitoring endpoint (WC-4). Registered with NO required role and NO
-// required permission so it bypasses RBAC (fail-open), and it is listed as a
-// public route in EnforceTenantIsolation so it bypasses tenant resolution too —
-// the probe must answer without a JWT or tenant context. The handler is kept
-// dependency-light (only the DB wrapper) so health stays meaningful when other
-// subsystems are down. $bootTimestamp drives the reported worker uptime.
+// Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
+// probes that target GET /api/health never break regardless of the API version.
+// No required role/permission (fail-open); listed as a PUBLIC route in
+// EnforceTenantIsolation so it bypasses tenant resolution too — the probe must
+// answer without a JWT or tenant context. The handler is kept dependency-light
+// (only the DB wrapper) so health stays meaningful when other subsystems are down.
+// $bootTimestamp drives the reported worker uptime.
 $healthHandler = new HealthApiHandler($db, $bootTimestamp);
-$router->register('GET', '/api/health', [$healthHandler, 'handle']);
+$router->registerUnversioned('GET', '/api/health', [$healthHandler, 'handle']);
+
+// WC-206: unversioned version-discovery endpoint. Returns the current API
+// version, the full supported set, and the default. No auth required — it is a
+// public metadata probe analogous to /api/health.
+$router->registerUnversioned('GET', '/api/version', static function () use ($router): \Whity\Core\Response {
+    $prefix = ltrim($router->getVersionPrefix(), '/'); // 'v1'
+    $version = ltrim($prefix, 'v');                    // '1'
+    return new \Whity\Core\Response(
+        200,
+        (string) json_encode([
+            'version'   => $version,
+            'supported' => [$version],
+            'default'   => $version,
+        ], JSON_THROW_ON_ERROR),
+        ['Content-Type' => 'application/json']
+    );
+});
 
 $deploymentHandler = new DeploymentApiHandler($deploymentManager);
 $router->register('POST', '/api/deployments/apply', [$deploymentHandler, 'apply'], 'admin');

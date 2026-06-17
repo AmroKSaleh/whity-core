@@ -115,7 +115,7 @@ test.describe('Two-Factor Authentication — Settings UI (admin)', () => {
     const statusRefetch = page
       .waitForResponse(
         (res) =>
-          res.url().includes('/api/auth/2fa/status') &&
+          res.url().includes('/api/v1/auth/2fa/status') &&
           res.request().method() === 'GET' &&
           res.ok(),
         { timeout: 30_000 }

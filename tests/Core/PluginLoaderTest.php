@@ -26,7 +26,7 @@ class PluginLoaderTest extends TestCase
     {
         $this->tempDir = sys_get_temp_dir() . '/whity_plugins_' . uniqid();
         mkdir($this->tempDir, 0755, true);
-        $this->router = new Router();
+        $this->router = new Router('');
 
         $this->hadAppEnv = array_key_exists('APP_ENV', $_ENV);
         $this->previousAppEnv = $_ENV['APP_ENV'] ?? null;

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -66,7 +66,7 @@ export default function AuditLogsPage() {
       try {
         setIsLoading(true);
         const response = await apiClient(
-          `/api/audit-logs?${buildQuery(targetPage, filters)}`
+          `/api/v1/audit-logs?${buildQuery(targetPage, filters)}`
         );
 
         if (!response.ok) {

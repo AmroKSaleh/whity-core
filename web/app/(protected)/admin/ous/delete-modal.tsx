@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -29,7 +29,7 @@ export function DeleteOuModal({ isOpen, onClose, onSuccess, ou }: DeleteOuModalP
   const handleDelete = async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient(`/api/ous/${ou.id}`, {
+      const response = await apiClient(`/api/v1/ous/${ou.id}`, {
         method: 'DELETE',
       });
 

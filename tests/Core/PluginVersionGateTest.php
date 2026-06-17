@@ -286,7 +286,7 @@ PHP);
      */
     private function loadDir(string $dir): array
     {
-        $router = new Router();
+        $router = new Router('');
         $loader = new PluginLoader($dir, $router, null, new HookManager());
         $loader->load();
 

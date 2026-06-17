@@ -34,7 +34,7 @@ export function DeleteUserModal({
     try {
       setIsDeleting(true);
 
-      const { error, response } = await api.DELETE('/api/users/{id}', {
+      const { error, response } = await api.DELETE('/api/v1/users/{id}', {
         params: { path: { id: user.id } },
       });
 

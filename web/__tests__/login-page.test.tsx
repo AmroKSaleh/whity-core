@@ -22,7 +22,10 @@ describe('LoginPage - 2FA Flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (useRouter as jest.Mock).mockReturnValue(mockRouter);
-    (global.fetch as jest.Mock).mockClear();
+    // Default: fail with 401 so the silent-refresh fetch in initializeAuth
+    // (POST /api/v1/auth/refresh) doesn't consume a Once-mock intended for the
+    // login endpoint.
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 401 });
   });
 
   // Test 1: 202 response triggers 2FA input
@@ -32,6 +35,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     // Mock login endpoint returning 202 (2FA required)
     (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -82,6 +87,8 @@ describe('LoginPage - 2FA Flow', () => {
       status: 401,
     });
 
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
       ok: false,
@@ -126,6 +133,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
@@ -173,7 +182,7 @@ describe('LoginPage - 2FA Flow', () => {
     // Wait for API call
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/login/2fa'),
+        expect.stringContaining('/api/v1/login/2fa'),
         expect.objectContaining({
           method: 'POST',
           body: expect.stringContaining('123456'),
@@ -188,6 +197,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
@@ -249,6 +260,8 @@ describe('LoginPage - 2FA Flow', () => {
       status: 401,
     });
 
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
       ok: false,
@@ -299,6 +312,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
@@ -356,6 +371,8 @@ describe('LoginPage - 2FA Flow', () => {
       status: 401,
     });
 
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
       ok: false,
@@ -408,6 +425,8 @@ describe('LoginPage - 2FA Flow', () => {
       status: 401,
     });
 
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
       ok: false,
@@ -451,6 +470,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
@@ -502,6 +523,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
@@ -565,6 +588,8 @@ describe('LoginPage - 2FA Flow', () => {
       status: 401,
     });
 
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
       ok: false,
@@ -624,6 +649,8 @@ describe('LoginPage - 2FA Flow', () => {
       status: 401,
     });
 
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
       ok: false,
@@ -682,6 +709,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,
@@ -754,6 +783,8 @@ describe('LoginPage - 2FA Flow', () => {
       status: 401,
     });
 
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
     // Mock login endpoint returning 401 (invalid credentials)
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: false,
@@ -801,6 +832,8 @@ describe('LoginPage - 2FA Flow', () => {
       ok: false,
       status: 401,
     });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       status: 202,

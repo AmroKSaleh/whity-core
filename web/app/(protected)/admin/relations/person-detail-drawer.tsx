@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -66,7 +66,7 @@ export function PersonDetailDrawer({
     }
     setIsLoading(true);
     try {
-      const res = await apiClient(`/api/persons/${personId}/relations`);
+      const res = await apiClient(`/api/v1/persons/${personId}/relations`);
       if (res.ok) {
         setRelations(((await res.json()).data ?? []) as RelationView[]);
       }
@@ -88,7 +88,7 @@ export function PersonDetailDrawer({
   const handleRemoveRelation = async (relationId: number) => {
     setIsMutating(true);
     try {
-      const res = await apiClient(`/api/relations/${relationId}`, { method: 'DELETE' });
+      const res = await apiClient(`/api/v1/relations/${relationId}`, { method: 'DELETE' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || 'Failed to remove relation');

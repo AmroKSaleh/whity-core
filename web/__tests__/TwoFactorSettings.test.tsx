@@ -130,7 +130,7 @@ describe('TwoFactorSettings', () => {
       render(<TwoFactorSettings />);
 
       await waitFor(() => {
-        expect(mockApiClient).toHaveBeenCalledWith('/api/auth/2fa/status', {
+        expect(mockApiClient).toHaveBeenCalledWith('/api/v1/auth/2fa/status', {
           method: 'GET',
         });
       });
@@ -295,7 +295,7 @@ describe('TwoFactorSettings', () => {
       fireEvent.click(confirmButton);
 
       await waitFor(() => {
-        expect(mockApiClient).toHaveBeenCalledWith('/api/auth/2fa/disable', {
+        expect(mockApiClient).toHaveBeenCalledWith('/api/v1/auth/2fa/disable', {
           method: 'POST',
         });
       });
@@ -396,7 +396,7 @@ describe('TwoFactorSettings', () => {
       fireEvent.click(confirmButton);
 
       await waitFor(() => {
-        expect(mockApiClient).toHaveBeenCalledWith('/api/auth/2fa/regenerate-codes', {
+        expect(mockApiClient).toHaveBeenCalledWith('/api/v1/auth/2fa/regenerate-codes', {
           method: 'POST',
         });
       });

@@ -189,8 +189,8 @@ beforeEach(() => {
   jest.clearAllMocks();
 
   mockApiGet.mockImplementation((path: string) => {
-    if (path === '/api/roles') return Promise.resolve(mockRolesResponse);
-    if (path === '/api/ous') return Promise.resolve(mockOusResponse);
+    if (path === '/api/v1/roles') return Promise.resolve(mockRolesResponse);
+    if (path === '/api/v1/ous') return Promise.resolve(mockOusResponse);
     return Promise.resolve({ data: undefined, error: 'unknown path' });
   });
 
@@ -245,7 +245,7 @@ describe('EditUserModal – OU picker', () => {
 
     await waitFor(() => {
       expect(mockApiPatch).toHaveBeenCalledWith(
-        '/api/users/{id}',
+        '/api/v1/users/{id}',
         expect.objectContaining({
           body: expect.objectContaining({ ou_id: 5 }),
         })
@@ -274,7 +274,7 @@ describe('EditUserModal – OU picker', () => {
 
     await waitFor(() => {
       expect(mockApiPatch).toHaveBeenCalledWith(
-        '/api/users/{id}',
+        '/api/v1/users/{id}',
         expect.objectContaining({
           body: expect.objectContaining({ ou_id: null }),
         })

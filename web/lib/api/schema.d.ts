@@ -4,177 +4,6 @@
  */
 
 export interface paths {
-    "/api/admin/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Platform-wide aggregate statistics */
-        get: operations["get_api_admin_stats"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/audit-logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List the tenant's audit entries (newest first, paginated) */
-        get: operations["get_api_audit_logs"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/delegations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List the tenant's permission delegations */
-        get: operations["get_api_delegations"];
-        put?: never;
-        /** Delegate permissions the grantor holds (one row per permission) */
-        post: operations["post_api_delegations"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/delegations/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Revoke a delegation (non-destructive: sets revokedAt) */
-        delete: operations["delete_api_delegations_id"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/deployments/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply a deployment artefact */
-        post: operations["post_api_deployments_apply"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/deployments/rollback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Roll back the last deployment */
-        post: operations["post_api_deployments_rollback"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/deployments/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get the current deployment status */
-        get: operations["get_api_deployments_status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/example/hello": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Api/example/hello */
-        get: operations["get_api_example_hello"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/example/secure": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Api/example/secure */
-        post: operations["post_api_example_secure"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/frontend/features": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List the plugin frontend features visible to the caller */
-        get: operations["get_api_frontend_features"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -192,7 +21,178 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/hello": {
+    "/api/v1/admin/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Platform-wide aggregate statistics */
+        get: operations["get_api_v1_admin_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the tenant's audit entries (newest first, paginated) */
+        get: operations["get_api_v1_audit_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delegations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the tenant's permission delegations */
+        get: operations["get_api_v1_delegations"];
+        put?: never;
+        /** Delegate permissions the grantor holds (one row per permission) */
+        post: operations["post_api_v1_delegations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delegations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a delegation (non-destructive: sets revokedAt) */
+        delete: operations["delete_api_v1_delegations_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployments/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply a deployment artefact */
+        post: operations["post_api_v1_deployments_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployments/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Roll back the last deployment */
+        post: operations["post_api_v1_deployments_rollback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deployments/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current deployment status */
+        get: operations["get_api_v1_deployments_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/example/hello": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Api/v1/example/hello */
+        get: operations["get_api_v1_example_hello"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/example/secure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Api/v1/example/secure */
+        post: operations["post_api_v1_example_secure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/frontend/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the plugin frontend features visible to the caller */
+        get: operations["get_api_v1_frontend_features"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hello": {
         parameters: {
             query?: never;
             header?: never;
@@ -200,7 +200,7 @@ export interface paths {
             cookie?: never;
         };
         /** Public greeting */
-        get: operations["get_api_hello"];
+        get: operations["get_api_v1_hello"];
         put?: never;
         post?: never;
         delete?: never;
@@ -209,15 +209,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/hello/admin": {
+    "/api/v1/hello/admin": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Api/hello/admin */
-        get: operations["get_api_hello_admin"];
+        /** Get Api/v1/hello/admin */
+        get: operations["get_api_v1_hello_admin"];
         put?: never;
         post?: never;
         delete?: never;
@@ -226,7 +226,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/hello/greetings": {
+    "/api/v1/hello/greetings": {
         parameters: {
             query?: never;
             header?: never;
@@ -234,17 +234,17 @@ export interface paths {
             cookie?: never;
         };
         /** List the tenant's greetings (newest first) */
-        get: operations["get_api_hello_greetings"];
+        get: operations["get_api_v1_hello_greetings"];
         put?: never;
         /** Create a greeting in the caller's tenant */
-        post: operations["post_api_hello_greetings"];
+        post: operations["post_api_v1_hello_greetings"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/hello/greetings/{id}": {
+    "/api/v1/hello/greetings/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -255,14 +255,14 @@ export interface paths {
         put?: never;
         post?: never;
         /** Delete a greeting (tenant-scoped 404 semantics) */
-        delete: operations["delete_api_hello_greetings_id"];
+        delete: operations["delete_api_v1_hello_greetings_id"];
         options?: never;
         head?: never;
         /** Update a greeting (tenant-scoped 404 semantics) */
-        patch: operations["patch_api_hello_greetings_id"];
+        patch: operations["patch_api_v1_hello_greetings_id"];
         trace?: never;
     };
-    "/api/me/capabilities": {
+    "/api/v1/me/capabilities": {
         parameters: {
             query?: never;
             header?: never;
@@ -270,7 +270,7 @@ export interface paths {
             cookie?: never;
         };
         /** List the caller's effective permission slugs */
-        get: operations["get_api_me_capabilities"];
+        get: operations["get_api_v1_me_capabilities"];
         put?: never;
         post?: never;
         delete?: never;
@@ -279,7 +279,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/migrations": {
+    "/api/v1/migrations": {
         parameters: {
             query?: never;
             header?: never;
@@ -287,7 +287,7 @@ export interface paths {
             cookie?: never;
         };
         /** List database migrations and their execution state */
-        get: operations["get_api_migrations"];
+        get: operations["get_api_v1_migrations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -296,7 +296,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/navigation": {
+    "/api/v1/navigation": {
         parameters: {
             query?: never;
             header?: never;
@@ -304,7 +304,7 @@ export interface paths {
             cookie?: never;
         };
         /** List the navigation items visible to the caller */
-        get: operations["get_api_navigation"];
+        get: operations["get_api_v1_navigation"];
         put?: never;
         post?: never;
         delete?: never;
@@ -313,7 +313,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/ous": {
+    "/api/v1/ous": {
         parameters: {
             query?: never;
             header?: never;
@@ -321,17 +321,17 @@ export interface paths {
             cookie?: never;
         };
         /** List the tenant's organizational units */
-        get: operations["get_api_ous"];
+        get: operations["get_api_v1_ous"];
         put?: never;
         /** Create an organizational unit */
-        post: operations["post_api_ous"];
+        post: operations["post_api_v1_ous"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/ous/{id}": {
+    "/api/v1/ous/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -339,18 +339,18 @@ export interface paths {
             cookie?: never;
         };
         /** Get an organizational unit with its direct children */
-        get: operations["get_api_ous_id"];
+        get: operations["get_api_v1_ous_id"];
         put?: never;
         post?: never;
         /** Delete an organizational unit */
-        delete: operations["delete_api_ous_id"];
+        delete: operations["delete_api_v1_ous_id"];
         options?: never;
         head?: never;
         /** Update an organizational unit (re-parenting is cycle-checked) */
-        patch: operations["patch_api_ous_id"];
+        patch: operations["patch_api_v1_ous_id"];
         trace?: never;
     };
-    "/api/ous/{id}/members": {
+    "/api/v1/ous/{id}/members": {
         parameters: {
             query?: never;
             header?: never;
@@ -358,7 +358,7 @@ export interface paths {
             cookie?: never;
         };
         /** List the users assigned to an organizational unit */
-        get: operations["get_api_ous_id_members"];
+        get: operations["get_api_v1_ous_id_members"];
         put?: never;
         post?: never;
         delete?: never;
@@ -367,7 +367,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/ous/{id}/roles": {
+    "/api/v1/ous/{id}/roles": {
         parameters: {
             query?: never;
             header?: never;
@@ -375,17 +375,17 @@ export interface paths {
             cookie?: never;
         };
         /** List the roles assigned to an organizational unit */
-        get: operations["get_api_ous_id_roles"];
+        get: operations["get_api_v1_ous_id_roles"];
         put?: never;
         /** Assign a role to an organizational unit */
-        post: operations["post_api_ous_id_roles"];
+        post: operations["post_api_v1_ous_id_roles"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/ous/{ouId}/roles/{roleId}": {
+    "/api/v1/ous/{ouId}/roles/{roleId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -396,13 +396,13 @@ export interface paths {
         put?: never;
         post?: never;
         /** Remove a role assignment from an organizational unit */
-        delete: operations["delete_api_ous_ouid_roles_roleid"];
+        delete: operations["delete_api_v1_ous_ouid_roles_roleid"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/permissions": {
+    "/api/v1/permissions": {
         parameters: {
             query?: never;
             header?: never;
@@ -410,7 +410,7 @@ export interface paths {
             cookie?: never;
         };
         /** List the permission catalogue */
-        get: operations["get_api_permissions"];
+        get: operations["get_api_v1_permissions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -419,7 +419,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/persons": {
+    "/api/v1/persons": {
         parameters: {
             query?: never;
             header?: never;
@@ -427,17 +427,17 @@ export interface paths {
             cookie?: never;
         };
         /** List persons in the caller's tenant */
-        get: operations["get_api_persons"];
+        get: operations["get_api_v1_persons"];
         put?: never;
         /** Create a person record */
-        post: operations["post_api_persons"];
+        post: operations["post_api_v1_persons"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/persons/{id}": {
+    "/api/v1/persons/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -445,18 +445,18 @@ export interface paths {
             cookie?: never;
         };
         /** Get a single person */
-        get: operations["get_api_persons_id"];
+        get: operations["get_api_v1_persons_id"];
         put?: never;
         post?: never;
         /** Delete a person record */
-        delete: operations["delete_api_persons_id"];
+        delete: operations["delete_api_v1_persons_id"];
         options?: never;
         head?: never;
         /** Update a person record */
-        patch: operations["patch_api_persons_id"];
+        patch: operations["patch_api_v1_persons_id"];
         trace?: never;
     };
-    "/api/persons/{id}/relations": {
+    "/api/v1/persons/{id}/relations": {
         parameters: {
             query?: never;
             header?: never;
@@ -464,7 +464,7 @@ export interface paths {
             cookie?: never;
         };
         /** List a person's relation edges */
-        get: operations["get_api_persons_id_relations"];
+        get: operations["get_api_v1_persons_id_relations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -473,7 +473,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/plugins": {
+    "/api/v1/plugins": {
         parameters: {
             query?: never;
             header?: never;
@@ -481,7 +481,7 @@ export interface paths {
             cookie?: never;
         };
         /** List all registered plugins */
-        get: operations["get_api_plugins"];
+        get: operations["get_api_v1_plugins"];
         put?: never;
         post?: never;
         delete?: never;
@@ -490,7 +490,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/plugins/reload": {
+    "/api/v1/plugins/reload": {
         parameters: {
             query?: never;
             header?: never;
@@ -500,14 +500,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Reload the plugin registry */
-        post: operations["post_api_plugins_reload"];
+        post: operations["post_api_v1_plugins_reload"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/plugins/{id}/re-enable": {
+    "/api/v1/plugins/{id}/re-enable": {
         parameters: {
             query?: never;
             header?: never;
@@ -517,14 +517,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Re-enable a previously disabled plugin by id */
-        post: operations["post_api_plugins_id_re_enable"];
+        post: operations["post_api_v1_plugins_id_re_enable"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/plugins/{name}/disable": {
+    "/api/v1/plugins/{name}/disable": {
         parameters: {
             query?: never;
             header?: never;
@@ -534,14 +534,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Disable a plugin by name */
-        post: operations["post_api_plugins_name_disable"];
+        post: operations["post_api_v1_plugins_name_disable"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/plugins/{name}/enable": {
+    "/api/v1/plugins/{name}/enable": {
         parameters: {
             query?: never;
             header?: never;
@@ -551,14 +551,14 @@ export interface paths {
         get?: never;
         put?: never;
         /** Enable a plugin by name */
-        post: operations["post_api_plugins_name_enable"];
+        post: operations["post_api_v1_plugins_name_enable"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/relations": {
+    "/api/v1/relations": {
         parameters: {
             query?: never;
             header?: never;
@@ -566,17 +566,17 @@ export interface paths {
             cookie?: never;
         };
         /** List all relation edges in the caller's tenant */
-        get: operations["get_api_relations"];
+        get: operations["get_api_v1_relations"];
         put?: never;
         /** Create a relation edge between two persons */
-        post: operations["post_api_relations"];
+        post: operations["post_api_v1_relations"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/relations/{id}": {
+    "/api/v1/relations/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -587,13 +587,13 @@ export interface paths {
         put?: never;
         post?: never;
         /** Delete a relation edge */
-        delete: operations["delete_api_relations_id"];
+        delete: operations["delete_api_v1_relations_id"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/relationship-types": {
+    "/api/v1/relationship-types": {
         parameters: {
             query?: never;
             header?: never;
@@ -601,7 +601,7 @@ export interface paths {
             cookie?: never;
         };
         /** List the relationship-type vocabulary */
-        get: operations["get_api_relationship_types"];
+        get: operations["get_api_v1_relationship_types"];
         put?: never;
         post?: never;
         delete?: never;
@@ -610,7 +610,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/roles": {
+    "/api/v1/roles": {
         parameters: {
             query?: never;
             header?: never;
@@ -618,17 +618,17 @@ export interface paths {
             cookie?: never;
         };
         /** List the roles visible to the tenant (own + global) */
-        get: operations["get_api_roles"];
+        get: operations["get_api_v1_roles"];
         put?: never;
         /** Create a role with optional permission grants */
-        post: operations["post_api_roles"];
+        post: operations["post_api_v1_roles"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/roles/{id}": {
+    "/api/v1/roles/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -636,18 +636,18 @@ export interface paths {
             cookie?: never;
         };
         /** Get a role with its permissions */
-        get: operations["get_api_roles_id"];
+        get: operations["get_api_v1_roles_id"];
         put?: never;
         post?: never;
         /** Delete a role */
-        delete: operations["delete_api_roles_id"];
+        delete: operations["delete_api_v1_roles_id"];
         options?: never;
         head?: never;
         /** Update a role (permissions are replaced when supplied) */
-        patch: operations["patch_api_roles_id"];
+        patch: operations["patch_api_v1_roles_id"];
         trace?: never;
     };
-    "/api/roles/{id}/permissions": {
+    "/api/v1/roles/{id}/permissions": {
         parameters: {
             query?: never;
             header?: never;
@@ -655,7 +655,7 @@ export interface paths {
             cookie?: never;
         };
         /** List a role's permissions */
-        get: operations["get_api_roles_id_permissions"];
+        get: operations["get_api_v1_roles_id_permissions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -664,7 +664,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tenants": {
+    "/api/v1/tenants": {
         parameters: {
             query?: never;
             header?: never;
@@ -672,17 +672,17 @@ export interface paths {
             cookie?: never;
         };
         /** List tenants (system tenant sees all; others see their own) */
-        get: operations["get_api_tenants"];
+        get: operations["get_api_v1_tenants"];
         put?: never;
         /** Create a tenant (system tenant only) */
-        post: operations["post_api_tenants"];
+        post: operations["post_api_v1_tenants"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/tenants/{id}": {
+    "/api/v1/tenants/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -693,14 +693,14 @@ export interface paths {
         put?: never;
         post?: never;
         /** Delete a tenant (the system tenant is protected) */
-        delete: operations["delete_api_tenants_id"];
+        delete: operations["delete_api_v1_tenants_id"];
         options?: never;
         head?: never;
         /** Update a tenant */
-        patch: operations["patch_api_tenants_id"];
+        patch: operations["patch_api_v1_tenants_id"];
         trace?: never;
     };
-    "/api/users": {
+    "/api/v1/users": {
         parameters: {
             query?: never;
             header?: never;
@@ -708,17 +708,17 @@ export interface paths {
             cookie?: never;
         };
         /** List the tenant's users */
-        get: operations["get_api_users"];
+        get: operations["get_api_v1_users"];
         put?: never;
         /** Create a user */
-        post: operations["post_api_users"];
+        post: operations["post_api_v1_users"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/users/{id}": {
+    "/api/v1/users/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -729,14 +729,14 @@ export interface paths {
         put?: never;
         post?: never;
         /** Delete a user */
-        delete: operations["delete_api_users_id"];
+        delete: operations["delete_api_v1_users_id"];
         options?: never;
         head?: never;
         /** Update a user */
-        patch: operations["patch_api_users_id"];
+        patch: operations["patch_api_v1_users_id"];
         trace?: never;
     };
-    "/api/users/{id}/relations": {
+    "/api/v1/users/{id}/relations": {
         parameters: {
             query?: never;
             header?: never;
@@ -744,7 +744,7 @@ export interface paths {
             cookie?: never;
         };
         /** Get the person record and relations for a user account */
-        get: operations["get_api_users_id_relations"];
+        get: operations["get_api_v1_users_id_relations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1221,7 +1221,36 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    get_api_admin_stats: {
+    get_api_health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description System is healthy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+            /** @description System is degraded */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_admin_stats: {
         parameters: {
             query?: never;
             header?: never;
@@ -1259,7 +1288,7 @@ export interface operations {
             };
         };
     };
-    get_api_audit_logs: {
+    get_api_v1_audit_logs: {
         parameters: {
             query?: {
                 /** @description Exact action match (e.g. users:create) */
@@ -1312,7 +1341,7 @@ export interface operations {
             };
         };
     };
-    get_api_delegations: {
+    get_api_v1_delegations: {
         parameters: {
             query?: {
                 /** @description Filter by grantee type (role|user) */
@@ -1368,7 +1397,7 @@ export interface operations {
             };
         };
     };
-    post_api_delegations: {
+    post_api_v1_delegations: {
         parameters: {
             query?: never;
             header?: never;
@@ -1437,7 +1466,7 @@ export interface operations {
             };
         };
     };
-    delete_api_delegations_id: {
+    delete_api_v1_delegations_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -1486,7 +1515,7 @@ export interface operations {
             };
         };
     };
-    post_api_deployments_apply: {
+    post_api_v1_deployments_apply: {
         parameters: {
             query?: never;
             header?: never;
@@ -1537,7 +1566,7 @@ export interface operations {
             };
         };
     };
-    post_api_deployments_rollback: {
+    post_api_v1_deployments_rollback: {
         parameters: {
             query?: never;
             header?: never;
@@ -1575,7 +1604,7 @@ export interface operations {
             };
         };
     };
-    get_api_deployments_status: {
+    get_api_v1_deployments_status: {
         parameters: {
             query?: never;
             header?: never;
@@ -1613,7 +1642,7 @@ export interface operations {
             };
         };
     };
-    get_api_example_hello: {
+    get_api_v1_example_hello: {
         parameters: {
             query?: never;
             header?: never;
@@ -1645,7 +1674,7 @@ export interface operations {
             };
         };
     };
-    post_api_example_secure: {
+    post_api_v1_example_secure: {
         parameters: {
             query?: never;
             header?: never;
@@ -1677,7 +1706,7 @@ export interface operations {
             };
         };
     };
-    get_api_frontend_features: {
+    get_api_v1_frontend_features: {
         parameters: {
             query?: never;
             header?: never;
@@ -1715,36 +1744,7 @@ export interface operations {
             };
         };
     };
-    get_api_health: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description System is healthy */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-            /** @description System is degraded */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    get_api_hello: {
+    get_api_v1_hello: {
         parameters: {
             query?: never;
             header?: never;
@@ -1764,7 +1764,7 @@ export interface operations {
             };
         };
     };
-    get_api_hello_admin: {
+    get_api_v1_hello_admin: {
         parameters: {
             query?: never;
             header?: never;
@@ -1796,7 +1796,7 @@ export interface operations {
             };
         };
     };
-    get_api_hello_greetings: {
+    get_api_v1_hello_greetings: {
         parameters: {
             query?: never;
             header?: never;
@@ -1823,7 +1823,7 @@ export interface operations {
             };
         };
     };
-    post_api_hello_greetings: {
+    post_api_v1_hello_greetings: {
         parameters: {
             query?: never;
             header?: never;
@@ -1861,7 +1861,7 @@ export interface operations {
             };
         };
     };
-    delete_api_hello_greetings_id: {
+    delete_api_v1_hello_greetings_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -1902,7 +1902,7 @@ export interface operations {
             };
         };
     };
-    patch_api_hello_greetings_id: {
+    patch_api_v1_hello_greetings_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -1949,7 +1949,7 @@ export interface operations {
             };
         };
     };
-    get_api_me_capabilities: {
+    get_api_v1_me_capabilities: {
         parameters: {
             query?: never;
             header?: never;
@@ -1987,7 +1987,7 @@ export interface operations {
             };
         };
     };
-    get_api_migrations: {
+    get_api_v1_migrations: {
         parameters: {
             query?: never;
             header?: never;
@@ -2016,7 +2016,7 @@ export interface operations {
             };
         };
     };
-    get_api_navigation: {
+    get_api_v1_navigation: {
         parameters: {
             query?: never;
             header?: never;
@@ -2054,7 +2054,7 @@ export interface operations {
             };
         };
     };
-    get_api_ous: {
+    get_api_v1_ous: {
         parameters: {
             query?: never;
             header?: never;
@@ -2092,7 +2092,7 @@ export interface operations {
             };
         };
     };
-    post_api_ous: {
+    post_api_v1_ous: {
         parameters: {
             query?: never;
             header?: never;
@@ -2152,7 +2152,7 @@ export interface operations {
             };
         };
     };
-    get_api_ous_id: {
+    get_api_v1_ous_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -2201,7 +2201,7 @@ export interface operations {
             };
         };
     };
-    delete_api_ous_id: {
+    delete_api_v1_ous_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -2248,7 +2248,7 @@ export interface operations {
             };
         };
     };
-    patch_api_ous_id: {
+    patch_api_v1_ous_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -2301,7 +2301,7 @@ export interface operations {
             };
         };
     };
-    get_api_ous_id_members: {
+    get_api_v1_ous_id_members: {
         parameters: {
             query?: never;
             header?: never;
@@ -2350,7 +2350,7 @@ export interface operations {
             };
         };
     };
-    get_api_ous_id_roles: {
+    get_api_v1_ous_id_roles: {
         parameters: {
             query?: never;
             header?: never;
@@ -2399,7 +2399,7 @@ export interface operations {
             };
         };
     };
-    post_api_ous_id_roles: {
+    post_api_v1_ous_id_roles: {
         parameters: {
             query?: never;
             header?: never;
@@ -2470,7 +2470,7 @@ export interface operations {
             };
         };
     };
-    delete_api_ous_ouid_roles_roleid: {
+    delete_api_v1_ous_ouid_roles_roleid: {
         parameters: {
             query?: never;
             header?: never;
@@ -2518,7 +2518,7 @@ export interface operations {
             };
         };
     };
-    get_api_permissions: {
+    get_api_v1_permissions: {
         parameters: {
             query?: never;
             header?: never;
@@ -2556,7 +2556,7 @@ export interface operations {
             };
         };
     };
-    get_api_persons: {
+    get_api_v1_persons: {
         parameters: {
             query?: never;
             header?: never;
@@ -2594,7 +2594,7 @@ export interface operations {
             };
         };
     };
-    post_api_persons: {
+    post_api_v1_persons: {
         parameters: {
             query?: never;
             header?: never;
@@ -2636,7 +2636,7 @@ export interface operations {
             };
         };
     };
-    get_api_persons_id: {
+    get_api_v1_persons_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -2685,7 +2685,7 @@ export interface operations {
             };
         };
     };
-    delete_api_persons_id: {
+    delete_api_v1_persons_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -2741,7 +2741,7 @@ export interface operations {
             };
         };
     };
-    patch_api_persons_id: {
+    patch_api_v1_persons_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -2803,7 +2803,7 @@ export interface operations {
             };
         };
     };
-    get_api_persons_id_relations: {
+    get_api_v1_persons_id_relations: {
         parameters: {
             query?: never;
             header?: never;
@@ -2834,7 +2834,7 @@ export interface operations {
             };
         };
     };
-    get_api_plugins: {
+    get_api_v1_plugins: {
         parameters: {
             query?: never;
             header?: never;
@@ -2863,7 +2863,7 @@ export interface operations {
             };
         };
     };
-    post_api_plugins_reload: {
+    post_api_v1_plugins_reload: {
         parameters: {
             query?: never;
             header?: never;
@@ -2892,7 +2892,7 @@ export interface operations {
             };
         };
     };
-    post_api_plugins_id_re_enable: {
+    post_api_v1_plugins_id_re_enable: {
         parameters: {
             query?: never;
             header?: never;
@@ -2932,7 +2932,7 @@ export interface operations {
             };
         };
     };
-    post_api_plugins_name_disable: {
+    post_api_v1_plugins_name_disable: {
         parameters: {
             query?: never;
             header?: never;
@@ -2972,7 +2972,7 @@ export interface operations {
             };
         };
     };
-    post_api_plugins_name_enable: {
+    post_api_v1_plugins_name_enable: {
         parameters: {
             query?: never;
             header?: never;
@@ -3012,7 +3012,7 @@ export interface operations {
             };
         };
     };
-    get_api_relations: {
+    get_api_v1_relations: {
         parameters: {
             query?: never;
             header?: never;
@@ -3050,7 +3050,7 @@ export interface operations {
             };
         };
     };
-    post_api_relations: {
+    post_api_v1_relations: {
         parameters: {
             query?: never;
             header?: never;
@@ -3110,7 +3110,7 @@ export interface operations {
             };
         };
     };
-    delete_api_relations_id: {
+    delete_api_v1_relations_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3157,7 +3157,7 @@ export interface operations {
             };
         };
     };
-    get_api_relationship_types: {
+    get_api_v1_relationship_types: {
         parameters: {
             query?: never;
             header?: never;
@@ -3186,7 +3186,7 @@ export interface operations {
             };
         };
     };
-    get_api_roles: {
+    get_api_v1_roles: {
         parameters: {
             query?: never;
             header?: never;
@@ -3224,7 +3224,7 @@ export interface operations {
             };
         };
     };
-    post_api_roles: {
+    post_api_v1_roles: {
         parameters: {
             query?: never;
             header?: never;
@@ -3284,7 +3284,7 @@ export interface operations {
             };
         };
     };
-    get_api_roles_id: {
+    get_api_v1_roles_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3333,7 +3333,7 @@ export interface operations {
             };
         };
     };
-    delete_api_roles_id: {
+    delete_api_v1_roles_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3391,7 +3391,7 @@ export interface operations {
             };
         };
     };
-    patch_api_roles_id: {
+    patch_api_v1_roles_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3453,7 +3453,7 @@ export interface operations {
             };
         };
     };
-    get_api_roles_id_permissions: {
+    get_api_v1_roles_id_permissions: {
         parameters: {
             query?: never;
             header?: never;
@@ -3502,7 +3502,7 @@ export interface operations {
             };
         };
     };
-    get_api_tenants: {
+    get_api_v1_tenants: {
         parameters: {
             query?: never;
             header?: never;
@@ -3540,7 +3540,7 @@ export interface operations {
             };
         };
     };
-    post_api_tenants: {
+    post_api_v1_tenants: {
         parameters: {
             query?: never;
             header?: never;
@@ -3600,7 +3600,7 @@ export interface operations {
             };
         };
     };
-    delete_api_tenants_id: {
+    delete_api_v1_tenants_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3667,7 +3667,7 @@ export interface operations {
             };
         };
     };
-    patch_api_tenants_id: {
+    patch_api_v1_tenants_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3738,7 +3738,7 @@ export interface operations {
             };
         };
     };
-    get_api_users: {
+    get_api_v1_users: {
         parameters: {
             query?: never;
             header?: never;
@@ -3776,7 +3776,7 @@ export interface operations {
             };
         };
     };
-    post_api_users: {
+    post_api_v1_users: {
         parameters: {
             query?: never;
             header?: never;
@@ -3845,7 +3845,7 @@ export interface operations {
             };
         };
     };
-    delete_api_users_id: {
+    delete_api_v1_users_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3894,7 +3894,7 @@ export interface operations {
             };
         };
     };
-    patch_api_users_id: {
+    patch_api_v1_users_id: {
         parameters: {
             query?: never;
             header?: never;
@@ -3965,7 +3965,7 @@ export interface operations {
             };
         };
     };
-    get_api_users_id_relations: {
+    get_api_v1_users_id_relations: {
         parameters: {
             query?: never;
             header?: never;

@@ -125,7 +125,7 @@ class WorkerLoopAuditSurvivalTest extends TestCase
         // Boot-time wiring: logger injected ONCE, exactly like public/index.php.
         TenantContext::setLogger($this->spyLogger($records));
 
-        $router = new Router();
+        $router = new Router('');
         // An ordinary, non-privileged route driven for the warm-up loop. Its only
         // job is to run full handle() + resetRequestState() cycles (the worker
         // reuse boundary) without auditing anything.
@@ -222,7 +222,7 @@ class WorkerLoopAuditSurvivalTest extends TestCase
         ]);
         $isolation = new EnforceTenantIsolation($jwtParser, $logger);
 
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/loop', static fn(Request $req): Response => Response::json(['ok' => true]));
         // The cross-tenant target: a tenant-1 caller addressing tenant-2. The
         // route handler is reached ONLY if the middleware permits the bypass.
@@ -309,7 +309,7 @@ class WorkerLoopAuditSurvivalTest extends TestCase
 
         TenantContext::setLogger($this->spyLogger($firstRecords));
 
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/loop', static fn(Request $req): Response => Response::json(['ok' => true]));
         $router->register('GET', '/bypass', static function (Request $req): Response {
             TenantContext::setSystemMode(true, 'cli:rebind-probe');

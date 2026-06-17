@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -37,7 +37,7 @@ export function DeleteRoleModal({
     try {
       setIsDeleting(true);
 
-      const response = await apiClient(`/api/roles/${role.id}`, {
+      const response = await apiClient(`/api/v1/roles/${role.id}`, {
         method: 'DELETE',
       });
 

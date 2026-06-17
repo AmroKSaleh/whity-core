@@ -64,7 +64,7 @@ final class RelationsApiRbacTest extends TestCase
         $personsHandler = new PersonsApiHandler($personRepo, $relationRepo);
         $relationsHandler = new RelationsApiHandler($personRepo, $relationRepo, $resolver);
 
-        $this->router = new Router();
+        $this->router = new Router('');
         $this->router->register('GET', '/api/relationship-types', [$relationsHandler, 'listTypes'], null, null, CorePermissions::RELATIONS_READ);
         $this->router->register('GET', '/api/persons', [$personsHandler, 'list'], null, null, CorePermissions::RELATIONS_READ);
         $this->router->register('POST', '/api/persons', [$personsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);

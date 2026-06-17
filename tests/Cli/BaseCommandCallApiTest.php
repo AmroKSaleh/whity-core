@@ -41,7 +41,7 @@ final class BaseCommandCallApiTest extends TestCase
 
         // Wire a minimal real kernel (no DB): one GET route, so a POST to the
         // same path exercises the kernel's 405 path — an SDK-base Response.
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/tenants', static fn ($req) => \Whity\Core\Response::json([]));
 
         $jwtParser = new JwtParser('cli-test-secret-padded-for-hs256-min-32-byte-key');

@@ -40,7 +40,7 @@ final class AuditLogRbacTest extends TestCase
     {
         $this->jwtParser = new JwtParser(self::SECRET);
         $this->registry = new PermissionRegistry();
-        $this->router = new Router();
+        $this->router = new Router('');
 
         // Register the audit-log route exactly as public/index.php does: gated on
         // the audit:read permission (requiredRole null, requiredPermission set).

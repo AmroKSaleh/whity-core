@@ -143,7 +143,7 @@ test.describe('Roles CRUD (admin)', () => {
     // is more robust than parsing the rendered permission-count cell.
     const id = await findRoleIdByName(adminApi, createdRoleName);
     expect(id, 'created role should be retrievable by name').not.toBeNull();
-    const perms = await adminApi.get(`/api/roles/${id}/permissions`);
+    const perms = await adminApi.get(`/api/v1/roles/${id}/permissions`);
     expect(perms.ok()).toBeTruthy();
     const body = (await perms.json()) as { data?: Array<{ name: string }> };
     expect((body.data ?? []).map((p) => p.name)).toContain('users:read');
@@ -203,7 +203,7 @@ test.describe('Roles CRUD (admin)', () => {
     // ...and the assigned permission is persisted server-side.
     const id = await findRoleIdByName(adminApi, createdRoleName);
     expect(id).not.toBeNull();
-    const perms = await adminApi.get(`/api/roles/${id}/permissions`);
+    const perms = await adminApi.get(`/api/v1/roles/${id}/permissions`);
     const body = (await perms.json()) as { data?: Array<{ name: string }> };
     expect((body.data ?? []).map((p) => p.name)).toContain('roles:read');
   });
@@ -378,7 +378,7 @@ test.describe('Roles delete guards (admin)', () => {
     // Seed a user and assign it to the new role via the API (create ignores the
     // role name and lands on `user`; PATCH resolves names — WC-113). This sets
     // up the "role has active user assignments" precondition for the 409.
-    const create = await adminApi.post('/api/users', {
+    const create = await adminApi.post('/api/v1/users', {
       data: {
         name: 'probe',
         email: createdEmail,

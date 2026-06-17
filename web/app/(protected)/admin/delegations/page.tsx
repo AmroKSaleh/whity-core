@@ -40,7 +40,7 @@ export default function DelegationsPage() {
   const fetchDelegations = useCallback(async () => {
     try {
       setIsLoading(true);
-      const { data, response } = await api.GET('/api/delegations');
+      const { data, response } = await api.GET('/api/v1/delegations');
 
       if (response.status === 403) {
         // The acting user lacks delegation:manage — show an access-denied state

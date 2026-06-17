@@ -108,7 +108,7 @@ class RbacAuthEdgeCaseTest extends TestCase
         string $permission,
         ?bool &$handlerReached = null
     ): Response {
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/users', static fn(): Response => new Response(200, '[]'), null, null, $permission);
 
         $match = $router->match($request);

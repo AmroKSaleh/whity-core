@@ -248,7 +248,7 @@ class JwtSingleDecodeTest extends TestCase
         $roleChecker = $this->createMock(RoleChecker::class);
         $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
 
-        $router = new Router();
+        $router = new Router('');
         $router->register(
             'GET',
             '/api/users',

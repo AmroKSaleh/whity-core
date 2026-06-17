@@ -52,7 +52,7 @@ abstract class BaseCommand
     protected function setupKernel(): void
     {
         $db = Database::connect();
-        $router = new Router();
+        $router = new Router('');
 
         $appEnv = $_ENV['APP_ENV'] ?? 'production';
         if ($appEnv !== 'development' && empty($_ENV['JWT_SECRET'])) {

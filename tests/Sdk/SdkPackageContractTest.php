@@ -312,7 +312,7 @@ final class SdkPackageContractTest extends TestCase
      */
     public function testWrappedSdkHandlerServesItsRouteThroughTheRouter(): void
     {
-        $router = new Router();
+        $router = new Router('');
         $loader = new PluginLoader(
             dirname(__DIR__, 2) . '/plugins',
             $router,
@@ -339,7 +339,7 @@ final class SdkPackageContractTest extends TestCase
     {
         $loader = new PluginLoader(
             dirname(__DIR__, 2) . '/plugins',
-            new Router(),
+            new Router(''),
             null,
             new HookManager()
         );

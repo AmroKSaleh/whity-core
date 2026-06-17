@@ -27,7 +27,7 @@ class PluginIsolationTest extends TestCase
     {
         $this->tempDir = sys_get_temp_dir() . '/whity_isolation_' . uniqid();
         mkdir($this->tempDir, 0755, true);
-        $this->router = new Router();
+        $this->router = new Router('');
     }
 
     protected function tearDown(): void

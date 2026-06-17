@@ -77,7 +77,8 @@ final class OpenApiSpecDriftTest extends TestCase
      */
     public function testCommittedSpecMatchesLiveRouterRegeneration(): void
     {
-        ['spec' => $spec, 'errors' => $errors] = self::regenerate(new Router());
+        // WC-206: the generator uses '/v1' to produce '/api/v1/' paths in the spec.
+        ['spec' => $spec, 'errors' => $errors] = self::regenerate(new Router('/v1'));
 
         $this->assertSame([], $errors, 'The regenerated spec must be structurally valid before it is published');
 
@@ -99,7 +100,7 @@ final class OpenApiSpecDriftTest extends TestCase
      */
     public function testDeliberateRouterDivergenceIsDetected(): void
     {
-        $diverged = new Router();
+        $diverged = new Router('');
         $diverged->register(
             'GET',
             '/api/__wc179_drift_probe',

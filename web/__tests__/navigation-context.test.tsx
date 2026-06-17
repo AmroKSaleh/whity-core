@@ -132,7 +132,7 @@ describe('NavigationProvider auth-awareness', () => {
       expect(screen.getByTestId('ids').textContent).toBe('dashboard')
     );
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockFetch).toHaveBeenCalledWith('/api/navigation', {
+    expect(mockFetch).toHaveBeenCalledWith('/api/v1/navigation', {
       credentials: 'include',
     });
   });

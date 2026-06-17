@@ -8,7 +8,7 @@
  * 1. Every request carries `credentials: 'include'` (httpOnly cookies) and the
  *    `X-Requested-With: XMLHttpRequest` CSRF defense header (WC-160) —
  *    caller-supplied headers win on clash.
- * 2. On a 401, it POSTs `/api/auth/refresh` once and replays the original
+ * 2. On a 401, it POSTs `/api/v1/auth/refresh` once and replays the original
  *    request once. The replay bypasses the middleware entirely, so a 401 on
  *    the retry (or on the refresh itself) is returned as-is — refresh loops
  *    are structurally impossible.
@@ -52,11 +52,11 @@ export function createApiClient(options: CreateApiClientOptions = {}) {
    */
   const pristine = new Map<string, Request>();
 
-  /** POST /api/auth/refresh — true when the backend renewed the cookie. */
+  /** POST /api/v1/auth/refresh — true when the backend renewed the cookie. */
   const refreshAccessToken = async (): Promise<boolean> => {
     try {
       const response = await fetchFn(
-        new Request(`${baseUrl}/api/auth/refresh`, {
+        new Request(`${baseUrl}/api/v1/auth/refresh`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'X-Requested-With': 'XMLHttpRequest' },

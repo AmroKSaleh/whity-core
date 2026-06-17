@@ -40,11 +40,13 @@ final class CsrfGuard
      *
      * @var list<string>
      */
+    // WC-206: auth surface moved to /api/v1/; these paths must match the
+    // versioned request path that reaches the middleware.
     private const PROTECTED_POSTS = [
-        '/api/login',
-        '/api/login/2fa',
-        '/api/auth/refresh',
-        '/api/auth/logout',
+        '/api/v1/login',
+        '/api/v1/login/2fa',
+        '/api/v1/auth/refresh',
+        '/api/v1/auth/logout',
     ];
 
     /**

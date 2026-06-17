@@ -60,7 +60,7 @@ export function CreatePersonModal({ isOpen, onClose, onSuccess }: CreatePersonMo
         payload.notes = notes.trim();
       }
 
-      const response = await apiClient('/api/persons', {
+      const response = await apiClient('/api/v1/persons', {
         method: 'POST',
         body: JSON.stringify(payload),
       });

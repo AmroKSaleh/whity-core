@@ -222,7 +222,7 @@ PHP);
 
     public function testRouterStoresRouteSchemaDeclarations(): void
     {
-        $router = new Router();
+        $router = new Router('');
         $schema = ['summary' => 'List things', 'responses' => [200 => ['description' => 'ok']]];
         $router->register('GET', '/api/things', static fn () => null, null, null, null, $schema);
 
@@ -309,7 +309,7 @@ PHP);
      */
     public function testPathParametersAreSanitizedAndDeclared(): void
     {
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/items/{id:\d+}/tags/{tag}', static fn () => null, null, null, null, [
             'summary' => 'Get tags',
             'responses' => [200 => ['description' => 'ok']],
@@ -349,7 +349,7 @@ PHP);
      */
     public function testComponentConflictBecomesAValidationError(): void
     {
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/one', static fn () => null, null, null, null, [
             'responses' => [200 => 'Thing'],
             'components' => ['Thing' => ['type' => 'object']],
@@ -406,7 +406,7 @@ PHP);
      */
     public function testEmptySchemaMapsEncodeAsJsonObjects(): void
     {
-        $router = new Router();
+        $router = new Router('');
         $router->register('GET', '/api/none', static fn () => null, null, null, null, [
             'responses' => [200 => ['description' => 'ok']],
         ]);
@@ -444,7 +444,7 @@ PHP);
      */
     private function loadFixtures(): array
     {
-        $router = new Router();
+        $router = new Router('');
         $loader = new PluginLoader(self::$pluginsDir, $router, null, new HookManager());
         $loader->load();
 

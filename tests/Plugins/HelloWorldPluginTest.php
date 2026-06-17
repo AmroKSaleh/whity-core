@@ -186,7 +186,7 @@ final class HelloWorldPluginTest extends TestCase
         // the test tolerates additional plugins.
         $pluginDir = dirname(__DIR__, 2) . '/plugins';
 
-        $router = new Router();
+        $router = new Router('');
         $permissionRegistry = new PermissionRegistry();
         $hookManager = new HookManager();
 

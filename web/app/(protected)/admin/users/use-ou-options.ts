@@ -42,7 +42,7 @@ export function useOuOptions(enabled: boolean): {
     const fetchOus = async (): Promise<void> => {
       try {
         setIsLoadingOus(true);
-        const { data } = await api.GET('/api/ous');
+        const { data } = await api.GET('/api/v1/ous');
 
         if (data === undefined) {
           throw new Error('Failed to fetch organisational units');

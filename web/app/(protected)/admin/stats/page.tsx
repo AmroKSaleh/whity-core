@@ -63,7 +63,7 @@ export default function AdminStats() {
   useEffect(() => {
     async function fetchStats() {
       try {
-        const response = await apiClient("/api/admin/stats");
+        const response = await apiClient("/api/v1/admin/stats");
         if (response.ok) {
           const data = await response.json();
           setStats(data.stats);

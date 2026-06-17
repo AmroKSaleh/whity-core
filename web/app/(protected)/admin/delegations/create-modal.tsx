@@ -72,10 +72,10 @@ export function CreateDelegationModal({
   const loadOptions = useCallback(async () => {
     try {
       const [permsRes, rolesRes, usersRes, ousRes] = await Promise.all([
-        api.GET('/api/permissions'),
-        api.GET('/api/roles'),
-        api.GET('/api/users'),
-        api.GET('/api/ous'),
+        api.GET('/api/v1/permissions'),
+        api.GET('/api/v1/roles'),
+        api.GET('/api/v1/users'),
+        api.GET('/api/v1/ous'),
       ]);
 
       if (permsRes.data !== undefined) {
@@ -128,7 +128,7 @@ export function CreateDelegationModal({
 
     try {
       setIsSubmitting(true);
-      const { error, response } = await api.POST('/api/delegations', {
+      const { error, response } = await api.POST('/api/v1/delegations', {
         body: {
           granteeType,
           granteeId: Number(granteeId),

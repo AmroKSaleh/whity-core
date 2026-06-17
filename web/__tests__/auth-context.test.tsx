@@ -35,7 +35,9 @@ function TestComponent() {
 describe('AuthContext', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    (global.fetch as jest.Mock).mockClear();
+    // Default: fetch returns 401 so any unexpected call (e.g. the silent-refresh
+    // attempt when /api/v1/me returns 401) fails gracefully without throwing.
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 401 });
   });
 
   // Test 1: Initialize with /api/me on mount
@@ -56,7 +58,7 @@ describe('AuthContext', () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/me'),
+      expect.stringContaining('/api/v1/me'),
       expect.objectContaining({ credentials: 'include' })
     );
   });
@@ -200,7 +202,7 @@ describe('AuthContext', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/auth/logout'),
+        expect.stringContaining('/api/v1/auth/logout'),
         expect.objectContaining({
           method: 'POST',
           credentials: 'include',
@@ -302,7 +304,7 @@ describe('AuthContext', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/me'),
+        expect.stringContaining('/api/v1/me'),
         expect.any(Object)
       );
     });
@@ -393,7 +395,7 @@ describe('AuthContext', () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('/api/login'),
+        expect.stringContaining('/api/v1/login'),
         expect.objectContaining({
           credentials: 'include',
         })

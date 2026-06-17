@@ -108,7 +108,7 @@ describe('apiClient', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('/api/protected');
 
     // Second call: refresh endpoint (also proxy-relative)
-    expect(mockFetch.mock.calls[1][0]).toBe('/api/auth/refresh');
+    expect(mockFetch.mock.calls[1][0]).toBe('/api/v1/auth/refresh');
     expect(mockFetch.mock.calls[1][1]).toEqual(
       expect.objectContaining({
         method: 'POST',

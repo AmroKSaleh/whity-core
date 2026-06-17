@@ -45,10 +45,10 @@ describe('typed api client — request shaping', () => {
   it('sends credentials:include and the CSRF header on every request', async () => {
     const { fn, calls } = scriptedFetch(jsonResponse(200, { data: [] }));
 
-    const result = await client(fn).GET('/api/users');
+    const result = await client(fn).GET('/api/v1/users');
 
     expect(fn).toHaveBeenCalledTimes(1);
-    expect(calls[0].url).toBe(`${BASE}/api/users`);
+    expect(calls[0].url).toBe(`${BASE}/api/v1/users`);
     expect(calls[0].method).toBe('GET');
     expect(calls[0].credentials).toBe('include');
     expect(calls[0].headers.get('X-Requested-With')).toBe('XMLHttpRequest');
@@ -58,7 +58,7 @@ describe('typed api client — request shaping', () => {
   it('lets caller-supplied headers win on clash (legacy behavior)', async () => {
     const { fn, calls } = scriptedFetch(jsonResponse(200, { data: [] }));
 
-    await client(fn).GET('/api/users', {
+    await client(fn).GET('/api/v1/users', {
       headers: { 'X-Requested-With': 'CustomValue' },
     });
 
@@ -74,19 +74,19 @@ describe('typed api client — 401 silent refresh', () => {
       jsonResponse(200, { data: [] })
     );
 
-    const result = await client(fn).GET('/api/users');
+    const result = await client(fn).GET('/api/v1/users');
 
     expect(fn).toHaveBeenCalledTimes(3);
 
-    // Second call is the refresh: POST /api/auth/refresh with credentials
+    // Second call is the refresh: POST /api/v1/auth/refresh with credentials
     // and the CSRF header (the backend rejects auth POSTs without it).
-    expect(calls[1].url).toBe(`${BASE}/api/auth/refresh`);
+    expect(calls[1].url).toBe(`${BASE}/api/v1/auth/refresh`);
     expect(calls[1].method).toBe('POST');
     expect(calls[1].credentials).toBe('include');
     expect(calls[1].headers.get('X-Requested-With')).toBe('XMLHttpRequest');
 
     // Third call replays the original request exactly.
-    expect(calls[2].url).toBe(`${BASE}/api/users`);
+    expect(calls[2].url).toBe(`${BASE}/api/v1/users`);
     expect(calls[2].method).toBe('GET');
     expect(calls[2].credentials).toBe('include');
     expect(calls[2].headers.get('X-Requested-With')).toBe('XMLHttpRequest');
@@ -102,7 +102,7 @@ describe('typed api client — 401 silent refresh', () => {
       jsonResponse(401, { error: 'refresh denied' })
     );
 
-    const result = await client(fn).GET('/api/users');
+    const result = await client(fn).GET('/api/v1/users');
 
     expect(fn).toHaveBeenCalledTimes(2);
     expect(result.response.status).toBe(401);
@@ -119,7 +119,7 @@ describe('typed api client — 401 silent refresh', () => {
       throw new Error('network down');
     });
 
-    const result = await client(fn).GET('/api/users');
+    const result = await client(fn).GET('/api/v1/users');
 
     expect(fn).toHaveBeenCalledTimes(2);
     expect(result.response.status).toBe(401);
@@ -132,7 +132,7 @@ describe('typed api client — 401 silent refresh', () => {
       jsonResponse(401, { error: 'still unauthorized' })
     );
 
-    const result = await client(fn).GET('/api/users');
+    const result = await client(fn).GET('/api/v1/users');
 
     // Exactly three calls: original, refresh, retry. A loop would make more.
     expect(fn).toHaveBeenCalledTimes(3);
@@ -154,7 +154,7 @@ describe('typed api client — 401 silent refresh', () => {
       permissions: ['ous:read'],
       ouId: null,
     };
-    const result = await client(fn).POST('/api/delegations', { body });
+    const result = await client(fn).POST('/api/v1/delegations', { body });
 
     expect(fn).toHaveBeenCalledTimes(3);
     expect(calls[2].method).toBe('POST');
@@ -169,7 +169,7 @@ describe('typed api client — 401 silent refresh', () => {
       jsonResponse(403, { error: 'Insufficient permissions' })
     );
 
-    const result = await client(fn).GET('/api/delegations');
+    const result = await client(fn).GET('/api/v1/delegations');
 
     expect(fn).toHaveBeenCalledTimes(1);
     expect(result.response.status).toBe(403);
