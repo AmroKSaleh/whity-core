@@ -26,7 +26,7 @@ test.describe('Organizational Units (admin)', () => {
       page.getByRole('heading', { name: 'Organizational Units' }).first()
     ).toBeVisible();
     await expect(page.getByRole('group', { name: 'View mode' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Create (the first )?OU/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Create (the first )?OU/ }).first()).toBeVisible();
   });
 });
 
