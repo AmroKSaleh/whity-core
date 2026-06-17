@@ -820,21 +820,34 @@ PHP);
      * on-disk format a previous worker/deploy may have left behind) is treated as
      * a cache miss and rebuilt — proving the warm-cache path cannot trust a
      * manifest that carries no filesystem signature.
+     *
+     * The setup is deliberately constructed so this test is RED on pre-WC-213
+     * code and GREEN only because of the new fingerprint-key guard:
+     *  - TWO real, resolvable plugins exist on disk (Alpha and Beta).
+     *  - The hand-written old-format manifest (NO `fingerprint` key) lists only
+     *    Alpha, with a VALID FQCN -> existing-path entry that the pre-fix
+     *    per-entry guard (file_exists + class_exists + implementsInterface) would
+     *    happily ACCEPT. Pre-fix code therefore takes the cache HIT, returns just
+     *    Alpha, and NEVER surfaces Beta.
+     *  - With the fix, the absent `fingerprint` key forces loadManifest() to miss,
+     *    so discover() runs a full rescan that surfaces BOTH plugins.
+     * Asserting Beta is present proves the miss was caused by the missing
+     * fingerprint key — not by a bogus per-entry that the old guard would reject.
      */
     public function testManifestWithoutFingerprintIsTreatedAsMiss(): void
     {
-        $pluginSubDir = $this->tempDir . '/LegacyManifestPlugin';
-        mkdir($pluginSubDir, 0755, true);
-        file_put_contents($pluginSubDir . '/Plugin.php', <<<'PHP'
+        $alphaDir = $this->tempDir . '/LegacyAlphaPlugin';
+        mkdir($alphaDir, 0755, true);
+        file_put_contents($alphaDir . '/Plugin.php', <<<'PHP'
 <?php
 
-namespace LegacyManifestPlugin;
+namespace LegacyAlphaPlugin;
 
 use Whity\Core\PluginInterface;
 
 class Plugin implements PluginInterface
 {
-    public function getName(): string { return 'LegacyManifestPlugin'; }
+    public function getName(): string { return 'LegacyAlphaPlugin'; }
     public function getVersion(): string { return '1.0.0'; }
     public function getRoutes(): array { return []; }
     public function getPermissions(): array { return []; }
@@ -842,26 +855,53 @@ class Plugin implements PluginInterface
     public function getMigrations(): array { return []; }
 }
 PHP);
+
+        // A SECOND real, resolvable plugin that the hand-written manifest OMITS.
+        $betaDir = $this->tempDir . '/LegacyBetaPlugin';
+        mkdir($betaDir, 0755, true);
+        file_put_contents($betaDir . '/Plugin.php', <<<'PHP'
+<?php
+
+namespace LegacyBetaPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'LegacyBetaPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP);
+
         $cacheFile = $this->tempDir . '/manifest.json';
 
-        // Hand-write an OLD-FORMAT manifest (no `fingerprint` key) that points at
-        // a non-existent FQCN. If the loader trusted it blindly it would return
-        // the bogus entry; instead it must rescan and find the real plugin.
+        // Hand-write an OLD-FORMAT manifest (no `fingerprint` key) listing ONLY
+        // Alpha, via a VALID FQCN -> existing-path entry the pre-fix per-entry
+        // guard would ACCEPT. On pre-fix code this manifest HITs (Alpha resolves,
+        // class_exists + implementsInterface pass) and Beta is never surfaced. The
+        // missing `fingerprint` key is the ONLY reason a correct loader rescans.
         file_put_contents($cacheFile, json_encode([
             'scanned_at' => time(),
-            'plugins' => ['Bogus\\Stale' => $pluginSubDir . '/Plugin.php'],
+            'plugins' => ['LegacyAlphaPlugin\\Plugin' => $alphaDir . '/Plugin.php'],
         ]));
 
         $loader = new PluginLoader($this->tempDir, $this->router);
         $loader->enableCache($cacheFile);
         $discovered = $loader->discover();
 
+        // The fingerprint-less manifest must be rebuilt from a full rescan, which
+        // surfaces the omitted second plugin. Pre-fix code would HIT the cache and
+        // return only Alpha, so this assertion is RED without the fingerprint guard.
         $this->assertArrayHasKey(
-            'LegacyManifestPlugin\\Plugin',
+            'LegacyBetaPlugin\\Plugin',
             $discovered,
-            'A fingerprint-less manifest must be rebuilt from a full rescan'
+            'A fingerprint-less manifest must be rebuilt from a full rescan, surfacing the omitted plugin'
         );
-        $this->assertArrayNotHasKey('Bogus\\Stale', $discovered);
+        $this->assertArrayHasKey('LegacyAlphaPlugin\\Plugin', $discovered);
     }
 
     /**

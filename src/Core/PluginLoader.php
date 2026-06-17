@@ -600,6 +600,17 @@ class PluginLoader
         // 3. Scan the plugins directory
         $discovered = [];
 
+        // WC-213: capture the filesystem fingerprint ONCE, immediately before the
+        // scan that builds the $discovered map, and thread it through to
+        // saveManifest() below. Recomputing the fingerprint inside saveManifest()
+        // would sample the tree at a LATER instant than this scan, so a file
+        // changing in between would let the manifest persist an OLD plugins map
+        // beside a NEW signature — a TOCTOU race that would make the next warm
+        // load HIT and serve a stale map. Computing it here (and reusing the same
+        // value) guarantees the persisted fingerprint describes the content this
+        // scan actually saw, and collapses three tree walks down to one.
+        $fingerprint = $this->computeFingerprint();
+
         // Scan direct items in the pluginDir
         $items = scandir($this->pluginDir);
         if ($items === false) {
@@ -688,8 +699,10 @@ class PluginLoader
             }
         }
 
-        // 4. Save to manifest cache if enabled
-        $this->saveManifest($discovered);
+        // 4. Save to manifest cache if enabled, persisting the SAME fingerprint
+        // captured before the scan above (not a freshly recomputed one) so the
+        // stored signature matches the scanned content exactly (WC-213).
+        $this->saveManifest($discovered, $fingerprint);
 
         return $discovered;
     }
@@ -2577,20 +2590,27 @@ class PluginLoader
     /**
      * Save plugin manifest to cache file
      *
-     * Persists the current filesystem fingerprint alongside the FQCN -> path map
-     * so {@see loadManifest()} can self-invalidate the cache when any plugin file
-     * is added, removed, or modified in place (WC-213).
+     * Persists the filesystem fingerprint alongside the FQCN -> path map so
+     * {@see loadManifest()} can self-invalidate the cache when any plugin file is
+     * added, removed, or modified in place (WC-213).
+     *
+     * The fingerprint is supplied by the caller rather than recomputed here: the
+     * caller ({@see discover()}) captures it ONCE immediately before the scan that
+     * built $pluginsData, so the persisted signature describes the same content
+     * the scan saw. Recomputing it here would sample the tree at a later instant
+     * and could persist a stale map beside a fresher signature (a TOCTOU race).
      *
      * @param array<string, string> $pluginsData List of plugin classes and files
+     * @param array<string, string> $fingerprint Filesystem signature captured by the caller before the scan
      * @return void
      */
-    private function saveManifest(array $pluginsData): void
+    private function saveManifest(array $pluginsData, array $fingerprint): void
     {
         if ($this->cacheFile) {
             try {
                 $manifest = [
                     'scanned_at' => time(),
-                    'fingerprint' => $this->computeFingerprint(),
+                    'fingerprint' => $fingerprint,
                     'plugins' => $pluginsData,
                 ];
                 $content = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
