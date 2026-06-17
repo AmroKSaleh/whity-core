@@ -1525,6 +1525,48 @@ PHP;
     }
 
     /**
+     * WC-210 regression: writing a directory plugin's `.disabled` sentinel must
+     * make reload() converge that worker on the Disabled state — not only a full
+     * restart. The sentinel is a non-`.php` file, so the change-detection
+     * fingerprint must account for it; otherwise reload() is a no-op and the
+     * documented per-worker convergence (and the /api/plugins meta note) is a
+     * lie for directory plugins (the SDK's recommended layout).
+     */
+    public function testReloadConvergesDirectoryPluginWhenSentinelAppearsOnDisk(): void
+    {
+        $key = $this->writeDirectoryPlugin('ReloadConvergePlugin', '/api/reload-converge/ping');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+        $this->assertSame(\Whity\Core\PluginState::Active, $loader->getLifecycle($key)?->getState());
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/reload-converge/ping')));
+
+        // Another worker persisted a disable: the sentinel appears on disk while
+        // every `.php` source is byte-for-byte unchanged.
+        file_put_contents($this->tempDir . '/ReloadConvergePlugin/.disabled', '');
+
+        $this->assertTrue(
+            $loader->reload(),
+            'reload() must detect the new .disabled sentinel even though no .php file changed'
+        );
+        $this->assertSame(
+            \Whity\Core\PluginState::Disabled,
+            $loader->getLifecycle($key)->getState(),
+            'reload() must converge the worker on the persisted Disabled state'
+        );
+        $this->assertNull(
+            $this->router->match(new Request('GET', '/api/reload-converge/ping')),
+            'reload() must tear down a now-disabled directory plugin\'s routes'
+        );
+
+        // And removing the sentinel converges back to Active on the next reload.
+        unlink($this->tempDir . '/ReloadConvergePlugin/.disabled');
+        $this->assertTrue($loader->reload(), 'reload() must detect sentinel removal');
+        $this->assertSame(\Whity\Core\PluginState::Active, $loader->getLifecycle($key)->getState());
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/reload-converge/ping')));
+    }
+
+    /**
      * Disabling a single-file plugin renames Foo.php -> Foo.php.disabled, which
      * discovery skips; a fresh loader therefore does not register it. The
      * single-file disabled file is still surfaced by the API (covered in the

@@ -461,7 +461,19 @@ class PluginLoader
             );
             $iterator = new \RecursiveIteratorIterator($directory);
             foreach ($iterator as $fileInfo) {
-                if ($fileInfo->isFile() && $fileInfo->getExtension() === 'php') {
+                if (!$fileInfo->isFile()) {
+                    continue;
+                }
+                // WC-210: fingerprint the `.php` sources AND the persisted
+                // disable signals. A directory plugin is disabled by writing a
+                // non-`.php` `.disabled` sentinel into its folder; without it in
+                // the signature, reload() would not detect the change and other
+                // workers would never converge on the disabled state. Single-file
+                // disables rename `Foo.php` -> `Foo.php.disabled` (also caught
+                // here, and the vanished `.php` already perturbs the signature).
+                $isPhp = $fileInfo->getExtension() === 'php';
+                $isDisableSignal = str_ends_with($fileInfo->getFilename(), self::DIR_DISABLED_SENTINEL);
+                if ($isPhp || $isDisableSignal) {
                     $path = str_replace('\\', '/', (string) $fileInfo->getRealPath());
                     $fingerprint[$path] = $fileInfo->getMTime() . ':' . $fileInfo->getSize();
                 }
