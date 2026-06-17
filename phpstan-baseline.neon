@@ -256,11 +256,6 @@ parameters:
 			path: src/Cli/Commands/BaseCommand.php
 
 		-
-			message: "#^Parameter \\#3 \\$handler of method Whity\\\\Core\\\\Router\\:\\:register\\(\\) expects callable\\(\\)\\: mixed, array\\{Whity\\\\Api\\\\PluginsApiHandler, 'uninstall'\\} given\\.$#"
-			count: 1
-			path: src/Cli/Commands/BaseCommand.php
-
-		-
 			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
 			count: 1
 			path: src/Cli/Commands/BaseCommand.php
