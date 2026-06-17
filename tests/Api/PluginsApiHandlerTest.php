@@ -274,7 +274,7 @@ class PluginsApiHandlerTest extends TestCase
             'POST',
             '/api/plugins/DryRunPlugin/uninstall',
             ['Content-Type' => 'application/json'],
-            json_encode(['dry_run' => true])
+            (string) json_encode(['dry_run' => true])
         );
 
         $response = $apiHandler->uninstall($request, ['id' => 'DryRunPlugin']);
@@ -313,7 +313,7 @@ class PluginsApiHandlerTest extends TestCase
             'POST',
             '/api/plugins/ExecuteUninstallPlugin/uninstall',
             ['Content-Type' => 'application/json'],
-            json_encode(['dry_run' => false, 'force' => false])
+            (string) json_encode(['dry_run' => false, 'force' => false])
         );
 
         $response = $apiHandler->uninstall($request, ['id' => 'ExecuteUninstallPlugin']);

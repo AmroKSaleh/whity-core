@@ -231,11 +231,6 @@ parameters:
 			path: src/Cli/CliRunner.php
 
 		-
-			message: "#^Function Whity\\\\register_service not found\\.$#"
-			count: 1
-			path: src/Cli/Commands/BaseCommand.php
-
-		-
 			message: "#^Method Whity\\\\Cli\\\\Commands\\\\BaseCommand\\:\\:callApi\\(\\) has parameter \\$data with no value type specified in iterable type array\\.$#"
 			count: 1
 			path: src/Cli/Commands/BaseCommand.php
@@ -1324,3 +1319,23 @@ parameters:
 			message: "#^Method Tests\\\\Unit\\\\Sdk\\\\Tenant\\\\TenantPredicateScannerTest\\:\\:scan\\(\\) return type has no value type specified in iterable type array\\.$#"
 			count: 1
 			path: tests/Unit/Sdk/Tenant/TenantPredicateScannerTest.php
+
+		-
+			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$roleIds type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Local/SeedUniversityTest.php
+
+		-
+			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$ouIds type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Local/SeedUniversityTest.php
+
+		-
+			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$relTypeIds type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Local/SeedUniversityTest.php
+
+		-
+			message: "#^Method Tests\\\\Local\\\\SeedUniversityTest\\:\\:createOUs\\(\\) has parameter \\$ous with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Local/SeedUniversityTest.php

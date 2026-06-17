@@ -61,6 +61,7 @@ class PluginMigrationRollbackTest extends TestCase
         $stmt = $this->pdo->query(
             "SELECT COUNT(*) FROM core_schema_migrations WHERE migration_name LIKE 'plugin:Other:%'"
         );
+        $this->assertNotFalse($stmt);
         $this->assertSame(1, (int) $stmt->fetchColumn());
     }
 

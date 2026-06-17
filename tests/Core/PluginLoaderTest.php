@@ -1318,6 +1318,7 @@ PHP;
 
         $plan = $loader->planUninstall($key);
 
+        $this->assertNotNull($plan);
         $this->assertSame('PlanUninstallPlugin', $plan['plugin']);
         $this->assertArrayHasKey('status', $plan);
         $this->assertIsArray($plan['migrations_to_roll_back']);
