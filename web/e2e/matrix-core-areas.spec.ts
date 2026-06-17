@@ -87,7 +87,7 @@ test.describe('Core admin areas (role matrix)', () => {
         page.getByRole('heading', { name: 'Organizational Units' }).first()
       ).toBeVisible();
       await expect(
-        page.getByRole('button', { name: /Create (the first )?OU/ })
+        page.getByRole('button', { name: /Create (the first )?OU/ }).first()
       ).toBeVisible();
     } else {
       // requiredRole 'admin' — the link is filtered out server-side.
