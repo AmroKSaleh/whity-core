@@ -65,10 +65,10 @@ Key behaviours:
 
 ### How a plugin declares permissions
 
-Plugins declare permissions through the declarative `PluginInterface::getPermissions()` (`src/Core/PluginInterface.php`) — there is **no** `onEnable()` method. The `PluginLoader` reads the array and calls `PermissionRegistry::register($plugin->getName(), $plugin->getPermissions())` (`PluginLoader::registerCapabilities()`). A plugin that declares a permission outside the `resource:action` pattern is rejected with a logged warning rather than crashing the host.
+Plugins declare permissions through the declarative `PluginInterface::getPermissions()` (`sdk/src/PluginInterface.php`) — there is **no** `onEnable()` method. The `PluginLoader` reads the array and calls `PermissionRegistry::register($plugin->getName(), $plugin->getPermissions())` (`PluginLoader::registerCapabilities()`). A plugin that declares a permission outside the `resource:action` pattern is rejected with a logged warning rather than crashing the host.
 
 ```php
-final class MyPlugin implements \Whity\Core\PluginInterface
+final class MyPlugin implements \Whity\Sdk\PluginInterface
 {
     public function getName(): string { return 'my-plugin'; }
     public function getVersion(): string { return '1.0.0'; }

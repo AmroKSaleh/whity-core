@@ -353,7 +353,7 @@ Create `/plugins/HelloWorld.php`:
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -442,7 +442,7 @@ Let's modify the plugin to show the authenticated user when provided with a toke
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 

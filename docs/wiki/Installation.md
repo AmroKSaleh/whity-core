@@ -47,7 +47,7 @@ The Next.js UI lives in `web/` and proxies `/api/*` to the backend. See `web/REA
 ### 5. Add plugins
 
 Create a plugin directory under `plugins/` containing a class that implements
-`Whity\Core\PluginInterface`. See [Plugin Development](Plugin-Development.md).
+`Whity\Sdk\PluginInterface`. See [Plugin Development](Plugin-Development.md).
 
 ## Learn the system
 

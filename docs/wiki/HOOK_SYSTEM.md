@@ -80,14 +80,14 @@ $hookManager->listen('user.creating', function (array $data, array $context): ar
 
 ## How plugins register hooks
 
-Plugins declare hooks **declaratively** via `PluginInterface::getHooks()` (`src/Core/PluginInterface.php`) — there is **no** `onEnable(HookManager)` method. `getHooks()` returns a map of event name → subscription, where a subscription is:
+Plugins declare hooks **declaratively** via `PluginInterface::getHooks()` (`sdk/src/PluginInterface.php`) — there is **no** `onEnable(HookManager)` method. `getHooks()` returns a map of event name → subscription, where a subscription is:
 
 - a `callable` with signature `function (array $data, array $context): array`, or
 - an array `['callback' => callable, 'priority' => int]`, or
 - a list of either of the above.
 
 ```php
-final class AuditPlugin implements \Whity\Core\PluginInterface
+final class AuditPlugin implements \Whity\Sdk\PluginInterface
 {
     public function getName(): string { return 'audit-logger'; }
     public function getVersion(): string { return '1.0.0'; }

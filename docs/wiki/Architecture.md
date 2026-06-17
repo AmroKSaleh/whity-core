@@ -114,7 +114,7 @@ sequenceDiagram
 
 ## Plugin system
 
-Plugins extend the platform without forking it. The contract is `Whity\Core\PluginInterface` (`src/Core/PluginInterface.php`):
+Plugins extend the platform without forking it. The contract is `Whity\Sdk\PluginInterface` (`sdk/src/PluginInterface.php`):
 
 ```php
 interface PluginInterface

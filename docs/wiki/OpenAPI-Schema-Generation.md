@@ -81,7 +81,7 @@ When you create a new plugin, the schema generator automatically includes it:
 ```php
 <?php
 namespace Whity\Plugins;
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 

@@ -158,8 +158,8 @@ initiative.
 
 ### Impact on existing conventions
 
-- **Plugin interface** moves from `Whity\Core\PluginInterface` to a versioned
-  `Whity\Sdk` contract; plugins implement the SDK type, not the core. Plugins gain a
+- **Plugin interface** moves from the core-side plugin contract to a versioned
+  `Whity\Sdk\PluginInterface` contract; plugins implement the SDK type, not the core. Plugins gain a
   declared SDK constraint and inter-plugin dependencies (semver), and a frontend feature
   descriptor.
 - **Tenant isolation:** the instruction-set guarantee about `ScopesToTenant` is made

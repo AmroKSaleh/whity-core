@@ -5,7 +5,7 @@ namespace Whity\Tests\OpenAPI;
 use PHPUnit\Framework\TestCase;
 use Whity\OpenAPI\SchemaGenerator;
 use Whity\Core\PluginLoader;
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 

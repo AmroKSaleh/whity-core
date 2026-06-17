@@ -7,7 +7,7 @@ namespace Tests\Core;
 use PHPUnit\Framework\TestCase;
 use Whity\Core\PluginLoader;
 use Whity\Core\Router;
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -54,7 +54,7 @@ class PluginLoaderTest extends TestCase
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -199,7 +199,7 @@ PHP;
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -261,7 +261,7 @@ PHP;
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -297,7 +297,7 @@ PHP;
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -378,7 +378,7 @@ PHP;
 
 namespace Whity\Plugins;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -443,7 +443,7 @@ PHP;
 
 namespace MyNestedPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -540,7 +540,7 @@ PHP;
 
 namespace CachedPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -616,7 +616,7 @@ PHP;
 
 namespace MutatingPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -647,7 +647,7 @@ PHP;
 
 namespace MutatingPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 // Edited in place: this comment lengthens the file so its size changes too.
 class Plugin implements PluginInterface
@@ -669,7 +669,7 @@ PHP;
 
 namespace MutatingPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Second implements PluginInterface
 {
@@ -712,7 +712,7 @@ PHP);
 
 namespace FirstCachedPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -740,7 +740,7 @@ PHP);
 
 namespace SecondCachedPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -781,7 +781,7 @@ PHP);
 
 namespace StableCachedPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -843,7 +843,7 @@ PHP);
 
 namespace LegacyAlphaPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -864,7 +864,7 @@ PHP);
 
 namespace LegacyBetaPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -913,7 +913,7 @@ PHP);
         $badPluginCode = <<<'PHP'
 <?php
 namespace Whity\Plugins;
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 class BadPlugin implements PluginInterface
 {
     public function __construct()
@@ -933,7 +933,7 @@ PHP;
         $goodPluginCode = <<<'PHP'
 <?php
 namespace Whity\Plugins;
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 class GoodPlugin implements PluginInterface
 {
     public function getName(): string { return 'GoodPlugin'; }
@@ -971,7 +971,7 @@ PHP;
         $pluginCode = <<<'PHP'
 <?php
 namespace MyPrefixPlugin;
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 class Plugin implements PluginInterface
 {
     public function getName(): string { return 'MyPrefixPlugin'; }
@@ -1035,7 +1035,7 @@ PHP;
 
 namespace HotAddedPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -1081,7 +1081,7 @@ PHP;
 
 namespace StablePlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -1125,7 +1125,7 @@ PHP;
 
 namespace MutablePlugin;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -1207,7 +1207,7 @@ PHP;
 
 namespace PeekablePlugin;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -1282,7 +1282,7 @@ PHP;
 
 namespace NoVersionedNamespacePlugin;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -1344,7 +1344,7 @@ PHP;
 
 namespace GatedPlugin;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -1403,7 +1403,7 @@ PHP;
 
 namespace UnsetEnvPlugin;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -1457,7 +1457,7 @@ PHP;
 
 namespace SameContentPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 
 class Plugin implements PluginInterface
 {
@@ -1507,7 +1507,7 @@ PHP;
 
 namespace FreshlyAddedPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -1558,7 +1558,7 @@ PHP;
 
 namespace ToRemovePlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -1642,7 +1642,7 @@ PHP;
 
 namespace RemovablePlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -1710,7 +1710,7 @@ PHP;
         mkdir($pluginSubDir, 0755, true);
         file_put_contents(
             $pluginSubDir . '/Plugin.php',
-            "<?php\nnamespace FingerprintPlugin;\nuse Whity\\Core\\PluginInterface;\n"
+            "<?php\nnamespace FingerprintPlugin;\nuse Whity\\Sdk\\PluginInterface;\n"
             . "class Plugin implements PluginInterface {\n"
             . "    public function getName(): string { return 'FingerprintPlugin'; }\n"
             . "    public function getVersion(): string { return '1.0.0'; }\n"
@@ -1743,7 +1743,7 @@ PHP;
 
 namespace DisablablePlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -1824,7 +1824,7 @@ PHP;
 
 namespace CyclePlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -1886,7 +1886,7 @@ PHP;
 
 namespace MetaPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -1969,7 +1969,7 @@ PHP;
 
 namespace Whity\\Plugins;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 use Whity\\Core\\Request;
 use Whity\\Core\\Response;
 
@@ -2103,7 +2103,7 @@ PHP;
 
 namespace {$dir};
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 use Whity\\Core\\Request;
 use Whity\\Core\\Response;
 

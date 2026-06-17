@@ -124,12 +124,12 @@ final class SdkPackageContractTest extends TestCase
         );
     }
 
-    public function testCorePluginInterfaceIsAnAliasOfTheSdkContract(): void
+    public function testDeprecatedCorePluginInterfaceAliasIsRemoved(): void
     {
-        $reflection = new \ReflectionClass(\Whity\Core\PluginInterface::class);
-        $this->assertTrue(
-            $reflection->isSubclassOf(\Whity\Sdk\PluginInterface::class),
-            'The deprecated core interface must extend the SDK contract so legacy fixtures keep loading'
+        $this->assertFalse(
+            interface_exists(\Whity\Core\PluginInterface::class),
+            'The deprecated Whity\Core\PluginInterface alias was removed in WC-215; '
+            . 'implement \Whity\Sdk\PluginInterface directly.'
         );
     }
 
@@ -288,8 +288,11 @@ final class SdkPackageContractTest extends TestCase
                 $reflection->getInterfaceNames(),
                 "{$pluginClass} must implement the SDK contract"
             );
+            // The deprecated core alias was removed in WC-215; no shipped
+            // plugin should report it among its implemented interfaces. Use a
+            // string literal — the class no longer exists to reference.
             $this->assertNotContains(
-                \Whity\Core\PluginInterface::class,
+                'Whity\Core\PluginInterface',
                 $reflection->getInterfaceNames(),
                 "{$pluginClass} must implement the SDK contract directly, not the deprecated core alias"
             );
