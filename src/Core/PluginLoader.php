@@ -25,9 +25,8 @@ use Whity\Sdk\Sdk;
  * Plugin loader for dynamic discovery and registration
  *
  * Scans a directory for PHP files, uses reflection to check if they implement
- * the SDK plugin contract ({@see \Whity\Sdk\PluginInterface}, WC-162 — the
- * deprecated {@see \Whity\Core\PluginInterface} alias extends it, so pre-SDK
- * plugins keep loading), and registers their routes, permissions, and hooks.
+ * the SDK plugin contract ({@see \Whity\Sdk\PluginInterface}, WC-162), and
+ * registers their routes, permissions, and hooks.
  */
 class PluginLoader
 {

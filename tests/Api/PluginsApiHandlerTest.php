@@ -553,7 +553,7 @@ class PluginsApiHandlerTest extends TestCase
 
 namespace DirUninstallPlugin;
 
-use Whity\Core\PluginInterface;
+use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
 
@@ -608,7 +608,7 @@ PHP;
 
 namespace Whity\\Plugins;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 use Whity\\Core\\Request;
 use Whity\\Core\\Response;
 
@@ -644,7 +644,7 @@ PHP;
 
 namespace Whity\\Plugins;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 use Whity\\Core\\Request;
 use Whity\\Core\\Response;
 

@@ -14,7 +14,7 @@ The finished reference implementation lives in
 [`plugins/HelloWorld/`](../../plugins/HelloWorld) and its test in
 [`tests/Plugins/HelloWorldPluginTest.php`](../../tests/Plugins/HelloWorldPluginTest.php).
 Every code sample below is copy-paste accurate against the real
-[`PluginInterface`](../../src/Core/PluginInterface.php).
+[`PluginInterface`](../../sdk/src/PluginInterface.php).
 
 For the bigger picture of how plugins fit into the framework (the "Plugins, Not
 Forks" principle and the request runtime flow), see
@@ -649,7 +649,7 @@ typed schemas, the descriptor above, and both migrations.
 ## Checklist
 
 - [ ] Directory `plugins/HelloWorld/` with namespace prefix `HelloWorld\`.
-- [ ] Class implements [`PluginInterface`](../../src/Core/PluginInterface.php)
+- [ ] Class implements [`PluginInterface`](../../sdk/src/PluginInterface.php)
       exactly (`declare(strict_types=1)`, PSR-12, PHPDoc).
 - [ ] Routes return `Response` objects; public route is `GET /api/hello`.
 - [ ] Permissions use `resource:action` colon notation.

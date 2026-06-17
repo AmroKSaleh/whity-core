@@ -332,7 +332,7 @@ class PluginsApiRbacTest extends TestCase
 
 namespace Whity\\Plugins;
 
-use Whity\\Core\\PluginInterface;
+use Whity\\Sdk\\PluginInterface;
 use Whity\\Core\\Request;
 use Whity\\Core\\Response;
 
