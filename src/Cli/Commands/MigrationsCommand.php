@@ -154,6 +154,12 @@ class MigrationsCommand
      */
     private function status(): int
     {
+        // WC-214: the malformed-plugin flag is instance state set during plugin
+        // collection. Reset it per action so a malformed plugin seen by an
+        // EARLIER action on this instance cannot make a later clean action
+        // falsely return 1; the flag must reflect only this action's collection.
+        $this->malformedPluginEncountered = false;
+
         try {
             $executed = $this->getExecutedMigrations();
             $files = $this->getMigrationFiles();
@@ -234,6 +240,10 @@ class MigrationsCommand
      */
     private function run(): int
     {
+        // WC-214: reset the malformed-plugin flag per action (see status()),
+        // so it reflects only the plugins collected during THIS run.
+        $this->malformedPluginEncountered = false;
+
         try {
             // Ensure the migration tracking table exists BEFORE running any
             // migration. Without this, the earliest migrations (which run before

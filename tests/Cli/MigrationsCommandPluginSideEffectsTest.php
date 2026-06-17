@@ -460,6 +460,27 @@ PHP);
         $this->assertTrue($this->tableExists('wc214_side_effects'), 'The plugin migration must have run');
         $this->assertContains('plugin:Wc214SideEffects:CreateSideEffectsTable', $this->recordedNames());
 
+        // POSITIVE: the loader-OWNED collaborators the command actually used
+        // received the plugin's declarations. The fixture declares a non-empty
+        // route, permission, and hook; if registration had silently no-op'd or
+        // been retargeted at some other (shared) state, these would be empty and
+        // the test would fail. This is what makes the isolation assertion below
+        // meaningful rather than vacuous: registration DID happen, just onto the
+        // throwaway loader collaborators the CLI discards on exit.
+        $this->assertNotEmpty(
+            $loaderRouter->getRoutes(),
+            'The plugin route must land on the loader-owned router the command used'
+        );
+        $this->assertTrue(
+            $loaderPerms->exists('wc214:read'),
+            'The plugin permission must land on the loader-owned permission registry'
+        );
+        $this->assertArrayHasKey(
+            'wc214.event',
+            $loaderHooks->getListeners(),
+            'The plugin hook must land on the loader-owned hook registry'
+        );
+
         // The live application state is untouched: migrate built / used its own
         // loader collaborators, never the application's shared HTTP routing/hook
         // registry / permission registry.
