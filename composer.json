@@ -39,6 +39,7 @@
       "Whity\\Cli\\": "src/Cli/",
       "Whity\\Commands\\": "src/Commands/",
       "Whity\\OpenAPI\\": "src/OpenAPI/",
+      "Whity\\Storage\\": "src/Storage/",
       "Whity\\Plugins\\": "plugins/"
     }
   },
