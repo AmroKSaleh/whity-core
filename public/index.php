@@ -123,6 +123,7 @@ use Whity\Api\FrontendFeaturesApiHandler;
 use Whity\Api\MeCapabilitiesApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
+use Whity\Api\OpenApiHandler;
 use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Delegation\DelegationService;
 use Whity\Core\Relations\PersonRepository;
@@ -509,6 +510,18 @@ $router->registerUnversioned('GET', '/api/version', static function () use ($rou
         ['Content-Type' => 'application/json']
     );
 });
+
+// WC-209: dynamic OpenAPI document. Regenerates the spec from the LIVE router
+// at request time, so a plugin installed/uninstalled/reloaded after the last
+// manual `generate:openapi` is immediately reflected — the schema-driven plugin
+// CRUD UI fetches this instead of the (core-only) committed static file. The
+// handler reads $router/$pluginLoader at dispatch time, so plugins loaded below
+// (and any runtime reload) are always included. Registered UNVERSIONED and
+// PUBLIC (no auth; listed in EnforceTenantIsolation::PUBLIC_ROUTES), matching
+// how the static /openapi.json is already served unauthenticated by Caddy — it
+// exposes only route shapes (method/path/schema), never any tenant data.
+$openApiHandler = new OpenApiHandler($router, $pluginLoader);
+$router->registerUnversioned('GET', '/api/openapi.json', [$openApiHandler, 'handle']);
 
 $deploymentHandler = new DeploymentApiHandler($deploymentManager);
 $router->register('POST', '/api/deployments/apply', [$deploymentHandler, 'apply'], 'admin');
