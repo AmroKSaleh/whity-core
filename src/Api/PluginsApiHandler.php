@@ -289,8 +289,10 @@ class PluginsApiHandler
 
         // A modified already-loaded plugin cannot be hot-swapped in-process; the
         // loader requests a worker recycle instead. Surface that so the operator
-        // knows the new code lands only after a worker restart (WC-212).
-        $workerRestartRequired = $this->pluginLoader->consumePendingWorkerRecycle();
+        // knows the new code lands only after a worker restart (WC-212). Use the
+        // non-clearing peek: the worker loop owns the single authoritative
+        // consume, so REPORTING here must not clear the flag and defeat it.
+        $workerRestartRequired = $this->pluginLoader->isWorkerRecyclePending();
 
         return Response::json([
             'data' => [

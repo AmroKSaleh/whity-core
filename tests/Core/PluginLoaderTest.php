@@ -859,6 +859,88 @@ PHP;
     }
 
     /**
+     * isWorkerRecyclePending() is a NON-destructive peek for status reporting
+     * (WC-212): repeated peeks keep returning true, the worker loop's
+     * consumePendingWorkerRecycle() remains the SOLE authoritative consume, and
+     * a peek by the admin reload handler must NOT defeat that consume.
+     *
+     * Reproduces the loop-then-handler ordering: in development the worker loop
+     * has already reload()ed and advanced the fingerprint/hash before dispatch,
+     * so if the in-request handler consumed the flag the loop's later consume
+     * would return false and the worker would never recycle — serving stale
+     * code forever. A peek must leave the flag intact for the loop.
+     */
+    public function testIsWorkerRecyclePendingIsNonDestructive(): void
+    {
+        // The reload-of-modified-code path is gated to development (WC-160).
+        $_ENV['APP_ENV'] = 'development';
+
+        $pluginSubDir = $this->tempDir . '/PeekablePlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginFile = $pluginSubDir . '/Plugin.php';
+
+        $makeCode = static function (string $version): string {
+            return <<<PHP
+<?php
+
+namespace PeekablePlugin;
+
+use Whity\\Core\\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'PeekablePlugin'; }
+    public function getVersion(): string { return '{$version}'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+        };
+
+        file_put_contents($pluginFile, $makeCode('1.0.0'));
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        // Modify the already-loaded plugin and reload (sets the recycle flag).
+        file_put_contents($pluginFile, $makeCode('2.0.0'));
+        touch($pluginFile, time() + 5);
+        clearstatcache();
+
+        $this->assertTrue($loader->reload(), 'reload() should detect the modified file');
+
+        // The admin reload handler peeks to REPORT the pending state. Peeking is
+        // non-destructive: it returns true and a second peek STILL returns true.
+        $this->assertTrue(
+            $loader->isWorkerRecyclePending(),
+            'isWorkerRecyclePending() must report the pending recycle'
+        );
+        $this->assertTrue(
+            $loader->isWorkerRecyclePending(),
+            'isWorkerRecyclePending() must NOT clear the flag (repeated peek still true)'
+        );
+
+        // The worker loop owns the single authoritative consume: after a peek,
+        // the loop's consume still observes the pending recycle and clears it.
+        $this->assertTrue(
+            $loader->consumePendingWorkerRecycle(),
+            'A peek must not defeat the loop consume; the recycle is still pending'
+        );
+
+        // Single-shot consume: the flag is now cleared for both reads.
+        $this->assertFalse(
+            $loader->consumePendingWorkerRecycle(),
+            'consumePendingWorkerRecycle() must reset the flag after reading it'
+        );
+        $this->assertFalse(
+            $loader->isWorkerRecyclePending(),
+            'isWorkerRecyclePending() reflects the cleared flag after consume'
+        );
+    }
+
+    /**
      * The loader never re-evaluates modified source under a `_Whity_Reload_`
      * versioned namespace anymore (WC-212): no class declared in the process
      * carries that segment after a modify+reload, and the live instance keeps

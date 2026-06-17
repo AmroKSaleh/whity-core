@@ -1750,6 +1750,25 @@ class PluginLoader
     }
 
     /**
+     * Non-destructive peek at the pending-recycle flag for STATUS REPORTING only
+     * (WC-212).
+     *
+     * Returns whether a worker recycle is pending WITHOUT clearing it, so the
+     * admin reload endpoint can surface `worker_restart_required` while leaving
+     * the flag intact for the worker loop. The loop's
+     * {@see consumePendingWorkerRecycle()} remains the single authoritative
+     * read-and-clear consumer: were a caller to consume the flag mid-request,
+     * the loop's later consume would return false and the worker would never
+     * recycle, serving the stale already-loaded class forever.
+     *
+     * @return bool True if a worker recycle is pending (flag left unchanged).
+     */
+    public function isWorkerRecyclePending(): bool
+    {
+        return $this->pendingWorkerRecycle;
+    }
+
+    /**
      * Register a plugin with the core capabilities
      *
      * @param PluginInterface $plugin The plugin instance to register
