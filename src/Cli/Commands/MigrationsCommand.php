@@ -24,6 +24,32 @@ use PDO;
  *    tracking row, and is recorded in core_schema_migrations under the
  *    per-plugin namespace `plugin:<PluginName>:<MigrationClass>`.
  *
+ * Plugin-loading side-effect contract (WC-214):
+ *  - ISOLATED loading. Collecting plugin migrations loads plugins through a
+ *    THROWAWAY {@see PluginLoader} built over a private {@see Router}/
+ *    {@see HookManager} with no permission registry (see {@see pluginLoader()}).
+ *    Any routes/hooks/permissions a plugin registers during load land on those
+ *    throwaway collaborators, never on the live HTTP router or shared state,
+ *    and a live router is never required. The CLI also runs in a separate
+ *    process from the FrankenPHP workers, so plugin constructor side effects
+ *    cannot reach a running worker.
+ *  - MALFORMED plugin => exit 1. An unparseable plugin file raises a
+ *    ParseError from the loader's require_once that propagates to execute()
+ *    and exits 1. A loaded plugin whose getMigrations() THROWS is likewise a
+ *    hard failure: the run still executes core and other healthy plugins'
+ *    migrations and prints the per-plugin warning, but both `run` and `status`
+ *    RETURN 1 so an operator sees the failure rather than a silent skip.
+ *  - GATE-INCOMPATIBLE plugin => exit 0. A plugin quarantined by the WC-211/
+ *    WC-165 compatibility gate (incompatible SDK/core version, unmet
+ *    dependency) is a VALID exclusion, not a malformation: the loader drops it
+ *    from getPlugins() before its migrations are ever collected, so it never
+ *    reaches the exit-1 path and the rest of the run exits 0.
+ *  - KNOWN LIMITATION. A plugin whose CONSTRUCTOR throws is silently dropped
+ *    by {@see PluginLoader::instantiatePlugin()} (logged, not surfaced here),
+ *    so such a plugin contributes no migrations and does NOT trip the exit-1
+ *    path. Surfacing that as exit 1 would require PluginLoader changes and is
+ *    intentionally out of scope.
+ *
  * Usage:
  *   php public/index.php migrate status  - Show migration status
  *   php public/index.php migrate run     - Run pending migrations
@@ -38,6 +64,15 @@ class MigrationsCommand
     private string $migrationDir;
     private ?PluginLoader $pluginLoader;
     private bool $pluginsLoaded = false;
+
+    /**
+     * Set by {@see pluginMigrations()} when a loaded plugin's getMigrations()
+     * throws (WC-214). The collection continues — core and healthy plugins'
+     * migrations still run — but `run`/`status` read this flag to return exit 1
+     * so a malformed plugin is surfaced to the operator rather than silently
+     * skipped.
+     */
+    private bool $malformedPluginEncountered = false;
 
     /**
      * @param Database|null $db Injected connection (tests); defaults to Database::connect().
@@ -119,6 +154,12 @@ class MigrationsCommand
      */
     private function status(): int
     {
+        // WC-214: the malformed-plugin flag is instance state set during plugin
+        // collection. Reset it per action so a malformed plugin seen by an
+        // EARLIER action on this instance cannot make a later clean action
+        // falsely return 1; the flag must reflect only this action's collection.
+        $this->malformedPluginEncountered = false;
+
         try {
             $executed = $this->getExecutedMigrations();
             $files = $this->getMigrationFiles();
@@ -179,6 +220,14 @@ class MigrationsCommand
                 echo "\n\033[1;33m⚠ $pending pending migration(s)\033[0m\n";
             }
 
+            // WC-214: keep status consistent with run — a malformed plugin
+            // (getMigrations() threw, warned above) surfaces as exit 1 so the
+            // operator is not misled by an otherwise-clean status.
+            if ($this->malformedPluginEncountered) {
+                echo "\n\033[0;31m✗ One or more plugins were malformed (see warnings above)\033[0m\n";
+                return 1;
+            }
+
             return 0;
         } catch (\Exception $e) {
             echo "\033[0;31m✗ Failed to get migration status: " . $e->getMessage() . "\033[0m\n";
@@ -191,6 +240,10 @@ class MigrationsCommand
      */
     private function run(): int
     {
+        // WC-214: reset the malformed-plugin flag per action (see status()),
+        // so it reflects only the plugins collected during THIS run.
+        $this->malformedPluginEncountered = false;
+
         try {
             // Ensure the migration tracking table exists BEFORE running any
             // migration. Without this, the earliest migrations (which run before
@@ -231,6 +284,14 @@ class MigrationsCommand
                 echo "\033[0;32m✓ All migrations already executed\033[0m\n";
             } else {
                 echo "\033[0;32m✓ Successfully ran $count migration(s)\033[0m\n";
+            }
+
+            // WC-214: a malformed plugin (getMigrations() threw) did not block
+            // the healthy migrations above, but it must still surface as a
+            // non-zero exit so the operator knows a plugin was broken.
+            if ($this->malformedPluginEncountered) {
+                echo "\033[0;31m✗ One or more plugins were malformed (see warnings above)\033[0m\n";
+                return 1;
             }
 
             return 0;
@@ -641,6 +702,11 @@ class MigrationsCommand
             try {
                 $declared = $plugin->getMigrations();
             } catch (\Throwable $e) {
+                // WC-214: a throwing getMigrations() is a MALFORMED plugin. We
+                // still skip it so core and other healthy plugins' migrations
+                // run, but the run is recorded as failed so run()/status()
+                // return exit 1 — the failure must not be silent.
+                $this->malformedPluginEncountered = true;
                 echo "\033[1;33m⚠ Skipping {$pluginName}: getMigrations() threw " . get_class($e) . "\033[0m\n";
                 continue;
             }

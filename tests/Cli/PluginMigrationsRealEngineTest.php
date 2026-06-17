@@ -551,18 +551,20 @@ PHP);
     }
 
     /**
-     * Review MAJOR regression: one plugin whose getMigrations() throws must be
-     * warned about and SKIPPED — core migrations and every other plugin's
-     * migrations still run (AAThrowingDecl loads before ZzGoodDecl).
+     * Review MAJOR regression + WC-214 hardening: one plugin whose
+     * getMigrations() throws must be warned about and SKIPPED so core
+     * migrations and every other plugin's migrations still run (AAThrowingDecl
+     * loads before ZzGoodDecl) — but the run must now exit 1, not 0, so a
+     * malformed plugin is surfaced to the operator instead of silently skipped.
      */
-    public function testThrowingGetMigrationsIsSkippedAndOthersStillRun(): void
+    public function testThrowingGetMigrationsIsSkippedButRunStillExitsOne(): void
     {
         $loader = new PluginLoader(self::$mixedDir, new Router(''), null, new HookManager());
         $command = new MigrationsCommand($this->db, $loader, self::$emptyCoreDir);
 
         $exit = $this->runQuiet($command, ['run']);
 
-        $this->assertSame(0, $exit, 'One broken declaration must not fail the whole run');
+        $this->assertSame(1, $exit, 'A malformed plugin (getMigrations() threw) must make the run exit 1');
         $this->assertTrue($this->tableExists('good_tbl'), "The well-behaved plugin's migration must still run");
         $this->assertContains('plugin:ZzGoodDecl:CreateGoodTable', $this->recordedNames());
     }
