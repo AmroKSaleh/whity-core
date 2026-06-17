@@ -99,6 +99,11 @@ class EnforceTenantIsolation
         // WC-206: /api/version is also unversioned and probe-safe.
         '/api/health',
         '/api/version',
+        // WC-209: the dynamic OpenAPI document. Unversioned and unauthenticated
+        // (matching the static /openapi.json already served by Caddy) — it
+        // exposes only route shapes, never tenant data, so it bypasses tenant
+        // resolution like the other infrastructure probes.
+        '/api/openapi.json',
     ];
 
     private JwtParser $jwtParser;

@@ -494,6 +494,25 @@ final class CoreApiSchemas
                     ],
                 ],
             ],
+            // WC-209: the dynamic OpenAPI document, regenerated from the live
+            // router at request time. UNVERSIONED (stored at /api/openapi.json
+            // regardless of the version prefix, like /api/health) and
+            // unauthenticated — it exposes only route shapes, never tenant data.
+            [
+                'method' => 'GET',
+                'path' => '/api/openapi.json',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'unversioned' => true,
+                'schema' => [
+                    'summary' => 'The live OpenAPI 3.0 document (regenerated per request from the running router)',
+                    'tags' => ['platform-ops'],
+                    'responses' => [
+                        200 => self::jsonResponse('The OpenAPI document describing every currently-registered route', 'OpenApiDocumentResponse'),
+                        500 => self::errorResponse('Failed to generate the OpenAPI document'),
+                    ],
+                ],
+            ],
             // No auth gate — any authenticated caller may read navigation
             [
                 'method' => 'GET',
@@ -1052,6 +1071,12 @@ final class CoreApiSchemas
                 'requiredPermission' => self::str(true),
             ], ['id', 'label', 'href', 'icon', 'group', 'order']),
             'NavigationListResponse' => self::listEnvelope('NavigationItem'),
+
+            // WC-209: the dynamic OpenAPI document is itself an OpenAPI spec —
+            // a free-form object whose top-level keys (openapi/info/paths/
+            // components/...) vary with the registered routes, so it is typed
+            // as an open object rather than pinned field-by-field.
+            'OpenApiDocumentResponse' => ['type' => 'object', 'additionalProperties' => true],
 
             // Shared bare { message } response (deployment and plugin handlers)
             'SimpleMessageResponse' => self::object(['message' => self::str()], ['message']),

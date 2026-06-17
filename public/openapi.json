@@ -42,6 +42,37 @@
                 }
             }
         },
+        "/api/openapi.json": {
+            "get": {
+                "operationId": "get_api_openapi_json",
+                "summary": "The live OpenAPI 3.0 document (regenerated per request from the running router)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The OpenAPI document describing every currently-registered route",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OpenApiDocumentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to generate the OpenAPI document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/stats": {
             "get": {
                 "operationId": "get_api_v1_admin_stats",
@@ -4372,6 +4403,10 @@
                 "required": [
                     "data"
                 ]
+            },
+            "OpenApiDocumentResponse": {
+                "type": "object",
+                "additionalProperties": true
             },
             "OrganizationalUnit": {
                 "type": "object",

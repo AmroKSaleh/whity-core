@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/openapi.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The live OpenAPI 3.0 document (regenerated per request from the running router) */
+        get: operations["get_api_openapi_json"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/stats": {
         parameters: {
             query?: never;
@@ -955,6 +972,9 @@ export interface components {
         NavigationListResponse: {
             data: components["schemas"]["NavigationItem"][];
         };
+        OpenApiDocumentResponse: {
+            [key: string]: unknown;
+        };
         OrganizationalUnit: {
             id: number;
             tenant_id: number;
@@ -1258,6 +1278,35 @@ export interface operations {
             };
             /** @description System is degraded */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_openapi_json: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The OpenAPI document describing every currently-registered route */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenApiDocumentResponse"];
+                };
+            };
+            /** @description Failed to generate the OpenAPI document */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
