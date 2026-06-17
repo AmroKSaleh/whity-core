@@ -364,7 +364,7 @@ class PluginsApiHandler
                 $this->removePath($dirPath);
                 $directoryRemoved = true;
             } elseif (file_exists($filePath)) {
-                unlink($filePath);
+                @unlink($filePath);
                 $directoryRemoved = true;
             }
 
