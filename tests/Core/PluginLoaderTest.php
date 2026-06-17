@@ -580,6 +580,288 @@ PHP;
 
         $discovered2 = $loader2->discover();
         $this->assertArrayHasKey('CachedPlugin\\Plugin', $discovered2);
+
+        // The manifest now carries a filesystem fingerprint so a warm cache can
+        // self-invalidate when a file is modified/added/removed (WC-213).
+        $this->assertArrayHasKey('fingerprint', $cacheContent);
+    }
+
+    /**
+     * WC-213: an in-place modification of a plugin DIRECTORY's contents (here,
+     * the entry file edited AND a second plugin class added alongside it) must
+     * invalidate a warm manifest cache and force a full rescan, rather than
+     * returning the stale cached FQCN map.
+     *
+     * The loader resolves a plugin's FQCN from its file PATH, so the cleanly
+     * observable signal of an edit-in-place is a SECOND plugin class appearing
+     * at a brand-new path inside the already-cached directory: the stale cache
+     * (keyed on the single original path) never surfaces it, whereas a correct
+     * rescan does. The original entry file is also rewritten with a different
+     * length so its own "mtime:size" signature shifts.
+     *
+     * The manifest stores a filesystem fingerprint ("mtime:size" per file). The
+     * edits change BOTH file sizes (different content length) AND, via touch()
+     * to a future timestamp, the mtime — so the fingerprint reliably differs
+     * even on filesystems with whole-second mtime granularity where a same-second
+     * rewrite could otherwise keep the mtime unchanged.
+     */
+    public function testManifestCacheDetectsInPlaceModification(): void
+    {
+        $pluginSubDir = $this->tempDir . '/MutatingPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginFile = $pluginSubDir . '/Plugin.php';
+
+        $originalCode = <<<'PHP'
+<?php
+
+namespace MutatingPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MutatingPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+        file_put_contents($pluginFile, $originalCode);
+        $cacheFile = $this->tempDir . '/manifest.json';
+
+        // First loader: cold cache -> scans + writes the manifest (with fingerprint).
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->enableCache($cacheFile);
+        $discovered = $loader->discover();
+        $this->assertArrayHasKey('MutatingPlugin\\Plugin', $discovered);
+        $this->assertArrayNotHasKey('MutatingPlugin\\Second', $discovered);
+
+        // Edit the directory in place: rewrite the entry file (different length)
+        // and add a SECOND plugin class at a new path inside the same folder.
+        // touch() bumps mtimes to a future second so the signature differs even
+        // under coarse mtime granularity.
+        $editedEntry = <<<'PHP'
+<?php
+
+namespace MutatingPlugin;
+
+use Whity\Core\PluginInterface;
+
+// Edited in place: this comment lengthens the file so its size changes too.
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'MutatingPluginEdited'; }
+    public function getVersion(): string { return '2.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+        file_put_contents($pluginFile, $editedEntry);
+        touch($pluginFile, time() + 5);
+
+        $secondFile = $pluginSubDir . '/Second.php';
+        file_put_contents($secondFile, <<<'PHP'
+<?php
+
+namespace MutatingPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Second implements PluginInterface
+{
+    public function getName(): string { return 'MutatingPluginSecond'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP);
+        touch($secondFile, time() + 5);
+        clearstatcache();
+
+        // A NEW loader on the SAME cache file exercises the warm-cache path.
+        $loader2 = new PluginLoader($this->tempDir, $this->router);
+        $loader2->enableCache($cacheFile);
+        $discovered2 = $loader2->discover();
+
+        // The modified directory must be re-scanned: the newly added class is
+        // surfaced rather than the stale cached single-entry map.
+        $this->assertArrayHasKey(
+            'MutatingPlugin\\Second',
+            $discovered2,
+            'An in-place directory modification must be re-scanned, surfacing the new class'
+        );
+        $this->assertArrayHasKey('MutatingPlugin\\Plugin', $discovered2);
+    }
+
+    /**
+     * WC-213: a brand-new plugin file added to the tree after a warm manifest was
+     * written must be discovered by a fresh loader, not masked by the cache.
+     */
+    public function testManifestCacheDetectsAddedPluginFile(): void
+    {
+        $firstSubDir = $this->tempDir . '/FirstCachedPlugin';
+        mkdir($firstSubDir, 0755, true);
+        file_put_contents($firstSubDir . '/Plugin.php', <<<'PHP'
+<?php
+
+namespace FirstCachedPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'FirstCachedPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP);
+        $cacheFile = $this->tempDir . '/manifest.json';
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->enableCache($cacheFile);
+        $discovered = $loader->discover();
+        $this->assertArrayHasKey('FirstCachedPlugin\\Plugin', $discovered);
+        $this->assertArrayNotHasKey('SecondCachedPlugin\\Plugin', $discovered);
+
+        // Add a brand-new plugin AFTER the manifest was written.
+        $secondSubDir = $this->tempDir . '/SecondCachedPlugin';
+        mkdir($secondSubDir, 0755, true);
+        file_put_contents($secondSubDir . '/Plugin.php', <<<'PHP'
+<?php
+
+namespace SecondCachedPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'SecondCachedPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP);
+        clearstatcache();
+
+        $loader2 = new PluginLoader($this->tempDir, $this->router);
+        $loader2->enableCache($cacheFile);
+        $discovered2 = $loader2->discover();
+
+        $this->assertArrayHasKey(
+            'SecondCachedPlugin\\Plugin',
+            $discovered2,
+            'A newly added plugin file must be discovered despite a warm cache'
+        );
+        $this->assertArrayHasKey('FirstCachedPlugin\\Plugin', $discovered2);
+    }
+
+    /**
+     * WC-213: an UNCHANGED tree with a warm, signature-matching manifest is still
+     * served from cache (cache HIT, no regression of the caching benefit). The
+     * cached map is honoured because the on-disk tree is untouched and the stored
+     * fingerprint still matches, so discover() returns the same set.
+     */
+    public function testManifestCacheStillHitsWhenUnchanged(): void
+    {
+        $pluginSubDir = $this->tempDir . '/StableCachedPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        file_put_contents($pluginSubDir . '/Plugin.php', <<<'PHP'
+<?php
+
+namespace StableCachedPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'StableCachedPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP);
+        $cacheFile = $this->tempDir . '/manifest.json';
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->enableCache($cacheFile);
+        $first = $loader->discover();
+        $this->assertArrayHasKey('StableCachedPlugin\\Plugin', $first);
+
+        // No disk change. A fresh loader on the same cache must still resolve the
+        // plugin from the matching-fingerprint manifest (cache HIT).
+        clearstatcache();
+        $loader2 = new PluginLoader($this->tempDir, $this->router);
+        $loader2->enableCache($cacheFile);
+        $second = $loader2->discover();
+
+        $this->assertSame(
+            array_keys($first),
+            array_keys($second),
+            'An unchanged tree with a matching fingerprint must serve the same cached set'
+        );
+        $this->assertArrayHasKey('StableCachedPlugin\\Plugin', $second);
+    }
+
+    /**
+     * WC-213: a manifest written WITHOUT a `fingerprint` key (the pre-WC-213
+     * on-disk format a previous worker/deploy may have left behind) is treated as
+     * a cache miss and rebuilt — proving the warm-cache path cannot trust a
+     * manifest that carries no filesystem signature.
+     */
+    public function testManifestWithoutFingerprintIsTreatedAsMiss(): void
+    {
+        $pluginSubDir = $this->tempDir . '/LegacyManifestPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        file_put_contents($pluginSubDir . '/Plugin.php', <<<'PHP'
+<?php
+
+namespace LegacyManifestPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'LegacyManifestPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP);
+        $cacheFile = $this->tempDir . '/manifest.json';
+
+        // Hand-write an OLD-FORMAT manifest (no `fingerprint` key) that points at
+        // a non-existent FQCN. If the loader trusted it blindly it would return
+        // the bogus entry; instead it must rescan and find the real plugin.
+        file_put_contents($cacheFile, json_encode([
+            'scanned_at' => time(),
+            'plugins' => ['Bogus\\Stale' => $pluginSubDir . '/Plugin.php'],
+        ]));
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->enableCache($cacheFile);
+        $discovered = $loader->discover();
+
+        $this->assertArrayHasKey(
+            'LegacyManifestPlugin\\Plugin',
+            $discovered,
+            'A fingerprint-less manifest must be rebuilt from a full rescan'
+        );
+        $this->assertArrayNotHasKey('Bogus\\Stale', $discovered);
     }
 
     /**

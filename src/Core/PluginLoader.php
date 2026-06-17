@@ -2531,6 +2531,19 @@ class PluginLoader
     /**
      * Load plugin manifest from cache file
      *
+     * The manifest is trusted only when its stored filesystem fingerprint still
+     * matches the current plugin tree (WC-213). The fingerprint maps each plugin
+     * file path to a "mtime:size" signature (see {@see computeFingerprint()}), so
+     * any added, removed, or in-place-modified file — even one keeping the same
+     * path and an already-loaded class — perturbs the signature and invalidates
+     * the cache. A manifest predating WC-213 (no `fingerprint` key, or the wrong
+     * shape) is likewise treated as a miss so a previous worker/deploy's
+     * fingerprint-less manifest cannot be trusted on a cold-boot worker. On any
+     * miss this returns null and {@see discover()} falls through to a full
+     * filesystem rescan (which rebuilds and re-saves a fresh-fingerprint
+     * manifest). The per-entry file_exists/class_exists/interface checks in
+     * discover() remain as a secondary guard.
+     *
      * @return array<string, string>|null List of plugin classes and files, or null if cache miss/disabled
      */
     private function loadManifest(): ?array
@@ -2540,8 +2553,16 @@ class PluginLoader
                 $content = file_get_contents($this->cacheFile);
                 if ($content !== false) {
                     $manifest = json_decode($content, true);
-                    if (is_array($manifest) && isset($manifest['plugins']) && is_array($manifest['plugins'])) {
-                        return $manifest['plugins'];
+                    if (
+                        is_array($manifest)
+                        && isset($manifest['plugins'], $manifest['fingerprint'])
+                        && is_array($manifest['plugins'])
+                        && is_array($manifest['fingerprint'])
+                        && $manifest['fingerprint'] === $this->computeFingerprint()
+                    ) {
+                        /** @var array<string, string> $plugins */
+                        $plugins = $manifest['plugins'];
+                        return $plugins;
                     }
                 }
             } catch (\Throwable $e) {
@@ -2556,6 +2577,10 @@ class PluginLoader
     /**
      * Save plugin manifest to cache file
      *
+     * Persists the current filesystem fingerprint alongside the FQCN -> path map
+     * so {@see loadManifest()} can self-invalidate the cache when any plugin file
+     * is added, removed, or modified in place (WC-213).
+     *
      * @param array<string, string> $pluginsData List of plugin classes and files
      * @return void
      */
@@ -2565,7 +2590,8 @@ class PluginLoader
             try {
                 $manifest = [
                     'scanned_at' => time(),
-                    'plugins' => $pluginsData
+                    'fingerprint' => $this->computeFingerprint(),
+                    'plugins' => $pluginsData,
                 ];
                 $content = json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
                 if ($content !== false) {
