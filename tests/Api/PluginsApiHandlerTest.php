@@ -225,6 +225,131 @@ class PluginsApiHandlerTest extends TestCase
         $this->assertSame(404, $response->getStatusCode());
     }
 
+    // -----------------------------------------------------------------------
+    // WC-208: uninstall endpoint
+    // -----------------------------------------------------------------------
+
+    public function testUninstallReturnsNotFoundForUnknownPlugin(): void
+    {
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader, $pdo);
+        $response = $apiHandler->uninstall(
+            new Request('POST', '/api/plugins/Ghost/uninstall'),
+            ['id' => 'Ghost']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    public function testDryRunReturnsUninstallPlanWithoutMutating(): void
+    {
+        $this->writeMetadataPlugin('DryRunPlugin', '/api/dryrun/run');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader, $pdo);
+
+        $request = new Request(
+            'POST',
+            '/api/plugins/DryRunPlugin/uninstall',
+            ['Content-Type' => 'application/json'],
+            json_encode(['dry_run' => true])
+        );
+
+        $response = $apiHandler->uninstall($request, ['id' => 'DryRunPlugin']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $data = $payload['data'];
+        $this->assertArrayHasKey('plugin', $data);
+        $this->assertArrayHasKey('migrations_to_roll_back', $data);
+        $this->assertArrayHasKey('will_remove_directory', $data);
+
+        // Must NOT have mutated: plugin file still exists, route still live.
+        $this->assertFileExists($this->tempDir . '/DryRunPlugin.php');
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/dryrun/run')));
+    }
+
+    public function testUninstallDisablesPluginAndRollsBackMigrations(): void
+    {
+        $this->writeMetadataPlugin('ExecuteUninstallPlugin', '/api/execute-uninstall/run');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader, $pdo);
+
+        $request = new Request(
+            'POST',
+            '/api/plugins/ExecuteUninstallPlugin/uninstall',
+            ['Content-Type' => 'application/json'],
+            json_encode(['dry_run' => false, 'force' => false])
+        );
+
+        $response = $apiHandler->uninstall($request, ['id' => 'ExecuteUninstallPlugin']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $data = $payload['data'];
+        $this->assertTrue($data['disabled']);
+        $this->assertTrue($data['directory_removed']);
+        $this->assertSame([], $data['errors']);
+
+        // File must be gone after uninstall.
+        $this->assertFileDoesNotExist($this->tempDir . '/ExecuteUninstallPlugin.php');
+    }
+
+    public function testUninstallWithoutLoaderAndWithoutFileReturns404(): void
+    {
+        // No loader, no file on disk.
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, null, $pdo);
+        $response = $apiHandler->uninstall(
+            new Request('POST', '/api/plugins/NoSuchPlugin/uninstall'),
+            ['id' => 'NoSuchPlugin']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
     private function writeMetadataPlugin(string $class, string $path): void
     {
         $code = <<<PHP

@@ -31,9 +31,13 @@ class PluginsApiHandler
     /**
      * @param string $pluginDir Directory containing plugin files.
      * @param PluginLoader|null $pluginLoader Optional live loader for lifecycle state.
+     * @param \PDO|null $pdo Optional database connection for migration rollback.
      */
-    public function __construct(string $pluginDir, ?PluginLoader $pluginLoader = null)
-    {
+    public function __construct(
+        string $pluginDir,
+        ?PluginLoader $pluginLoader = null,
+        private readonly ?\PDO $pdo = null
+    ) {
         $this->pluginDir = $pluginDir;
         $this->pluginLoader = $pluginLoader;
     }
@@ -262,6 +266,174 @@ class PluginsApiHandler
                 'changed' => $changed,
             ],
         ], 200);
+    }
+
+    /**
+     * POST /api/plugins/{id}/uninstall - Uninstall (disable + rollback + remove) a plugin.
+     *
+     * Accepts an optional JSON body: `{ "dry_run": true, "force": false }`.
+     * When dry_run is true the method returns the plan without mutating anything.
+     * When force is true the directory is removed even if migration rollback had
+     * errors.
+     *
+     * Requires the PluginLoader and a PDO connection to be wired; returns 503
+     * when either is absent. Returns 409 when migration rollback fails and force
+     * is false.
+     *
+     * @param Request $request The incoming request.
+     * @param array<string, string> $params Route parameters (expects 'id').
+     * @return Response
+     */
+    public function uninstall(Request $request, array $params): Response
+    {
+        $identifier = $this->identifier($params);
+        if ($identifier === null) {
+            return Response::error('Plugin identifier required', 400);
+        }
+
+        // Parse body options (all optional).
+        $body = [];
+        $rawBody = $request->getBody();
+        if ($rawBody !== '' && $rawBody !== null) {
+            $decoded = json_decode($rawBody, true);
+            if (is_array($decoded)) {
+                $body = $decoded;
+            }
+        }
+
+        $dryRun = (bool) ($body['dry_run'] ?? false);
+        $force = (bool) ($body['force'] ?? false);
+
+        if ($this->pdo === null) {
+            return Response::error('Database connection unavailable for migration rollback', 503);
+        }
+
+        // Resolve the plugin's stable FQCN key if a loader is wired.
+        $key = null;
+        if ($this->pluginLoader !== null) {
+            $key = $this->resolvePluginKey($identifier);
+        }
+
+        if ($key === null) {
+            // Check filesystem as fallback (plugin file exists but not loaded / no loader).
+            if (!$this->hasPluginFile($identifier)) {
+                return Response::error('Plugin not found', 404);
+            }
+
+            // Plugin is on disk but not in the loader — perform a filesystem-only
+            // uninstall: rollback orphaned tracking rows and delete the file.
+            $rollbackSvc = new \Whity\Core\PluginMigrationRollback($this->pdo);
+
+            if ($dryRun) {
+                $rollbackNames = $rollbackSvc->listMigrationsForPlugin($identifier);
+                $filePath = $this->pluginDir . '/' . $identifier . '.php';
+                $dirPath = $this->pluginDir . '/' . $identifier;
+                $directory = is_dir($dirPath) ? $dirPath : (file_exists($filePath) ? $filePath : null);
+
+                return Response::json([
+                    'data' => [
+                        'plugin' => $identifier,
+                        'status' => 'unloaded',
+                        'migrations_to_roll_back' => $rollbackNames,
+                        'directory' => $directory,
+                        'will_remove_directory' => $directory !== null,
+                    ],
+                ], 200);
+            }
+
+            $rollbackResult = $rollbackSvc->rollback($identifier);
+            $errors = $rollbackResult['errors'];
+
+            if ($errors !== [] && !$force) {
+                return Response::json([
+                    'data' => [
+                        'plugin' => $identifier,
+                        'disabled' => false,
+                        'migrations_rolled_back' => $rollbackResult['rolled_back'],
+                        'directory_removed' => false,
+                        'errors' => $errors,
+                    ],
+                ], 409);
+            }
+
+            $directoryRemoved = false;
+            $filePath = $this->pluginDir . '/' . $identifier . '.php';
+            $dirPath = $this->pluginDir . '/' . $identifier;
+
+            if (is_dir($dirPath)) {
+                $this->removePath($dirPath);
+                $directoryRemoved = true;
+            } elseif (file_exists($filePath)) {
+                unlink($filePath);
+                $directoryRemoved = true;
+            }
+
+            return Response::json([
+                'data' => [
+                    'plugin' => $identifier,
+                    'disabled' => false,
+                    'migrations_rolled_back' => $rollbackResult['rolled_back'],
+                    'directory_removed' => $directoryRemoved,
+                    'errors' => $errors,
+                ],
+            ], 200);
+        }
+
+        // Plugin is loaded — use PluginLoader's orchestrated uninstall.
+        // $key !== null here means $this->pluginLoader !== null (resolvePluginKey requires it).
+        if ($this->pluginLoader === null) {
+            return Response::error('Plugin loader unavailable', 503);
+        }
+
+        if ($dryRun) {
+            $plan = $this->pluginLoader->planUninstall($key);
+            if ($plan === null) {
+                return Response::error('Plugin not found', 404);
+            }
+
+            return Response::json(['data' => $plan], 200);
+        }
+
+        try {
+            $result = $this->pluginLoader->uninstallPlugin($key, $this->pdo, $force);
+        } catch (\Throwable $e) {
+            error_log('[PluginsApiHandler] uninstall failed: ' . $e->getMessage());
+            return Response::error('Uninstall failed: ' . $e->getMessage(), 500);
+        }
+
+        if ($result['errors'] !== [] && !$force) {
+            return Response::json(['data' => $result], 409);
+        }
+
+        return Response::json(['data' => $result], 200);
+    }
+
+    /**
+     * Remove a path recursively (file or directory).
+     *
+     * @param string $path Absolute path to remove.
+     */
+    private function removePath(string $path): void
+    {
+        if (is_file($path) || is_link($path)) {
+            @unlink($path);
+            return;
+        }
+
+        if (!is_dir($path)) {
+            return;
+        }
+
+        $entries = scandir($path);
+        if ($entries === false) {
+            return;
+        }
+        $files = array_diff($entries, ['.', '..']);
+        foreach ($files as $file) {
+            $this->removePath($path . '/' . (string) $file);
+        }
+
+        @rmdir($path);
     }
 
     /**
