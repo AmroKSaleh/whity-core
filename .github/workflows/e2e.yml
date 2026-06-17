@@ -15,9 +15,14 @@ concurrency:
 
 jobs:
   e2e:
-    name: Playwright multi-role suite (full stack)
+    name: Playwright shard ${{ matrix.shard }}/3
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout code
@@ -35,6 +40,13 @@ jobs:
           php-version: '8.4'
           extensions: mbstring, pgsql, pdo_pgsql
           coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
 
       - name: Install PHP dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
@@ -81,15 +93,15 @@ jobs:
 
       # The Playwright config starts the Next dev server itself (webServer on
       # port 3010) and proxies /api/* to the stack at localhost:8000.
-      - name: Run the E2E suite
+      - name: Run the E2E suite (shard ${{ matrix.shard }}/3)
         working-directory: web
-        run: npx playwright test
+        run: npx playwright test --shard=${{ matrix.shard }}/3
 
       - name: Upload Playwright report and traces
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-${{ matrix.shard }}
           path: |
             web/playwright-report
             web/test-results
