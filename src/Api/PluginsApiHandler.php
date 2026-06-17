@@ -31,9 +31,13 @@ class PluginsApiHandler
     /**
      * @param string $pluginDir Directory containing plugin files.
      * @param PluginLoader|null $pluginLoader Optional live loader for lifecycle state.
+     * @param \PDO|null $pdo Optional database connection for migration rollback.
      */
-    public function __construct(string $pluginDir, ?PluginLoader $pluginLoader = null)
-    {
+    public function __construct(
+        string $pluginDir,
+        ?PluginLoader $pluginLoader = null,
+        private readonly ?\PDO $pdo = null
+    ) {
         $this->pluginDir = $pluginDir;
         $this->pluginLoader = $pluginLoader;
     }
@@ -265,6 +269,182 @@ class PluginsApiHandler
     }
 
     /**
+     * POST /api/plugins/{id}/uninstall - Uninstall (disable + rollback + remove) a plugin.
+     *
+     * Accepts an optional JSON body: `{ "dry_run": true, "force": false }`.
+     * When dry_run is true the method returns the plan without mutating anything.
+     * When force is true the directory is removed even if migration rollback had
+     * errors.
+     *
+     * Requires the PluginLoader and a PDO connection to be wired; returns 503
+     * when either is absent. Returns 409 when migration rollback fails and force
+     * is false.
+     *
+     * @param Request $request The incoming request.
+     * @param array<string, string> $params Route parameters (expects 'id').
+     * @return Response
+     */
+    public function uninstall(Request $request, array $params): Response
+    {
+        $identifier = $this->identifier($params);
+        if ($identifier === null) {
+            return Response::error('Plugin identifier required', 400);
+        }
+
+        // Parse body options (all optional).
+        $body = [];
+        $rawBody = $request->getBody();
+        if ($rawBody !== '' && $rawBody !== null) {
+            $decoded = json_decode($rawBody, true);
+            if (is_array($decoded)) {
+                $body = $decoded;
+            }
+        }
+
+        $dryRun = (bool) ($body['dry_run'] ?? false);
+        $force = (bool) ($body['force'] ?? false);
+
+        if ($this->pdo === null) {
+            return Response::error('Database connection unavailable for migration rollback', 503);
+        }
+
+        // Resolve the plugin's stable FQCN key if a loader is wired.
+        $key = null;
+        if ($this->pluginLoader !== null) {
+            $key = $this->resolvePluginKey($identifier);
+        }
+
+        if ($key === null) {
+            // Filesystem fallback (plugin on disk but not loaded / no loader).
+            // Validate the identifier and resolve EXACTLY ONE concrete target
+            // (file OR dir) once, so the reachability gate and the removal
+            // target can never diverge. safePluginPath() rejects any identifier
+            // that could escape the plugin directory and realpath-anchors the
+            // candidate under it.
+            $target = $this->safePluginPath($identifier, '.php')          // enabled file
+                ?? $this->safePluginPath($identifier, '.php.disabled')    // disabled file
+                ?? $this->safePluginPath($identifier);                    // directory plugin
+
+            if ($target === null) {
+                // Distinguish a malformed/unsafe identifier (400) from a simply
+                // absent one (404): if the identifier itself is invalid, none of
+                // the suffix variants could ever resolve, so re-check the bare id.
+                if (
+                    $identifier === ''
+                    || str_contains($identifier, '/')
+                    || str_contains($identifier, '\\')
+                    || str_contains($identifier, '.')
+                ) {
+                    return Response::error('Invalid plugin identifier', 400);
+                }
+                return Response::error('Plugin not found', 404);
+            }
+
+            // Plugin is on disk but not in the loader — perform a filesystem-only
+            // uninstall: rollback orphaned tracking rows and delete the target.
+            $rollbackSvc = new \Whity\Core\PluginMigrationRollback($this->pdo);
+
+            if ($dryRun) {
+                $rollbackNames = $rollbackSvc->listMigrationsForPlugin($identifier);
+
+                return Response::json([
+                    'data' => [
+                        'plugin' => $identifier,
+                        'status' => 'unloaded',
+                        'migrations_to_roll_back' => $rollbackNames,
+                        'directory' => $target,
+                        'will_remove_directory' => true,
+                    ],
+                ], 200);
+            }
+
+            $rollbackResult = $rollbackSvc->rollback($identifier);
+            $errors = $rollbackResult['errors'];
+
+            if ($errors !== [] && !$force) {
+                return Response::json([
+                    'data' => [
+                        'plugin' => $identifier,
+                        'disabled' => false,
+                        'migrations_rolled_back' => $rollbackResult['rolled_back'],
+                        'directory_removed' => false,
+                        'errors' => $errors,
+                    ],
+                ], 409);
+            }
+
+            // Remove exactly the target the gate matched.
+            $this->removePath($target);
+
+            return Response::json([
+                'data' => [
+                    'plugin' => $identifier,
+                    'disabled' => false,
+                    'migrations_rolled_back' => $rollbackResult['rolled_back'],
+                    'directory_removed' => true,
+                    'errors' => $errors,
+                ],
+            ], 200);
+        }
+
+        // Plugin is loaded — use PluginLoader's orchestrated uninstall.
+        // $key !== null here means $this->pluginLoader !== null (resolvePluginKey requires it).
+        if ($this->pluginLoader === null) {
+            return Response::error('Plugin loader unavailable', 503);
+        }
+
+        if ($dryRun) {
+            $plan = $this->pluginLoader->planUninstall($key);
+            if ($plan === null) {
+                return Response::error('Plugin not found', 404);
+            }
+
+            return Response::json(['data' => $plan], 200);
+        }
+
+        try {
+            $result = $this->pluginLoader->uninstallPlugin($key, $this->pdo, $force);
+        } catch (\Throwable $e) {
+            error_log('[PluginsApiHandler] uninstall failed: ' . $e->getMessage());
+            return Response::error('Uninstall failed', 500);
+        }
+
+        if ($result['errors'] !== [] && !$force) {
+            return Response::json(['data' => $result], 409);
+        }
+
+        return Response::json(['data' => $result], 200);
+    }
+
+    /**
+     * Remove a path recursively (file or directory).
+     *
+     * @param string $path Absolute path to remove.
+     */
+    private function removePath(string $path): void
+    {
+        if (is_file($path) || is_link($path)) {
+            @unlink($path);
+            return;
+        }
+
+        if (!is_dir($path)) {
+            return;
+        }
+
+        $entries = scandir($path);
+        if ($entries === false) {
+            return;
+        }
+        $files = array_diff($entries, ['.', '..']);
+        foreach ($files as $file) {
+            $this->removePath($path . '/' . (string) $file);
+        }
+
+        @rmdir($path);
+    }
+
+    /**
      * Get lifecycle status snapshots from the loader, if available.
      *
      * @return array<int, array{id: string, name: string, state: string, consecutive_errors: int, last_error: array{message: string, type: string, trace: string, at: int}|null}>
@@ -465,8 +645,62 @@ class PluginsApiHandler
      */
     private function hasPluginFile(string $id): bool
     {
-        return file_exists($this->pluginDir . '/' . $id . '.php')
-            || file_exists($this->pluginDir . '/' . $id . '.php.disabled');
+        return $this->safePluginPath($id, '.php') !== null
+            || $this->safePluginPath($id, '.php.disabled') !== null;
+    }
+
+    /**
+     * Resolve a deletion/lookup candidate path for a plugin identifier, refusing
+     * any identifier that could escape the plugin directory.
+     *
+     * A plugin identifier is a bare class-name segment: it must not be empty,
+     * contain a path separator (`/` or `\`), or contain a `.` (which would allow
+     * `.`/`..` relative components or dotted traversal). After building the
+     * candidate path it is realpath-anchored under the plugin directory so that
+     * even symlink/normalisation tricks cannot point outside it. Mirrors the
+     * proven guard in PluginLoader::resolvePluginDirectory.
+     *
+     * @param string $identifier The raw route identifier.
+     * @param string $suffix Optional suffix to append (e.g. '.php' or '').
+     * @return string|null The validated absolute candidate path, or null when the
+     *                     identifier is unsafe OR no such path exists on disk.
+     */
+    private function safePluginPath(string $identifier, string $suffix = ''): ?string
+    {
+        // Reject empty, separators, and any dot (no relative components, no
+        // dotted traversal). A plugin id is a single bare name segment.
+        if (
+            $identifier === ''
+            || str_contains($identifier, '/')
+            || str_contains($identifier, '\\')
+            || str_contains($identifier, '.')
+        ) {
+            return null;
+        }
+
+        $candidate = $this->pluginDir . '/' . $identifier . $suffix;
+
+        $realPluginDir = realpath($this->pluginDir);
+        if ($realPluginDir === false) {
+            // Plugin dir does not exist (tests / fresh installs): the dot/separator
+            // rejection above already prevents traversal, so fall back to a plain
+            // existence check against the constructed candidate.
+            return file_exists($candidate) ? $candidate : null;
+        }
+
+        $realCandidate = realpath($candidate);
+        if ($realCandidate === false) {
+            return null;
+        }
+
+        // Anchor with a trailing separator so "/var/plugins_evil" cannot pass a
+        // prefix check against "/var/plugins".
+        $anchor = rtrim($realPluginDir, '/\\') . DIRECTORY_SEPARATOR;
+        if (!str_starts_with($realCandidate . DIRECTORY_SEPARATOR, $anchor)) {
+            return null;
+        }
+
+        return $candidate;
     }
 
     /**

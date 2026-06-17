@@ -593,6 +593,18 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
+            self::permissionRoute('POST', '/api/plugins/{id}/uninstall', 'plugins:manage', [
+                'summary' => 'Uninstall a plugin (disable, roll back migrations, remove files)',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Plugin uninstalled', 'SimpleMessageResponse'),
+                    400 => self::errorResponse('Invalid plugin identifier'),
+                    404 => self::errorResponse('Plugin not found'),
+                    409 => self::jsonResponse('Migration rollback failed', 'SimpleMessageResponse'),
+                    500 => self::errorResponse('Internal error'),
+                    503 => self::errorResponse('Database connection unavailable'),
+                ],
+            ]),
             self::permissionRoute('POST', '/api/plugins/reload', 'plugins:manage', [
                 'summary' => 'Reload the plugin registry',
                 'tags' => ['platform-ops'],

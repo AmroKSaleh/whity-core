@@ -294,12 +294,10 @@ class MigrationsCommand
      * Roll back all executed migrations that belong to the named plugin, in
      * reverse execution order.
      *
-     * Plugin migrations are identified by their tracking record:
-     * `plugin:<PluginName>:<ClassName>`.  The rollback uses the
-     * `executePluginMigration` path when the plugin is loaded (real migration
-     * class available), or removes the tracking row directly for orphaned
-     * records (plugin no longer installed) — consistent with the uninstall
-     * use-case this feature targets.
+     * Delegates to {@see \Whity\Core\PluginMigrationRollback} which removes
+     * the tracking rows in id DESC order.  Because plugin classes may be
+     * unavailable at uninstall time, down() is intentionally NOT called —
+     * schema cleanup is the plugin author's responsibility.
      *
      * @param string $pluginName The plugin's declared name (case-sensitive).
      * @param bool   $force      Currently unused but accepted for consistency.
@@ -307,52 +305,30 @@ class MigrationsCommand
     private function rollbackPlugin(string $pluginName, bool $force): int
     {
         try {
-            $prefix   = self::PLUGIN_PREFIX . $pluginName . ':';
-            $executed = $this->getExecutedMigrations();
+            $rollback = new \Whity\Core\PluginMigrationRollback($this->db->getPdo());
+            $list = $rollback->listMigrationsForPlugin($pluginName);
 
-            // Collect matching records, ordered by id DESC (reverse execution).
-            $targets = [];
-            foreach ($executed as $migName => $row) {
-                if (str_starts_with((string) $migName, $prefix)) {
-                    $targets[] = ['name' => (string) $migName, 'row' => $row];
-                }
-            }
-
-            // Sort by id DESC so the most-recently-run migration rolls back first.
-            usort($targets, static function (array $a, array $b): int {
-                return (int) ($b['row']['id'] ?? 0) <=> (int) ($a['row']['id'] ?? 0);
-            });
-
-            if (empty($targets)) {
+            if (empty($list)) {
                 echo "\n\033[1;33m⚠ No executed migrations found for plugin '{$pluginName}'\033[0m\n\n";
                 return 0;
             }
 
             echo "\n\033[1;33mRolling back migrations for plugin '{$pluginName}'...\033[0m\n";
 
-            foreach ($targets as $target) {
-                $migName = $target['name'];
-                echo "  Rolling back: $migName... ";
+            $result = $rollback->rollback($pluginName);
 
-                $entry = $this->findPluginMigrationByRecord($migName);
-                if ($entry !== null) {
-                    $this->executePluginMigration($entry, 'down');
-                } else {
-                    // Plugin is no longer installed; remove the orphaned tracking
-                    // row so the record does not block a future re-install.
-                    $stmt = $this->db->getPdo()->prepare(
-                        'DELETE FROM core_schema_migrations WHERE migration_name = ?'
-                    );
-                    $stmt->execute([$migName]);
-                }
-
-                echo "\033[0;32m✓\033[0m\n";
+            foreach ($result['rolled_back'] as $name) {
+                echo "  Rolling back: $name... \033[0;32m✓\033[0m\n";
             }
 
-            $count = count($targets);
+            foreach ($result['errors'] as $err) {
+                echo "  \033[0;31m✗ {$err}\033[0m\n";
+            }
+
+            $count = count($result['rolled_back']);
             echo "\n\033[0;32m✓ Successfully rolled back $count migration(s) for plugin '{$pluginName}'\033[0m\n\n";
 
-            return 0;
+            return empty($result['errors']) ? 0 : 1;
         } catch (\Exception $e) {
             echo "\033[0;31m✗ Plugin rollback failed: " . $e->getMessage() . "\033[0m\n";
             return 1;

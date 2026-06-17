@@ -225,6 +225,224 @@ class PluginsApiHandlerTest extends TestCase
         $this->assertSame(404, $response->getStatusCode());
     }
 
+    // -----------------------------------------------------------------------
+    // WC-208: uninstall endpoint
+    // -----------------------------------------------------------------------
+
+    public function testUninstallReturnsNotFoundForUnknownPlugin(): void
+    {
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader, $pdo);
+        $response = $apiHandler->uninstall(
+            new Request('POST', '/api/plugins/Ghost/uninstall'),
+            ['id' => 'Ghost']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    public function testDryRunReturnsUninstallPlanWithoutMutating(): void
+    {
+        $this->writeMetadataPlugin('DryRunPlugin', '/api/dryrun/run');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader, $pdo);
+
+        $request = new Request(
+            'POST',
+            '/api/plugins/DryRunPlugin/uninstall',
+            ['Content-Type' => 'application/json'],
+            (string) json_encode(['dry_run' => true])
+        );
+
+        $response = $apiHandler->uninstall($request, ['id' => 'DryRunPlugin']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $data = $payload['data'];
+        $this->assertArrayHasKey('plugin', $data);
+        $this->assertArrayHasKey('migrations_to_roll_back', $data);
+        $this->assertArrayHasKey('will_remove_directory', $data);
+
+        // Must NOT have mutated: plugin file still exists, route still live.
+        $this->assertFileExists($this->tempDir . '/DryRunPlugin.php');
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/dryrun/run')));
+    }
+
+    public function testUninstallDisablesPluginAndRollsBackMigrations(): void
+    {
+        $this->writeMetadataPlugin('ExecuteUninstallPlugin', '/api/execute-uninstall/run');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, $loader, $pdo);
+
+        $request = new Request(
+            'POST',
+            '/api/plugins/ExecuteUninstallPlugin/uninstall',
+            ['Content-Type' => 'application/json'],
+            (string) json_encode(['dry_run' => false, 'force' => false])
+        );
+
+        $response = $apiHandler->uninstall($request, ['id' => 'ExecuteUninstallPlugin']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $data = $payload['data'];
+        $this->assertTrue($data['disabled']);
+        $this->assertTrue($data['directory_removed']);
+        $this->assertSame([], $data['errors']);
+
+        // File must be gone after uninstall.
+        $this->assertFileDoesNotExist($this->tempDir . '/ExecuteUninstallPlugin.php');
+    }
+
+    public function testUninstallWithoutLoaderAndWithoutFileReturns404(): void
+    {
+        // No loader, no file on disk.
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, null, $pdo);
+        $response = $apiHandler->uninstall(
+            new Request('POST', '/api/plugins/NoSuchPlugin/uninstall'),
+            ['id' => 'NoSuchPlugin']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    public function testUninstallRejectsTraversalIdentifier(): void
+    {
+        // A sentinel file OUTSIDE the plugin dir that traversal would target.
+        $outside = $this->tempDir . '/outside_secret.php';
+        file_put_contents($outside, "<?php // must survive\n");
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        // Plugin dir is a child so "../outside_secret" would escape it.
+        $pluginDir = $this->tempDir . '/plugins';
+        mkdir($pluginDir, 0755, true);
+
+        $apiHandler = new PluginsApiHandler($pluginDir, null, $pdo);
+
+        foreach (['..\\..\\evil', '../../evil', '..\\outside_secret', '../outside_secret'] as $bad) {
+            $response = $apiHandler->uninstall(
+                new Request('POST', '/api/plugins/x/uninstall'),
+                ['id' => $bad]
+            );
+            $this->assertSame(400, $response->getStatusCode(), "identifier '{$bad}' must be rejected");
+            $payload = json_decode($response->getBody(), true);
+            $this->assertSame('Invalid plugin identifier', $payload['error'] ?? null);
+            // The raw identifier must not be echoed back.
+            $this->assertStringNotContainsString($bad, $response->getBody());
+        }
+
+        // Nothing outside the plugin dir was deleted.
+        $this->assertFileExists($outside);
+    }
+
+    public function testUninstallRejectsDottedIdentifier(): void
+    {
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $apiHandler = new PluginsApiHandler($this->tempDir, null, $pdo);
+        $response = $apiHandler->uninstall(
+            new Request('POST', '/api/plugins/x/uninstall'),
+            ['id' => 'Some.Dotted.Id']
+        );
+
+        $this->assertSame(400, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $this->assertSame('Invalid plugin identifier', $payload['error'] ?? null);
+    }
+
+    public function testUninstallRemovesFileNotSiblingDirectoryWhenGateMatchedFile(): void
+    {
+        // Both a Foo.php file AND a Foo/ directory exist. The reachability gate
+        // (hasPluginFile) matches the .php FILE, so ONLY the file must be removed.
+        file_put_contents($this->tempDir . '/Foo.php', "<?php // plugin file\n");
+        mkdir($this->tempDir . '/Foo', 0755, true);
+        file_put_contents($this->tempDir . '/Foo/keep.txt', "must survive\n");
+
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        // No loader: forces the filesystem-fallback path.
+        $apiHandler = new PluginsApiHandler($this->tempDir, null, $pdo);
+        $response = $apiHandler->uninstall(
+            new Request('POST', '/api/plugins/Foo/uninstall'),
+            ['id' => 'Foo']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $this->assertTrue($payload['data']['directory_removed']);
+
+        // The FILE the gate matched is gone; the sibling directory survives.
+        $this->assertFileDoesNotExist($this->tempDir . '/Foo.php');
+        $this->assertDirectoryExists($this->tempDir . '/Foo');
+        $this->assertFileExists($this->tempDir . '/Foo/keep.txt');
+    }
+
     private function writeMetadataPlugin(string $class, string $path): void
     {
         $code = <<<PHP

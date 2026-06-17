@@ -519,11 +519,14 @@ $router->register('GET', '/api/deployments/status', [$deploymentHandler, 'status
 // list/enable/disable use the WC-9 lifecycle at runtime, and gate every route on
 // the plugins:manage permission (6th positional arg to Router::register; 4th arg
 // requiredRole stays null so RbacMiddleware enforces the permission).
-$pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins', $pluginLoader);
+// WC-208: pass the PDO so the orchestrated uninstall (disable → migration
+// rollback → directory removal) has a DB connection for tracking-row cleanup.
+$pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins', $pluginLoader, $db->getPdo());
 $router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], null, null, CorePermissions::PLUGINS_MANAGE);
 $router->register('POST', '/api/plugins/{name}/enable', [$pluginsHandler, 'enable'], null, null, CorePermissions::PLUGINS_MANAGE);
 $router->register('POST', '/api/plugins/{name}/disable', [$pluginsHandler, 'disable'], null, null, CorePermissions::PLUGINS_MANAGE);
 $router->register('POST', '/api/plugins/{id}/re-enable', [$pluginsHandler, 'reEnable'], null, null, CorePermissions::PLUGINS_MANAGE);
+$router->register('POST', '/api/plugins/{id}/uninstall', [$pluginsHandler, 'uninstall'], null, null, CorePermissions::PLUGINS_MANAGE);
 $router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], null, null, CorePermissions::PLUGINS_MANAGE);
 
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Whity\Cli\Commands;
 
 /**
@@ -22,6 +24,7 @@ class PluginsCommand extends BaseCommand
             'enable' => $this->enable($argv),
             'disable' => $this->disable($argv),
             'reload' => $this->reload(),
+            'uninstall' => $this->uninstall($argv),
             '--help', '-h', 'help' => $this->showHelp(),
             default => $this->unknownAction($action),
         };
@@ -126,16 +129,99 @@ class PluginsCommand extends BaseCommand
     }
 
     /**
+     * Uninstall a plugin (disable + rollback migrations + remove directory).
+     *
+     * Flags:
+     *   --dry-run  Print what would happen without mutating anything.
+     *   --force    Remove directory even if migration rollback had errors.
+     *
+     * @param array<int, string> $argv
+     */
+    private function uninstall(array $argv): int
+    {
+        $id = null;
+        $dryRun = false;
+        $force = false;
+
+        foreach ($argv as $arg) {
+            if ($arg === '--dry-run') {
+                $dryRun = true;
+            } elseif ($arg === '--force') {
+                $force = true;
+            } elseif ($id === null && !str_starts_with($arg, '--')) {
+                $id = $arg;
+            }
+        }
+
+        if ($id === null || $id === '') {
+            echo "Error: Missing plugin ID.\n";
+            $this->showHelp();
+            return 1;
+        }
+
+        $body = ['dry_run' => $dryRun, 'force' => $force];
+        $response = $this->callApi('POST', "/api/plugins/{$id}/uninstall", $body);
+        $statusCode = $response->getStatusCode();
+        $payload = json_decode($response->getBody(), true);
+        $data = is_array($payload) && isset($payload['data']) && is_array($payload['data'])
+            ? $payload['data']
+            : [];
+
+        if ($dryRun) {
+            echo "Dry-run plan for uninstalling plugin '{$id}':\n\n";
+
+            $migrations = (array) ($data['migrations_to_roll_back'] ?? []);
+            $migrationsLabel = empty($migrations) ? '(none)' : implode(', ', $migrations);
+            $willRemove = ($data['will_remove_directory'] ?? false) ? 'yes' : 'no';
+
+            $this->renderTable(
+                ['Field', 'Value'],
+                [
+                    ['Plugin', (string) ($data['plugin'] ?? $id)],
+                    ['Status', (string) ($data['status'] ?? '-')],
+                    ['Migrations to roll back', $migrationsLabel],
+                    ['Directory', (string) ($data['directory'] ?? '(unknown)')],
+                    ['Will remove directory', $willRemove],
+                ]
+            );
+
+            return 0;
+        }
+
+        if ($statusCode !== 200) {
+            $errors = (array) ($data['errors'] ?? []);
+            echo "Error uninstalling plugin '{$id}':\n";
+            foreach ($errors as $err) {
+                echo "  - {$err}\n";
+            }
+            if ($errors === []) {
+                echo $response->getBody() . "\n";
+            }
+            return 1;
+        }
+
+        $rolled = count((array) ($data['migrations_rolled_back'] ?? []));
+        $removed = ($data['directory_removed'] ?? false) ? 'yes' : 'no';
+
+        echo "Plugin '{$id}' uninstalled successfully.\n";
+        echo "  Migrations rolled back : {$rolled}\n";
+        echo "  Directory removed      : {$removed}\n";
+
+        return 0;
+    }
+
+    /**
      * Show help for plugins command
      */
     private function showHelp(): int
     {
         echo "Usage: whity-cli plugin <action> [arguments]\n\n";
         echo "Actions:\n";
-        echo "  list               List all plugins\n";
-        echo "  enable <id>        Enable a plugin\n";
-        echo "  disable <id>       Disable a plugin\n";
-        echo "  reload             Reload discovered plugins\n";
+        echo "  list                                  List all plugins\n";
+        echo "  enable <id>                           Enable a plugin\n";
+        echo "  disable <id>                          Disable a plugin\n";
+        echo "  reload                                Reload discovered plugins\n";
+        echo "  uninstall <id> [--dry-run] [--force]  Uninstall a plugin\n";
         return 0;
     }
 

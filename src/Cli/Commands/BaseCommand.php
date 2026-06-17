@@ -100,11 +100,12 @@ abstract class BaseCommand
         $permissionsHandler = new PermissionsApiHandler($db->getPdo());
         $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
 
-        $pluginsHandler = new PluginsApiHandler($baseDir . '/plugins');
+        $pluginsHandler = new PluginsApiHandler($baseDir . '/plugins', $pluginLoader, $db->getPdo());
         $router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], 'admin');
         $router->register('POST', '/api/plugins/{id}/enable', [$pluginsHandler, 'enable'], 'admin');
         $router->register('POST', '/api/plugins/{id}/disable', [$pluginsHandler, 'disable'], 'admin');
         $router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], 'admin');
+        $router->register('POST', '/api/plugins/{id}/uninstall', [$pluginsHandler, 'uninstall'], 'admin');
 
         $migrationsHandler = new MigrationsApiHandler($db, $baseDir . '/database/migrations');
         $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');

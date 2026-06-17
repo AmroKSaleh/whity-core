@@ -656,13 +656,18 @@ parameters:
 			path: tests/Cli/PluginMigrationsRealEngineTest.php
 
 		-
+			message: "#^Parameter \\#1 \\$string of function strtolower expects string, string\\|false given\\.$#"
+			count: 3
+			path: tests/Cli/PluginsCommandTest.php
+
+		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
-			count: 2
+			count: 5
 			path: tests/Cli/PluginsCommandTest.php
 
 		-
 			message: "#^Parameter \\#2 \\$haystack of method PHPUnit\\\\Framework\\\\Assert\\:\\:assertStringContainsString\\(\\) expects string, string\\|false given\\.$#"
-			count: 3
+			count: 4
 			path: tests/Cli/PluginsCommandTest.php
 
 		-
