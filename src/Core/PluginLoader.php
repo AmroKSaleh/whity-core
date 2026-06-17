@@ -857,6 +857,185 @@ class PluginLoader
     }
 
     /**
+     * Return a dry-run plan for uninstalling a plugin without mutating anything.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return array{plugin: string, status: string, migrations_to_roll_back: list<string>, directory: string|null, will_remove_directory: bool}|null
+     *   Null when the plugin is not known to this loader.
+     */
+    public function planUninstall(string $pluginKey): ?array
+    {
+        $info = $this->registeredPlugins[$pluginKey] ?? null;
+        if ($info === null) {
+            return null;
+        }
+
+        $plugin = $info['plugin'];
+        $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+        $status = $lifecycle?->getState()->value ?? 'unknown';
+
+        $directory = $this->resolvePluginDirectory($pluginKey, $plugin->getName());
+
+        // Migrations cannot be queried without a PDO, so report what is declared.
+        $declaredMigrations = [];
+        foreach ($plugin->getMigrations() as $fqcn) {
+            if (is_string($fqcn)) {
+                $short = substr((string) strrchr('\\' . $fqcn, '\\'), 1);
+                $declaredMigrations[] = 'plugin:' . $plugin->getName() . ':' . $short;
+            }
+        }
+
+        return [
+            'plugin' => $plugin->getName(),
+            'status' => $status,
+            'migrations_to_roll_back' => $declaredMigrations,
+            'directory' => $directory,
+            'will_remove_directory' => $directory !== null,
+        ];
+    }
+
+    /**
+     * Orchestrate full plugin uninstall: disable → rollback migrations → remove directory.
+     *
+     * When $force is false and migration rollback returns errors, the directory
+     * is NOT removed (the plugin is left disabled but its files intact) and the
+     * errors are surfaced in the return value. Pass $force = true to remove the
+     * directory even when rollback had errors.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @param \PDO   $pdo       Live database connection for migration tracking.
+     * @param bool   $force     When true, remove the directory even after migration errors.
+     * @return array{plugin: string, disabled: bool, migrations_rolled_back: list<string>, directory_removed: bool, errors: list<string>}
+     */
+    public function uninstallPlugin(string $pluginKey, \PDO $pdo, bool $force = false): array
+    {
+        $info = $this->registeredPlugins[$pluginKey] ?? null;
+        $pluginName = $info !== null ? $info['plugin']->getName() : $pluginKey;
+
+        // Step 1: disable (tears down routes and hooks).
+        $disabled = $this->disablePlugin($pluginKey);
+
+        // Step 2: roll back migrations.
+        $rollback = new PluginMigrationRollback($pdo);
+        $rollbackResult = $rollback->rollback($pluginName);
+
+        $errors = $rollbackResult['errors'];
+        $migrationsRolledBack = $rollbackResult['rolled_back'];
+
+        // Step 3: remove directory only when safe (or forced).
+        $directoryRemoved = false;
+        if ($errors === [] || $force) {
+            $directory = $this->resolvePluginDirectory($pluginKey, $pluginName);
+            if ($directory !== null) {
+                $this->removeRecursive($directory);
+                $directoryRemoved = true;
+            }
+        }
+
+        return [
+            'plugin' => $pluginName,
+            'disabled' => $disabled,
+            'migrations_rolled_back' => $migrationsRolledBack,
+            'directory_removed' => $directoryRemoved,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * Resolve the on-disk path for a plugin, validating it stays under pluginDir.
+     *
+     * Supports both single-file plugins (plugins/Name.php) and directory-based
+     * plugins (plugins/Name/). Returns null for plugins with no on-disk presence
+     * or when the resolved path would escape the plugins directory (path traversal
+     * guard).
+     *
+     * @param string $pluginKey  The plugin's FQCN key.
+     * @param string $pluginName The plugin's declared getName() value.
+     * @return string|null Absolute path, or null if not determinable / unsafe.
+     */
+    private function resolvePluginDirectory(string $pluginKey, string $pluginName): ?string
+    {
+        $parts = explode('\\', $pluginKey);
+        $lastPart = (string) end($parts);
+        $candidates = array_unique([$pluginName, $lastPart]);
+
+        foreach ($candidates as $candidate) {
+            if ($candidate === '') {
+                continue;
+            }
+
+            // Path traversal guard: candidate must be a plain name with no
+            // directory separators or relative components.
+            if (str_contains($candidate, '/') || str_contains($candidate, '\\')
+                || $candidate === '.' || $candidate === '..') {
+                continue;
+            }
+
+            $dirPath = $this->pluginDir . '/' . $candidate;
+            $filePath = $this->pluginDir . '/' . $candidate . '.php';
+            $disabledPath = $this->pluginDir . '/' . $candidate . '.php.disabled';
+
+            // Validate the resolved path sits under the plugin directory.
+            $realPluginDir = realpath($this->pluginDir);
+            if ($realPluginDir !== false) {
+                $realDir = realpath($dirPath);
+                $realFile = realpath($filePath);
+                $realDisabled = realpath($disabledPath);
+
+                if ($realDir !== false && str_starts_with($realDir, $realPluginDir)) {
+                    return $dirPath;
+                }
+                if ($realFile !== false && str_starts_with($realFile, $realPluginDir)) {
+                    return $filePath;
+                }
+                if ($realDisabled !== false && str_starts_with($realDisabled, $realPluginDir)) {
+                    return $disabledPath;
+                }
+            } else {
+                // pluginDir does not exist yet (tests); fall back to string check.
+                if (is_dir($dirPath)) {
+                    return $dirPath;
+                }
+                if (file_exists($filePath)) {
+                    return $filePath;
+                }
+                if (file_exists($disabledPath)) {
+                    return $disabledPath;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Recursively remove a directory or single file.
+     *
+     * Mirrors the pattern from DeploymentManager::removeRecursive(). Silently
+     * returns when the path does not exist.
+     *
+     * @param string $path Absolute path to remove.
+     */
+    private function removeRecursive(string $path): void
+    {
+        if (is_file($path) || is_link($path)) {
+            unlink($path);
+            return;
+        }
+
+        if (!is_dir($path)) {
+            return;
+        }
+
+        $files = array_diff((array) scandir($path), ['.', '..']);
+        foreach ($files as $file) {
+            $this->removeRecursive($path . '/' . (string) $file);
+        }
+
+        rmdir($path);
+    }
+
+    /**
      * Load a single plugin class and register it
      *
      * When the same plugin file has already been required earlier in this

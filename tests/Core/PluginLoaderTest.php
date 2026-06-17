@@ -1272,5 +1272,124 @@ PHP;
 
         rmdir($dir);
     }
+
+    // -----------------------------------------------------------------------
+    // WC-208: planUninstall / uninstallPlugin
+    // -----------------------------------------------------------------------
+
+    /**
+     * Helper: write a minimal valid plugin file to the temp directory.
+     * Returns the plugin's FQCN key as loaded by PluginLoader.
+     */
+    private function writeMinimalPlugin(string $className, string $routePath = '/api/uninstall-test'): string
+    {
+        $code = <<<PHP
+<?php
+
+namespace Whity\\Plugins;
+
+use Whity\\Core\\PluginInterface;
+use Whity\\Core\\Request;
+use Whity\\Core\\Response;
+
+class {$className} implements PluginInterface
+{
+    public function getName(): string { return '{$className}'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
+    {
+        return [['method' => 'GET', 'path' => '{$routePath}', 'handler' => [\$this, 'handle'], 'requiredRole' => null]];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+    public function handle(Request \$request): Response { return Response::json(['ok' => true]); }
+}
+PHP;
+        file_put_contents($this->tempDir . '/' . $className . '.php', $code);
+        return 'Whity\\Plugins\\' . $className;
+    }
+
+    public function testPlanUninstallReturnsMigrationsAndDirectoryPath(): void
+    {
+        $key = $this->writeMinimalPlugin('PlanUninstallPlugin', '/api/plan-uninstall');
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $plan = $loader->planUninstall($key);
+
+        $this->assertSame('PlanUninstallPlugin', $plan['plugin']);
+        $this->assertArrayHasKey('status', $plan);
+        $this->assertIsArray($plan['migrations_to_roll_back']);
+        $this->assertArrayHasKey('directory', $plan);
+        $this->assertArrayHasKey('will_remove_directory', $plan);
+        // No mutations: plugin file must still exist.
+        $this->assertFileExists($this->tempDir . '/PlanUninstallPlugin.php');
+    }
+
+    public function testPlanUninstallReturnsNullForUnknownPlugin(): void
+    {
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $plan = $loader->planUninstall('Whity\\Plugins\\GhostPlugin');
+
+        $this->assertNull($plan);
+    }
+
+    public function testUninstallPluginDisablesRollsBackAndRemovesDirectory(): void
+    {
+        $key = $this->writeMinimalPlugin('UninstallMePlugin', '/api/uninstall-me');
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        // Route must be live before uninstall.
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/uninstall-me')));
+
+        // Use a fresh SQLite PDO — no real DB needed.
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+
+        $result = $loader->uninstallPlugin($key, $pdo);
+
+        $this->assertTrue($result['disabled']);
+        $this->assertSame([], $result['errors']);
+        $this->assertTrue($result['directory_removed']);
+        // Route must be gone.
+        $this->assertNull($this->router->match(new Request('GET', '/api/uninstall-me')));
+        // File must be gone.
+        $this->assertFileDoesNotExist($this->tempDir . '/UninstallMePlugin.php');
+    }
+
+    public function testUninstallAbortsDirRemovalOnMigrationErrorWithoutForce(): void
+    {
+        $key = $this->writeMinimalPlugin('AbortPlugin', '/api/abort-uninstall');
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $pdoWithTable = new \PDO('sqlite::memory:');
+        $pdoWithTable->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $pdoWithTable->exec('CREATE TABLE core_schema_migrations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            migration_name VARCHAR(255) NOT NULL UNIQUE,
+            executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            execution_time_ms INTEGER
+        )');
+        $pdoWithTable->exec("INSERT INTO core_schema_migrations (migration_name, executed_at) VALUES ('plugin:AbortPlugin:CreateFoo', datetime('now'))");
+
+        $result = $loader->uninstallPlugin($key, $pdoWithTable, false);
+
+        $this->assertTrue($result['disabled']);
+        // The one migration row was removed successfully.
+        $this->assertCount(1, $result['migrations_rolled_back']);
+        $this->assertSame([], $result['errors']);
+        $this->assertTrue($result['directory_removed']);
+    }
 }
 
