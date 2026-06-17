@@ -18,6 +18,25 @@ use Whity\Core\PluginLoader;
  */
 class PluginsApiHandler
 {
+    /**
+     * Propagation/staleness indicator surfaced on the plugin list (WC-210).
+     *
+     * Per-plugin lifecycle state is worker-local (held in each FrankenPHP
+     * worker's PluginLoader). Admin enable/disable/uninstall now persist to
+     * disk, so other workers converge on their next reload or restart; the
+     * consecutive-error auto-fail state remains per-worker until the Phase-F
+     * shared store. This typed `meta` block tells clients the listing reflects
+     * the answering worker only.
+     *
+     * @var array{worker_local: bool, note: string}
+     */
+    private const WORKER_LOCAL_META = [
+        'worker_local' => true,
+        'note' => 'Plugin lifecycle state is per-worker. Admin enable/disable/uninstall '
+            . 'persist to disk and converge across workers on reload or worker restart; '
+            . 'auto-fail (consecutive-error) state is per-worker until the shared store lands.',
+    ];
+
     private string $pluginDir;
 
     /**
@@ -111,7 +130,10 @@ class PluginsApiHandler
                 }
             }
 
-            return Response::json(['data' => $plugins], 200);
+            return Response::json([
+                'data' => $plugins,
+                'meta' => self::WORKER_LOCAL_META,
+            ], 200);
         } catch (\Throwable $e) {
             error_log('[PluginsApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to list plugins', 500);

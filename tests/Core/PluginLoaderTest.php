@@ -1401,5 +1401,266 @@ PHP;
         $this->assertSame([], $result['errors']);
         $this->assertTrue($result['directory_removed']);
     }
+
+    // -----------------------------------------------------------------------
+    // WC-210: persistent admin lifecycle signal -> cross-worker convergence
+    // -----------------------------------------------------------------------
+
+    /**
+     * Write a directory plugin (plugins/<Dir>/Plugin.php) declaring one GET
+     * route, returning its FQCN key. Mirrors the directory-plugin layout used
+     * by the lifecycle tests above.
+     */
+    private function writeDirectoryPlugin(string $dir, string $routePath): string
+    {
+        $subDir = $this->tempDir . '/' . $dir;
+        if (!is_dir($subDir)) {
+            mkdir($subDir, 0755, true);
+        }
+        $code = <<<PHP
+<?php
+
+namespace {$dir};
+
+use Whity\\Core\\PluginInterface;
+use Whity\\Core\\Request;
+use Whity\\Core\\Response;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return '{$dir}'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
+    {
+        return [['method' => 'GET', 'path' => '{$routePath}', 'handler' => [\$this, 'handle'], 'requiredRole' => null]];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+    public function handle(Request \$request): Response { return Response::json(['ok' => true]); }
+}
+PHP;
+        file_put_contents($subDir . '/Plugin.php', $code);
+        return $dir . '\\Plugin';
+    }
+
+    /**
+     * THE crux (WC-210): disabling a directory plugin through loader A must
+     * persist a signal so a SECOND loader over the same plugins dir (another
+     * FrankenPHP worker) converges on the Disabled state on its next load(),
+     * with the plugin's routes NOT registered.
+     */
+    public function testDisablePersistsSignalSoAFreshLoaderSeesDisabled(): void
+    {
+        $key = $this->writeDirectoryPlugin('WorkerConvergePlugin', '/api/worker-converge/ping');
+
+        $loaderA = new PluginLoader($this->tempDir, $this->router);
+        $loaderA->load();
+        $this->assertSame(\Whity\Core\PluginState::Active, $loaderA->getLifecycle($key)?->getState());
+
+        $this->assertTrue($loaderA->disablePlugin($key));
+        // The persisted sentinel must exist on disk.
+        $this->assertFileExists($this->tempDir . '/WorkerConvergePlugin/.disabled');
+
+        // A SECOND worker loads the same dir into its own router.
+        $routerB = new Router('');
+        $loaderB = new PluginLoader($this->tempDir, $routerB);
+        $loaderB->load();
+
+        $this->assertSame(
+            \Whity\Core\PluginState::Disabled,
+            $loaderB->getLifecycle($key)?->getState(),
+            'A fresh loader must converge on the persisted Disabled state'
+        );
+        $this->assertNull(
+            $routerB->match(new Request('GET', '/api/worker-converge/ping')),
+            'A fresh loader must NOT register a persistently disabled plugin\'s routes'
+        );
+    }
+
+    /**
+     * Re-enabling clears the persisted signal so a fresh loader sees it Active.
+     */
+    public function testReEnableClearsSignalSoAFreshLoaderSeesActive(): void
+    {
+        $key = $this->writeDirectoryPlugin('WorkerReenablePlugin', '/api/worker-reenable/ping');
+
+        $loaderA = new PluginLoader($this->tempDir, $this->router);
+        $loaderA->load();
+        $this->assertTrue($loaderA->disablePlugin($key));
+        $this->assertFileExists($this->tempDir . '/WorkerReenablePlugin/.disabled');
+
+        $this->assertTrue($loaderA->reEnablePlugin($key));
+        $this->assertFileDoesNotExist($this->tempDir . '/WorkerReenablePlugin/.disabled');
+
+        $routerB = new Router('');
+        $loaderB = new PluginLoader($this->tempDir, $routerB);
+        $loaderB->load();
+
+        $this->assertSame(
+            \Whity\Core\PluginState::Active,
+            $loaderB->getLifecycle($key)?->getState(),
+            'A fresh loader must see a re-enabled plugin as Active again'
+        );
+        $this->assertNotNull(
+            $routerB->match(new Request('GET', '/api/worker-reenable/ping')),
+            'A fresh loader must register a re-enabled plugin\'s routes'
+        );
+    }
+
+    /**
+     * A directory plugin pre-seeded with a `.disabled` sentinel loads straight
+     * into the Disabled state on first discovery (no in-process disable call).
+     */
+    public function testDirectorySentinelHonoredOnDiscovery(): void
+    {
+        $key = $this->writeDirectoryPlugin('PreDisabledPlugin', '/api/pre-disabled/ping');
+        file_put_contents($this->tempDir . '/PreDisabledPlugin/.disabled', '');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $this->assertSame(\Whity\Core\PluginState::Disabled, $loader->getLifecycle($key)?->getState());
+        $this->assertNull($this->router->match(new Request('GET', '/api/pre-disabled/ping')));
+    }
+
+    /**
+     * WC-210 regression: writing a directory plugin's `.disabled` sentinel must
+     * make reload() converge that worker on the Disabled state — not only a full
+     * restart. The sentinel is a non-`.php` file, so the change-detection
+     * fingerprint must account for it; otherwise reload() is a no-op and the
+     * documented per-worker convergence (and the /api/plugins meta note) is a
+     * lie for directory plugins (the SDK's recommended layout).
+     */
+    public function testReloadConvergesDirectoryPluginWhenSentinelAppearsOnDisk(): void
+    {
+        $key = $this->writeDirectoryPlugin('ReloadConvergePlugin', '/api/reload-converge/ping');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+        $this->assertSame(\Whity\Core\PluginState::Active, $loader->getLifecycle($key)?->getState());
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/reload-converge/ping')));
+
+        // Another worker persisted a disable: the sentinel appears on disk while
+        // every `.php` source is byte-for-byte unchanged.
+        file_put_contents($this->tempDir . '/ReloadConvergePlugin/.disabled', '');
+
+        $this->assertTrue(
+            $loader->reload(),
+            'reload() must detect the new .disabled sentinel even though no .php file changed'
+        );
+        $this->assertSame(
+            \Whity\Core\PluginState::Disabled,
+            $loader->getLifecycle($key)->getState(),
+            'reload() must converge the worker on the persisted Disabled state'
+        );
+        $this->assertNull(
+            $this->router->match(new Request('GET', '/api/reload-converge/ping')),
+            'reload() must tear down a now-disabled directory plugin\'s routes'
+        );
+
+        // And removing the sentinel converges back to Active on the next reload.
+        unlink($this->tempDir . '/ReloadConvergePlugin/.disabled');
+        $this->assertTrue($loader->reload(), 'reload() must detect sentinel removal');
+        $this->assertSame(\Whity\Core\PluginState::Active, $loader->getLifecycle($key)->getState());
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/reload-converge/ping')));
+    }
+
+    /**
+     * Disabling a single-file plugin renames Foo.php -> Foo.php.disabled, which
+     * discovery skips; a fresh loader therefore does not register it. The
+     * single-file disabled file is still surfaced by the API (covered in the
+     * handler test); here we assert the rename is the persisted signal.
+     */
+    public function testSingleFileDisabledRenameHonored(): void
+    {
+        $key = $this->writeMinimalPlugin('SingleFileTogglePlugin', '/api/single-toggle/ping');
+
+        $loaderA = new PluginLoader($this->tempDir, $this->router);
+        $loaderA->load();
+        $this->assertTrue($loaderA->disablePlugin($key));
+
+        $this->assertFileDoesNotExist($this->tempDir . '/SingleFileTogglePlugin.php');
+        $this->assertFileExists($this->tempDir . '/SingleFileTogglePlugin.php.disabled');
+
+        // A fresh worker skips the .php.disabled file entirely on discovery.
+        $routerB = new Router('');
+        $loaderB = new PluginLoader($this->tempDir, $routerB);
+        $loaderB->load();
+        $this->assertNull($routerB->match(new Request('GET', '/api/single-toggle/ping')));
+        $this->assertNull($loaderB->getLifecycle($key));
+    }
+
+    /**
+     * Disabling an already-disabled plugin and re-enabling an already-enabled
+     * one are safe no-ops that leave the disk signal coherent.
+     */
+    public function testDisableAndReEnableAreIdempotent(): void
+    {
+        $key = $this->writeDirectoryPlugin('IdempotentPlugin', '/api/idempotent/ping');
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $this->assertTrue($loader->disablePlugin($key));
+        // Second disable: the lifecycle is already Disabled; signal stays put.
+        $this->assertTrue($loader->disablePlugin($key));
+        $this->assertFileExists($this->tempDir . '/IdempotentPlugin/.disabled');
+
+        $this->assertTrue($loader->reEnablePlugin($key));
+        // Second re-enable: already Active; signal stays cleared.
+        $this->assertTrue($loader->reEnablePlugin($key));
+        $this->assertFileDoesNotExist($this->tempDir . '/IdempotentPlugin/.disabled');
+    }
+
+    /**
+     * A traversal-style identifier cannot escape the plugins dir when persisting
+     * a signal: disablePlugin() reports false for an unknown/unsafe key and
+     * writes nothing outside the plugin directory.
+     */
+    public function testTraversalSafeIdentifierWritesNothing(): void
+    {
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        $sentinelOutside = dirname($this->tempDir) . '/.disabled';
+        @unlink($sentinelOutside);
+
+        $this->assertFalse($loader->disablePlugin('..\\..\\Evil'));
+        $this->assertFalse($loader->disablePlugin('Nope\\Missing'));
+        $this->assertFileDoesNotExist($sentinelOutside);
+    }
+
+    /**
+     * Auto-fail (consecutive errors) must remain worker-local: it must NOT write
+     * any disk signal, so a fresh loader sees the plugin Active. This proves the
+     * auto-fail path is deliberately not persisted (deferred to Phase-F).
+     */
+    public function testAutoFailDoesNotPersistAnyDiskSignal(): void
+    {
+        $key = $this->writeDirectoryPlugin('FlakyPlugin', '/api/flaky/ping');
+
+        $loaderA = new PluginLoader($this->tempDir, $this->router);
+        $loaderA->load();
+
+        // Trip the lifecycle into Failed via consecutive recorded errors.
+        $lifecycle = $loaderA->getLifecycle($key);
+        $this->assertNotNull($lifecycle);
+        for ($i = 0; $i < \Whity\Core\PluginLifecycle::MAX_CONSECUTIVE_ERRORS; $i++) {
+            $lifecycle->recordError(new \RuntimeException('boom'));
+        }
+        $this->assertSame(\Whity\Core\PluginState::Failed, $lifecycle->getState());
+
+        // No disk signal was written for the auto-fail.
+        $this->assertFileDoesNotExist($this->tempDir . '/FlakyPlugin/.disabled');
+        $this->assertFileExists($this->tempDir . '/FlakyPlugin/Plugin.php');
+
+        // A fresh worker therefore loads the plugin as Active — auto-fail is local.
+        $routerB = new Router('');
+        $loaderB = new PluginLoader($this->tempDir, $routerB);
+        $loaderB->load();
+        $this->assertSame(\Whity\Core\PluginState::Active, $loaderB->getLifecycle($key)?->getState());
+        $this->assertNotNull($routerB->match(new Request('GET', '/api/flaky/ping')));
+    }
 }
 
