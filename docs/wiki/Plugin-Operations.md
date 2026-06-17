@@ -75,6 +75,18 @@ recycles. Disk remains the source of truth throughout, so there is no risk of a
 worker resurrecting a disabled plugin: a recycled worker re-reads the
 `.php.disabled` rename / `.disabled` sentinel and stays converged.
 
+### The manifest cache self-invalidates (WC-213)
+
+The on-disk plugin manifest (`plugin_manifest.json`) stores a filesystem
+**fingerprint** — a `mtime:size` signature per plugin file — alongside its
+`FQCN -> path` map. On a warm cache, discovery recomputes the fingerprint and
+trusts the cached map only when it matches exactly. Any added, removed, or
+**in-place-modified** file (a changed class, namespace, or an extra plugin
+dropped beside an existing one) shifts the signature and forces a full rescan,
+so a freshly-booted worker never serves a stale map left behind by a previous
+worker or deploy. A manifest written before WC-213 (no `fingerprint` key) is
+treated as a miss and rebuilt.
+
 ## Auto-fail is deliberately worker-local
 
 A plugin that throws repeatedly is auto-failed by the error boundary after
