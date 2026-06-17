@@ -39,7 +39,7 @@ test.describe('Sidebar navigation (admin)', () => {
     await expect(
       page.getByRole('heading', { name: 'Organizational Units' }).first()
     ).toBeVisible();
-    await expect(page.getByRole('button', { name: /Create (the first )?OU/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Create (the first )?OU/ }).first()).toBeVisible();
   });
 
   test('Tenants section loads its page with heading and table', async ({ adminPage, page }) => {
