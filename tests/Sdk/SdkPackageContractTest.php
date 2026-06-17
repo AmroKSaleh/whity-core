@@ -163,12 +163,12 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('array', (string) $return);
     }
 
-    public function testSdkVersionIsOneThreeForTheTenantConformanceKit(): void
+    public function testSdkVersionIsOneFourForTheCoreVersionGate(): void
     {
         $this->assertSame(
-            '1.3.0',
+            '1.4.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.3 ships the tenant-isolation conformance kit'
+            'SDK 1.4 adds the host core-version constraint declaration (WC-211)'
         );
     }
 

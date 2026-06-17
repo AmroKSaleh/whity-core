@@ -1332,6 +1332,8 @@ class PluginLoader
      *  - duplicate plugin names (the later discovery is quarantined);
      *  - the SDK constraint ({@see PluginRequirementsInterface::getSdkConstraint()})
      *    against {@see Sdk::VERSION};
+     *  - the host CORE constraint ({@see PluginRequirementsInterface::getCoreConstraint()})
+     *    against {@see CoreVersion::VERSION} (WC-211);
      *  - inter-plugin dependencies (existence + version range), iterated to a
      *    fixpoint so quarantine CASCADES to dependents of failed plugins;
      *  - dependency cycles (every member quarantined).
@@ -1354,7 +1356,7 @@ class PluginLoader
         // and requirements are captured ONCE here — every later phase works
         // from these snapshots, so a plugin whose accessors return varying
         // values cannot end up half-registered, half-quarantined.
-        /** @var array<string, array{fqcn: string, plugin: PluginInterface, namespacePrefix: string, sdkConstraint: string, deps: array<string, string>}> $byName */
+        /** @var array<string, array{fqcn: string, plugin: PluginInterface, namespacePrefix: string, sdkConstraint: string, coreConstraint: string, deps: array<string, string>}> $byName */
         $byName = [];
         foreach ($candidates as $candidate) {
             $name = $candidate['plugin']->getName();
@@ -1371,6 +1373,7 @@ class PluginLoader
             // (e.g. plugin code referencing SDK symbols this host lacks).
             try {
                 $candidate['sdkConstraint'] = $this->sdkConstraintOf($candidate['plugin']);
+                $candidate['coreConstraint'] = $this->coreConstraintOf($candidate['plugin']);
                 $candidate['deps'] = $this->dependenciesOf($candidate['plugin']);
             } catch (\Throwable $e) {
                 $quarantined[] = [
@@ -1405,6 +1408,36 @@ class PluginLoader
                 $quarantined[] = [
                     'candidate' => $candidate,
                     'reason' => "requires plugin SDK '{$constraint}', but the host provides " . Sdk::VERSION,
+                ];
+                unset($byName[$name]);
+            }
+        }
+
+        // Core-version gate (WC-211). Mirrors the SDK gate above but evaluates
+        // the declared constraint against the host CORE version rather than the
+        // SDK version, so a plugin built for a newer (or specific) host core is
+        // quarantined independently of the SDK gate.
+        foreach ($byName as $name => $candidate) {
+            $constraint = $candidate['coreConstraint'];
+            if ($constraint === '') {
+                continue;
+            }
+
+            try {
+                $satisfied = Semver::satisfies(CoreVersion::VERSION, $constraint);
+            } catch (\UnexpectedValueException) {
+                $quarantined[] = [
+                    'candidate' => $candidate,
+                    'reason' => "declares an unparseable core constraint '{$constraint}'",
+                ];
+                unset($byName[$name]);
+                continue;
+            }
+
+            if (!$satisfied) {
+                $quarantined[] = [
+                    'candidate' => $candidate,
+                    'reason' => "requires core '{$constraint}', but the host provides " . CoreVersion::VERSION,
                 ];
                 unset($byName[$name]);
             }
@@ -1513,6 +1546,21 @@ class PluginLoader
         }
 
         return $plugin->getSdkConstraint();
+    }
+
+    /**
+     * The plugin's declared host CORE-version constraint, or '' when undeclared.
+     *
+     * Deliberately does NOT catch: a throwing declaration is handled
+     * fail-closed by the caller (quarantine with the exception named).
+     */
+    private function coreConstraintOf(PluginInterface $plugin): string
+    {
+        if (!$plugin instanceof PluginRequirementsInterface) {
+            return '';
+        }
+
+        return $plugin->getCoreConstraint();
     }
 
     /**

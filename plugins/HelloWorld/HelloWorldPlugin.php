@@ -68,6 +68,17 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
     }
 
     /**
+     * No host core-version constraint (WC-211): HelloWorld runs against any
+     * core version that ships the SDK range it requires.
+     *
+     * @inheritDoc
+     */
+    public function getCoreConstraint(): string
+    {
+        return '';
+    }
+
+    /**
      * HelloWorld depends on no other plugin.
      *
      * @inheritDoc
