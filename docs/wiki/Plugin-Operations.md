@@ -57,7 +57,7 @@ which worker handled the original admin request.
 
 | Environment | Convergence trigger |
 | --- | --- |
-| **Development** (`APP_ENV=development`) | The worker loop calls `reload()` at the start of every request (`public/index.php`), so all workers pick up disk changes almost immediately. |
+| **Development** (`APP_ENV=development`) | The worker loop calls `reload()` at the start of every request (`public/index.php`), so added/removed plugins are picked up almost immediately. An **edit** to an already-loaded plugin cannot be redefined in-process: `reload()` invalidates the file's opcache entry and requests a worker recycle, and after the response is sent the worker breaks its loop so FrankenPHP respawns a fresh worker that recompiles the new source (WC-212). |
 | **Production** | A worker re-reads disk on its next recycle. Workers recycle after `MAX_REQUESTS` (default `500`, see `docker-compose.yml`) or when the memory limit is hit. `POST /api/plugins/reload` reloads **only the worker that handles that request** — not the whole pool. |
 
 ### The immediate-propagation contract

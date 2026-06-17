@@ -297,8 +297,16 @@ implements the interface. `HelloWorld\HelloWorldPlugin` at
 On FrankenPHP persistent workers a single `PluginLoader` survives many requests.
 [`PluginLoader::reload()`](../../src/Core/PluginLoader.php) fingerprints the
 plugin tree (mtime + size) and, when it changes, unregisters the old
-capabilities and re-registers from disk — so adding, editing, or removing a
-plugin is picked up without restarting the worker.
+capabilities and re-registers from disk. **Adding** or **removing** a plugin is
+picked up in-process on the next reload without restarting the worker.
+
+**Editing** an already-loaded plugin is different: a PHP class cannot be
+redefined inside a live worker. So in development `reload()` detects the content
+change, invalidates the file's opcache entry, and requests a **worker recycle**;
+the worker finishes the current request on the old code, then breaks the loop so
+FrankenPHP respawns a fresh worker that recompiles the new source (WC-212).
+Outside development a changed-on-disk plugin never starts executing without a
+deploy/restart.
 
 ---
 

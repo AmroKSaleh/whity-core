@@ -82,6 +82,10 @@ no dependency:
   than relying on `SameSite=Lax` alone.
 - **`eval()` hot-reload — GATE:** the `eval('?>' . $rewritten)` plugin hot-reload path
   is gated to development only (unreachable when `APP_ENV != development`).
+  - **Update (WC-212):** the `eval()`/versioned-namespace hot-reload primitive has now
+    been **removed entirely** (not merely gated). Editing an already-loaded plugin in
+    development invalidates the file's opcache entry and recycles the FrankenPHP worker
+    so a fresh worker recompiles the new source — no in-process code evaluation remains.
 - **Router — FIX:** correct the 404-vs-405 handling and `{id:\d+}` constraint matching
   in-house.
 

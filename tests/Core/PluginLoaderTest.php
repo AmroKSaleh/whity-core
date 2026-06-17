@@ -783,12 +783,14 @@ PHP;
     }
 
     /**
-     * AC #2: Modifying an existing plugin file causes the next reload() to run the
-     * UPDATED code rather than the stale in-memory class.
+     * AC #2 (WC-212): modifying an already-loaded plugin file cannot redefine
+     * the class in-process. In development reload() detects the change and
+     * requests a worker recycle (so a fresh worker recompiles the new source);
+     * the in-process instance keeps serving the OLD code until that recycle.
      */
     public function testReloadPicksUpModifiedPluginCode(): void
     {
-        // The eval()-based reload of modified code is gated to development (WC-160).
+        // The reload-of-modified-code path is gated to development (WC-160).
         $_ENV['APP_ENV'] = 'development';
 
         $pluginSubDir = $this->tempDir . '/MutablePlugin';
@@ -831,19 +833,98 @@ PHP;
         $reloaded = $loader->reload();
         $this->assertTrue($reloaded, 'reload() should detect the modified file');
 
+        // A content change of an already-loaded class requests a worker recycle.
+        $this->assertTrue(
+            $loader->consumePendingWorkerRecycle(),
+            'A modified already-loaded plugin must request a worker recycle'
+        );
+
+        // The class cannot be redefined in-process, so the live instance still
+        // reflects the OLD code. The new code only arrives after the recycle
+        // respawns a fresh worker that recompiles the (opcache-invalidated)
+        // source.
         $plugins = $loader->getPlugins();
         $this->assertCount(1, $plugins);
         $this->assertSame(
-            '2.0.0',
+            '1.0.0',
             $plugins[0]->getVersion(),
-            'reload() must instantiate the UPDATED plugin code, not the cached class'
+            'A modified class cannot be redefined in-process; old code serves until recycle'
+        );
+
+        // consume() resets the flag (check-and-clear once per request).
+        $this->assertFalse(
+            $loader->consumePendingWorkerRecycle(),
+            'consumePendingWorkerRecycle() must reset the flag after reading it'
         );
     }
 
     /**
-     * WC-160: the eval()-based hot-reload of MODIFIED plugin code is an
-     * arbitrary-code-execution primitive and must be unreachable outside
-     * APP_ENV=development — the stale in-memory class keeps serving.
+     * The loader never re-evaluates modified source under a `_Whity_Reload_`
+     * versioned namespace anymore (WC-212): no class declared in the process
+     * carries that segment after a modify+reload, and the live instance keeps
+     * its plain FQCN.
+     */
+    public function testModifiedReloadNeverCreatesVersionedNamespace(): void
+    {
+        $_ENV['APP_ENV'] = 'development';
+
+        $pluginSubDir = $this->tempDir . '/NoVersionedNamespacePlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginFile = $pluginSubDir . '/Plugin.php';
+
+        $makeCode = static function (string $version): string {
+            return <<<PHP
+<?php
+
+namespace NoVersionedNamespacePlugin;
+
+use Whity\\Core\\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'NoVersionedNamespacePlugin'; }
+    public function getVersion(): string { return '{$version}'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+        };
+
+        file_put_contents($pluginFile, $makeCode('1.0.0'));
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        file_put_contents($pluginFile, $makeCode('2.0.0'));
+        touch($pluginFile, time() + 5);
+        clearstatcache();
+
+        $loader->reload();
+
+        // No declared class anywhere in the process may carry the old eval-based
+        // versioned namespace segment.
+        foreach (get_declared_classes() as $declared) {
+            $this->assertStringNotContainsString(
+                '_Whity_Reload_',
+                $declared,
+                'The loader must never materialize a _Whity_Reload_ versioned class'
+            );
+        }
+
+        // The live instance keeps its real, plain FQCN.
+        $this->assertSame(
+            'NoVersionedNamespacePlugin\\Plugin',
+            get_class($loader->getPlugins()[0]),
+            'The loaded plugin must keep its plain namespace, never a versioned one'
+        );
+    }
+
+    /**
+     * WC-160/WC-212: a changed-on-disk plugin must NOT start executing outside
+     * development, and no worker recycle is signalled — the stale in-memory
+     * class keeps serving and the operator must deploy/restart to pick up code.
      */
     public function testModifiedCodeIsNotEvaluatedOutsideDevelopment(): void
     {
@@ -891,13 +972,18 @@ PHP;
         $this->assertSame(
             '1.0.0',
             $plugins[0]->getVersion(),
-            'Outside development, modified plugin code must NOT be eval()d — the loaded class stays'
+            'Outside development, modified plugin code must NOT execute — the loaded class stays'
+        );
+        $this->assertFalse(
+            $loader->consumePendingWorkerRecycle(),
+            'Outside development a changed plugin must NOT signal a worker recycle'
         );
     }
 
     /**
-     * WC-160 fail-safe: with APP_ENV unset the gate treats the environment as
-     * non-development and refuses the eval() reload path.
+     * WC-160/WC-212 fail-safe: with APP_ENV unset the gate treats the
+     * environment as non-development — the modified code does not execute and
+     * no worker recycle is requested.
      */
     public function testModifiedCodeIsNotEvaluatedWhenAppEnvUnset(): void
     {
@@ -941,7 +1027,198 @@ PHP;
         $this->assertSame(
             '1.0.0',
             $loader->getPlugins()[0]->getVersion(),
-            'With APP_ENV unset the eval() reload path must be refused (fail safe)'
+            'With APP_ENV unset the modified code must not execute (fail safe)'
+        );
+        $this->assertFalse(
+            $loader->consumePendingWorkerRecycle(),
+            'With APP_ENV unset no worker recycle must be requested (fail safe)'
+        );
+    }
+
+    /**
+     * WC-212: re-touching a plugin file without changing its CONTENTS (same
+     * content hash) must NOT signal a worker recycle — there is no new code to
+     * load.
+     */
+    public function testUnchangedContentReloadDoesNotSignalRecycle(): void
+    {
+        $_ENV['APP_ENV'] = 'development';
+
+        $pluginSubDir = $this->tempDir . '/SameContentPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginFile = $pluginSubDir . '/Plugin.php';
+
+        $code = <<<'PHP'
+<?php
+
+namespace SameContentPlugin;
+
+use Whity\Core\PluginInterface;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'SameContentPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+}
+PHP;
+        file_put_contents($pluginFile, $code);
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+
+        // Touch the file (mtime changes -> fingerprint changes) but the bytes
+        // are identical, so the content hash is unchanged.
+        file_put_contents($pluginFile, $code);
+        touch($pluginFile, time() + 5);
+        clearstatcache();
+
+        $this->assertTrue($loader->reload(), 'reload() detects the mtime change');
+        $this->assertFalse(
+            $loader->consumePendingWorkerRecycle(),
+            'Identical content must NOT request a worker recycle'
+        );
+    }
+
+    /**
+     * WC-212: adding a brand-new plugin file loads it in-process on the next
+     * reload() and does NOT request a worker recycle — a brand-new class loads
+     * cleanly without any redefinition.
+     */
+    public function testAddingPluginDoesNotSignalWorkerRecycle(): void
+    {
+        $_ENV['APP_ENV'] = 'development';
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+        $this->assertCount(0, $loader->getPlugins());
+
+        $pluginSubDir = $this->tempDir . '/FreshlyAddedPlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace FreshlyAddedPlugin;
+
+use Whity\Core\PluginInterface;
+use Whity\Core\Request;
+use Whity\Core\Response;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'FreshlyAddedPlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
+    {
+        return [[
+            'method' => 'GET',
+            'path' => '/api/freshly/added',
+            'handler' => [$this, 'handle'],
+            'requiredRole' => null,
+        ]];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+    public function handle(Request $request): Response { return Response::json(['ok' => true]); }
+}
+PHP;
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+        clearstatcache();
+
+        $this->assertTrue($loader->reload(), 'reload() detects the new plugin');
+        $this->assertCount(1, $loader->getPlugins(), 'New plugin loads in-process');
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/freshly/added')));
+        $this->assertFalse(
+            $loader->consumePendingWorkerRecycle(),
+            'Adding a brand-new plugin must NOT request a worker recycle'
+        );
+    }
+
+    /**
+     * WC-212: removing a plugin unregisters it on the next reload() and does
+     * NOT request a worker recycle — a removal just tears down capabilities,
+     * no code redefinition is involved.
+     */
+    public function testRemovingPluginDoesNotSignalWorkerRecycle(): void
+    {
+        $_ENV['APP_ENV'] = 'development';
+
+        $pluginSubDir = $this->tempDir . '/ToRemovePlugin';
+        mkdir($pluginSubDir, 0755, true);
+        $pluginCode = <<<'PHP'
+<?php
+
+namespace ToRemovePlugin;
+
+use Whity\Core\PluginInterface;
+use Whity\Core\Request;
+use Whity\Core\Response;
+
+class Plugin implements PluginInterface
+{
+    public function getName(): string { return 'ToRemovePlugin'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array
+    {
+        return [[
+            'method' => 'GET',
+            'path' => '/api/to-remove/ping',
+            'handler' => [$this, 'handle'],
+            'requiredRole' => null,
+        ]];
+    }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array { return []; }
+    public function getMigrations(): array { return []; }
+    public function handle(Request $request): Response { return Response::json(['ok' => true]); }
+}
+PHP;
+        file_put_contents($pluginSubDir . '/Plugin.php', $pluginCode);
+
+        $loader = new PluginLoader($this->tempDir, $this->router);
+        $loader->load();
+        $this->assertCount(1, $loader->getPlugins());
+
+        $this->removeDirectory($pluginSubDir);
+        clearstatcache();
+
+        $this->assertTrue($loader->reload(), 'reload() detects the removed plugin');
+        $this->assertCount(0, $loader->getPlugins(), 'Removed plugin is unregistered');
+        $this->assertFalse(
+            $loader->consumePendingWorkerRecycle(),
+            'Removing a plugin must NOT request a worker recycle'
+        );
+    }
+
+    /**
+     * WC-212: the eval-based hot-reload primitive is gone. The PluginLoader
+     * source must no longer contain an `eval(` call or a `rewriteNamespace`
+     * helper.
+     */
+    public function testEvalAndRewriteNamespaceAreRemovedFromLoaderSource(): void
+    {
+        $source = (string) file_get_contents(
+            (string) (new \ReflectionClass(PluginLoader::class))->getFileName()
+        );
+
+        $this->assertStringNotContainsString(
+            'eval(',
+            $source,
+            'PluginLoader must not contain an eval() call anymore (WC-212)'
+        );
+        $this->assertStringNotContainsString(
+            'rewriteNamespace',
+            $source,
+            'PluginLoader must not contain a rewriteNamespace helper anymore (WC-212)'
+        );
+        $this->assertStringNotContainsString(
+            '_Whity_Reload_',
+            $source,
+            'PluginLoader must not reference the versioned-namespace prefix anymore (WC-212)'
         );
     }
 

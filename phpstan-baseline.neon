@@ -451,11 +451,6 @@ parameters:
 			path: src/Core/PluginLifecycle.php
 
 		-
-			message: "#^If condition is always false\\.$#"
-			count: 1
-			path: src/Core/PluginLoader.php
-
-		-
 			message: "#^Parameter \\#1 \\$objectOrClass of class ReflectionClass constructor expects class\\-string\\<T of object\\>\\|T of object, string given\\.$#"
 			count: 1
 			path: src/Core/PluginLoader.php

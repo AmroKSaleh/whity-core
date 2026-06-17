@@ -271,6 +271,11 @@ class PluginsApiHandler
      * hot-reload loop is disabled (WC-160). In development the worker loop
      * already reloads each request, so this is usually a no-op there.
      *
+     * A MODIFIED already-loaded plugin cannot be redefined in a live worker
+     * (WC-212), so the new code is served only after a worker restart — the
+     * response surfaces this via `worker_restart_required`, consistent with
+     * WC-210's documented worker-restart contract.
+     *
      * @param Request $request The incoming request.
      * @return Response
      */
@@ -282,10 +287,16 @@ class PluginsApiHandler
 
         $changed = $this->pluginLoader->reload();
 
+        // A modified already-loaded plugin cannot be hot-swapped in-process; the
+        // loader requests a worker recycle instead. Surface that so the operator
+        // knows the new code lands only after a worker restart (WC-212).
+        $workerRestartRequired = $this->pluginLoader->consumePendingWorkerRecycle();
+
         return Response::json([
             'data' => [
                 'message' => $changed ? 'Plugins reloaded' : 'No plugin changes detected',
                 'changed' => $changed,
+                'worker_restart_required' => $workerRestartRequired,
             ],
         ], 200);
     }
