@@ -556,6 +556,13 @@ and removes its hook subscriptions; re-enabling restores them from the retained
 instance without a disk reload. The loader also tracks a per-plugin lifecycle
 (`Loaded` → `Active` → `Disabled`/`Failed`) that the list endpoint reports.
 
+This lifecycle state is **per-worker**, but the disable/enable change is
+**persisted to disk** (a `.php.disabled` rename for single-file plugins, a
+`.disabled` sentinel file for directory plugins) so every FrankenPHP worker
+converges on the same state on its next reload or restart. For the full
+cross-worker propagation model and the operator restart contract, see
+[Plugin-Operations.md](./Plugin-Operations.md).
+
 ---
 
 ## Step 8 — Contribute an admin screen (frontend feature descriptors, SDK 1.2)
