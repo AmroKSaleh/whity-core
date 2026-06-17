@@ -4863,6 +4863,21 @@
                     "file"
                 ]
             },
+            "PluginListMeta": {
+                "type": "object",
+                "properties": {
+                    "worker_local": {
+                        "type": "boolean"
+                    },
+                    "note": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "worker_local",
+                    "note"
+                ]
+            },
             "PluginListResponse": {
                 "type": "object",
                 "properties": {
@@ -4871,10 +4886,14 @@
                         "items": {
                             "$ref": "#/components/schemas/PluginEntry"
                         }
+                    },
+                    "meta": {
+                        "$ref": "#/components/schemas/PluginListMeta"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "meta"
                 ]
             },
             "RelationCreateRequest": {

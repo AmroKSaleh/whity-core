@@ -1091,8 +1091,13 @@ export interface components {
             routes_count?: number;
             permissions_count?: number;
         };
+        PluginListMeta: {
+            worker_local: boolean;
+            note: string;
+        };
         PluginListResponse: {
             data: components["schemas"]["PluginEntry"][];
+            meta: components["schemas"]["PluginListMeta"];
         };
         RelationCreateRequest: {
             from: components["schemas"]["RelationRef"];

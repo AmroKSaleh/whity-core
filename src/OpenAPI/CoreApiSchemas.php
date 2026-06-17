@@ -1111,7 +1111,17 @@ final class CoreApiSchemas
                 'routes_count' => self::int(),
                 'permissions_count' => self::int(),
             ], ['id', 'name', 'enabled', 'file']),
-            'PluginListResponse' => self::listEnvelope('PluginEntry'),
+            // WC-210: the list carries a typed propagation/staleness indicator so
+            // clients know the per-plugin state is worker-local and admin changes
+            // converge across workers on reload/restart.
+            'PluginListMeta' => self::object([
+                'worker_local' => self::bool(),
+                'note' => self::str(),
+            ], ['worker_local', 'note']),
+            'PluginListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('PluginEntry')],
+                'meta' => SchemaBuilder::ref('PluginListMeta'),
+            ], ['data', 'meta']),
 
             // GET /api/admin/stats
             'AdminStatsResponse' => self::object([
