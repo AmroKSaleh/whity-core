@@ -1319,23 +1319,3 @@ parameters:
 			message: "#^Method Tests\\\\Unit\\\\Sdk\\\\Tenant\\\\TenantPredicateScannerTest\\:\\:scan\\(\\) return type has no value type specified in iterable type array\\.$#"
 			count: 1
 			path: tests/Unit/Sdk/Tenant/TenantPredicateScannerTest.php
-
-		-
-			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$roleIds type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
-
-		-
-			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$ouIds type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
-
-		-
-			message: "#^Property Tests\\\\Local\\\\SeedUniversityTest\\:\\:\\$relTypeIds type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
-
-		-
-			message: "#^Method Tests\\\\Local\\\\SeedUniversityTest\\:\\:createOUs\\(\\) has parameter \\$ous with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Local/SeedUniversityTest.php
