@@ -43,14 +43,21 @@ class PluginMigrationRollback
                  WHERE migration_name LIKE ?
                  ORDER BY id DESC'
             );
+            /** @var \PDOStatement $stmt */
             $stmt->execute([$prefix . '%']);
 
             /** @var list<string> $names */
             $names = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
             return $names;
-        } catch (\PDOException) {
-            return [];
+        } catch (\PDOException $e) {
+            // Only swallow "table not found" — let real connection errors propagate.
+            if (str_contains($e->getMessage(), 'no such table')
+                || str_contains($e->getMessage(), 'core_schema_migrations')
+            ) {
+                return [];
+            }
+            throw $e;
         }
     }
 
@@ -69,12 +76,14 @@ class PluginMigrationRollback
         $rolledBack = [];
         $errors = [];
 
+        /** @var \PDOStatement $deleteStmt */
+        $deleteStmt = $this->pdo->prepare(
+            'DELETE FROM core_schema_migrations WHERE migration_name = ?'
+        );
+
         foreach ($names as $name) {
             try {
-                $stmt = $this->pdo->prepare(
-                    'DELETE FROM core_schema_migrations WHERE migration_name = ?'
-                );
-                $stmt->execute([$name]);
+                $deleteStmt->execute([$name]);
                 $rolledBack[] = $name;
             } catch (\PDOException $e) {
                 $errors[] = "Failed to remove tracking row '{$name}': " . $e->getMessage();
