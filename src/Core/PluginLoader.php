@@ -170,16 +170,37 @@ class PluginLoader
     private array $lifecycles = [];
 
     /**
-     * Content hash of the source most recently registered for each plugin FQCN.
+     * Content hash of the source most recently loaded for each plugin FQCN.
      *
      * Survives unregister cycles because it reflects what is actually compiled
-     * into this PHP process. Used to detect when a plugin file's contents
-     * changed between reloads so the new code can be re-evaluated under a fresh
-     * versioned namespace.
+     * into this PHP process. Used to detect when an already-loaded plugin
+     * class's source changed between reloads: such a class cannot be redefined
+     * in-process, so instead of re-evaluating it the loader requests a worker
+     * recycle (see {@see materializeClass()} and
+     * {@see consumePendingWorkerRecycle()}).
      *
      * @var array<string, string>
      */
     private array $loadedContentHashes = [];
+
+    /**
+     * Set when {@see materializeClass()} sees an already-loaded plugin class
+     * whose source changed on disk (WC-212).
+     *
+     * A PHP class cannot be redefined once it is `require`d into a long-lived
+     * FrankenPHP worker, so the only honest way to serve the new code is to
+     * recycle the worker (FrankenPHP respawns a fresh one that recompiles the
+     * opcache-invalidated source). The worker loop reads-and-clears this flag
+     * once per request via {@see consumePendingWorkerRecycle()} and breaks the
+     * loop after the response has been sent. Per-loader-instance state by
+     * design: the loader is a long-lived worker singleton, and the flag is
+     * reset each request when the loop consumes it.
+     *
+     * Only a CONTENT CHANGE of a previously-loaded class sets this flag.
+     * Additions create brand-new classes that load cleanly in-process, and
+     * removals merely unregister — neither requires a recycle.
+     */
+    private bool $pendingWorkerRecycle = false;
 
     /**
      * Snapshot of the plugin-tree fingerprint captured at the last load/reload.
@@ -389,12 +410,12 @@ class PluginLoader
      * without restarting the worker.
      *
      * Behaviour:
-     *  - Added plugins are discovered and registered.
+     *  - Added plugins are discovered and registered in-process.
      *  - Removed plugins have their routes and hooks unregistered.
-     *  - Modified plugins are re-registered from their updated source. Because a
-     *    PHP class cannot be redefined within a live process, modified classes
-     *    are re-evaluated under a content-versioned namespace so the new code
-     *    actually runs (see materializeClass()).
+     *  - A modified ALREADY-LOADED plugin cannot be redefined in a live process,
+     *    so the old class keeps serving this request and a worker recycle is
+     *    requested ({@see consumePendingWorkerRecycle()}); a freshly-respawned
+     *    worker recompiles the new source (see {@see materializeClass()}).
      *
      * @return bool True if a change was detected and applied, false if nothing changed
      */
@@ -1611,11 +1632,26 @@ class PluginLoader
     }
 
     /**
-     * Ensure the plugin class is defined and return the concrete FQCN to use
+     * Ensure the plugin class is defined and return its FQCN to instantiate.
      *
-     * Returns the original FQCN when the file can simply be required, or a
-     * versioned FQCN when the file was modified after an earlier version was
-     * already loaded in this process. Returns null when no usable class exists.
+     * A plain loader (WC-212): it `require_once`s the file and tracks the
+     * source content hash so it can tell first loads, unchanged content, and
+     * changed-but-already-loaded apart. It ALWAYS returns the plugin's real,
+     * plain FQCN (never a versioned one), so the namespace prefix flowing into
+     * route/hook registration is always the plugin's real namespace.
+     *
+     * Once a PHP class is `require`d into a long-lived FrankenPHP worker it
+     * cannot be safely redefined in-process. So when an already-loaded class's
+     * source changed on disk this method does NOT try to re-execute it: it
+     * records that a worker recycle is required (see
+     * {@see consumePendingWorkerRecycle()}), invalidates the file's opcache
+     * entry so a freshly-respawned worker recompiles the new source, and
+     * returns the existing FQCN — the old class keeps serving for the rest of
+     * THIS request, and the recycle brings in the new code.
+     *
+     * The changed-content path is gated to development (WC-160): outside
+     * development a changed-on-disk plugin must NOT start executing without a
+     * deploy/restart, and no worker recycle is signalled.
      *
      * @param string $fqcn Original fully qualified class name
      * @param string $filePath Plugin file path
@@ -1634,9 +1670,10 @@ class PluginLoader
         $contentHash = substr(hash('xxh128', $source), 0, 12);
         $previousHash = $this->loadedContentHashes[$fqcn] ?? null;
 
-        // First time this loader registers this class in the process: require
-        // the file as-is. (discover() may already have required it, but no prior
-        // version has been registered, so the original definition is correct.)
+        // First time this loader loads this class in the process: require the
+        // file as-is. (discover() may already have required it, but no prior
+        // version was loaded, so the original definition is correct.) A
+        // brand-new class loads cleanly — no recycle needed.
         if ($previousHash === null) {
             require_once $filePath;
             if (!class_exists($fqcn)) {
@@ -1646,21 +1683,21 @@ class PluginLoader
             return $fqcn;
         }
 
-        // Previously registered with identical content: reuse the live class.
+        // Previously loaded with identical content: reuse the live class.
         if ($previousHash === $contentHash) {
             return $fqcn;
         }
 
-        // WC-160: the eval() below re-executes MODIFIED plugin source in-place
-        // and is hard-gated to development; in any other (or unset) APP_ENV the
-        // already-loaded definition keeps serving. Note this gate alone does not
-        // cover brand-new files (first load uses require_once above) — that
-        // runtime vector is closed by gating the per-request reload() loop to
-        // development in public/index.php; boot-time load() and explicit admin
-        // actions still load plugins in every env.
+        // The source of an ALREADY-LOADED class changed on disk. WC-160 gates
+        // this to development: outside (or with an unset) APP_ENV a changed-on-
+        // disk plugin must NOT start executing without a deploy/restart, so the
+        // loaded definition keeps serving and no recycle is signalled. (This
+        // gate does not cover brand-new files — first load above requires them
+        // unconditionally — that runtime vector is closed by gating the
+        // per-request reload() loop to development in public/index.php.)
         if (($_ENV['APP_ENV'] ?? 'production') !== 'development') {
-            $gateMsg = "Plugin {$fqcn} changed on disk, but eval-based hot-reload is "
-                . "development-only (WC-160); keeping the loaded version.";
+            $gateMsg = "Plugin {$fqcn} changed on disk, but picking up modified plugin "
+                . "code is development-only (WC-160); keeping the loaded version.";
             if ($this->logger !== null) {
                 $this->logger->warning($gateMsg);
             } else {
@@ -1669,79 +1706,66 @@ class PluginLoader
             return class_exists($fqcn) ? $fqcn : null;
         }
 
-        // Content changed since the last registration. The original class is
-        // locked into memory, so re-evaluate the source under a fresh,
-        // content-addressed namespace so the updated code runs.
-        $namespacePos = strrpos($fqcn, '\\');
-        $namespace = $namespacePos === false ? '' : substr($fqcn, 0, $namespacePos);
-        $shortName = $namespacePos === false ? $fqcn : substr($fqcn, $namespacePos + 1);
+        // Development: the class is locked into this worker's memory and cannot
+        // be redefined in-process (WC-212 — no eval, no versioned namespace).
+        // Request a worker recycle so a freshly-respawned worker recompiles the
+        // new source, and invalidate the file's opcache entry so that respawn
+        // sees the new bytes. The old class keeps serving the rest of THIS
+        // request. The content hash is recorded so a later reload before the
+        // recycle does not re-signal for the same change.
+        $this->pendingWorkerRecycle = true;
+        $this->loadedContentHashes[$fqcn] = $contentHash;
 
-        $versionedNamespace = ($namespace === '' ? '' : $namespace . '\\')
-            . '_Whity_Reload_' . $contentHash;
-        $versionedFqcn = $versionedNamespace . '\\' . $shortName;
-
-        // Re-evaluating identical content would just reuse the same versioned
-        // class, so short-circuit once it exists (e.g. reverting to a prior
-        // version whose namespace was already materialized).
-        if (class_exists($versionedFqcn, false)) {
-            $this->loadedContentHashes[$fqcn] = $contentHash;
-            return $versionedFqcn;
-        }
-
-        // Rewrite the namespace declaration so the class can be redefined under
-        // a fresh, content-addressed namespace and the updated code runs.
-        $rewritten = $this->rewriteNamespace($source, $namespace, $versionedNamespace);
-        if ($rewritten === null) {
-            // Could not safely rewrite: keep the already-loaded definition.
-            return $fqcn;
-        }
-
-        try {
-            eval('?>' . $rewritten);
-        } catch (\Throwable $e) {
-            $errorMsg = "Failed to hot-reload plugin {$fqcn}: " . $e->getMessage();
-            if ($this->logger !== null) {
-                $this->logger->error($errorMsg);
-            } else {
-                error_log($errorMsg);
-            }
-            return class_exists($fqcn) ? $fqcn : null;
-        }
-
-        if (class_exists($versionedFqcn, false)) {
-            $this->loadedContentHashes[$fqcn] = $contentHash;
-            return $versionedFqcn;
+        // opcache may be off (e.g. php:8.4-cli), so guard the call; the recycle
+        // signal alone is enough to converge on the new code.
+        if (function_exists('opcache_invalidate')) {
+            @opcache_invalidate($filePath, true);
         }
 
         return class_exists($fqcn) ? $fqcn : null;
     }
 
     /**
-     * Rewrite the top-level namespace declaration of a plugin's source
+     * Whether a reload detected a modified already-loaded plugin and therefore
+     * the worker should recycle to pick up the fresh code (WC-212).
      *
-     * @param string $source Original PHP source
-     * @param string $oldNamespace The namespace currently declared (may be empty)
-     * @param string $newNamespace The replacement namespace
-     * @return string|null Rewritten source, or null if it could not be rewritten safely
+     * Reads and clears the pending-recycle flag (set by
+     * {@see materializeClass()} when an already-loaded class's source changed
+     * on disk). The FrankenPHP worker loop calls this once per request — AFTER
+     * the response is sent — and, when true, breaks the loop so FrankenPHP
+     * respawns a fresh worker that recompiles the opcache-invalidated source.
+     *
+     * Check-and-clear semantics keep the flag per-request: a single recycle
+     * request is consumed exactly once, never leaking into the next request the
+     * worker (or its replacement) serves.
+     *
+     * @return bool True if a worker recycle is pending (and now cleared).
      */
-    private function rewriteNamespace(string $source, string $oldNamespace, string $newNamespace): ?string
+    public function consumePendingWorkerRecycle(): bool
     {
-        if ($oldNamespace === '') {
-            // Rewriting global-namespace plugins would require injecting a
-            // namespace wrapper around use-statements; not supported.
-            return null;
-        }
+        $pending = $this->pendingWorkerRecycle;
+        $this->pendingWorkerRecycle = false;
 
-        $pattern = '/\bnamespace\s+' . preg_quote($oldNamespace, '/') . '\s*;/';
-        $replacement = 'namespace ' . $newNamespace . ';';
+        return $pending;
+    }
 
-        $rewritten = preg_replace($pattern, $replacement, $source, 1, $count);
-
-        if ($rewritten === null || $count !== 1) {
-            return null;
-        }
-
-        return $rewritten;
+    /**
+     * Non-destructive peek at the pending-recycle flag for STATUS REPORTING only
+     * (WC-212).
+     *
+     * Returns whether a worker recycle is pending WITHOUT clearing it, so the
+     * admin reload endpoint can surface `worker_restart_required` while leaving
+     * the flag intact for the worker loop. The loop's
+     * {@see consumePendingWorkerRecycle()} remains the single authoritative
+     * read-and-clear consumer: were a caller to consume the flag mid-request,
+     * the loop's later consume would return false and the worker would never
+     * recycle, serving the stale already-loaded class forever.
+     *
+     * @return bool True if a worker recycle is pending (flag left unchanged).
+     */
+    public function isWorkerRecyclePending(): bool
+    {
+        return $this->pendingWorkerRecycle;
     }
 
     /**

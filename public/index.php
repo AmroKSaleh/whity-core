@@ -729,6 +729,21 @@ if ($isWorker) {
             gc_collect_cycles();
         }
 
+        // WC-212: a development reload() that detected a MODIFIED already-loaded
+        // plugin cannot redefine the class in-process, so it requested a worker
+        // recycle. The response for THIS request has already been sent above, so
+        // recycling now is safe: FrankenPHP respawns a fresh worker that
+        // re-bootstraps and recompiles the (opcache-invalidated) plugin source,
+        // serving the new code. Gated to development, mirroring the reload() call.
+        if (
+            ($_ENV['APP_ENV'] ?? 'production') === 'development'
+            && $pluginLoader->consumePendingWorkerRecycle()
+        ) {
+            error_log("[FrankenPHP Worker] Recycling worker to load modified plugin code.");
+            $db->disconnect();
+            break;
+        }
+
         if ($kernel->hasExceededMemoryLimit()) {
             error_log("[FrankenPHP Worker] Memory limit exceeded. Recycling worker gracefully.");
             // Release the worker's database connection eagerly on the memory-recycle
