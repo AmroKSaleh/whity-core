@@ -94,7 +94,7 @@ describe('proxy outbound Accept-Encoding', () => {
     await openapiGET();
 
     expect(fn).toHaveBeenCalledTimes(1);
-    expect(calls[0].url).toBe(`${BACKEND}/openapi.json`);
+    expect(calls[0].url).toBe(`${BACKEND}/api/openapi.json`);
     expect(acceptEncoding(calls[0].init)).toBe('identity');
   });
 });
