@@ -133,6 +133,54 @@ final class OpenApiHandlerTest extends TestCase
     }
 
     /**
+     * The encoded document is memoized per worker while the route set is
+     * unchanged (the unauthenticated endpoint must not rebuild a ~200KB spec on
+     * every hit), but a change to the route set rebuilds it. Proven by counting
+     * how often the build seam actually runs.
+     */
+    public function testMemoizesDocumentUntilRouteSetChanges(): void
+    {
+        $router = new Router('/v1');
+        CoreApiSchemas::registerRoutes($router);
+        $loader = new PluginLoader(
+            dirname(__DIR__, 2) . '/plugins',
+            $router,
+            null,
+            new HookManager()
+        );
+
+        $handler = new class ($router, $loader) extends OpenApiHandler {
+            public int $builds = 0;
+
+            protected function buildSpec(): string
+            {
+                $this->builds++;
+
+                return parent::buildSpec();
+            }
+        };
+
+        $req = new Request('GET', '/api/openapi.json');
+        $handler->handle($req);
+        $handler->handle($req);
+        $this->assertSame(1, $handler->builds, 'Unchanged route set must be served from the memo');
+
+        // Changing the route set must bust the memo and rebuild exactly once.
+        $router->register(
+            'GET',
+            '/api/widgets',
+            static fn (): Response => new Response(200, '[]'),
+            null,
+            'fake-plugin',
+            null,
+            ['summary' => 'List widgets', 'tags' => ['widgets']]
+        );
+        $handler->handle($req);
+        $handler->handle($req);
+        $this->assertSame(2, $handler->builds, 'A changed route set must rebuild once, then re-memo');
+    }
+
+    /**
      * A generation failure returns a generic 500 and never leaks raw exception
      * text (message or stack trace) to the client.
      */
