@@ -852,7 +852,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 6
+			count: 8
 			path: tests/Integration/SettingsApiRealEngineTest.php
 
 		-

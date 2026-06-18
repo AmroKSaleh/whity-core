@@ -159,14 +159,37 @@ final class SettingsRegistry
         };
     }
 
+    /**
+     * Normalise a value for a known key into its canonical stored form.
+     *
+     * This is the value that is actually persisted, so a caller's incidental
+     * formatting can never leak into storage. `site_name` is trimmed of
+     * surrounding whitespace (so `" Acme "` is stored as `"Acme"`); the other
+     * keys are stored verbatim. Callers MUST {@see validate()} first — normalise
+     * does not validate, and an unknown key is returned unchanged.
+     *
+     * @param string $key   The setting key.
+     * @param string $value The validated candidate value.
+     * @return string The canonical value to persist.
+     */
+    public static function normalize(string $key, string $value): string
+    {
+        return match ($key) {
+            self::SITE_NAME => trim($value),
+            default => $value,
+        };
+    }
+
     private static function validateSiteName(string $value): ?string
     {
         $trimmed = trim($value);
         if ($trimmed === '') {
             return 'site_name must not be empty.';
         }
-        // Count characters (not bytes) so the <= 120 limit is multibyte-correct.
-        if (mb_strlen($value) > self::SITE_NAME_MAX) {
+        // The trimmed value is what gets stored ({@see normalize()}), so the
+        // <= 120 limit applies to it. Count characters (not bytes) so the limit
+        // is multibyte-correct.
+        if (mb_strlen($trimmed) > self::SITE_NAME_MAX) {
             return 'site_name must be at most ' . self::SITE_NAME_MAX . ' characters.';
         }
 

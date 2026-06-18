@@ -37,10 +37,13 @@ final class SettingsApiRealEngineTest extends TestCase
     private const SYSTEM_TENANT = 0;
 
     // Seeded users (see makeSchema): user 10 holds ALL three settings perms;
-    // 11 holds only settings:read; 12 holds NO settings perms.
+    // 11 holds only settings:read; 12 holds NO settings perms; 13 holds
+    // settings:read + settings:write but NOT settings:manage (a "write-only"
+    // editor who must still be locked out of the GLOBAL defaults surface).
     private const USER_FULL = 10;
     private const USER_READ_ONLY = 11;
     private const USER_NONE = 12;
+    private const USER_WRITE_NO_MANAGE = 13;
 
     private PDO $pdo;
     private SettingsApiHandler $handler;
@@ -182,13 +185,58 @@ final class SettingsApiRealEngineTest extends TestCase
 
     // ==================== /api/settings/global (settings:manage) ====================
 
-    public function testGetGlobalRejectsCallerWithOnlyWritePermission(): void
+    public function testGetGlobalRejectsReadOnlyCaller(): void
     {
         // USER_READ_ONLY holds settings:read but NOT settings:manage.
         TenantContext::setTenantId(self::TENANT_A);
         $response = $this->handler->getGlobal($this->req('GET', '/api/settings/global', null, self::USER_READ_ONLY));
 
         self::assertSame(403, $response->getStatusCode());
+    }
+
+    /**
+     * The headline security invariant: holding settings:write (the per-tenant
+     * editor permission) does NOT grant access to the GLOBAL defaults surface —
+     * that requires settings:manage. A write-no-manage caller must be denied on
+     * BOTH the global read and the global write, and nothing must persist.
+     *
+     * RED-first reasoning: if getGlobal/patchGlobal were mis-gated on
+     * SETTINGS_WRITE (instead of SETTINGS_MANAGE), USER_WRITE_NO_MANAGE would
+     * sail through with 200/upsert and these 403 + zero-row assertions would
+     * fail. They pass against the real handler precisely because both global
+     * endpoints re-check settings:manage in authorize().
+     */
+    public function testGlobalEndpointsRejectWriteOnlyCaller(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        // GET /api/settings/global — write-only holder is denied (403).
+        $get = $this->handler->getGlobal(
+            $this->req('GET', '/api/settings/global', null, self::USER_WRITE_NO_MANAGE)
+        );
+        self::assertSame(403, $get->getStatusCode());
+        self::assertSame(
+            'settings:manage',
+            $this->decode($get)['details']['required'] ?? null,
+            'The 403 must name settings:manage as the missing permission.'
+        );
+
+        // PATCH /api/settings/global — write-only holder is denied (403) and the
+        // global default is NOT written.
+        $patch = $this->handler->patchGlobal(
+            $this->req('PATCH', '/api/settings/global', ['settings' => ['timezone' => 'Europe/Berlin']], self::USER_WRITE_NO_MANAGE)
+        );
+        self::assertSame(403, $patch->getStatusCode());
+        self::assertSame(
+            'settings:manage',
+            $this->decode($patch)['details']['required'] ?? null,
+            'The 403 must name settings:manage as the missing permission.'
+        );
+        self::assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM app_settings')->fetchColumn(),
+            'A write-only caller must not be able to write a global default.'
+        );
     }
 
     public function testPatchGlobalUpsertsGlobalDefaultForManageCaller(): void
@@ -290,20 +338,32 @@ final class SettingsApiRealEngineTest extends TestCase
         $pdo->exec("
             INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES
                 (100, 'settings-reader', '', 1, datetime('now')),
-                (101, 'no-settings',     '', 1, datetime('now'))
+                (101, 'no-settings',     '', 1, datetime('now')),
+                (102, 'settings-writer', '', 1, datetime('now'))
         ");
 
-        // Resolve the seeded settings:read permission id, then grant ONLY it to
-        // the reader role. (admin already holds all three via migration 026.)
+        // Resolve the seeded permission ids, then grant precise subsets:
+        //  - role 100 (reader): ONLY settings:read.
+        //  - role 102 (writer): settings:read + settings:write, but NOT
+        //    settings:manage (a per-tenant editor with no global-defaults reach).
+        // (admin role 1 already holds all three via migration 026.)
         $readPermId = (int) $pdo->query("SELECT id FROM permissions WHERE name = 'settings:read'")->fetchColumn();
-        $pdo->exec("INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (100, {$readPermId}, datetime('now'))");
+        $writePermId = (int) $pdo->query("SELECT id FROM permissions WHERE name = 'settings:write'")->fetchColumn();
+        $pdo->exec("
+            INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
+                (100, {$readPermId},  datetime('now')),
+                (102, {$readPermId},  datetime('now')),
+                (102, {$writePermId}, datetime('now'))
+        ");
 
-        // user 10 = admin (all three settings perms), 11 = reader, 12 = none.
+        // user 10 = admin (all three settings perms), 11 = reader, 12 = none,
+        // 13 = write-no-manage (settings:read + settings:write only).
         $pdo->exec("
             INSERT INTO users (id, tenant_id, email, password, role_id, created_at) VALUES
                 (10, 1, 'admin@t1.example',  'x', 1,   datetime('now')),
                 (11, 1, 'reader@t1.example', 'x', 100, datetime('now')),
-                (12, 1, 'none@t1.example',   'x', 101, datetime('now'))
+                (12, 1, 'none@t1.example',   'x', 101, datetime('now')),
+                (13, 1, 'writer@t1.example', 'x', 102, datetime('now'))
         ");
 
         return $pdo;

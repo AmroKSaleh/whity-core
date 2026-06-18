@@ -131,7 +131,7 @@ final class SettingsService
         }
 
         $this->assertValid($key, $value);
-        $this->globals->set($key, $value);
+        $this->globals->set($key, SettingsRegistry::normalize($key, $value));
     }
 
     /**
@@ -166,7 +166,7 @@ final class SettingsService
         }
 
         $this->assertValid($key, $value);
-        $this->tenants->set($tenantId, $key, $value);
+        $this->tenants->set($tenantId, $key, SettingsRegistry::normalize($key, $value));
     }
 
     /**

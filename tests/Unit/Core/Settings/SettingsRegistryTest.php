@@ -68,6 +68,31 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotNull(SettingsRegistry::validate('site_name', str_repeat('a', 121)));
     }
 
+    public function testSiteNameAcceptsValueWhoseTrimmedFormIsWithinLimit(): void
+    {
+        // 120 real chars wrapped in whitespace: the limit applies to the trimmed
+        // value (what gets stored), so this is valid even though the raw string
+        // is longer than 120.
+        self::assertNull(SettingsRegistry::validate('site_name', '  ' . str_repeat('a', 120) . '  '));
+        // But 121 real chars (post-trim) is still over the limit.
+        self::assertNotNull(SettingsRegistry::validate('site_name', '  ' . str_repeat('a', 121) . '  '));
+    }
+
+    public function testNormalizeTrimsSiteName(): void
+    {
+        self::assertSame('Acme', SettingsRegistry::normalize('site_name', ' Acme '));
+        self::assertSame('Acme Co', SettingsRegistry::normalize('site_name', "\tAcme Co\n"));
+        // Internal whitespace is preserved; only the surrounding whitespace goes.
+        self::assertSame('Acme', SettingsRegistry::normalize('site_name', 'Acme'));
+    }
+
+    public function testNormalizeLeavesOtherKeysVerbatim(): void
+    {
+        self::assertSame('Europe/Berlin', SettingsRegistry::normalize('timezone', 'Europe/Berlin'));
+        self::assertSame('en-US', SettingsRegistry::normalize('locale', 'en-US'));
+        self::assertSame('help@example.com', SettingsRegistry::normalize('support_email', 'help@example.com'));
+    }
+
     // ---- timezone ----
 
     public function testTimezoneAcceptsValidIana(): void
