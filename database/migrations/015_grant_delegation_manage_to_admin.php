@@ -13,8 +13,8 @@ use Whity\Core\RBAC\CorePermissions;
  * Seeds the new `delegation:manage` permission ({@see CorePermissions::DELEGATION_MANAGE})
  * into the persisted catalogue and grants it to the seeded `admin` role, so the
  * platform administrator can reach the delegation API the moment the feature
- * ships — mirroring the conservative, single-grant approach migration 013 used
- * for `plugins:manage`.
+ * ships — mirroring the seed-and-grant approach migration 013 uses for the
+ * `plugins:*` per-action permissions.
  *
  * Why a separate, seed-style migration
  * ------------------------------------

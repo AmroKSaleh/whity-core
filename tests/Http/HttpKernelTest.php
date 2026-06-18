@@ -166,8 +166,8 @@ class HttpKernelTest extends TestCase
         };
 
         // requiredRole = null (4th arg), namespacePrefix = null (5th arg),
-        // requiredPermission = 'plugins:manage' (6th arg).
-        $this->router->register('GET', '/api/plugins', $handler, null, null, 'plugins:manage');
+        // requiredPermission = 'plugins:read' (6th arg).
+        $this->router->register('GET', '/api/plugins', $handler, null, null, 'plugins:read');
 
         $rbacMiddlewareMock
             ->expects($this->once())
@@ -181,7 +181,7 @@ class HttpKernelTest extends TestCase
                 // The kernel must forward the route's permission as the 4th arg,
                 // with no role required.
                 $this->assertNull($role);
-                $this->assertSame('plugins:manage', $permission);
+                $this->assertSame('plugins:read', $permission);
                 return $next($req);
             });
 

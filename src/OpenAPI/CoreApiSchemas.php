@@ -576,8 +576,8 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
-            // Plugin lifecycle management — plugins:manage permission required
-            self::permissionRoute('GET', '/api/plugins', 'plugins:manage', [
+            // Plugin lifecycle management — per-action permission required (WC-218).
+            self::permissionRoute('GET', '/api/plugins', 'plugins:read', [
                 'summary' => 'List all registered plugins',
                 'tags' => ['platform-ops'],
                 'responses' => [
@@ -585,7 +585,7 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
-            self::permissionRoute('POST', '/api/plugins/{name}/enable', 'plugins:manage', [
+            self::permissionRoute('POST', '/api/plugins/{name}/enable', 'plugins:enable', [
                 'summary' => 'Enable a plugin by name',
                 'tags' => ['platform-ops'],
                 'responses' => [
@@ -594,7 +594,7 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
-            self::permissionRoute('POST', '/api/plugins/{name}/disable', 'plugins:manage', [
+            self::permissionRoute('POST', '/api/plugins/{name}/disable', 'plugins:disable', [
                 'summary' => 'Disable a plugin by name',
                 'tags' => ['platform-ops'],
                 'responses' => [
@@ -603,7 +603,7 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
-            self::permissionRoute('POST', '/api/plugins/{id}/re-enable', 'plugins:manage', [
+            self::permissionRoute('POST', '/api/plugins/{id}/re-enable', 'plugins:enable', [
                 'summary' => 'Re-enable a previously disabled plugin by id',
                 'tags' => ['platform-ops'],
                 'responses' => [
@@ -612,7 +612,7 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
-            self::permissionRoute('POST', '/api/plugins/{id}/uninstall', 'plugins:manage', [
+            self::permissionRoute('POST', '/api/plugins/{id}/uninstall', 'plugins:uninstall', [
                 'summary' => 'Uninstall a plugin (disable, roll back migrations, remove files)',
                 'tags' => ['platform-ops'],
                 'responses' => [
@@ -624,7 +624,7 @@ final class CoreApiSchemas
                     503 => self::errorResponse('Database connection unavailable'),
                 ],
             ]),
-            self::permissionRoute('POST', '/api/plugins/reload', 'plugins:manage', [
+            self::permissionRoute('POST', '/api/plugins/reload', 'plugins:reload', [
                 'summary' => 'Reload the plugin registry',
                 'tags' => ['platform-ops'],
                 'responses' => [

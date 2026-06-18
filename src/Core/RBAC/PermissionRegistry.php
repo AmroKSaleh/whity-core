@@ -11,7 +11,7 @@ use Whity\Core\Hooks\HookManager;
  * the platform, collected from both the core system and loaded plugins.
  *
  * Permissions follow a `resource:action` naming pattern (e.g. `users:read`,
- * `roles:manage`, `plugins:manage`) and are tagged with their source: the
+ * `roles:manage`, `plugins:read`) and are tagged with their source: the
  * literal `core` for built-in permissions, or the plugin name for plugin
  * permissions.
  *

@@ -17,7 +17,7 @@ Related: [Architecture](Architecture.md) · [TENANT_ISOLATION](TENANT_ISOLATION.
 
 ## Permission naming: `resource:action`
 
-Permissions are strings in **colon notation**: `resource:action`. The registry validates the strict form with `^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$` (see `PermissionRegistry::isValidPermission()`). Examples: `users:read`, `roles:manage`, `tenants:delete`, `plugins:manage`.
+Permissions are strings in **colon notation**: `resource:action`. The registry validates the strict form with `^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$` (see `PermissionRegistry::isValidPermission()`). Examples: `users:read`, `roles:manage`, `tenants:delete`, `plugins:read`.
 
 > History: the original seeds (migrations 002 and 007) used dot notation (`users.read`). Migration `016_normalize_permission_notation.php` rewrote them to colon notation so the stored data matches what the RBAC layer validates (issue #55). Fresh databases already seed colon notation.
 
@@ -30,10 +30,12 @@ tenants:read tenants:write tenants:delete
 ous:read     ous:write     ous:delete     ous:assign
 permissions:read
 audit:read
-plugins:manage
+plugins:read   plugins:enable   plugins:disable   plugins:upload   plugins:uninstall   plugins:reload
 delegation:manage
 relations:read   relations:manage
 ```
+
+> `plugins:*` (WC-218) replaced the single coarse `plugins:manage` with six per-action permissions so each plugin operation can be delegated independently: `plugins:read` (GET /api/plugins), `plugins:enable` (enable / re-enable), `plugins:disable`, `plugins:upload` (route lands in a later slice; permission seeded now), `plugins:uninstall`, `plugins:reload`. Migration `013_grant_plugins_manage_to_admin` seeds all six into the catalogue and grants them to the seeded `admin` role.
 
 > `audit:read` (WC-34) gates the read-only security audit trail (`GET /api/audit-logs`). Migration `016_create_audit_log` seeds it into the `permissions` catalogue and grants it to the seeded `admin` role, so administrators can read the trail out of the box. See [AUDIT_TRAIL](AUDIT_TRAIL.md).
 

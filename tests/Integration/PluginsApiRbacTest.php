@@ -27,10 +27,13 @@ use Whity\Http\RbacMiddleware;
  * {@see PluginLoader}, and {@see PluginsApiHandler} together — resolving the
  * route's required permission exactly as the HTTP kernel does — to prove:
  *
- *  1. Every plugin endpoint (list/enable/disable) is gated by
- *     {@see CorePermissions::PLUGINS_MANAGE}; a user granted it reaches the
- *     handler, a user without it receives a structured 403, and an unauthenticated
- *     caller receives 401.
+ *  1. Each plugin endpoint is gated by its OWN per-action permission (WC-218):
+ *     GET /api/plugins → plugins:read, enable/re-enable → plugins:enable,
+ *     disable → plugins:disable, uninstall → plugins:uninstall, reload →
+ *     plugins:reload. A token holding ONLY the matching permission reaches the
+ *     handler, a token without it receives a structured 403, and an
+ *     unauthenticated caller receives 401. The retired `plugins:manage`
+ *     permission opens NO plugin route.
  *  2. End-to-end, a privileged disable request unregisters the plugin's routes
  *     and flips its lifecycle status to 'disabled' (AC #2).
  *
@@ -90,15 +93,16 @@ class PluginsApiRbacTest extends TestCase
 
         $this->handler = new PluginsApiHandler($this->tempDir, $this->loader);
 
-        // Register the admin plugin endpoints exactly as the documented handoff
-        // does in public/index.php, gated by plugins:manage.
+        // Register the admin plugin endpoints exactly as public/index.php does,
+        // each gated by its OWN per-action permission (WC-218). enable and
+        // re-enable share plugins:enable; the rest are 1:1.
         $this->router->register(
             'GET',
             '/api/plugins',
             [$this->handler, 'list'],
             null,
             null,
-            CorePermissions::PLUGINS_MANAGE
+            CorePermissions::PLUGINS_READ
         );
         $this->router->register(
             'POST',
@@ -106,7 +110,7 @@ class PluginsApiRbacTest extends TestCase
             [$this->handler, 'enable'],
             null,
             null,
-            CorePermissions::PLUGINS_MANAGE
+            CorePermissions::PLUGINS_ENABLE
         );
         $this->router->register(
             'POST',
@@ -114,7 +118,31 @@ class PluginsApiRbacTest extends TestCase
             [$this->handler, 'disable'],
             null,
             null,
-            CorePermissions::PLUGINS_MANAGE
+            CorePermissions::PLUGINS_DISABLE
+        );
+        $this->router->register(
+            'POST',
+            '/api/plugins/{id}/re-enable',
+            [$this->handler, 'reEnable'],
+            null,
+            null,
+            CorePermissions::PLUGINS_ENABLE
+        );
+        $this->router->register(
+            'POST',
+            '/api/plugins/{id}/uninstall',
+            [$this->handler, 'uninstall'],
+            null,
+            null,
+            CorePermissions::PLUGINS_UNINSTALL
+        );
+        $this->router->register(
+            'POST',
+            '/api/plugins/reload',
+            [$this->handler, 'reload'],
+            null,
+            null,
+            CorePermissions::PLUGINS_RELOAD
         );
     }
 
@@ -207,14 +235,14 @@ class PluginsApiRbacTest extends TestCase
     }
 
     /**
-     * AC: GET /api/plugins with plugins:manage reaches the handler and returns
+     * AC: GET /api/plugins with plugins:read reaches the handler and returns
      * the metadata contract (name, version, status, routes_count,
      * permissions_count).
      */
-    public function testListWithPluginsManageReturnsMetadata(): void
+    public function testListWithPluginsReadReturnsMetadata(): void
     {
         $userId = 20;
-        $this->seedRolePermissions($userId, [CorePermissions::PLUGINS_MANAGE]);
+        $this->seedRolePermissions($userId, [CorePermissions::PLUGINS_READ]);
 
         $request = new Request('GET', '/api/plugins', ['Authorization' => 'Bearer ' . $this->tokenFor($userId)]);
         $response = $this->dispatch($request);
@@ -237,7 +265,7 @@ class PluginsApiRbacTest extends TestCase
         $this->assertSame(1, $entry['permissions_count']);
     }
 
-    public function testListWithoutPluginsManageIsForbidden(): void
+    public function testListWithoutPluginsReadIsForbidden(): void
     {
         $userId = 21;
         $this->seedRolePermissions($userId, [CorePermissions::USERS_READ]);
@@ -248,7 +276,7 @@ class PluginsApiRbacTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
         $body = json_decode($response->getBody(), true);
         $this->assertSame(
-            ['error' => 'Insufficient permissions', 'required' => 'plugins:manage'],
+            ['error' => 'Insufficient permissions', 'required' => 'plugins:read'],
             $body
         );
     }
@@ -261,13 +289,14 @@ class PluginsApiRbacTest extends TestCase
     }
 
     /**
-     * AC #2 end-to-end: a privileged disable request unregisters the plugin's
-     * routes and flips its lifecycle status to 'disabled'.
+     * AC #2 end-to-end: a privileged disable request (holding plugins:disable)
+     * unregisters the plugin's routes and flips its lifecycle status to
+     * 'disabled'.
      */
-    public function testDisableWithPluginsManageUnregistersRoutesAndDisables(): void
+    public function testDisableWithPluginsDisableUnregistersRoutesAndDisables(): void
     {
         $userId = 22;
-        $this->seedRolePermissions($userId, [CorePermissions::PLUGINS_MANAGE]);
+        $this->seedRolePermissions($userId, [CorePermissions::PLUGINS_DISABLE]);
 
         // Plugin route is live before disabling.
         $this->assertNotNull($this->router->match(new Request('GET', $this->pluginPath)));
@@ -293,36 +322,119 @@ class PluginsApiRbacTest extends TestCase
         );
     }
 
-    public function testDisableWithoutPluginsManageIsForbidden(): void
+    /**
+     * Every plugin write route refuses a principal that does not hold its
+     * matching per-action permission. Driven through the real middleware: a 403
+     * means the route's requiredPermission did not match, never that the handler
+     * ran. We grant USERS_READ so the principal is authenticated and non-empty
+     * but holds none of the plugin permissions.
+     *
+     * @return array<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function forbiddenWriteRouteProvider(): array
     {
-        $userId = 23;
-        $this->seedRolePermissions($userId, [CorePermissions::ROLES_READ]);
-
-        $request = new Request(
-            'POST',
-            '/api/plugins/' . $this->pluginName . '/disable',
-            ['Authorization' => 'Bearer ' . $this->tokenFor($userId)]
-        );
-        $response = $this->dispatch($request);
-
-        $this->assertSame(403, $response->getStatusCode());
-        // The handler must not have run: the route is still live.
-        $this->assertNotNull($this->router->match(new Request('GET', $this->pluginPath)));
+        return [
+            'enable'        => ['POST', '/api/plugins/PLUGIN/enable', 'plugins:enable'],
+            'disable'       => ['POST', '/api/plugins/PLUGIN/disable', 'plugins:disable'],
+            're-enable'     => ['POST', '/api/plugins/1/re-enable', 'plugins:enable'],
+            'uninstall'     => ['POST', '/api/plugins/1/uninstall', 'plugins:uninstall'],
+            'reload'        => ['POST', '/api/plugins/reload', 'plugins:reload'],
+        ];
     }
 
-    public function testEnableWithoutPluginsManageIsForbidden(): void
+    /**
+     * @dataProvider forbiddenWriteRouteProvider
+     */
+    public function testWriteRouteWithoutItsPermissionIsForbidden(string $method, string $path, string $required): void
     {
-        $userId = 24;
+        $userId = 30;
+        // Holds an unrelated permission only — none of the plugin permissions.
         $this->seedRolePermissions($userId, [CorePermissions::USERS_READ]);
 
+        $path = str_replace('PLUGIN', $this->pluginName, $path);
         $request = new Request(
-            'POST',
-            '/api/plugins/' . $this->pluginName . '/enable',
+            $method,
+            $path,
             ['Authorization' => 'Bearer ' . $this->tokenFor($userId)]
         );
         $response = $this->dispatch($request);
 
         $this->assertSame(403, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(
+            ['error' => 'Insufficient permissions', 'required' => $required],
+            $body
+        );
+    }
+
+    /**
+     * A principal holding ONLY plugins:read can list plugins but is forbidden on
+     * every write route — read access must never imply mutate access (WC-218).
+     *
+     * @dataProvider forbiddenWriteRouteProvider
+     */
+    public function testReadOnlyPrincipalIsForbiddenOnWriteRoutes(string $method, string $path, string $required): void
+    {
+        $userId = 31;
+        $this->seedRolePermissions($userId, [CorePermissions::PLUGINS_READ]);
+
+        $path = str_replace('PLUGIN', $this->pluginName, $path);
+        $request = new Request(
+            $method,
+            $path,
+            ['Authorization' => 'Bearer ' . $this->tokenFor($userId)]
+        );
+        $response = $this->dispatch($request);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame($required, $body['required'] ?? null);
+    }
+
+    /**
+     * The retired `plugins:manage` permission must open NO plugin route: a
+     * principal granted only that string is forbidden everywhere, proving the
+     * umbrella permission was removed and not silently re-accepted (WC-218).
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function allPluginRouteProvider(): array
+    {
+        return [
+            'list'      => ['GET', '/api/plugins'],
+            'enable'    => ['POST', '/api/plugins/PLUGIN/enable'],
+            'disable'   => ['POST', '/api/plugins/PLUGIN/disable'],
+            're-enable' => ['POST', '/api/plugins/1/re-enable'],
+            'uninstall' => ['POST', '/api/plugins/1/uninstall'],
+            'reload'    => ['POST', '/api/plugins/reload'],
+        ];
+    }
+
+    /**
+     * @dataProvider allPluginRouteProvider
+     */
+    public function testPluginsManageOpensNoPluginRoute(string $method, string $path): void
+    {
+        $userId = 40;
+        // 'plugins:manage' is no longer a known permission; seed it as a raw
+        // role grant to prove it satisfies none of the new per-action gates.
+        $this->seedRolePermissions($userId, ['plugins:manage']);
+
+        $path = str_replace('PLUGIN', $this->pluginName, $path);
+        $request = new Request(
+            $method,
+            $path,
+            ['Authorization' => 'Bearer ' . $this->tokenFor($userId)]
+        );
+        $response = $this->dispatch($request);
+
+        $this->assertSame(
+            403,
+            $response->getStatusCode(),
+            "plugins:manage must not satisfy {$method} {$path}"
+        );
+        $body = json_decode($response->getBody(), true);
+        $this->assertNotSame('plugins:manage', $body['required'] ?? null);
     }
 
     private function writePlugin(string $class, string $path): void
