@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/auth-context';
 
 export interface NavigationItem {
@@ -16,6 +16,20 @@ interface NavigationContextType {
   items: NavigationItem[];
   isLoading: boolean;
   getGroupedItems: () => Map<string, NavigationItem[]>;
+  /**
+   * Re-run the `/api/v1/navigation` fetch for the current user and apply the
+   * result. Resolves once the new (RBAC-filtered) list is in state, so callers
+   * that just changed plugin state can `await` the sidebar reflecting it —
+   * without a full page reload. A no-op (resolves immediately) when signed out.
+   */
+  refresh: () => Promise<void>;
+  /**
+   * Optimistically drop nav items whose `href` is in `hrefs` from the local
+   * list, BEFORE any refetch resolves. Used by the plugins console to make a
+   * disabled/uninstalled plugin's contributed links vanish instantly; a
+   * subsequent {@link refresh} then reconciles with the server.
+   */
+  removeItemsByHref: (hrefs: readonly string[]) => void;
 }
 
 const NavigationContext = createContext<NavigationContextType | undefined>(undefined);
@@ -44,6 +58,39 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
   // changes it; token refreshes for the same user do not.
   const userId = user !== null ? user.id : null;
 
+  // Mirror userId into a ref so the stable `refresh` callback can read the
+  // current signed-in user without being re-created (and without becoming a
+  // dependency that would force consumers to re-render on every auth tick).
+  // The ref is synced in an effect rather than during render (a render-phase
+  // ref write is a React anti-pattern); the value only needs to be current by
+  // the time refresh() is INVOKED from an event handler, which is always after
+  // the commit that ran this effect.
+  const userIdRef = useRef<number | null>(userId);
+  useEffect(() => {
+    userIdRef.current = userId;
+  }, [userId]);
+
+  // Fetch the current user's RBAC-filtered nav list. Signed out, the server
+  // would only 401 — return an empty list without a pointless request. Any
+  // failure maps to an empty list so the sidebar renders nothing rather than
+  // crashing. Shared by the mount/auth effect and the imperative refresh().
+  const fetchNavigation = useCallback(async (): Promise<NavigationItem[]> => {
+    if (userIdRef.current === null) {
+      return [];
+    }
+    try {
+      const response = await fetch('/api/v1/navigation', {
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error('Failed to fetch navigation');
+      const data = await response.json();
+      return data.data || [];
+    } catch (error) {
+      console.error('Error fetching navigation:', error);
+      return [];
+    }
+  }, []);
+
   useEffect(() => {
     if (isAuthLoading) {
       return;
@@ -51,25 +98,10 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
 
     let cancelled = false;
 
-    // Fetcher defined inside the effect so no setState runs synchronously in
-    // the effect body (react-hooks/set-state-in-effect). Signed out, the server
-    // would only 401 — expose an empty list without a pointless request (and
-    // drop the previous user's nav). Any failure maps to an empty list so the
-    // sidebar renders nothing rather than crashing.
+    // setState is deferred into this async fetcher so none runs synchronously
+    // in the effect body (react-hooks/set-state-in-effect).
     const load = async (): Promise<void> => {
-      let fetched: NavigationItem[] = [];
-      if (userId !== null) {
-        try {
-          const response = await fetch('/api/v1/navigation', {
-            credentials: 'include',
-          });
-          if (!response.ok) throw new Error('Failed to fetch navigation');
-          const data = await response.json();
-          fetched = data.data || [];
-        } catch (error) {
-          console.error('Error fetching navigation:', error);
-        }
-      }
+      const fetched = await fetchNavigation();
       if (!cancelled) {
         setItems(fetched);
         setIsLoading(false);
@@ -81,7 +113,27 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     return () => {
       cancelled = true;
     };
-  }, [userId, isAuthLoading]);
+  }, [userId, isAuthLoading, fetchNavigation]);
+
+  // Imperative refetch for callers that just mutated server state (e.g. the
+  // plugins console disabling a plugin) and want the sidebar to reflect it
+  // without a full page reload. Resolves once the new list is applied.
+  const refresh = useCallback(async (): Promise<void> => {
+    const fetched = await fetchNavigation();
+    setItems(fetched);
+    setIsLoading(false);
+  }, [fetchNavigation]);
+
+  // Optimistic, local-only removal: drop items whose href is in `hrefs`. Lets
+  // the plugins console make a disabled/uninstalled plugin's links disappear
+  // instantly; refresh() then reconciles with the authoritative server list.
+  const removeItemsByHref = useCallback((hrefs: readonly string[]): void => {
+    if (hrefs.length === 0) {
+      return;
+    }
+    const drop = new Set(hrefs);
+    setItems((prev) => prev.filter((item) => !drop.has(item.href)));
+  }, []);
 
   const getGroupedItems = useCallback(() => {
     const grouped = new Map<string, NavigationItem[]>();
@@ -105,7 +157,9 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
   }, [items]);
 
   return (
-    <NavigationContext.Provider value={{ items, isLoading, getGroupedItems }}>
+    <NavigationContext.Provider
+      value={{ items, isLoading, getGroupedItems, refresh, removeItemsByHref }}
+    >
       {children}
     </NavigationContext.Provider>
   );

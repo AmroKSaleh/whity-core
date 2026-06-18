@@ -79,6 +79,15 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },
+    // WC-221: the plugin upload + RBAC-visibility journeys run admin-authenticated
+    // (the upload/enable lifecycle needs admin); the read-only delegate journey
+    // logs in within the spec against a plugins:read-only delegation it provisions.
+    {
+      name: 'plugins-upload',
+      testMatch: /plugin-upload\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
+    },
     // The multi-role matrix (WC-173): one spec file, three role projects.
     // All three share the same testMatch, so every e2e/matrix-*.spec.ts runs
     // once per role; specs read the role via the `role` fixture (which parses

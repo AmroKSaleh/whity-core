@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import {
   NavigationProvider,
   useNavigation,
@@ -190,5 +190,106 @@ describe('NavigationProvider auth-awareness', () => {
     await waitFor(() =>
       expect(screen.getByTestId('ids').textContent).toBe('dashboard')
     );
+  });
+});
+
+/**
+ * WC-221: imperative `refresh()` and optimistic `removeItemsByHref()`.
+ *
+ * The plugins console disables/uninstalls plugins and needs the sidebar to drop
+ * the plugin's contributed nav links WITHOUT a full page reload. The provider
+ * exposes:
+ *   - `refresh()`            — re-runs the `/api/v1/navigation` fetch and
+ *                              resolves once the new list is applied.
+ *   - `removeItemsByHref()`  — optimistically filters items by href so a link
+ *                              disappears BEFORE the refetch resolves.
+ */
+
+const PLUGIN_GREETINGS: NavigationItem = {
+  id: 'hello-greetings',
+  label: 'Greetings',
+  href: '/admin/x/hello-greetings',
+  icon: 'message',
+  group: 'plugins',
+  order: 30,
+};
+
+function RefreshProbe() {
+  const { items, refresh, removeItemsByHref } = useNavigation();
+  return (
+    <div>
+      <span data-testid="ids">{items.map((i) => i.id).join(',')}</span>
+      <button data-testid="refresh" onClick={() => void refresh()}>
+        refresh
+      </button>
+      <button
+        data-testid="optimistic-remove"
+        onClick={() => removeItemsByHref(['/admin/x/hello-greetings'])}
+      >
+        remove
+      </button>
+    </div>
+  );
+}
+
+describe('NavigationProvider refresh + optimistic removal (WC-221)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReset();
+    mockFetch.mockReset();
+  });
+
+  it('refresh() re-runs the navigation fetch and applies the new list', async () => {
+    mockUseAuth.mockReturnValue(authState({ id: 2 }));
+    mockFetch.mockResolvedValue(navResponse([DASHBOARD, PLUGIN_GREETINGS]));
+
+    render(
+      <NavigationProvider>
+        <RefreshProbe />
+      </NavigationProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('ids').textContent).toBe(
+        'dashboard,hello-greetings'
+      )
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // After a plugin is disabled the server no longer returns its link; a
+    // refresh() pulls the new RBAC-filtered list in without a page reload.
+    mockFetch.mockResolvedValue(navResponse([DASHBOARD]));
+    await act(async () => {
+      screen.getByTestId('refresh').click();
+    });
+
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId('ids').textContent).toBe('dashboard')
+    );
+  });
+
+  it('removeItemsByHref() optimistically drops a plugin link before any refetch', async () => {
+    mockUseAuth.mockReturnValue(authState({ id: 2 }));
+    mockFetch.mockResolvedValue(navResponse([DASHBOARD, PLUGIN_GREETINGS]));
+
+    render(
+      <NavigationProvider>
+        <RefreshProbe />
+      </NavigationProvider>
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('ids').textContent).toBe(
+        'dashboard,hello-greetings'
+      )
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // Optimistic removal is local-only: the plugin link vanishes immediately
+    // and NO new request is made by the removal itself.
+    act(() => {
+      screen.getByTestId('optimistic-remove').click();
+    });
+
+    expect(screen.getByTestId('ids').textContent).toBe('dashboard');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
