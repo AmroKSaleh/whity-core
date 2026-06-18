@@ -1,12 +1,23 @@
 name: E2E
 
+# Doc-only changes can't affect the running stack or the E2E suite, so skip it
+# when every changed path is documentation. `paths-ignore` only suppresses a run
+# when ALL changed files match — a PR that touches both code and docs still runs.
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
 
 # A newer push to the same ref obsoletes the in-flight run; never queue two.
 concurrency:
@@ -87,9 +98,38 @@ jobs:
         working-directory: web
         run: npm ci
 
-      - name: Install Playwright Chromium
+      # Playwright browser binaries are versioned by the @playwright/test
+      # release and live in ~/.cache/ms-playwright. Cache them keyed on that
+      # version so all three shards reuse one download instead of fetching
+      # Chromium independently on every run. The key changes only when
+      # @playwright/test is bumped, so the cache refreshes exactly when the
+      # browser actually changes (a calendar TTL would re-download daily for
+      # nothing); GitHub also evicts caches untouched for 7 days, so a quiet
+      # repo re-warms on its own.
+      - name: Resolve Playwright version
+        id: playwright-version
         working-directory: web
-        run: npx playwright install chromium --with-deps
+        run: echo "version=$(node -e 'console.log(require("@playwright/test/package.json").version)')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      # Cache miss: install the browser plus its OS-level dependencies. Cache
+      # hit: the binaries are already restored, so only (re)install the system
+      # deps — those are apt packages that live outside the cached directory.
+      - name: Install Playwright Chromium + system deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cached browser)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: web
+        run: npx playwright install-deps chromium
 
       # The Playwright config starts the Next dev server itself (webServer on
       # port 3010) and proxies /api/* to the stack at localhost:8000.
