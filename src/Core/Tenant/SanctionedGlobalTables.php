@@ -45,6 +45,13 @@ final class SanctionedGlobalTables
         // the single shared database — a process/deploy-level concern, not a
         // tenant concern.
         'core_schema_migrations' => 'Schema migration ledger for the shared database; not tenant data.',
+
+        // Platform-wide website-settings defaults (site_name, timezone, locale,
+        // support_email). These are the GLOBAL fallbacks every tenant inherits
+        // until it stores a per-tenant override (in the tenant-owned
+        // `tenant_settings` table); a row here is unique platform-wide and
+        // carries no tenant_id, so a tenant predicate would be meaningless.
+        'app_settings' => 'Platform-wide website-settings defaults; no tenant column (per-tenant overrides live in tenant_settings).',
     ];
 
     /**

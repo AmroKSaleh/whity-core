@@ -578,6 +578,23 @@ $router->register('DELETE', '/api/delegations/{id:\d+}', [$delegationsHandler, '
 $auditLogHandler = new AuditLogApiHandler($db->getPdo(), $roleChecker);
 $router->register('GET', '/api/audit-logs', [$auditLogHandler, 'list'], null, null, CorePermissions::AUDIT_READ);
 
+// 13b. Register the Website Settings API (global defaults + per-tenant
+// overrides). Reads are gated on settings:read, current-tenant override writes
+// on settings:write, and global-default reads/writes on settings:manage (6th
+// positional arg; requiredRole stays null so RbacMiddleware enforces the
+// permission). The handler issues NO SQL — all access goes through
+// SettingsService and its repositories; the tenant always comes from
+// TenantContext, so a caller can only edit its own tenant's overrides.
+$settingsService = new \Whity\Core\Settings\SettingsService(
+    new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
+    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
+);
+$settingsHandler = new \Whity\Api\SettingsApiHandler($settingsService, $roleChecker);
+$router->register('GET',   '/api/settings',        [$settingsHandler, 'get'],         null, null, CorePermissions::SETTINGS_READ);
+$router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'],       null, null, CorePermissions::SETTINGS_WRITE);
+$router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlobal'], null, null, CorePermissions::SETTINGS_MANAGE);
+
 // 14. Register the family relations API (WC-65). Reads are gated on
 // relations:read, writes on relations:manage (6th positional arg; requiredRole
 // stays null so RbacMiddleware enforces the permission). All routes are

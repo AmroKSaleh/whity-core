@@ -70,6 +70,15 @@ final class CorePermissions
     public const RELATIONS_READ = 'relations:read';
     public const RELATIONS_MANAGE = 'relations:manage';
 
+    // Website settings (Website Settings feature). SETTINGS_READ gates viewing
+    // the effective/editable set; SETTINGS_WRITE gates editing the CURRENT
+    // tenant's overrides; SETTINGS_MANAGE gates editing the GLOBAL platform
+    // defaults. All three are seeded and granted to the admin role by the
+    // settings-permissions seeding migration.
+    public const SETTINGS_READ = 'settings:read';
+    public const SETTINGS_WRITE = 'settings:write';
+    public const SETTINGS_MANAGE = 'settings:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -98,6 +107,9 @@ final class CorePermissions
             self::DELEGATION_MANAGE,
             self::RELATIONS_READ,
             self::RELATIONS_MANAGE,
+            self::SETTINGS_READ,
+            self::SETTINGS_WRITE,
+            self::SETTINGS_MANAGE,
         ];
     }
 }

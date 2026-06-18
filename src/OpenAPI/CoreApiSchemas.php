@@ -88,7 +88,8 @@ final class CoreApiSchemas
             self::frontendFeatureRoutes(),
             self::meRoutes(),
             self::platformOpsRoutes(),
-            self::familyRelationsRoutes()
+            self::familyRelationsRoutes(),
+            self::settingsRoutes()
         );
     }
 
@@ -755,6 +756,51 @@ final class CoreApiSchemas
     }
 
     /**
+     * The Website Settings route declarations (global defaults + per-tenant
+     * overrides). Reads are gated on settings:read, current-tenant writes on
+     * settings:write, and global reads/writes on settings:manage.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function settingsRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/settings', 'settings:read', [
+                'summary' => 'Get the caller tenant\'s effective settings, the registry shape, and overridden keys',
+                'tags' => ['settings'],
+                'responses' => [
+                    200 => self::jsonResponse('The effective settings, registry descriptors, and overridden keys', 'SettingsResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/settings', 'settings:write', [
+                'summary' => 'Upsert the current tenant\'s setting overrides (null/empty clears an override)',
+                'tags' => ['settings'],
+                'request' => 'SettingsUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The recomputed effective settings', 'SettingsValueMapResponse'),
+                    422 => self::errorResponse('Validation failed (unknown key or invalid value)'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/settings/global', 'settings:manage', [
+                'summary' => 'Get the global setting defaults',
+                'tags' => ['settings'],
+                'responses' => [
+                    200 => self::jsonResponse('The global defaults and the registry shape', 'GlobalSettingsResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/settings/global', 'settings:manage', [
+                'summary' => 'Upsert the global setting defaults (null clears a default)',
+                'tags' => ['settings'],
+                'request' => 'SettingsUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The recomputed global defaults', 'SettingsValueMapResponse'),
+                    422 => self::errorResponse('Validation failed (unknown key or invalid value)'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
      * The component schemas the admin resources publish.
      *
      * @return array<string, array<string, mixed>>
@@ -1230,6 +1276,45 @@ final class CoreApiSchemas
                 'relationshipTypeId' => self::int(),
             ], ['id', 'fromPersonId', 'toPersonId', 'relationshipTypeId']),
             'RelationCreatedResponse' => self::dataEnvelope(SchemaBuilder::ref('RelationCreatedData')),
+
+            // ---- Website Settings schemas ----
+
+            // The four known string-valued settings (the registry's keys). Every
+            // key is always present in an effective/global value map.
+            'SettingsValueMap' => self::object([
+                'site_name' => self::str(),
+                'timezone' => self::str(),
+                'locale' => self::str(),
+                'support_email' => self::str(),
+            ], ['site_name', 'timezone', 'locale', 'support_email']),
+            // One registry descriptor: key + value-type + hardcoded default.
+            'SettingsRegistryEntry' => self::object([
+                'key' => self::str(),
+                'type' => self::str(),
+                'default' => self::str(),
+            ], ['key', 'type', 'default']),
+            // GET /api/settings — effective values, registry shape, overridden keys.
+            'SettingsResponse' => self::dataEnvelope(self::object([
+                'effective' => SchemaBuilder::ref('SettingsValueMap'),
+                'registry' => ['type' => 'array', 'items' => SchemaBuilder::ref('SettingsRegistryEntry')],
+                'overridden' => ['type' => 'array', 'items' => self::str()],
+            ], ['effective', 'registry', 'overridden'])),
+            // GET /api/settings/global — the global defaults plus registry shape.
+            'GlobalSettingsResponse' => self::dataEnvelope(self::object([
+                'global' => SchemaBuilder::ref('SettingsValueMap'),
+                'registry' => ['type' => 'array', 'items' => SchemaBuilder::ref('SettingsRegistryEntry')],
+            ], ['global', 'registry'])),
+            // PATCH response — the recomputed value map (effective or global).
+            'SettingsValueMapResponse' => self::dataEnvelope(SchemaBuilder::ref('SettingsValueMap')),
+            // PATCH request — a `settings` object of key => value (string or null
+            // to clear). additionalProperties keeps it open to future registry
+            // keys without an OpenAPI change.
+            'SettingsUpdateRequest' => self::object([
+                'settings' => [
+                    'type' => 'object',
+                    'additionalProperties' => ['type' => 'string', 'nullable' => true],
+                ],
+            ], ['settings']),
         ];
     }
 

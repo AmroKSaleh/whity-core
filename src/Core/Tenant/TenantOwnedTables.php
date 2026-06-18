@@ -61,6 +61,7 @@ final class TenantOwnedTables
         'audit_log' => '016_create_audit_log.php',
         'persons' => '018_create_persons.php',
         'relations' => '020_create_relations.php',
+        'tenant_settings' => '025_create_tenant_settings.php',
     ];
 
     /**
