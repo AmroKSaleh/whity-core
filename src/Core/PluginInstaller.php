@@ -64,17 +64,57 @@ final class PluginInstaller
     private const NAME_PATTERN = '/^[A-Za-z0-9_-]+$/';
 
     /**
+     * Default wall-clock deadline (seconds) for the introspection child before
+     * it is forcibly terminated. A malicious plugin whose top-level code,
+     * constructor, or accessors loop/sleep forever would otherwise block the
+     * host read indefinitely; the parent enforces this bound itself rather than
+     * trusting the child to exit (WC-220 M1).
+     */
+    public const DEFAULT_INTROSPECT_TIMEOUT_SECONDS = 8;
+
+    /**
+     * Hard child resource limits passed to the introspection PHP binary so a
+     * runaway plugin cannot exhaust host memory or CPU even within the deadline.
+     */
+    private const CHILD_MEMORY_LIMIT = '128M';
+    private const CHILD_MAX_EXECUTION_TIME = '10';
+
+    /**
+     * Sentinel marker prefixes/suffix delimiting the genuine introspection
+     * result on the child's stdout. The full marker is
+     * `<PREFIX><nonce><SUFFIX>`, where the nonce is a single-use random token
+     * the child scrubs before any plugin code runs. The parent parses ONLY the
+     * bytes between the nonce-keyed markers, so any output the untrusted plugin
+     * printed before the genuine emit (a forged result — even one wrapped in
+     * forged markers with a guessed nonce — or a version-gate-bypass attempt) is
+     * non-authoritative (WC-220 M3). Kept in sync with bin/plugin-introspect.php.
+     */
+    private const INTROSPECT_BEGIN_MARKER = '===WC-INTROSPECT-BEGIN:';
+    private const INTROSPECT_END_MARKER = '===WC-INTROSPECT-END:';
+    private const INTROSPECT_MARKER_SUFFIX = '===';
+
+    /** Wall-clock deadline (seconds) for the introspection child. */
+    private readonly int $introspectTimeoutSeconds;
+
+    /**
      * @param string $pluginDir Absolute path to the host plugins directory.
      * @param PluginLoader|null $pluginLoader Live loader; reloaded after a stage.
      * @param AuditLogger|null $auditLogger Audit sink for the `plugin.upload` record.
      * @param LoggerInterface $logger Server-side logger (failures only); defaults to a no-op.
+     * @param int|null $introspectTimeoutSeconds Optional override of the child
+     *   introspection deadline (seconds); tests lower it so a looping fixture is
+     *   rejected fast. Null uses {@see DEFAULT_INTROSPECT_TIMEOUT_SECONDS}.
      */
     public function __construct(
         private readonly string $pluginDir,
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?AuditLogger $auditLogger = null,
         private readonly LoggerInterface $logger = new NullLogger(),
+        ?int $introspectTimeoutSeconds = null,
     ) {
+        $this->introspectTimeoutSeconds = ($introspectTimeoutSeconds !== null && $introspectTimeoutSeconds > 0)
+            ? $introspectTimeoutSeconds
+            : self::DEFAULT_INTROSPECT_TIMEOUT_SECONDS;
     }
 
     /**
@@ -147,7 +187,18 @@ final class PluginInstaller
                 $this->removeRecursive($committedPath);
             }
 
-            $this->audit('plugin.upload', $auditName, $auditSize, $auditSha, 'rejected');
+            // The audit sink must never mask the precise typed failure: a
+            // throwing audit here would otherwise replace the typed exception
+            // with a generic 500 (WC-220 minor). Isolate it so the original
+            // exception always propagates.
+            try {
+                $this->audit('plugin.upload', $auditName, $auditSize, $auditSha, 'rejected');
+            } catch (Throwable $auditError) {
+                $this->logger->error('[PluginInstaller] audit sink threw during rollback', [
+                    'event' => 'plugin.upload.audit_failed',
+                    'error' => $auditError->getMessage(),
+                ]);
+            }
 
             if ($e instanceof PluginInstallException) {
                 throw $e;
@@ -511,7 +562,25 @@ final class PluginInstaller
         $script = $this->introspectorScriptPath();
         $php = (defined('PHP_BINARY') && PHP_BINARY !== '') ? PHP_BINARY : 'php';
 
-        $cmd = array_merge([$php, $script], $files);
+        // Single-use, unguessable nonce keying the result markers (WC-220 M3):
+        // the child embeds it in its genuine emit and scrubs it before any
+        // plugin code runs, so a plugin that prints forged markers cannot make
+        // the parent accept a forged block (the parent requires THIS nonce).
+        $nonce = bin2hex(random_bytes(16));
+
+        // Pass hard child resource limits so a runaway plugin cannot exhaust
+        // host memory/CPU even within the wall-clock deadline (WC-220 M1). The
+        // nonce is the FIRST argument; the staged files follow.
+        $cmd = array_merge(
+            [
+                $php,
+                '-d', 'memory_limit=' . self::CHILD_MEMORY_LIMIT,
+                '-d', 'max_execution_time=' . self::CHILD_MAX_EXECUTION_TIME,
+                $script,
+                $nonce,
+            ],
+            $files
+        );
 
         $descriptors = [
             0 => ['pipe', 'r'],
@@ -523,14 +592,47 @@ final class PluginInstaller
             throw new PluginPackageInvalid('The package could not be inspected.');
         }
 
-        fclose($pipes[0]);
-        $stdout = (string) stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        $stderr = (string) stream_get_contents($pipes[2]);
-        fclose($pipes[2]);
-        proc_close($process);
+        // Bounded, non-blocking read with a wall-clock deadline. A malicious
+        // plugin whose top-level/constructor/accessor code loops or sleeps
+        // forever would make a blocking read hang the worker indefinitely
+        // (WC-220 M1); instead we stop reading at the deadline, terminate the
+        // child, and treat the outcome as a generic inspection failure.
+        [$stdout, $stderr, $timedOut, $exitCode] = $this->readChildBounded($process, $pipes);
 
-        $decoded = json_decode($stdout, true);
+        if ($timedOut) {
+            $this->logger->error('[PluginInstaller] introspection timed out', [
+                'event' => 'plugin.upload.introspect_timeout',
+                'timeout_seconds' => $this->introspectTimeoutSeconds,
+            ]);
+            throw new PluginPackageInvalid('The package could not be inspected.');
+        }
+
+        // The child must exit cleanly (0). A non-zero exit (uncatchable fatal,
+        // OOM, kill) is a generic inspection failure — never trust its output.
+        if ($exitCode !== 0) {
+            $this->logger->error('[PluginInstaller] introspection child exited non-zero', [
+                'event' => 'plugin.upload.introspect_failed',
+                'exit_code' => $exitCode,
+                'stderr' => $stderr,
+            ]);
+            throw new PluginPackageInvalid('The package could not be inspected.');
+        }
+
+        // Parse ONLY the genuine, NONCE-KEYED marker-delimited result. Any
+        // output the untrusted plugin printed before the genuine emit (e.g. a
+        // forged JSON result — even one wrapped in forged markers — echoed then
+        // exit()) cannot carry this run's nonce, so it is ignored and cannot
+        // forge metadata or bypass the version gate (WC-220 M3).
+        $result = $this->extractDelimitedResult($stdout, $nonce);
+        if ($result === null) {
+            $this->logger->error('[PluginInstaller] introspection produced no delimited result', [
+                'event' => 'plugin.upload.introspect_failed',
+                'stderr' => $stderr,
+            ]);
+            throw new PluginPackageInvalid('The package could not be inspected.');
+        }
+
+        $decoded = json_decode($result, true);
         if (!is_array($decoded) || !isset($decoded['status'])) {
             $this->logger->error('[PluginInstaller] introspection produced no result', [
                 'event' => 'plugin.upload.introspect_failed',
@@ -562,6 +664,146 @@ final class PluginInstaller
             'sdk_constraint' => is_string($plugin['sdk_constraint'] ?? null) ? $plugin['sdk_constraint'] : null,
             'core_constraint' => is_string($plugin['core_constraint'] ?? null) ? $plugin['core_constraint'] : null,
         ];
+    }
+
+    /**
+     * Read a child process's stdout/stderr without blocking, enforcing a
+     * wall-clock deadline; terminate the child on deadline (WC-220 M1).
+     *
+     * Pipes are switched to non-blocking and drained in a {@see stream_select()}
+     * loop. When the deadline elapses before the child closes its pipes, the
+     * child is {@see proc_terminate()}'d (SIGKILL) and reaped. Returns the bytes
+     * captured so far, whether the deadline was hit, and the child's exit code
+     * (-1 when it was killed / never reported a code).
+     *
+     * @param resource $process The proc_open() process handle.
+     * @param array<int, resource> $pipes The [0=>stdin,1=>stdout,2=>stderr] pipes.
+     * @return array{0: string, 1: string, 2: bool, 3: int} [stdout, stderr, timedOut, exitCode]
+     */
+    private function readChildBounded($process, array $pipes): array
+    {
+        // We never write to the child; close stdin so it cannot block on input.
+        fclose($pipes[0]);
+
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        $stdout = '';
+        $stderr = '';
+        $open = [1 => $pipes[1], 2 => $pipes[2]];
+        $deadline = microtime(true) + $this->introspectTimeoutSeconds;
+        $timedOut = false;
+
+        while ($open !== []) {
+            $remaining = $deadline - microtime(true);
+            if ($remaining <= 0) {
+                $timedOut = true;
+                break;
+            }
+
+            $read = array_values($open);
+            $write = null;
+            $except = null;
+
+            $sec = (int) $remaining;
+            $usec = (int) (($remaining - $sec) * 1_000_000);
+            $ready = @stream_select($read, $write, $except, $sec, $usec);
+
+            if ($ready === false) {
+                // Interrupted (e.g. by a signal); re-evaluate the deadline.
+                continue;
+            }
+            if ($ready === 0) {
+                // select() timed out with nothing ready: deadline reached.
+                $timedOut = true;
+                break;
+            }
+
+            foreach ($read as $stream) {
+                $chunk = fread($stream, 8192);
+                $key = array_search($stream, $open, true);
+                if ($chunk === false || $chunk === '') {
+                    // EOF (or error): the child closed this pipe.
+                    if ($key !== false) {
+                        unset($open[$key]);
+                    }
+                    continue;
+                }
+                if ($key === 1) {
+                    $stdout .= $chunk;
+                } elseif ($key === 2) {
+                    $stderr .= $chunk;
+                }
+            }
+        }
+
+        if ($timedOut) {
+            // Force-kill the runaway child, then reap it so no zombie lingers.
+            @proc_terminate($process, 9);
+        }
+
+        // Close any pipes the loop did not already drain to EOF.
+        foreach ([1, 2] as $i) {
+            if (is_resource($pipes[$i])) {
+                @fclose($pipes[$i]);
+            }
+        }
+
+        $exitCode = proc_close($process);
+        if ($timedOut) {
+            // A terminated child's reported code is unreliable; force a failure.
+            $exitCode = -1;
+        }
+
+        return [$stdout, $stderr, $timedOut, $exitCode];
+    }
+
+    /**
+     * Extract the single genuine result JSON between the NONCE-KEYED
+     * introspection sentinel markers, or null when absent / malformed
+     * (WC-220 M3).
+     *
+     * The markers embed this run's single-use nonce, which the child scrubbed
+     * before any plugin code ran. A plugin therefore cannot print a marker pair
+     * the parent will accept (it cannot know the nonce). Output the plugin
+     * printed before the genuine emit — including forged markers with a
+     * guessed/blank nonce, or a forged result then `exit()` — lives outside the
+     * nonce-keyed markers (or carries the wrong nonce) and is ignored.
+     *
+     * @param string $stdout The child's raw stdout.
+     * @param string $nonce The single-use nonce this run generated.
+     * @return string|null The delimited JSON payload, or null.
+     */
+    private function extractDelimitedResult(string $stdout, string $nonce): ?string
+    {
+        if ($nonce === '') {
+            return null;
+        }
+        $begin = self::INTROSPECT_BEGIN_MARKER . $nonce . self::INTROSPECT_MARKER_SUFFIX;
+        $end = self::INTROSPECT_END_MARKER . $nonce . self::INTROSPECT_MARKER_SUFFIX;
+
+        // The genuine emit is always the LAST thing written (it exits 0 right
+        // after). Anchor on the last begin marker so a forged earlier marker
+        // pair cannot win, and require a matching end after it.
+        $beginPos = strrpos($stdout, $begin);
+        if ($beginPos === false) {
+            return null;
+        }
+        $payloadStart = $beginPos + strlen($begin);
+        $endPos = strpos($stdout, $end, $payloadStart);
+        if ($endPos === false) {
+            return null;
+        }
+
+        $payload = substr($stdout, $payloadStart, $endPos - $payloadStart);
+
+        // A forged result cannot smuggle a second begin/end marker inside the
+        // genuine payload: reject if the payload itself contains either marker.
+        if (str_contains($payload, $begin) || str_contains($payload, $end)) {
+            return null;
+        }
+
+        return $payload === '' ? null : $payload;
     }
 
     /**
@@ -698,9 +940,15 @@ final class PluginInstaller
      * Atomically land the validated artifact in plugins/ marked DISABLED, using
      * the existing {@see PluginLoader} sentinel model.
      *
-     * Directory plugin: move the tree to plugins/<Name>/ then write the
-     * {@see PluginLoader::DIR_DISABLED_SENTINEL} marker. Single-file plugin:
-     * write it as plugins/<Name>.php.disabled (which discovery skips).
+     * The commit is ATOMIC and disabled-BY-CONSTRUCTION (WC-220 M2): the final
+     * artifact — INCLUDING its {@see PluginLoader::DIR_DISABLED_SENTINEL} marker
+     * (directory) or its `.disabled` suffix (single file) — is fully prepared in
+     * a temp location ON THE SAME FILESYSTEM as plugins/, then moved into the
+     * live path with a SINGLE {@see rename()}. There is therefore never a window
+     * in which a partially-written, or sentinel-less (and thus ACTIVE), artifact
+     * exists at the live path: discovery sees either nothing or the complete,
+     * already-disabled artifact. Any failure removes the temp artifact and
+     * leaves nothing at the live path.
      *
      * The destination is re-anchored under the realpath of plugins/ so the name
      * (already allowlisted) cannot, even via symlink tricks, land outside it.
@@ -723,8 +971,19 @@ final class PluginInstaller
         if ($isSingleFile) {
             $dest = $this->pluginDir . '/' . $name . '.php.disabled';
             $this->assertUnder($dest, $anchor);
-            if (!@copy($artifactPath, $dest)) {
-                throw new PluginPackageInvalid('The plugin file could not be installed.');
+
+            // Prepare on a same-dir temp path, then atomically rename into place.
+            $temp = $this->pluginDir . '/.' . $name . '.tmp_' . bin2hex(random_bytes(8)) . '.php.disabled';
+            try {
+                if (!@copy($artifactPath, $temp)) {
+                    throw new PluginPackageInvalid('The plugin file could not be installed.');
+                }
+                if (!@rename($temp, $dest)) {
+                    throw new PluginPackageInvalid('The plugin file could not be installed.');
+                }
+            } catch (Throwable $e) {
+                $this->removeRecursive($temp);
+                throw $e;
             }
 
             return $dest;
@@ -733,13 +992,27 @@ final class PluginInstaller
         $dest = $this->pluginDir . '/' . $name;
         $this->assertUnder($dest, $anchor);
 
-        // Copy the validated tree into place (cross-device-safe vs. rename).
-        $this->copyTree($artifactPath, $dest);
+        // Prepare the COMPLETE, already-disabled tree in a same-filesystem temp
+        // dir (sibling of the live path), then a single atomic rename lands it.
+        $temp = $this->pluginDir . '/.' . $name . '.tmp_' . bin2hex(random_bytes(8));
+        try {
+            $this->copyTree($artifactPath, $temp);
 
-        // Mark disabled with the directory sentinel so discovery lists it disabled.
-        $sentinel = $dest . '/' . PluginLoader::DIR_DISABLED_SENTINEL;
-        if (file_put_contents($sentinel, '') === false) {
-            throw new PluginPackageInvalid('The plugin could not be marked disabled.');
+            // Establish the disabled sentinel BEFORE the artifact is live, so the
+            // directory can never appear at the live path without it (which the
+            // loader would otherwise treat as ENABLED, running untrusted code).
+            $sentinel = $temp . '/' . PluginLoader::DIR_DISABLED_SENTINEL;
+            if (file_put_contents($sentinel, '') === false) {
+                throw new PluginPackageInvalid('The plugin could not be marked disabled.');
+            }
+
+            if (!@rename($temp, $dest)) {
+                throw new PluginPackageInvalid('The plugin could not be installed.');
+            }
+        } catch (Throwable $e) {
+            // Remove the prepared-but-unmoved temp; nothing landed at $dest.
+            $this->removeRecursive($temp);
+            throw $e;
         }
 
         return $dest;

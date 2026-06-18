@@ -315,6 +315,249 @@ PHP;
     }
 
     /**
+     * Build a zip whose plugin's TOP-LEVEL code blocks forever (a busy loop
+     * bounded only by a long sleep). Introspecting it must hit the installer's
+     * wall-clock deadline rather than hang the worker (WC-220 M1).
+     *
+     * @param string $workDir Directory to write the .zip into (must exist).
+     * @param string $pluginName Plugin/dir name.
+     * @return string Absolute path to the created .zip.
+     */
+    public static function hangingTopLevelZip(string $workDir, string $pluginName = 'HangingPlugin'): string
+    {
+        $zipPath = $workDir . '/' . $pluginName . '.zip';
+        $source = <<<PHP
+        <?php
+
+        declare(strict_types=1);
+
+        namespace {$pluginName};
+
+        use Whity\\Sdk\\PluginInterface;
+
+        // TOP-LEVEL hang: runs during `require` in the introspection child,
+        // before any plugin class is even reflected. A blocking host read would
+        // never return; the bounded read must terminate the child at its deadline.
+        \\sleep(120);
+
+        final class Plugin implements PluginInterface
+        {
+            public function getName(): string { return '{$pluginName}'; }
+            public function getVersion(): string { return '1.0.0'; }
+            public function getRoutes(): array { return []; }
+            public function getPermissions(): array { return []; }
+            public function getHooks(): array { return []; }
+            public function getMigrations(): array { return []; }
+        }
+        PHP;
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException("Could not create zip at {$zipPath}");
+        }
+        $zip->addFromString($pluginName . '/Plugin.php', $source);
+        $zip->close();
+
+        return $zipPath;
+    }
+
+    /**
+     * Build a zip whose plugin's TOP-LEVEL code ECHOES a fully forged
+     * introspection result (a satisfiable null constraint + a bogus name) and
+     * then exits, attempting to forge the metadata the host trusts (WC-220 M3).
+     *
+     * The forged result claims the impossible core constraint is NOT present
+     * (null) so a naive host would skip the version gate. The GENUINE plugin,
+     * however, declares an impossible core constraint, so a correctly-hardened
+     * host reads the genuine (marker-delimited) result and still rejects it.
+     *
+     * @param string $workDir Directory to write the .zip into (must exist).
+     * @param string $pluginName Plugin/dir name (also the genuine getName()).
+     * @return string Absolute path to the created .zip.
+     */
+    public static function forgedIntrospectionZip(string $workDir, string $pluginName = 'ForgedPlugin'): string
+    {
+        $zipPath = $workDir . '/' . $pluginName . '.zip';
+        // Forge a result with NO constraints (so a tricked host skips the gate)
+        // and a bogus name — emitted at top level, before the genuine emit.
+        $forged = json_encode([
+            'status' => 'ok',
+            'plugin' => [
+                'name' => $pluginName,
+                'version' => '9.9.9',
+                'routes_count' => 999,
+                'permissions_count' => 999,
+                'sdk_constraint' => null,
+                'core_constraint' => null,
+            ],
+        ], JSON_UNESCAPED_SLASHES);
+
+        $forgedExport = var_export($forged, true);
+
+        // The genuine plugin declares an IMPOSSIBLE core constraint (^99.0):
+        // honest introspection -> version gate rejects. The top-level echo tries
+        // to forge a constraint-free result and exit before the genuine emit.
+        $source = <<<PHP
+        <?php
+
+        declare(strict_types=1);
+
+        namespace {$pluginName};
+
+        use Whity\\Sdk\\PluginInterface;
+        use Whity\\Sdk\\PluginRequirementsInterface;
+
+        // Attempt to forge the ENTIRE introspection result at top level, then
+        // exit so the genuine emit "never runs". A hardened child discards this
+        // pre-emit output (it sits outside the sentinel markers) and the host
+        // parses ONLY the genuine marker-delimited block.
+        echo {$forgedExport};
+
+        final class Plugin implements PluginInterface, PluginRequirementsInterface
+        {
+            public function getName(): string { return '{$pluginName}'; }
+            public function getVersion(): string { return '1.0.0'; }
+            public function getRoutes(): array { return []; }
+            public function getPermissions(): array { return []; }
+            public function getHooks(): array { return []; }
+            public function getMigrations(): array { return []; }
+            public function getSdkConstraint(): string { return '^1.5'; }
+            public function getCoreConstraint(): string { return '^99.0'; }
+            public function getPluginDependencies(): array { return []; }
+        }
+        PHP;
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException("Could not create zip at {$zipPath}");
+        }
+        $zip->addFromString($pluginName . '/Plugin.php', $source);
+        $zip->close();
+
+        return $zipPath;
+    }
+
+    /**
+     * Build a zip whose plugin's TOP-LEVEL code prints a fully-forged result
+     * WRAPPED IN forged sentinel markers and then `exit(0)`s, so the genuine
+     * emit never runs (WC-220 M3, hardest case). Because the forged markers
+     * cannot carry the parent's single-use nonce, the parent finds no genuine
+     * nonce-keyed block and rejects the upload as an inspection failure.
+     *
+     * @param string $workDir Directory to write the .zip into (must exist).
+     * @param string $pluginName Plugin/dir name.
+     * @return string Absolute path to the created .zip.
+     */
+    public static function forgedMarkersThenExitZip(string $workDir, string $pluginName = 'ForgedExit'): string
+    {
+        $zipPath = $workDir . '/' . $pluginName . '.zip';
+        $forged = json_encode([
+            'status' => 'ok',
+            'plugin' => [
+                'name' => $pluginName,
+                'version' => '9.9.9',
+                'routes_count' => 1,
+                'permissions_count' => 1,
+                'sdk_constraint' => null,
+                'core_constraint' => null,
+            ],
+        ], JSON_UNESCAPED_SLASHES);
+        $forgedExport = var_export($forged, true);
+
+        // Guess the marker shape with a blank/zero nonce; the real nonce is
+        // random and was scrubbed, so this cannot match the parent's nonce.
+        $source = <<<PHP
+        <?php
+
+        declare(strict_types=1);
+
+        namespace {$pluginName};
+
+        use Whity\\Sdk\\PluginInterface;
+
+        // Print forged, marker-wrapped result then exit before the genuine emit.
+        echo '===WC-INTROSPECT-BEGIN:===' . {$forgedExport} . '===WC-INTROSPECT-END:===';
+        exit(0);
+
+        final class Plugin implements PluginInterface
+        {
+            public function getName(): string { return '{$pluginName}'; }
+            public function getVersion(): string { return '1.0.0'; }
+            public function getRoutes(): array { return []; }
+            public function getPermissions(): array { return []; }
+            public function getHooks(): array { return []; }
+            public function getMigrations(): array { return []; }
+        }
+        PHP;
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException("Could not create zip at {$zipPath}");
+        }
+        $zip->addFromString($pluginName . '/Plugin.php', $source);
+        $zip->close();
+
+        return $zipPath;
+    }
+
+    /**
+     * Build a zip whose plugin's TOP-LEVEL code AND constructor write a marker
+     * file to a caller-chosen path — proof of whether the plugin's code was
+     * executed in-host. Used to assert a STAGED DISABLED directory plugin is
+     * never `require`d/instantiated before an explicit enable (WC-220 M4).
+     *
+     * @param string $workDir Directory to write the .zip into (must exist).
+     * @param string $markerPath Absolute path the plugin will create when run.
+     * @param string $pluginName Plugin/dir name.
+     * @return string Absolute path to the created .zip.
+     */
+    public static function executionMarkerZip(
+        string $workDir,
+        string $markerPath,
+        string $pluginName = 'MarkerPlugin',
+    ): string {
+        $zipPath = $workDir . '/' . $pluginName . '.zip';
+        $markerExport = var_export($markerPath, true);
+
+        $source = <<<PHP
+        <?php
+
+        declare(strict_types=1);
+
+        namespace {$pluginName};
+
+        use Whity\\Sdk\\PluginInterface;
+
+        // TOP-LEVEL side effect: writing this proves the file was `require`d.
+        @\\file_put_contents({$markerExport}, "top-level\\n", FILE_APPEND);
+
+        final class Plugin implements PluginInterface
+        {
+            public function __construct()
+            {
+                // CONSTRUCTOR side effect: proves the plugin was instantiated.
+                @\\file_put_contents({$markerExport}, "constructed\\n", FILE_APPEND);
+            }
+            public function getName(): string { return '{$pluginName}'; }
+            public function getVersion(): string { return '1.0.0'; }
+            public function getRoutes(): array { return []; }
+            public function getPermissions(): array { return []; }
+            public function getHooks(): array { return []; }
+            public function getMigrations(): array { return []; }
+        }
+        PHP;
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException("Could not create zip at {$zipPath}");
+        }
+        $zip->addFromString($pluginName . '/Plugin.php', $source);
+        $zip->close();
+
+        return $zipPath;
+    }
+
+    /**
      * Build a zip containing NO class implementing PluginInterface.
      *
      * @param string $workDir Directory to write the .zip into (must exist).
