@@ -677,6 +677,58 @@ final class PluginInstallerTest extends TestCase
         self::assertNull($resolved);
     }
 
+    /**
+     * Invoke the pure fd-closing-wrapper builder with a stubbed shell probe
+     * (WC-221).
+     *
+     * @param callable(string): bool $isExecutable
+     * @return list<string>
+     */
+    private function buildFdClosingWrapperPrefix(callable $isExecutable): array
+    {
+        $method = new ReflectionMethod(PluginInstaller::class, 'buildFdClosingWrapperPrefix');
+
+        /** @var list<string> $result */
+        $result = $method->invoke(null, $isExecutable);
+
+        return $result;
+    }
+
+    public function testFdClosingWrapperPrefersBashWhenAvailable(): void
+    {
+        // The introspection child must close the FrankenPHP worker's inherited
+        // fds before exec'ing php, or it pins the HTTP connection open and the
+        // upload hangs ~41s (WC-221). bash is required to close the MULTI-DIGIT
+        // fds the worker leaks (sh/dash cannot), so it is preferred when present.
+        $prefix = $this->buildFdClosingWrapperPrefix(
+            static fn (string $c): bool => $c === '/bin/bash',
+        );
+
+        self::assertSame('/bin/bash', $prefix[0]);
+        self::assertSame('-c', $prefix[1]);
+        self::assertSame('bash', $prefix[3], 'the shell name is passed as $0');
+        // The wrapper closes inherited fds (>= 3) and then execs the real argv
+        // WITHOUT re-parsing it (positional `"$@"`), so there is no injection
+        // surface from the staged file paths.
+        self::assertStringContainsString('exec "$@"', $prefix[2]);
+        self::assertStringContainsString('/proc/$$/fd', $prefix[2]);
+        self::assertStringContainsString('-ge 3', $prefix[2]);
+    }
+
+    public function testFdClosingWrapperFallsBackToShWhenNoBash(): void
+    {
+        // Bash-less host: fall back to POSIX sh, which still drops the leaked
+        // single-digit connection socket fd. The closing script is unchanged.
+        $prefix = $this->buildFdClosingWrapperPrefix(
+            static fn (string $c): bool => false,
+        );
+
+        self::assertSame('/bin/sh', $prefix[0]);
+        self::assertSame('-c', $prefix[1]);
+        self::assertSame('sh', $prefix[3]);
+        self::assertStringContainsString('exec "$@"', $prefix[2]);
+    }
+
     private function assertPluginDirEmpty(): void
     {
         $entries = array_values(array_diff((array) scandir($this->pluginDir), ['.', '..']));
