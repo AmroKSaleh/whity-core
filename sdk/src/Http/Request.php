@@ -41,6 +41,17 @@ class Request
     private array $attributes = [];
 
     /**
+     * Per-instance memoized uploaded-files bag.
+     *
+     * Lives on the Request instance (never in a static) so persistent worker
+     * runtimes cannot leak one request's parsed uploads into the next. Null
+     * until the first {@see self::getUploadedFiles()} call lazily parses the body.
+     *
+     * @var array<string, UploadedFile>|null
+     */
+    private ?array $uploadedFiles = null;
+
+    /**
      * Constructor
      *
      * @param string $method HTTP method (GET, POST, etc.)
@@ -106,6 +117,39 @@ class Request
     public function getBody(): string
     {
         return $this->body;
+    }
+
+    /**
+     * Get the uploaded files from a multipart/form-data request (SDK v1.5).
+     *
+     * Lazily parses the request body the first time it is called, keyed off the
+     * `Content-Type` header + raw body (never PHP's $_FILES superglobal), so it
+     * is worker-safe and unit-testable. Each file part's bytes are spilled to a
+     * temp file by {@see MultipartParser}; size caps are read from the host
+     * environment via {@see MultipartConfig::fromEnvironment()}.
+     *
+     * Returns an empty array for any non-multipart request (JSON, urlencoded,
+     * GET, etc.); those requests' bodies are left entirely untouched.
+     *
+     * @return array<string, UploadedFile> Uploaded files keyed by multipart field name.
+     * @throws \Whity\Sdk\Http\Exception\MultipartException On a malformed body or a cap violation.
+     */
+    public function getUploadedFiles(): array
+    {
+        if ($this->uploadedFiles !== null) {
+            return $this->uploadedFiles;
+        }
+
+        $contentType = $this->getHeader('Content-Type');
+        if (!MultipartParser::isMultipart($contentType) || $this->body === '') {
+            return $this->uploadedFiles = [];
+        }
+
+        $parser = new MultipartParser(MultipartConfig::fromEnvironment());
+        /** @var string $contentType Narrowed: isMultipart() returns false for null. */
+        $result = $parser->parse($contentType, $this->body);
+
+        return $this->uploadedFiles = $result->getUploadedFiles();
     }
 
     /**
