@@ -673,6 +673,60 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ==================== tenant_settings (Website Settings) ====================
+
+    public function testTenantSettingsReadIsTenantScoped(): void
+    {
+        $repo = new \Whity\Core\Settings\TenantSettingsRepository($this->pdo);
+
+        $aOverrides = $repo->allForTenant(self::TENANT_A);
+        self::assertSame('Tenant A Co', $aOverrides['site_name'] ?? null);
+        self::assertArrayNotHasKey(
+            'support_email',
+            $aOverrides,
+            "Tenant B's override (support_email) must be invisible to Tenant A"
+        );
+
+        $bOverrides = $repo->allForTenant(self::TENANT_B);
+        self::assertSame('b@t2.example', $bOverrides['support_email'] ?? null);
+        self::assertArrayNotHasKey('site_name', $bOverrides, "Tenant A's override must be invisible to Tenant B");
+    }
+
+    public function testTenantCannotClearForeignSettingOverrideAndRowSurvives(): void
+    {
+        $repo = new \Whity\Core\Settings\TenantSettingsRepository($this->pdo);
+
+        // Tenant A tries to delete the 'support_email' key while acting in its own
+        // scope — the tenant_id predicate means it can never reach Tenant B's row.
+        $affected = $repo->delete(self::TENANT_A, 'support_email');
+
+        self::assertSame(0, $affected, 'A cross-tenant override clear must touch zero rows');
+        self::assertSame(
+            'b@t2.example',
+            $this->pdo->query("SELECT value FROM tenant_settings WHERE tenant_id = 2 AND setting_key = 'support_email'")->fetchColumn(),
+            "Tenant B's override must survive a Tenant-A-scoped clear attempt"
+        );
+    }
+
+    public function testTenantSettingWriteLandsOnlyInOwnScopeAndLeavesForeignUntouched(): void
+    {
+        $repo = new \Whity\Core\Settings\TenantSettingsRepository($this->pdo);
+
+        // Tenant A upserts support_email in ITS OWN scope. The (tenant_id, key)
+        // predicate means this can never reach Tenant B's support_email row.
+        $repo->set(self::TENANT_A, 'support_email', 'a@t1.example');
+
+        self::assertSame(
+            'a@t1.example',
+            $this->pdo->query("SELECT value FROM tenant_settings WHERE tenant_id = 1 AND setting_key = 'support_email'")->fetchColumn()
+        );
+        self::assertSame(
+            'b@t2.example',
+            $this->pdo->query("SELECT value FROM tenant_settings WHERE tenant_id = 2 AND setting_key = 'support_email'")->fetchColumn(),
+            "Tenant B's override must be byte-for-byte untouched by Tenant A's write"
+        );
+    }
+
     // ==================== helpers ====================
 
     private function usersHandler(): UsersApiHandler
@@ -884,6 +938,15 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (id, tenant_id, grantor_user_id, grantee_type, grantee_id, permission, granted_at) VALUES
                 (1, 1, 10, 'user', 11, 'users:read', datetime('now')),
                 (2, 2, 20, 'user', 21, 'users:read', datetime('now'))
+        ");
+
+        // Website Settings per-tenant overrides (tenant_settings, migration 025):
+        // disjoint keys per tenant so cross-tenant read/write rejection can be
+        // proven (Tenant A overrides site_name; Tenant B overrides support_email).
+        $pdo->exec("
+            INSERT INTO tenant_settings (tenant_id, setting_key, value, updated_at) VALUES
+                (1, 'site_name',     'Tenant A Co',   datetime('now')),
+                (2, 'support_email', 'b@t2.example',  datetime('now'))
         ");
 
         return $pdo;

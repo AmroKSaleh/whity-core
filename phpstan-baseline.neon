@@ -847,8 +847,18 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 24
+			count: 27
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 8
+			path: tests/Integration/SettingsApiRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
+			path: tests/Integration/SettingsMigrationsRealEngineTest.php
 
 		-
 			message: "#^Call to an undefined method Psr\\\\Log\\\\LoggerInterface\\:\\:expects\\(\\)\\.$#"
