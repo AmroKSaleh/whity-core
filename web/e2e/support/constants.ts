@@ -72,6 +72,7 @@ export const SIDEBAR_SECTIONS = [
   { label: 'Organizational Units', href: '/admin/ous' },
   { label: 'Tenants', href: '/admin/tenants' },
   { label: 'Settings', href: '/settings' },
+  { label: 'Website Settings', href: '/admin/settings' },
 ] as const;
 
 /**

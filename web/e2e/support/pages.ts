@@ -1,5 +1,5 @@
 import { type Locator, type Page, expect } from '@playwright/test';
-import { type Credentials } from './constants';
+import { type Credentials, SIDEBAR_SECTIONS } from './constants';
 
 /**
  * Page object for the login screen and the auth lifecycle.
@@ -139,7 +139,18 @@ export class AppShell {
   }
 
   navLink(label: string): Locator {
-    return this.sidebar.getByRole('link', { name: new RegExp(`\\b${escapeRegExp(label)}$`) });
+    // Resolve nav items within the sidebar's <nav> landmark only. Two
+    // disambiguations matter: (1) the footer "Account settings" link ALSO
+    // points at /settings, so a sidebar-wide href match is ambiguous — scoping
+    // to the navigation region excludes it; (2) within the nav, a section's
+    // href is unique (/settings vs /admin/settings), so "Settings" and
+    // "Website Settings" (both end in "Settings") never collide under strict mode.
+    const nav = this.sidebar.getByRole('navigation');
+    const section = SIDEBAR_SECTIONS.find((s) => s.label === label);
+    if (section) {
+      return nav.locator(`a[href="${section.href}"]`);
+    }
+    return nav.getByRole('link', { name: new RegExp(`\\b${escapeRegExp(label)}$`) });
   }
 
   /** The desktop collapse/expand toggle in the sidebar header (title attr). */
