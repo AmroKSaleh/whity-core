@@ -340,19 +340,19 @@ test.describe('Roles delete guards (admin)', () => {
     await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
     await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
 
-    // But DELETE on the global `user` role is rejected for this tenant (404
-    // "Role not found"), surfaced as a delete-failure toast; the role stays.
+    // DELETE and EDIT on the global `user` base role are DISABLED for this
+    // tenant (WC-222): a global base role (NULL tenant) is not tenant-manageable
+    // (only the system tenant may write it), so the row actions are shown
+    // disabled with an explanatory tooltip rather than letting the admin open a
+    // dialog that would only 404. The seeded role therefore stays.
     const userRow = page.getByRole('row', { name: /^user/ });
     await userRow.getByRole('button').click();
-    await page.getByRole('menuitem', { name: 'Delete' }).click();
-    const deleteDialog = page.getByRole('dialog');
-    await expect(deleteDialog.getByRole('heading', { name: 'Delete Role' })).toBeVisible();
-    await deleteDialog.getByRole('button', { name: 'Delete Role' }).click();
-
-    await expect(page.getByText(/Failed to delete role|Role not found/i)).toBeVisible();
-    // Close the still-open dialog and confirm the seeded role survives.
-    await deleteDialog.getByRole('button', { name: 'Cancel' }).click();
-    await expect(deleteDialog).toBeHidden();
+    const deleteItem = page.getByRole('menuitem', { name: 'Delete' });
+    await expect(deleteItem).toBeVisible();
+    await expect(deleteItem).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByRole('menuitem', { name: 'Edit' })).toHaveAttribute('aria-disabled', 'true');
+    // Close the menu without triggering a delete; the seeded role survives.
+    await page.keyboard.press('Escape');
     await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
   });
 
