@@ -352,6 +352,21 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLUGINS_READ,
     ];
     $items[] = [
+        'id' => 'website-settings',
+        'label' => 'Website Settings',
+        'href' => '/admin/settings',
+        'icon' => 'settings',
+        'group' => 'admin',
+        'order' => 9,
+        // Website Settings: mirrors GET /api/v1/settings, gated on the
+        // settings:read permission (migration grants all three settings perms to
+        // admin). The nav item carries the requirement so a permission-aware
+        // client hides it; the page also enforces it server-side via the
+        // RBAC-protected API (a 403 renders the access-denied state), matching
+        // the plugins pattern.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_READ,
+    ];
+    $items[] = [
         'id' => 'settings',
         'label' => 'Settings',
         'href' => '/settings',
