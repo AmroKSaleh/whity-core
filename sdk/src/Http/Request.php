@@ -52,6 +52,22 @@ class Request
     private ?array $uploadedFiles = null;
 
     /**
+     * The PHP `$_FILES` superglobal as captured by {@see self::fromGlobals()},
+     * or null for a Request built from raw values (tests, plugins).
+     *
+     * Needed because, under the real runtime (FrankenPHP, mod_php, php-fpm) with
+     * `enable_post_data_reading` ON — the default — PHP eagerly parses a
+     * `multipart/form-data` body into `$_FILES` and leaves `php://input` EMPTY.
+     * The body-based {@see MultipartParser} therefore has nothing to parse, so
+     * {@see self::getUploadedFiles()} falls back to this captured `$_FILES` bag.
+     * Stored on the instance (never a static) so a persistent worker cannot leak
+     * one request's files into the next.
+     *
+     * @var array<string, mixed>|null
+     */
+    private ?array $phpFilesSuperglobal = null;
+
+    /**
      * Constructor
      *
      * @param string $method HTTP method (GET, POST, etc.)
@@ -141,7 +157,26 @@ class Request
         }
 
         $contentType = $this->getHeader('Content-Type');
-        if (!MultipartParser::isMultipart($contentType) || $this->body === '') {
+        if (!MultipartParser::isMultipart($contentType)) {
+            return $this->uploadedFiles = [];
+        }
+
+        // Real-runtime path (WC-221): with `enable_post_data_reading` ON (the
+        // default for FrankenPHP / php-fpm / mod_php), PHP has ALREADY parsed the
+        // multipart body into `$_FILES` and drained `php://input`, so the body
+        // this Request was built from is empty. The body-based parser would then
+        // find nothing and every upload would 400 even though the file arrived
+        // intact. When `fromGlobals()` captured a populated `$_FILES`, adopt it.
+        if ($this->body === '' && $this->phpFilesSuperglobal !== null && $this->phpFilesSuperglobal !== []) {
+            return $this->uploadedFiles = $this->uploadedFilesFromPhpFiles(
+                $this->phpFilesSuperglobal,
+                MultipartConfig::fromEnvironment()
+            );
+        }
+
+        // Body-based path: the raw multipart body is present (e.g. unit tests, or
+        // a runtime with post-data-reading disabled). Parse it directly.
+        if ($this->body === '') {
             return $this->uploadedFiles = [];
         }
 
@@ -150,6 +185,55 @@ class Request
         $result = $parser->parse($contentType, $this->body);
 
         return $this->uploadedFiles = $result->getUploadedFiles();
+    }
+
+    /**
+     * Build the uploaded-files bag from a PHP `$_FILES`-shaped array (WC-221).
+     *
+     * Used only on the real-runtime path where PHP itself parsed the multipart
+     * body. Each scalar (single-file) entry whose temp file is within the
+     * per-file cap becomes an {@see UploadedFile} pointing at PHP's tmp_name;
+     * the installer reads it via `copy()`, so PHP's `move_uploaded_file()`
+     * single-move semantics are not required. A part PHP flagged with an error
+     * (e.g. {@see UPLOAD_ERR_INI_SIZE}) is preserved with that error code so the
+     * caller can surface it. Array-of-files fields are not used by core upload
+     * endpoints and are skipped. Kept side-effect-free and array-driven so it is
+     * unit-testable without a live `$_FILES`.
+     *
+     * @param array<string, mixed> $phpFiles A `$_FILES`-shaped array.
+     * @param MultipartConfig $config Provides the per-file size cap.
+     * @return array<string, UploadedFile> File parts keyed by field name.
+     */
+    private function uploadedFilesFromPhpFiles(array $phpFiles, MultipartConfig $config): array
+    {
+        $files = [];
+        foreach ($phpFiles as $field => $spec) {
+            // Only the scalar single-file shape is supported (the shape core
+            // upload endpoints use); skip multi-file array specs.
+            if (!is_array($spec) || !isset($spec['tmp_name']) || !is_string($spec['tmp_name'])) {
+                continue;
+            }
+
+            $error = isset($spec['error']) && is_int($spec['error']) ? $spec['error'] : UPLOAD_ERR_OK;
+            $size = isset($spec['size']) && is_int($spec['size']) ? $spec['size'] : 0;
+
+            // A part PHP rejected for size (or any other reason) keeps its error
+            // code; a successful part exceeding the SDK per-file cap is downgraded
+            // to UPLOAD_ERR_INI_SIZE so the contract matches the body-parse path.
+            if ($error === UPLOAD_ERR_OK && $size > $config->getMaxFileBytes()) {
+                $error = UPLOAD_ERR_INI_SIZE;
+            }
+
+            $files[(string) $field] = new UploadedFile(
+                $spec['tmp_name'],
+                $size,
+                $error,
+                isset($spec['name']) && is_string($spec['name']) ? $spec['name'] : null,
+                isset($spec['type']) && is_string($spec['type']) ? $spec['type'] : null,
+            );
+        }
+
+        return $files;
     }
 
     /**
@@ -228,7 +312,16 @@ class Request
         // Get request body
         $body = file_get_contents('php://input') ?: '';
 
-        return new static($method, $path, $headers, $body);
+        $request = new static($method, $path, $headers, $body);
+
+        // Capture $_FILES so getUploadedFiles() can fall back to it when PHP has
+        // already drained php://input for a multipart body (WC-221). Copied by
+        // value onto the instance; never read from the superglobal afterwards.
+        if ($_FILES !== []) {
+            $request->phpFilesSuperglobal = $_FILES;
+        }
+
+        return $request;
     }
 
     /**

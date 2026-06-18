@@ -2,7 +2,13 @@
 
 declare(strict_types=1);
 
-namespace Whity\Plugins\WC221UploadFixture;
+// The top-level namespace MUST equal the plugin's directory name
+// (WC221UploadFixture): the host PluginLoader maps each plugins/<Dir>/ to the
+// PSR-4 prefix <Dir>\, so a directory plugin's class must live under that
+// prefix for the loader to resolve it on Enable (mirrors the HelloWorld
+// reference plugin's `namespace HelloWorld;`). A mismatched namespace stages
+// fine (introspection uses the SDK autoloader) but cannot be enabled in-host.
+namespace WC221UploadFixture;
 
 use Whity\Sdk\PluginInterface;
 
