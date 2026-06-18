@@ -17,8 +17,8 @@ use Whity\Database\Database;
  * Permission names use the mandated `resource:action` (colon) notation so a
  * fresh database matches the RBAC registry (see CorePermissions). The broader
  * CorePermissions catalogue (e.g. `*:write`, `roles:manage`, `permissions:read`,
- * `plugins:manage`) is reconciled — and `plugins:manage` granted to admin — by
- * the final 012_grant_plugins_manage_to_admin migration, which runs after the OU
+ * the `plugins:*` per-action permissions) is reconciled — and the `plugins:*`
+ * permissions granted to admin — by migration 013, which runs after the OU
  * permissions are seeded so existing human-readable descriptions win.
  */
 class CreatePermissions
