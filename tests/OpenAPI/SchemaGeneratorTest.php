@@ -5,6 +5,7 @@ namespace Whity\Tests\OpenAPI;
 use PHPUnit\Framework\TestCase;
 use Whity\OpenAPI\SchemaGenerator;
 use Whity\Core\PluginLoader;
+use Whity\Core\Router;
 use Whity\Sdk\PluginInterface;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -68,6 +69,124 @@ class SchemaGeneratorTest extends TestCase
         $this->assertArrayHasKey('/api/admin/stats', $spec['paths']);
         $statsOperation = $spec['paths']['/api/admin/stats']['get'];
         $this->assertContains('Admin', $statsOperation['tags']);
+    }
+
+    public function testAuthenticatedPermissionedOperationGetsStandardErrorEnvelopes(): void
+    {
+        $router = new Router('');
+        $router->register('GET', '/api/admin/stats', static fn() => null, 'admin', null, 'view:stats');
+
+        $operation = $this->generateOverRouter($router)['paths']['/api/admin/stats']['get'];
+        $responses = $operation['responses'];
+
+        foreach (['401', '403', '404', '405', '500'] as $code) {
+            $this->assertArrayHasKey($code, $responses, "Expected error response {$code}");
+            $this->assertSame(
+                '#/components/schemas/Error',
+                $responses[$code]['content']['application/json']['schema']['$ref'],
+                "Response {$code} must \$ref the Error component"
+            );
+        }
+    }
+
+    public function testPublicOperationOmitsAuthErrorsButKeepsTransportErrors(): void
+    {
+        $router = new Router('');
+        $router->register('GET', '/api/public/ping', static fn() => null);
+
+        $responses = $this->generateOverRouter($router)['paths']['/api/public/ping']['get']['responses'];
+
+        $this->assertArrayHasKey('404', $responses);
+        $this->assertArrayHasKey('405', $responses);
+        $this->assertArrayHasKey('500', $responses);
+        $this->assertArrayNotHasKey('401', $responses);
+        $this->assertArrayNotHasKey('403', $responses);
+    }
+
+    public function testOperationWithRequestBodyGetsBadRequestEnvelope(): void
+    {
+        $router = new Router('');
+        $router->register('POST', '/api/widgets', static fn() => null, null, null, null, [
+            'request' => ['type' => 'object', 'properties' => ['name' => ['type' => 'string']]],
+            'responses' => [201 => ['description' => 'Created']],
+        ]);
+
+        $operation = $this->generateOverRouter($router)['paths']['/api/widgets']['post'];
+
+        $this->assertArrayHasKey('requestBody', $operation);
+        $this->assertArrayHasKey('400', $operation['responses']);
+        $this->assertSame(
+            '#/components/schemas/Error',
+            $operation['responses']['400']['content']['application/json']['schema']['$ref']
+        );
+    }
+
+    public function testDeclaredResponsesAreNotOverwrittenByInjectedEnvelopes(): void
+    {
+        $router = new Router('');
+        $router->register('GET', '/api/admin/widgets', static fn() => null, 'admin', null, 'view:widgets', [
+            'responses' => [
+                200 => ['description' => 'OK'],
+                403 => ['description' => 'Custom forbidden text'],
+                422 => ['description' => 'Unprocessable entity'],
+            ],
+        ]);
+
+        $responses = $this->generateOverRouter($router)['paths']['/api/admin/widgets']['get']['responses'];
+
+        // Declared 403 keeps its custom description (not clobbered by the generic envelope).
+        $this->assertSame('Custom forbidden text', $responses['403']['description']);
+        $this->assertArrayNotHasKey('content', $responses['403']);
+        // Declared 422 survives; we never inject 422.
+        $this->assertSame('Unprocessable entity', $responses['422']['description']);
+        // Injected universal codes are still added alongside.
+        $this->assertArrayHasKey('404', $responses);
+        $this->assertArrayHasKey('405', $responses);
+        $this->assertArrayHasKey('500', $responses);
+        // 401 is still injected (authenticated) since it was not declared.
+        $this->assertArrayHasKey('401', $responses);
+    }
+
+    public function testInjectedEnvelopesKeepSpecValidAndDeterministic(): void
+    {
+        $build = function (): array {
+            $router = new Router('');
+            $router->register('GET', '/api/admin/stats', static fn() => null, 'admin', null, 'view:stats');
+            $router->register('POST', '/api/widgets', static fn() => null, null, null, null, [
+                'request' => ['type' => 'object', 'properties' => ['name' => ['type' => 'string']]],
+                'responses' => [201 => ['description' => 'Created']],
+            ]);
+            $router->register('GET', '/api/public/ping', static fn() => null);
+
+            $loader = $this->createMock(PluginLoader::class);
+            $loader->method('getPlugins')->willReturn([]);
+
+            return (new SchemaGenerator('Whity API', '1.0.0', $loader, $router))->generateAndValidate();
+        };
+
+        $first = $build();
+        $this->assertSame([], $first['errors'], 'Injected error envelopes must keep the spec structurally valid');
+
+        // Determinism: encoding two generations is byte-identical.
+        $this->assertSame(
+            SchemaGenerator::encode($first['spec']),
+            SchemaGenerator::encode($build()['spec'])
+        );
+    }
+
+    /**
+     * Generate a spec over a Router (the preferred source) with an empty
+     * plugin set, returning the built spec array.
+     *
+     * @param Router $router The router carrying the registered routes.
+     * @return array<string, mixed>
+     */
+    private function generateOverRouter(Router $router): array
+    {
+        $loader = $this->createMock(PluginLoader::class);
+        $loader->method('getPlugins')->willReturn([]);
+
+        return (new SchemaGenerator('Whity API', '1.0.0', $loader, $router))->generate();
     }
 
     /**

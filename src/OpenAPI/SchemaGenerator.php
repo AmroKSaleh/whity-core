@@ -85,6 +85,13 @@ class SchemaGenerator
         $builder->addBearerAuth();
         $this->conflicts = [];
 
+        // Every operation references the uniform error envelope (the standard
+        // error surface injected by addOperation), so the `Error` component
+        // must always be present. Registering the canonical definition here is
+        // idempotent with the identical per-route contribution made by
+        // CoreApiSchemas — registering the same shape twice is a no-op.
+        $builder->addComponentSchema('Error', CoreApiSchemas::components()['Error']);
+
         foreach ($this->routeDeclarations() as $route) {
             $this->addOperation(
                 $builder,
@@ -239,7 +246,10 @@ class SchemaGenerator
             $operation['requestBody'] = $this->jsonBody($request);
         }
 
-        // Responses: declared per-status, or the legacy defaults.
+        // Responses: declared per-status, or the success-only default. The
+        // standard error surface (404/405/500 always; 401/403/400
+        // conditionally) is injected below — the fallback no longer hard-codes
+        // 401/403, so public routes stop falsely advertising auth errors.
         $declaredResponses = $schema['responses'] ?? null;
         if (is_array($declaredResponses) && $declaredResponses !== []) {
             $responses = [];
@@ -253,17 +263,34 @@ class SchemaGenerator
             }
             $operation['responses'] = [
                 '200' => ['description' => 'Successful response'],
-                '401' => ['description' => 'Unauthorized'],
-                '403' => ['description' => 'Forbidden'],
             ];
         }
 
-        // Add security requirement if role is required
+        // Add security requirement if a role/permission is required. This is
+        // the SAME signal used to decide the 401 envelope below.
         if ($requiredRole !== null) {
             $operation['security'] = [
                 ['bearerAuth' => []],
             ];
         }
+
+        // Inject the standard error envelopes, MERGE-NOT-CLOBBER: an
+        // explicitly declared response for a status code always wins. 401 is
+        // emitted iff the operation carries security; 403 iff a role/permission
+        // gate exists; 400 iff a request body is declared.
+        $standard = $this->standardErrorResponses(
+            isset($operation['security']),
+            $requiredRole !== null,
+            isset($operation['requestBody'])
+        );
+        foreach ($standard as $status => $responseObject) {
+            if (!isset($operation['responses'][$status])) {
+                $operation['responses'][$status] = $responseObject;
+            }
+        }
+
+        // Deterministic, ascending status-code ordering for byte-stable output.
+        ksort($operation['responses'], SORT_STRING);
 
         $builder->addPath($specPath, $method, $operation);
     }
@@ -342,6 +369,61 @@ class SchemaGenerator
         }
 
         return ['description' => 'Response'];
+    }
+
+    /**
+     * Build the standard error-response envelopes injected into every
+     * operation. Each response references the uniform `Error` component (the
+     * runtime envelope produced by `Response::error()`), so clients and MCP
+     * see the full error surface.
+     *
+     * Universal (transport-level) for every operation:
+     *   - 404 Not found, 405 Method not allowed, 500 Internal server error.
+     * Conditional:
+     *   - 401 Unauthorized        when the operation requires authentication;
+     *   - 403 Forbidden           when the operation is permission/role gated;
+     *   - 400 Invalid request body when the operation declares a request body.
+     *
+     * 422/429 are NOT injected — they are not universal and remain owned by
+     * explicit route declarations.
+     *
+     * @param bool $authenticated Whether the operation requires authentication.
+     * @param bool $authorized Whether the operation is permission/role gated.
+     * @param bool $hasRequestBody Whether the operation declares a request body.
+     * @return array<int, array{description: string, content: array{'application/json': array{schema: array{'$ref': string}}}}>
+     */
+    private function standardErrorResponses(bool $authenticated, bool $authorized, bool $hasRequestBody): array
+    {
+        $responses = [];
+
+        if ($hasRequestBody) {
+            $responses['400'] = $this->errorResponse('Invalid request body');
+        }
+        if ($authenticated) {
+            $responses['401'] = $this->errorResponse('Unauthorized');
+        }
+        if ($authorized) {
+            $responses['403'] = $this->errorResponse('Forbidden');
+        }
+        $responses['404'] = $this->errorResponse('Not found');
+        $responses['405'] = $this->errorResponse('Method not allowed');
+        $responses['500'] = $this->errorResponse('Internal server error');
+
+        return $responses;
+    }
+
+    /**
+     * A single error response object referencing the `Error` component.
+     *
+     * @param string $description Human-readable description of the error.
+     * @return array{description: string, content: array{'application/json': array{schema: array{'$ref': string}}}}
+     */
+    private function errorResponse(string $description): array
+    {
+        return [
+            'description' => $description,
+            'content' => ['application/json' => ['schema' => SchemaBuilder::ref('Error')]],
+        ];
     }
 
     /**

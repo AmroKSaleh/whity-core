@@ -34,7 +34,7 @@ The generated `openapi.json` includes:
 - **Methods:** HTTP method for each endpoint (GET, POST, PATCH, DELETE, etc.)
 - **Security:** Bearer token authentication configuration
 - **Typed bodies (WC-166):** routes that declare a `schema` get a `requestBody` and per-status `responses` referencing named `components.schemas` via `$ref`
-- **Responses:** declared per-status, or the standard defaults (200, 401, 403) for undeclared routes
+- **Responses:** the declared per-status success shape (or a `200` default) PLUS the standard error surface injected into every operation (see below)
 - **Tags:** declared, or derived from the path
 
 Generation is **deterministic** (paths, methods, and component schemas are
@@ -122,10 +122,32 @@ Endpoints with `getRequiredRole() === null` are public (no auth required).
 
 ### Response Codes
 
-All endpoints include standard responses:
-- **200** — Successful response
-- **401** — Unauthorized (auth required but missing/invalid)
-- **403** — Forbidden (authenticated but insufficient permissions)
+#### Standard error surface (WC-216)
+
+The generator injects the application's uniform error envelope into **every**
+operation's `responses`, so clients and MCP see the full error surface. Each
+injected response references the shared `Error` component
+(`#/components/schemas/Error` → `{ "error": string, "details"?: object }`,
+the body produced by `Response::error()`).
+
+Injected codes:
+
+- **Always (transport-level):** `404` Not found, `405` Method not allowed,
+  `500` Internal server error.
+- **Only when the operation requires authentication** (it carries
+  `security: [{bearerAuth: []}]`): `401` Unauthorized.
+- **Only when the operation is role/permission gated:** `403` Forbidden.
+- **Only when the operation declares a request body:** `400` Invalid request
+  body.
+
+`422`/`429` are **not** blanket-injected — they are owned by explicit route
+declarations.
+
+Injection is **merge-not-clobber**: an explicitly declared response for a
+status code always wins (a route declaring a richer `403`, a `422`, etc. keeps
+its own object). Public routes therefore no longer falsely advertise `401`/`403`.
+Response keys are emitted in ascending status-code order for byte-stable
+regeneration.
 
 ## Development
 

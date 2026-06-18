@@ -400,23 +400,27 @@ PHP);
     }
 
     /**
-     * Review MAJOR 3: empty components.schemas must encode as a JSON OBJECT
-     * ({}), not an array ([]) — [] is invalid OAS and external validators
-     * reject it.
+     * Review MAJOR 3: maps that ARE empty must encode as a JSON OBJECT ({}),
+     * not an array ([]) — [] is invalid OAS and external validators reject it.
+     *
+     * The generator always registers the `Error` component (every operation
+     * now $refs the standard error envelope, WC-216), so components.schemas is
+     * never empty in practice. The encode() guard is exercised here against a
+     * genuinely empty map (an empty paths object) instead.
      */
-    public function testEmptySchemaMapsEncodeAsJsonObjects(): void
+    public function testEmptyMapsEncodeAsJsonObjects(): void
     {
+        // No routes at all: paths is genuinely empty and must encode as {}.
         $router = new Router('');
-        $router->register('GET', '/api/none', static fn () => null, null, null, null, [
-            'responses' => [200 => ['description' => 'ok']],
-        ]);
-
         $loader = new PluginLoader(self::$pluginsDir . '/nonexistent', $router, null, new HookManager());
         $generator = new SchemaGenerator('T', '1.0.0', $loader, $router);
         $json = SchemaGenerator::encode($generator->generate());
 
-        $this->assertStringContainsString('"schemas": {}', $json, 'Empty schema maps must be JSON objects');
+        $this->assertStringContainsString('"paths": {}', $json, 'Empty maps must be JSON objects');
         $this->assertStringNotContainsString('"schemas": []', $json);
+        $this->assertStringNotContainsString('"paths": []', $json);
+        // The always-present Error component keeps the schemas map non-empty.
+        $this->assertStringContainsString('"Error"', $json);
     }
 
     /**
