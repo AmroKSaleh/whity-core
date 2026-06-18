@@ -107,11 +107,11 @@ class RolesApiHandler
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists roles across all tenants; scoped else-branch binds (r.tenant_id = ? OR r.tenant_id IS NULL)
                 $stmt = $this->db->prepare('
-                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at,
+                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
                            COUNT(rp.id) AS permission_count
                     FROM roles r
                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
-                    GROUP BY r.id
+                    GROUP BY r.id, r.tenant_id
                     ORDER BY r.created_at DESC
                 ');
                 $stmt->execute();
@@ -122,12 +122,12 @@ class RolesApiHandler
                 // belongs to every tenant. Tenant-owned roles stay isolated to
                 // their owner (WC-110).
                 $stmt = $this->db->prepare('
-                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at,
+                    SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
                            COUNT(rp.id) AS permission_count
                     FROM roles r
                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
                     WHERE (r.tenant_id = ? OR r.tenant_id IS NULL)
-                    GROUP BY r.id
+                    GROUP BY r.id, r.tenant_id
                     ORDER BY r.created_at DESC
                 ');
                 $stmt->execute([$tenantId]);
@@ -136,10 +136,29 @@ class RolesApiHandler
             /** @var array<int, array<string, mixed>> $roles */
             $roles = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Normalize permission_count to camelCase integer.
-            $roles = array_map(static function (array $role): array {
+            // Normalize permission_count to camelCase integer and surface an
+            // AUTHORITATIVE per-row `manageable` flag so the admin UI can gate
+            // Edit/Delete without first issuing a write that would 404 on a
+            // global base role. The flag mirrors roleManageableByTenant()
+            // (WC-110): SYSTEM tenant (id 0) may manage every role; a regular
+            // tenant may manage ONLY its own roles (a global NULL-tenant role is
+            // not manageable); a null tenant context manages nothing. The raw
+            // owning tenant_id is dropped from the payload — `manageable` is the
+            // clean contract the UI consumes.
+            $roles = array_map(static function (array $role) use ($tenantId): array {
                 $role['permissionCount'] = (int)($role['permission_count'] ?? 0);
                 unset($role['permission_count']);
+
+                $roleTenantId = isset($role['tenant_id']) ? (int)$role['tenant_id'] : null;
+                if ($tenantId === 0) {
+                    $role['manageable'] = true;
+                } elseif ($tenantId === null) {
+                    $role['manageable'] = false;
+                } else {
+                    $role['manageable'] = ($roleTenantId === $tenantId);
+                }
+                unset($role['tenant_id']);
+
                 return $role;
             }, $roles);
 

@@ -386,6 +386,63 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         $this->assertSame(200, $deleteTenant->getStatusCode(), 'SYSTEM may manage any tenant role.');
     }
 
+    // ============ WC-222: per-row manageability surfaced in list() ============
+
+    public function testListMarksGlobalRoleNotManageableForRegularTenantButOwnRoleManageable(): void
+    {
+        // A global (NULL-tenant) base role plus a tenant-owned role.
+        $this->seedGlobalRole(1, 'admin');
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'TenantOneCustom']));
+
+        $list = json_decode($handler->list(new Request('GET', '/api/roles'))->getBody(), true)['data'];
+        $byName = [];
+        foreach ($list as $role) {
+            $byName[$role['name']] = $role;
+        }
+
+        $this->assertArrayHasKey('admin', $byName, 'Global role must still be visible to the tenant.');
+        $this->assertArrayHasKey('TenantOneCustom', $byName);
+
+        // Global NULL-tenant role: NOT manageable by a regular tenant (write 404).
+        $this->assertArrayHasKey('manageable', $byName['admin']);
+        $this->assertFalse(
+            $byName['admin']['manageable'],
+            'A regular tenant must see a global base role as not manageable.'
+        );
+        // The tenant's OWN role: manageable.
+        $this->assertTrue(
+            $byName['TenantOneCustom']['manageable'],
+            "A tenant's own role must be manageable."
+        );
+    }
+
+    public function testListMarksEveryRoleManageableForSystemTenant(): void
+    {
+        $this->seedGlobalRole(1, 'admin');
+
+        // Tenant 1 owns a custom role.
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->create($this->authedRequest('POST', '/api/roles', ['name' => 'TenantOwned']));
+
+        // SYSTEM tenant (id 0) sees and may manage every role.
+        TenantContext::reset();
+        MockRequestFactory::setTestTenant(0);
+        $list = json_decode($handler->list(new Request('GET', '/api/roles'))->getBody(), true)['data'];
+
+        $this->assertNotEmpty($list);
+        foreach ($list as $role) {
+            $this->assertArrayHasKey('manageable', $role);
+            $this->assertTrue(
+                $role['manageable'],
+                "SYSTEM tenant must see every role as manageable (role: {$role['name']})."
+            );
+        }
+    }
+
     public function testTenantBStillCannotSeeTenantAOwnedRoleEvenWithGlobalRolesPresent(): void
     {
         // A global role is present, but tenant isolation for OWNED roles still holds.

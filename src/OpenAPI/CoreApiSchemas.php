@@ -863,7 +863,12 @@ final class CoreApiSchemas
             'parent_id' => self::int(true),
             'created_at' => self::str(true),
             'permissionCount' => self::int(),
-        ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissionCount']);
+            // True when the current tenant may update/delete this role. A global
+            // NULL-tenant base role is visible but not manageable by a regular
+            // tenant (only the SYSTEM tenant may manage it); the admin UI gates
+            // its Edit/Delete actions on this flag (WC-222).
+            'manageable' => self::bool(),
+        ], ['id', 'name', 'description', 'parent_id', 'created_at', 'permissionCount', 'manageable']);
 
         $tenant = self::object([
             'id' => self::int(),

@@ -42,6 +42,19 @@ export function DeleteRoleModal({
       });
 
       if (!response.ok) {
+        // SAFETY NET (WC-222): a 404 here means the role is not manageable by
+        // the current tenant (a global NULL-tenant base role — managed only by
+        // the system tenant, WC-110). The row's Delete action is already gated
+        // on `manageable`, but should that gate ever be bypassed we surface a
+        // friendly toast instead of a generic error / console noise.
+        if (response.status === 404) {
+          addToast(
+            "This role can't be modified by your tenant — global base roles are managed by the system tenant.",
+            'error'
+          );
+          return;
+        }
+
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
           errorData.message || 'Failed to delete role'

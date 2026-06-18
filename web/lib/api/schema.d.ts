@@ -1219,6 +1219,7 @@ export interface components {
             parent_id: number | null;
             created_at: string | null;
             permissionCount: number;
+            manageable: boolean;
         };
         RoleCreateRequest: {
             name: string;

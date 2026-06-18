@@ -74,33 +74,62 @@ export default function RolesPage() {
     { key: 'permissionCount', label: 'Permission Count', sortable: false },
   ];
 
-  const rowActions = (role: Role) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm">
-          <IconMenu2 size={16} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => handleViewPermissions(role)}>
-          View Permissions
-        </DropdownMenuItem>
-        {canEdit && (
-          <DropdownMenuItem onClick={() => handleEditClick(role)}>
-            Edit
+  const rowActions = (role: Role) => {
+    // Two independent gates apply to Edit/Delete: the caller must hold the
+    // capability (ROLES_WRITE / ROLES_DELETE) AND the role must be manageable
+    // by the current tenant. A global NULL-tenant base role is visible but not
+    // manageable by a regular tenant, so writing it would 404 by design
+    // (WC-110); we surface that as a DISABLED item with an explanatory tooltip
+    // rather than letting the click fall through to a raw error (WC-222).
+    const editDisabled = !role.manageable;
+    const deleteDisabled = !role.manageable;
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon-sm">
+            <IconMenu2 size={16} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => handleViewPermissions(role)}>
+            View Permissions
           </DropdownMenuItem>
-        )}
-        {canDelete && (
-          <DropdownMenuItem
-            onClick={() => handleDeleteClick(role)}
-            className="text-destructive focus:text-destructive"
-          >
-            Delete
-          </DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
+          {canEdit && (
+            <DropdownMenuItem
+              disabled={editDisabled}
+              title={
+                editDisabled
+                  ? 'Global base roles can only be edited by the system tenant.'
+                  : undefined
+              }
+              onClick={
+                editDisabled ? undefined : () => handleEditClick(role)
+              }
+            >
+              Edit
+            </DropdownMenuItem>
+          )}
+          {canDelete && (
+            <DropdownMenuItem
+              disabled={deleteDisabled}
+              title={
+                deleteDisabled
+                  ? 'Global base roles can only be deleted by the system tenant.'
+                  : undefined
+              }
+              onClick={
+                deleteDisabled ? undefined : () => handleDeleteClick(role)
+              }
+              className="text-destructive focus:text-destructive"
+            >
+              Delete
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   return (
     <div className="space-y-8">
