@@ -1281,6 +1281,33 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description System is degraded */
             503: {
                 headers: {
@@ -1308,6 +1335,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpenApiDocumentResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Failed to generate the OpenAPI document */
@@ -1339,8 +1384,35 @@ export interface operations {
                     "application/json": components["schemas"]["AdminStatsResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1410,6 +1482,33 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     get_api_v1_delegations: {
@@ -1459,6 +1558,33 @@ export interface operations {
             };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1526,8 +1652,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The grantor does not hold every requested permission */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1584,6 +1728,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     post_api_v1_deployments_apply: {
@@ -1617,8 +1779,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1655,8 +1844,35 @@ export interface operations {
                     "application/json": components["schemas"]["SimpleMessageResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1693,8 +1909,35 @@ export interface operations {
                     "application/json": components["schemas"]["DeploymentStatusResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1729,19 +1972,32 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Unauthorized */
-            401: {
+            /** @description Not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
-            /** @description Forbidden */
-            403: {
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -1766,14 +2022,45 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -1813,6 +2100,33 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     get_api_v1_hello: {
@@ -1831,6 +2145,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Greeting"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1856,14 +2197,45 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -1885,12 +2257,48 @@ export interface operations {
                     "application/json": components["schemas"]["HelloGreetingListResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing hello:view or unresolved tenant context */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -1923,12 +2331,48 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing hello:manage or unresolved tenant context */
             403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -1957,6 +2401,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing hello:manage or unresolved tenant context */
             403: {
                 headers: {
@@ -1970,6 +2423,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -2004,6 +2475,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing hello:manage or unresolved tenant context */
             403: {
                 headers: {
@@ -2017,6 +2497,24 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
         };
     };
@@ -2056,6 +2554,33 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     get_api_v1_migrations: {
@@ -2074,6 +2599,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MigrationListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Internal error */
@@ -2107,6 +2668,24 @@ export interface operations {
             };
             /** @description Unauthenticated or tenant not resolved */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2154,6 +2733,33 @@ export interface operations {
             };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2212,8 +2818,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Name or slug already exists in the tenant */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2270,6 +2903,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     delete_api_v1_ous_id: {
@@ -2308,8 +2959,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Organizational unit still has children or users */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2343,6 +3021,15 @@ export interface operations {
                     "application/json": components["schemas"]["MutationResponse"];
                 };
             };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing or invalid authentication */
             401: {
                 headers: {
@@ -2361,8 +3048,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description The re-parent would create a cycle */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2419,6 +3133,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     get_api_v1_ous_id_roles: {
@@ -2461,6 +3193,24 @@ export interface operations {
             };
             /** @description Organizational unit not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2530,8 +3280,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Assignment already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2587,6 +3355,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     get_api_v1_permissions: {
@@ -2625,6 +3411,33 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     get_api_v1_persons: {
@@ -2647,6 +3460,42 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2696,6 +3545,42 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Internal error */
             500: {
                 headers: {
@@ -2736,8 +3621,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Person not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2783,6 +3695,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Person is linked to a user account */
             403: {
                 headers: {
@@ -2794,6 +3715,15 @@ export interface operations {
             };
             /** @description Person not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2845,6 +3775,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Person is linked to a user account and cannot be edited */
             403: {
                 headers: {
@@ -2856,6 +3795,15 @@ export interface operations {
             };
             /** @description Person not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2894,6 +3842,42 @@ export interface operations {
                     "application/json": components["schemas"]["RelationSummaryListResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Internal error */
             500: {
                 headers: {
@@ -2923,6 +3907,42 @@ export interface operations {
                     "application/json": components["schemas"]["PluginListResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Internal error */
             500: {
                 headers: {
@@ -2950,6 +3970,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SimpleMessageResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Internal error */
@@ -2985,6 +4041,42 @@ export interface operations {
             };
             /** @description Plugin not found or not disabled */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3032,8 +4124,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Plugin not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3099,6 +4218,42 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Internal error */
             500: {
                 headers: {
@@ -3139,6 +4294,42 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Internal error */
             500: {
                 headers: {
@@ -3170,6 +4361,42 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3219,8 +4446,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Person not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3275,8 +4529,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Relation not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3311,6 +4592,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RelationshipTypeListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Internal error */
@@ -3353,6 +4670,33 @@ export interface operations {
             };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3411,8 +4755,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Role name already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3469,6 +4840,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     delete_api_v1_roles_id: {
@@ -3518,8 +4907,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Role has active user assignments */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3553,6 +4960,15 @@ export interface operations {
                     "application/json": components["schemas"]["MutationResponse"];
                 };
             };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Missing or invalid authentication */
             401: {
                 headers: {
@@ -3580,8 +4996,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Role name already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3638,6 +5072,24 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     get_api_v1_tenants: {
@@ -3669,6 +5121,33 @@ export interface operations {
             };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3727,8 +5206,35 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Tenant name or slug already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3794,8 +5300,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Tenant still has users */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3865,8 +5389,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Tenant name or slug already exists */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3905,6 +5447,33 @@ export interface operations {
             };
             /** @description Insufficient permissions */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3972,8 +5541,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Email already exists in the tenant */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4023,6 +5610,24 @@ export interface operations {
             };
             /** @description User not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4092,8 +5697,26 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Email already exists in the tenant */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4125,6 +5748,42 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
