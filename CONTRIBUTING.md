@@ -39,7 +39,7 @@ PHP on your host machine to develop the backend.
 ### Prerequisites
 
 - Docker + Docker Compose
-- Node.js 20+ and npm (for the `web/` Next.js frontend)
+- Node.js 22 and npm (CI uses Node 22 — for the `web/` Next.js frontend)
 - `make` (optional but convenient — see the [Makefile](Makefile))
 
 ### 1. Configure environment variables
@@ -191,8 +191,9 @@ rebase (`git push --force-with-lease`).
 
 - **`declare(strict_types=1);`** at the top of every PHP file.
 - **PSR-12** coding style.
-- **PHPStan** static analysis must pass (`vendor/bin/phpstan analyse src tests`,
-  matching CI). Fix the root cause — do not suppress errors with broad ignores.
+- **PHPStan at level 8** must pass over the full CI scope —
+  `vendor/bin/phpstan analyse src tests plugins sdk` (config in `phpstan.neon`).
+  Fix the root cause — do not suppress errors with broad ignores.
 - **PHPDoc on public APIs**, especially to document array shapes, generics, and
   `@throws` that the native type system cannot express.
 - **Typed exceptions** — throw specific exception classes, not bare
@@ -210,6 +211,12 @@ rebase (`git push --force-with-lease`).
 - **No direct database access in API handlers** beyond the sanctioned
   query/repository layer, and every query must be tenant-scoped (see
   [Tenant Isolation](docs/wiki/TENANT_ISOLATION.md)).
+- **The tenant predicate is CI-enforced.** A static guard
+  (`scripts/ci-tenant-predicate-guard.php`) fails the build if a
+  `SELECT`/`UPDATE`/`DELETE` touches a tenant-owned table without a `tenant_id`
+  predicate. A genuinely platform-wide table must be registered in
+  `src/Core/Tenant/SanctionedGlobalTables.php`; a deliberate one-off unscoped
+  query needs a reasoned `// @tenant-guard-ignore: <reason>` annotation.
 
 ### TypeScript (frontend)
 
@@ -242,6 +249,24 @@ preserving old behavior:
 The quality bar still holds: clean means tested and verified (real-engine tests,
 green CI), not unverified.
 
+### Generated artifacts — keep them in sync
+
+Several committed files are generated and **drift-gated in CI** — regenerate and
+commit them in the same PR as the change that affects them, or the build fails:
+
+- **OpenAPI spec** — `public/openapi.json` is generated from the live PHP router.
+  After any route/schema change run `php public/index.php generate:openapi`; CI
+  fails if the committed spec differs from a fresh generation (and the PHPUnit
+  `OpenApiSpecDriftTest` asserts the same).
+- **Typed API client** — `web/lib/api/schema.d.ts` is generated from
+  `public/openapi.json`. After the spec changes run
+  `cd web && npm run generate:api`; CI fails on drift. So a single API change
+  touches three files: the handler/route, `public/openapi.json`, and
+  `web/lib/api/schema.d.ts`.
+- **Design tokens** — styling variables come from `base.json` via the token
+  pipeline; run `cd web && npm run tokens:check` (CI runs it). Never hand-edit a
+  generated token output or use raw hex/RGB in components.
+
 ## Testing Requirements
 
 Both **unit and integration tests are mandatory** for changes that touch
@@ -271,6 +296,13 @@ PDO masked (numeric permission ids resolving to zero permissions, and
 API-created roles being undeletable). When a test asserts how a query behaves,
 run it against a genuine engine.
 
+**Verify data-layer / migration / auth changes on real PostgreSQL.** The SQLite
+suite masks Postgres-only bugs (reserved words, DDL/type/cast, `rowCount()` on a
+`SELECT`). CI's `postgres-integration` job runs `migrate run` + `seed` + a second
+idempotent `migrate run` against a real PostgreSQL service; for every new
+tenant-owned table, extend `CrossTenantRejectionRealEngineTest` (it runs on the
+real engine).
+
 ### Running backend tests
 
 Run inside the FrankenPHP container (there is no native PHP requirement on your
@@ -280,8 +312,8 @@ host). CI uses PHP 8.4, so match that locally:
 # Full PHPUnit suite
 docker exec whity_frankenphp vendor/bin/phpunit
 
-# PHPStan static analysis (same invocation as CI)
-docker exec whity_frankenphp vendor/bin/phpstan analyse src tests
+# PHPStan static analysis (level 8, same scope as CI)
+docker exec whity_frankenphp vendor/bin/phpstan analyse src tests plugins sdk
 ```
 
 `make test` is a convenience target that runs `php vendor/bin/phpunit
@@ -325,11 +357,26 @@ seeded accounts and shared-database discipline.
    reviewers should focus on, note testing performed, and reference the tracking
    issue (e.g. `Relates to #1` / `Closes #9`). Do **not** add AI/tool attribution.
 
-4. **CI must be green.** The
-   [`automated-tests.yml`](.github/workflows/automated-tests.yml) workflow runs
-   on every PR to `main`: it sets up PHP 8.4, runs `composer install`, then
-   `vendor/bin/phpunit` and `vendor/bin/phpstan analyse src tests`. A red build
-   blocks merge.
+4. **CI must be green — all jobs.** Two workflows run on every PR to `main`;
+   merge only after every job passes (never merge on a red or still-running
+   check):
+
+   - [`automated-tests.yml`](.github/workflows/automated-tests.yml):
+     - **Unit, static analysis & plugin smoke (SQLite)** — `phpunit`, the
+       OpenAPI-spec drift check, `phpstan analyse src tests plugins sdk`, the
+       plugin-load smoke, the tenant-predicate guard, and the plugin
+       tenant-isolation conformance check.
+     - **Migrations + seed on real PostgreSQL** — migrate / seed / idempotent
+       re-migrate against a real Postgres service.
+     - **Frontend types, tests & generated-artifact drift** (Node 22) — the
+       typed-client (`schema.d.ts`) drift check, the design-token drift check,
+       the shadcn registry build, `tsc --noEmit`, ESLint (zero errors), the
+       production `next build`, and Jest.
+   - [`e2e.yml`](.github/workflows/e2e.yml): the **Playwright multi-role suite
+     across 3 shards**, run against the full Docker stack. Treat e2e as required
+     for any change to request handling, middleware, auth, SQL, the worker
+     pipeline, `docker-compose`, or plugins — unit tests built from a `Request`
+     object can mask worker/integration behavior.
 
 5. **Code review** — address review feedback by pushing follow-up commits (or a
    clean rebase). Verify suggestions technically rather than applying them
@@ -347,7 +394,14 @@ seeded accounts and shared-database discipline.
    - [ ] Unit + integration tests added/updated and passing locally.
    - [ ] Integration tests cover RBAC route protection and tenant isolation
          where relevant; data-layer logic uses real-engine tests.
-   - [ ] PHPStan clean; frontend lints clean (`npm run lint`) if `web/` changed.
+   - [ ] PHPStan (level 8, `src tests plugins sdk`) clean; frontend `tsc` +
+         `npm run lint` clean if `web/` changed.
+   - [ ] Generated artifacts regenerated and committed if affected:
+         `public/openapi.json` (`generate:openapi`) and `web/lib/api/schema.d.ts`
+         (`npm run generate:api`) on API changes; design tokens
+         (`npm run tokens:check`) on styling changes.
+   - [ ] Data-layer / migration / auth changes verified on real PostgreSQL; new
+         tenant-owned tables added to `CrossTenantRejectionRealEngineTest`.
    - [ ] No hardcoded secrets/values; config via env vars.
    - [ ] No `Co-authored-by` / AI attribution in commits or PR body.
 
@@ -436,11 +490,23 @@ from a plugin — plugins use the standard `schema_migrations` table.
 
 ### 4. Plugins, not forks
 
-Extend the framework via plugins implementing `PluginInterface`. Plugin authors
-should follow [Plugin Development](docs/wiki/Plugin-Development.md), the
+Extend the framework via plugins implementing `Whity\Sdk\PluginInterface` (from
+the standalone `whity/plugin-sdk` package — there is no `Whity\Core` plugin
+alias). A plugin may declare optional SDK/host **version constraints**
+(`PluginRequirementsInterface::getSdkConstraint()` / `getCoreConstraint()`); the
+loader **quarantines** an incompatible or malformed plugin instead of letting it
+run. Plugin authors should follow
+[Plugin Development](docs/wiki/Plugin-Development.md), the
 [Hook System](docs/wiki/HOOK_SYSTEM.md), and the
 [Permission System](docs/wiki/PERMISSION_SYSTEM.md). Hook payloads must contain
 only scalar data — never model instances or DB connections.
+
+**Plugin-repo hygiene:** product/customer plugins live in their own repositories
+and are dropped into `plugins/` at deploy time — they are **never** committed to
+whity-core. The only plugins in this repo are the reference/example plugins that
+document the SDK and exercise it in CI (`plugins/HelloWorld/`,
+`plugins/ExamplePlugin.php`); `plugins/.gitignore` enforces this. Extend the
+existing examples rather than adding new ones.
 
 ## Further Reading
 
