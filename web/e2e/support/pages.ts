@@ -1,5 +1,5 @@
 import { type Locator, type Page, expect } from '@playwright/test';
-import { type Credentials } from './constants';
+import { type Credentials, SIDEBAR_SECTIONS } from './constants';
 
 /**
  * Page object for the login screen and the auth lifecycle.
@@ -139,6 +139,14 @@ export class AppShell {
   }
 
   navLink(label: string): Locator {
+    // Locate by href when the label maps to a known sidebar section: nav items
+    // render with a numeric prefix (e.g. "9 Website Settings"), so a name-regex
+    // anchored on the label suffix is ambiguous — "Settings" also matches
+    // "Website Settings". Hrefs are unique, so they disambiguate reliably.
+    const section = SIDEBAR_SECTIONS.find((s) => s.label === label);
+    if (section) {
+      return this.sidebar.locator(`a[href="${section.href}"]`);
+    }
     return this.sidebar.getByRole('link', { name: new RegExp(`\\b${escapeRegExp(label)}$`) });
   }
 

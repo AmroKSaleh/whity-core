@@ -5,9 +5,9 @@ import { ADMIN, SIDEBAR_SECTIONS } from './support/constants';
 test.describe('Sidebar navigation (admin)', () => {
   test('all expected sidebar sections are present', async ({ adminPage }) => {
     for (const section of SIDEBAR_SECTIONS) {
-      await expect(
-        adminPage.shell.sidebar.getByRole('link', { name: new RegExp(`${section.label}$`) })
-      ).toBeVisible();
+      // navLink resolves by unique href, so "Settings" vs "Website Settings"
+      // (both end in "Settings") don't collide under strict mode.
+      await expect(adminPage.shell.navLink(section.label)).toBeVisible();
     }
     await expect(adminPage.shell.logoutButton).toBeVisible();
     await expect(adminPage.shell.sidebar.getByText('Logged in as')).toBeVisible();
