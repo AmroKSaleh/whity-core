@@ -346,7 +346,11 @@ class PluginLoader
         }
 
         foreach ($items as $item) {
-            if ($item === '.' || $item === '..') {
+            // Skip ALL dot-prefixed entries (`.`, `..`, `.gitkeep`, and the
+            // installer's atomic-commit temp sibling `.<Name>.tmp_<rand>`):
+            // dotfiles/dot-dirs are never plugins, so they must not register a
+            // PSR-4 namespace prefix (WC-220 minor).
+            if (str_starts_with($item, '.')) {
                 continue;
             }
 
@@ -685,7 +689,13 @@ class PluginLoader
         }
 
         foreach ($items as $item) {
-            if ($item === '.' || $item === '..') {
+            // Skip ALL dot-prefixed entries (`.`, `..`, `.gitkeep`, and the
+            // installer's atomic-commit temp sibling `.<Name>.tmp_<rand>`):
+            // dotfiles/dot-dirs are never plugins. This also fails closed if a
+            // temp dir is leaked by a hard crash mid-commit (before its
+            // sentinel) — discovery never require_once's its top-level code
+            // (WC-220 minor).
+            if (str_starts_with($item, '.')) {
                 continue;
             }
 

@@ -172,7 +172,11 @@ class PluginsApiHandler
             }
 
             foreach ($files as $file) {
-                if ($file === '.' || $file === '..' || $file === '.gitkeep') {
+                // Skip ALL dot-prefixed entries (`.`, `..`, `.gitkeep`, and the
+                // installer's atomic-commit temp sibling `.<Name>.tmp_<rand>`):
+                // dotfiles/dot-dirs are never plugins and must not be listed
+                // (WC-220 minor; subsumes the prior `.gitkeep` special-case).
+                if (str_starts_with($file, '.')) {
                     continue;
                 }
 

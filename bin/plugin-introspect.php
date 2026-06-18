@@ -18,20 +18,37 @@
  * disposable process, so they cannot pollute a long-lived FrankenPHP worker or
  * clash with the loader when it later loads the committed copy.
  *
- * TAMPER RESISTANCE (WC-220 hardening): the staged plugin's top-level code runs
- * during `require` and could `echo` a forged result then `exit` before this
- * script emits anything. To make pre-emit plugin output non-authoritative:
- *  - the parent passes a single-use random NONCE as the first argument, which
- *    this script captures and SCRUBS (from the argv copy, $_SERVER, $GLOBALS,
- *    $argc) BEFORE loading any plugin code, so the plugin cannot read it;
- *  - an output buffer is opened at the very top and DISCARDED immediately
- *    before the genuine emit;
- *  - the genuine result is written between NONCE-KEYED sentinel markers and the
- *    process exits 0.
- * The parent reads ONLY the bytes between the markers carrying THIS run's
- * nonce, and requires exactly one valid JSON object and a zero exit code.
- * Anything else — including a plugin that itself printed forged markers (it
- * cannot know the nonce) and then exited — is treated as an inspection failure.
+ * TAMPER RESISTANCE (WC-220 hardening, re-review M3): the staged plugin's
+ * top-level code runs during `require` and could `echo` a forged result then
+ * `exit` before this script emits anything. To make pre-emit plugin output
+ * non-authoritative the genuine result is written between NONCE-KEYED sentinel
+ * markers and the parent reads ONLY the bytes between the markers carrying THIS
+ * run's nonce. The plugin therefore cannot forge a block the parent accepts —
+ * unless it can RECOVER the nonce.
+ *
+ * Recovering the nonce must be impossible. An earlier design passed the nonce as
+ * a command-line argument and scrubbed it from `$argv`/`$_SERVER`/`$GLOBALS`
+ * before loading the plugin. That was BROKEN: the kernel still exposes the
+ * ORIGINAL argv at `/proc/self/cmdline` (and env at `/proc/self/environ`), which
+ * PHP-level scrubbing cannot remove, so a plugin could read the nonce there and
+ * forge an accepted block. The robust fix is to never put the secret anywhere
+ * the child's own process can read:
+ *  - the nonce is delivered over STDIN (NOT argv, NOT env), so it appears in no
+ *    process-visible table (`/proc/self/cmdline`, `/proc/self/environ`);
+ *  - it is read and consumed FIRST, before any plugin code runs; re-reading
+ *    STDIN yields EOF, so the plugin cannot recover it from there either;
+ *  - the plugin file is required inside an ISOLATED closure that does NOT import
+ *    the `$nonce` variable, so the plugin's top-level code cannot read it from
+ *    the enclosing scope.
+ * With cmdline, environ, stdin, and the variable scope all closed, the plugin
+ * has no channel to learn the nonce, so it cannot print a marker pair the parent
+ * will accept. A plugin that prints forged markers (wrong/blank nonce) or
+ * `exit(0)`s without the genuine emit yields no valid nonce-keyed block → the
+ * parent treats it as an inspection failure.
+ *
+ * Defence in depth still applies: an output buffer is opened at the very top and
+ * DISCARDED immediately before the genuine emit, so pre-emit plugin output never
+ * reaches stdout.
  *
  * Output contract (stdout):
  *  - ===WC-INTROSPECT-BEGIN:<nonce>==={json}===WC-INTROSPECT-END:<nonce>===
@@ -50,34 +67,21 @@
 declare(strict_types=1);
 
 (static function (array $argv): void {
-    // The parent passes a single-use random NONCE as the first argument. It is
-    // embedded in the result markers so a plugin that itself prints forged
-    // markers at top level (then exits before the genuine emit) cannot forge a
-    // block the parent will accept: the parent requires the markers to carry
-    // the exact nonce it generated, which the plugin cannot guess (WC-220 M3).
-    // Capture it FIRST, then SCRUB it from every place the about-to-run plugin
-    // code could read it ($argv copy, $_SERVER, $GLOBALS, $argc) so the plugin
-    // cannot recover the nonce and replay it.
-    $nonce = isset($argv[1]) ? (string) $argv[1] : '';
+    // The parent delivers a single-use random NONCE over STDIN (NOT argv, NOT
+    // env), so it appears in no process-visible table the about-to-run plugin
+    // code could read — not `/proc/self/cmdline`, not `/proc/self/environ`
+    // (WC-220 M3 re-review). Read and CONSUME it FIRST, before any plugin code
+    // runs: a later re-read of STDIN by the plugin yields EOF, so the plugin
+    // cannot recover the nonce from there either. Hold it in a local variable
+    // that the isolated plugin-require closure below does NOT import.
+    $nonce = '';
+    $stdinLine = fgets(STDIN);
+    if (is_string($stdinLine)) {
+        $nonce = trim($stdinLine);
+    }
 
-    $files = array_slice($argv, 2);
-
-    // Scrub the nonce from anywhere the untrusted plugin code could observe it.
-    if (isset($_SERVER['argv']) && is_array($_SERVER['argv'])) {
-        unset($_SERVER['argv'][1]);
-        $_SERVER['argv'] = array_values($_SERVER['argv']);
-        $_SERVER['argc'] = count($_SERVER['argv']);
-    }
-    if (isset($GLOBALS['argv']) && is_array($GLOBALS['argv'])) {
-        unset($GLOBALS['argv'][1]);
-        $GLOBALS['argv'] = array_values($GLOBALS['argv']);
-    }
-    if (isset($GLOBALS['argc'])) {
-        $GLOBALS['argc'] = isset($GLOBALS['argv']) && is_array($GLOBALS['argv'])
-            ? count($GLOBALS['argv'])
-            : 0;
-    }
-    $argv = [];
+    // The staged plugin files are the only argv entries (no secret in argv).
+    $files = array_slice($argv, 1);
 
     // Unique sentinels delimiting the genuine result on stdout, suffixed with
     // the unguessable nonce. Kept in sync with
@@ -127,13 +131,22 @@ declare(strict_types=1);
         $emit(['status' => 'error', 'reason' => 'none']);
     }
 
+    // Require the staged plugin file(s) inside an ISOLATED closure that does NOT
+    // `use` the $nonce (or any secret) — the plugin's top-level code runs here
+    // and so cannot read the nonce from the enclosing scope. Combined with the
+    // nonce never being in argv/env (cmdline/environ) and STDIN already being
+    // consumed to EOF, the plugin has no channel to recover the nonce.
+    $loadPlugin = static function (string $pluginFile): void {
+        require $pluginFile;
+    };
+
     $before = get_declared_classes();
     foreach ($files as $file) {
         if (!is_string($file) || !is_file($file)) {
             continue;
         }
         try {
-            require_once $file;
+            $loadPlugin($file);
         } catch (\Throwable $e) {
             $emit(['status' => 'error', 'reason' => 'load']);
         }

@@ -83,11 +83,13 @@ final class PluginInstaller
      * Sentinel marker prefixes/suffix delimiting the genuine introspection
      * result on the child's stdout. The full marker is
      * `<PREFIX><nonce><SUFFIX>`, where the nonce is a single-use random token
-     * the child scrubs before any plugin code runs. The parent parses ONLY the
-     * bytes between the nonce-keyed markers, so any output the untrusted plugin
-     * printed before the genuine emit (a forged result — even one wrapped in
-     * forged markers with a guessed nonce — or a version-gate-bypass attempt) is
-     * non-authoritative (WC-220 M3). Kept in sync with bin/plugin-introspect.php.
+     * delivered to the child over STDIN (never argv/env, so it is absent from
+     * `/proc/self/cmdline` and `/proc/self/environ`) and consumed before any
+     * plugin code runs. The parent parses ONLY the bytes between the nonce-keyed
+     * markers, so any output the untrusted plugin printed before the genuine
+     * emit (a forged result — even one wrapped in forged markers with a guessed
+     * nonce — or a version-gate-bypass attempt) is non-authoritative
+     * (WC-220 M3). Kept in sync with bin/plugin-introspect.php.
      */
     private const INTROSPECT_BEGIN_MARKER = '===WC-INTROSPECT-BEGIN:';
     private const INTROSPECT_END_MARKER = '===WC-INTROSPECT-END:';
@@ -563,21 +565,27 @@ final class PluginInstaller
         $php = (defined('PHP_BINARY') && PHP_BINARY !== '') ? PHP_BINARY : 'php';
 
         // Single-use, unguessable nonce keying the result markers (WC-220 M3):
-        // the child embeds it in its genuine emit and scrubs it before any
-        // plugin code runs, so a plugin that prints forged markers cannot make
-        // the parent accept a forged block (the parent requires THIS nonce).
+        // the child embeds it in its genuine emit, so a plugin that prints
+        // forged markers cannot make the parent accept a forged block (the
+        // parent requires THIS nonce). The nonce is delivered over STDIN — NOT
+        // argv, NOT env — so it never appears in any process-visible table the
+        // untrusted plugin could read (`/proc/self/cmdline`,
+        // `/proc/self/environ`), which PHP-level scrubbing of $argv/$_SERVER
+        // could not cover (re-review fix). The child consumes it before any
+        // plugin code runs and loads the plugin in an isolated scope, so the
+        // plugin has no channel to recover it.
         $nonce = bin2hex(random_bytes(16));
 
         // Pass hard child resource limits so a runaway plugin cannot exhaust
         // host memory/CPU even within the wall-clock deadline (WC-220 M1). The
-        // nonce is the FIRST argument; the staged files follow.
+        // staged files are the only argv entries — the nonce is NEVER an
+        // argument (it would be readable via /proc/self/cmdline).
         $cmd = array_merge(
             [
                 $php,
                 '-d', 'memory_limit=' . self::CHILD_MEMORY_LIMIT,
                 '-d', 'max_execution_time=' . self::CHILD_MAX_EXECUTION_TIME,
                 $script,
-                $nonce,
             ],
             $files
         );
@@ -590,6 +598,16 @@ final class PluginInstaller
         $process = @proc_open($cmd, $descriptors, $pipes);
         if (!is_resource($process)) {
             throw new PluginPackageInvalid('The package could not be inspected.');
+        }
+
+        // Hand the nonce to the child over its stdin pipe, then close stdin so
+        // the child's first read sees the single line and any later read by the
+        // plugin sees EOF. Writing happens before the bounded read drains
+        // stdout (the nonce line is tiny — well within the pipe buffer — so this
+        // never deadlocks).
+        if (is_resource($pipes[0])) {
+            @fwrite($pipes[0], $nonce . "\n");
+            @fclose($pipes[0]);
         }
 
         // Bounded, non-blocking read with a wall-clock deadline. A malicious
@@ -682,8 +700,12 @@ final class PluginInstaller
      */
     private function readChildBounded($process, array $pipes): array
     {
-        // We never write to the child; close stdin so it cannot block on input.
-        fclose($pipes[0]);
+        // stdin already carried the single nonce line and was closed by the
+        // caller (so the child's later reads see EOF); close it here only if it
+        // somehow remains open.
+        if (is_resource($pipes[0])) {
+            @fclose($pipes[0]);
+        }
 
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);

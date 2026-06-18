@@ -335,6 +335,52 @@ final class PluginInstallerTest extends TestCase
     }
 
     /**
+     * M3 re-review (CONFIRMED-exploit regression): the prior design passed the
+     * introspection nonce as a command-line argument and merely scrubbed it from
+     * `$argv`/`$_SERVER`/`$GLOBALS`. That was bypassable — the kernel still
+     * exposes the ORIGINAL argv at `/proc/self/cmdline` (and env at
+     * `/proc/self/environ`), which PHP-level scrubbing cannot remove — so a
+     * plugin could read the nonce, print a forged compatible block keyed by it,
+     * and `exit(0)` before the genuine emit, bypassing the version gate.
+     *
+     * This fixture mounts exactly that attack: it greps BOTH proc files for a
+     * 32-hex token and forges a constraint-free (compatible) block for each
+     * candidate, while the GENUINE plugin declares an impossible `^99.0` core
+     * constraint. With the nonce now delivered over STDIN (never argv/env) and
+     * consumed before plugin code runs, neither proc table contains it, so every
+     * forged block carries the wrong token; the host parses ONLY the genuine
+     * block and rejects the incompatible plugin. Nothing is staged; the
+     * filesystem is left clean. This proves the prior exploit is dead.
+     */
+    public function testProcCmdlineNonceRecoveryCannotBypassVersionGate(): void
+    {
+        if (!is_readable('/proc/self/cmdline')) {
+            self::markTestSkipped('Linux /proc is required for the cmdline/environ nonce-recovery probe.');
+        }
+
+        $zip = PluginPackageFixtures::cmdlineNonceProbeZip($this->workDir, 'CmdlineProbe');
+
+        $rejected = false;
+        try {
+            $this->installer()->installFromUpload($this->upload($zip));
+        } catch (PluginIncompatible | PluginPackageInvalid $e) {
+            // EITHER outcome proves the attack failed: the genuine (incompatible)
+            // metadata reached the gate (PluginIncompatible), or the forged
+            // wrong-nonce blocks left no genuine result to parse and the upload
+            // was rejected as an inspection failure (PluginPackageInvalid). What
+            // must NEVER happen is acceptance/staging of the forged compatible
+            // metadata.
+            $rejected = true;
+        } finally {
+            self::assertDirectoryDoesNotExist($this->pluginDir . '/CmdlineProbe');
+            $this->assertPluginDirEmpty();
+            self::assertSame(0, $this->tempWorkDirCount());
+        }
+
+        self::assertTrue($rejected, 'a nonce-recovery forgery must never be accepted/staged');
+    }
+
+    /**
      * M2: prove the staged directory artifact is disabled BY CONSTRUCTION — the
      * `.disabled` sentinel is established together with (and never after) the
      * tree, so a directory can never appear at the live path without it (which
@@ -457,6 +503,89 @@ final class PluginInstallerTest extends TestCase
             $marker,
             'a DISABLED directory plugin must never be require_once\'d/instantiated in the HOST worker before enable'
         );
+    }
+
+    /**
+     * ISSUE 2 (minor) regression: the M2 atomic-commit prepares the artifact in
+     * a dot-prefixed temp sibling (`.<Name>.tmp_<rand>`) inside plugins/ so the
+     * landing rename() is atomic/same-filesystem. If such a temp dir were leaked
+     * by a hard crash mid-commit (before its sentinel), discovery must NOT
+     * `require_once` its top-level code and listing must NOT surface it.
+     *
+     * discover() and PluginsApiHandler::list() now skip ALL dot-prefixed
+     * entries (not just `.`/`..`/`.gitkeep`). This plants a `.Foo.tmp_x`
+     * directory whose Plugin.php has a top-level side effect (writes a marker)
+     * and asserts the marker stays absent after discover() + list(), and that
+     * the entry never appears in the listing.
+     */
+    public function testDotPrefixedEntriesAreSkippedByDiscoveryAndListing(): void
+    {
+        $marker = $this->workDir . '/DOT_EXECUTED_MARKER.txt';
+        self::assertFileDoesNotExist($marker);
+
+        // A leaked atomic-commit temp sibling: dot-prefixed dir under plugins/.
+        $leaked = $this->pluginDir . '/.Foo.tmp_' . bin2hex(random_bytes(4));
+        mkdir($leaked, 0775, true);
+        $markerExport = var_export($marker, true);
+        file_put_contents(
+            $leaked . '/Plugin.php',
+            <<<PHP
+            <?php
+
+            declare(strict_types=1);
+
+            namespace Foo;
+
+            use Whity\\Sdk\\PluginInterface;
+
+            // TOP-LEVEL side effect: writing this proves discover() require_once'd
+            // the file. It must NEVER run for a dot-prefixed entry.
+            @\\file_put_contents({$markerExport}, "discovered\\n", FILE_APPEND);
+
+            final class Plugin implements PluginInterface
+            {
+                public function getName(): string { return 'Foo'; }
+                public function getVersion(): string { return '1.0.0'; }
+                public function getRoutes(): array { return []; }
+                public function getPermissions(): array { return []; }
+                public function getHooks(): array { return []; }
+                public function getMigrations(): array { return []; }
+            }
+            PHP
+        );
+
+        $loader = new PluginLoader($this->pluginDir, new \Whity\Core\Router(''));
+
+        // discover() must not execute the dot-prefixed entry's top-level code.
+        $discovered = $loader->discover();
+        self::assertSame(
+            [],
+            $discovered,
+            'discovery must not pick up a dot-prefixed (temp/leaked) entry'
+        );
+        self::assertFileDoesNotExist(
+            $marker,
+            'discover() must NOT require_once a dot-prefixed entry\'s top-level code'
+        );
+
+        // A full load() pass (discover + register) likewise must not run it.
+        $loader->load();
+        self::assertFileDoesNotExist($marker, 'load() must NOT execute a dot-prefixed entry');
+
+        // list() must not surface the dot-prefixed entry.
+        $handler = new \Whity\Api\PluginsApiHandler($this->pluginDir, $loader);
+        $listResponse = $handler->list(new \Whity\Core\Request('GET', '/api/plugins'));
+        /** @var array{data: list<array{id: string, name: string}>} $payload */
+        $payload = json_decode($listResponse->getBody(), true);
+        $ids = array_map(static fn(array $p): string => (string) $p['id'], $payload['data']);
+        $names = array_map(static fn(array $p): string => (string) $p['name'], $payload['data']);
+
+        self::assertNotContains('.Foo', $ids, 'list() must not surface a dot-prefixed entry');
+        self::assertNotContains('Foo', $names, 'list() must not surface a dot-prefixed entry');
+        foreach ($ids as $id) {
+            self::assertStringNotContainsString('.tmp_', $id, 'list() must not surface a temp sibling');
+        }
+        self::assertFileDoesNotExist($marker, 'list() must NOT execute a dot-prefixed entry');
     }
 
     private function assertPluginDirEmpty(): void

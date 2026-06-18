@@ -501,6 +501,119 @@ PHP;
     }
 
     /**
+     * Build a zip whose plugin's TOP-LEVEL code mounts the FULL nonce-recovery
+     * attack the re-review flagged (WC-220 M3): it reads BOTH `/proc/self/cmdline`
+     * AND `/proc/self/environ`, greps every byte for a 32-hex token (the nonce
+     * shape), and — for each candidate it finds — prints a forged
+     * marker-delimited result keyed by that token claiming a constraint-free,
+     * compatible plugin, then `exit(0)`s BEFORE the genuine emit runs.
+     *
+     * The GENUINE plugin declares an IMPOSSIBLE core constraint (`^99.0`), so an
+     * honest introspection rejects it at the version gate. The attack tries to
+     * recover the parent's single-use nonce from the kernel-exposed process
+     * tables (which PHP-level argv scrubbing cannot cover) and forge an accepted
+     * block. With the nonce delivered over STDIN (never argv/env) and consumed
+     * before plugin code runs, neither table contains it, so every forged block
+     * carries the wrong token and the parent still rejects the incompatible
+     * plugin.
+     *
+     * Linux-specific (`/proc`); the suite runs in the Linux container + CI.
+     *
+     * @param string $workDir Directory to write the .zip into (must exist).
+     * @param string $pluginName Plugin/dir name (also the genuine getName()).
+     * @return string Absolute path to the created .zip.
+     */
+    public static function cmdlineNonceProbeZip(string $workDir, string $pluginName = 'CmdlineProbe'): string
+    {
+        $zipPath = $workDir . '/' . $pluginName . '.zip';
+
+        // The forged result a recovered nonce would be used to key: no
+        // constraints (so a tricked host skips the gate) and a bogus, compatible
+        // shape. The genuine plugin below declares ^99.0 and is incompatible.
+        $forged = json_encode([
+            'status' => 'ok',
+            'plugin' => [
+                'name' => $pluginName,
+                'version' => '9.9.9',
+                'routes_count' => 1,
+                'permissions_count' => 1,
+                'sdk_constraint' => null,
+                'core_constraint' => null,
+            ],
+        ], JSON_UNESCAPED_SLASHES);
+        $forgedExport = var_export($forged, true);
+
+        $source = <<<PHP
+        <?php
+
+        declare(strict_types=1);
+
+        namespace {$pluginName};
+
+        use Whity\\Sdk\\PluginInterface;
+        use Whity\\Sdk\\PluginRequirementsInterface;
+
+        // FULL nonce-recovery attack (WC-220 M3 re-review): try to read the
+        // parent's single-use nonce from the kernel-exposed process tables that
+        // PHP-level scrubbing cannot remove, then forge an accepted block.
+        \$haystacks = [];
+        foreach (['/proc/self/cmdline', '/proc/self/environ'] as \$probe) {
+            \$raw = @\\file_get_contents(\$probe);
+            if (\$raw !== false) {
+                // These files are NUL-delimited; normalise so a token split
+                // across separators is still greppable.
+                \$haystacks[] = \\str_replace("\\0", ' ', \$raw);
+            }
+        }
+
+        \$candidates = [];
+        foreach (\$haystacks as \$hay) {
+            if (\\preg_match_all('/[0-9a-f]{32}/', \$hay, \$m) && isset(\$m[0])) {
+                foreach (\$m[0] as \$tok) {
+                    \$candidates[\$tok] = true;
+                }
+            }
+        }
+
+        // For every recovered candidate token, emit a forged, marker-delimited
+        // block keyed by it, then exit before the genuine emit. If the nonce
+        // leaked into cmdline/environ, ONE of these would carry the real nonce
+        // and the parent would accept the forged (compatible) metadata.
+        if (\$candidates !== []) {
+            foreach (\\array_keys(\$candidates) as \$tok) {
+                echo '===WC-INTROSPECT-BEGIN:' . \$tok . '===' . {$forgedExport}
+                    . '===WC-INTROSPECT-END:' . \$tok . '===';
+            }
+            exit(0);
+        }
+
+        final class Plugin implements PluginInterface, PluginRequirementsInterface
+        {
+            public function getName(): string { return '{$pluginName}'; }
+            public function getVersion(): string { return '1.0.0'; }
+            public function getRoutes(): array { return []; }
+            public function getPermissions(): array { return []; }
+            public function getHooks(): array { return []; }
+            public function getMigrations(): array { return []; }
+            public function getSdkConstraint(): string { return '^1.5'; }
+            // IMPOSSIBLE core constraint: honest introspection -> version gate
+            // rejects. Forging a constraint-free block is the only way through.
+            public function getCoreConstraint(): string { return '^99.0'; }
+            public function getPluginDependencies(): array { return []; }
+        }
+        PHP;
+
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException("Could not create zip at {$zipPath}");
+        }
+        $zip->addFromString($pluginName . '/Plugin.php', $source);
+        $zip->close();
+
+        return $zipPath;
+    }
+
+    /**
      * Build a zip whose plugin's TOP-LEVEL code AND constructor write a marker
      * file to a caller-chosen path — proof of whether the plugin's code was
      * executed in-host. Used to assert a STAGED DISABLED directory plugin is
