@@ -179,7 +179,7 @@ Error isolation lives in `PluginLoader::wrapHandler()` / `wrapHookCallback()`: e
 
 ## RBAC model
 
-Permissions use **`resource:action` colon notation** (e.g. `users:read`, `roles:manage`, `plugins:manage`).
+Permissions use **`resource:action` colon notation** (e.g. `users:read`, `roles:manage`, `plugins:read`).
 
 ### PermissionRegistry + CorePermissions
 
@@ -189,7 +189,7 @@ Permissions use **`resource:action` colon notation** (e.g. `users:read`, `roles:
 - Core permissions are registered lazily on first read (`ensureCoreRegistered()`), so the RBAC layer can validate them even without explicit bootstrap wiring (issue #55).
 - When a plugin is unloaded, its permissions vanish from the registry instantly — no orphaned permission rows.
 
-`CorePermissions` (`src/Core/RBAC/CorePermissions.php`) is the single source of truth for built-ins, registered under the `core` source: `users:read|write|delete`, `roles:read|write|delete|manage`, `tenants:read|write|delete`, `ous:read|write|delete|assign`, `permissions:read`, `plugins:manage`.
+`CorePermissions` (`src/Core/RBAC/CorePermissions.php`) is the single source of truth for built-ins, registered under the `core` source: `users:read|write|delete`, `roles:read|write|delete|manage`, `tenants:read|write|delete`, `ous:read|write|delete|assign`, `permissions:read`, `plugins:read|enable|disable|upload|uninstall|reload` (WC-218).
 
 ### RoleChecker (hierarchy + cache)
 

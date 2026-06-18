@@ -532,19 +532,24 @@ the `user.creating` hook both directly and via `HookManager::dispatch()`.
 
 Plugins are administered through the `/api/plugins` surface
 ([`PluginsApiHandler`](../../src/Api/PluginsApiHandler.php), wired in
-[`public/index.php`](../../public/index.php)). These endpoints require the
-`admin` role and the `plugins:manage` permission
-([`CorePermissions::PLUGINS_MANAGE`](../../src/Core/RBAC/CorePermissions.php)).
+[`public/index.php`](../../public/index.php)). Each endpoint is gated by its OWN
+per-action permission (WC-218); the constants live on
+[`CorePermissions`](../../src/Core/RBAC/CorePermissions.php). The seeded `admin`
+role holds all six out of the box (migration 013).
 
-| Method & path                    | Action                                               |
-| -------------------------------- | ---------------------------------------------------- |
-| `GET  /api/plugins`              | List plugins with name, version, status, and counts. |
-| `POST /api/plugins/{id}/enable`  | Re-enable a disabled plugin.                          |
-| `POST /api/plugins/{id}/disable` | Disable a plugin (unregisters its routes & hooks).    |
-| `POST /api/plugins/reload`       | Reload plugins from disk.                             |
+| Method & path                       | Required permission  | Action                                               |
+| ----------------------------------- | -------------------- | ---------------------------------------------------- |
+| `GET  /api/plugins`                 | `plugins:read`       | List plugins with name, version, status, and counts. |
+| `POST /api/plugins/{name}/enable`   | `plugins:enable`     | Enable a plugin by name.                             |
+| `POST /api/plugins/{name}/disable`  | `plugins:disable`    | Disable a plugin (unregisters its routes & hooks).   |
+| `POST /api/plugins/{id}/re-enable`  | `plugins:enable`     | Re-enable a disabled plugin by id.                   |
+| `POST /api/plugins/{id}/uninstall`  | `plugins:uninstall`  | Uninstall a plugin (disable, roll back, remove).     |
+| `POST /api/plugins/reload`          | `plugins:reload`     | Reload plugins from disk.                            |
+
+> `plugins:upload` is also defined and seeded; its upload route lands in a later slice.
 
 List the plugins (the bearer token must belong to a role granted
-`plugins:manage`):
+`plugins:read`):
 
 ```bash
 curl -H "Authorization: Bearer <admin-token>" \

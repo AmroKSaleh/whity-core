@@ -33,10 +33,11 @@ use Whity\Database\Database;
  *     code.
  *
  *  2. Missing grant — even with the SQL fixed, the seeded `admin` role did not
- *     hold `plugins:manage` (it lived only in the in-memory CorePermissions
- *     registry, never seeded/granted). The migration test below proves that
- *     after the migration runs, `hasPermission(admin, 'plugins:manage')` is true;
- *     without the migration the grant is absent and the assertion fails.
+ *     hold the plugin lifecycle permissions (they live only in the in-memory
+ *     CorePermissions registry unless seeded/granted). The migration test below
+ *     proves that after migration 013 runs, `admin` holds all SIX per-action
+ *     plugin permissions (WC-218) and NOT the retired `plugins:manage`; without
+ *     the migration the grants are absent and the assertions fail.
  */
 final class RoleCheckerRealEngineTest extends TestCase
 {
@@ -74,8 +75,8 @@ final class RoleCheckerRealEngineTest extends TestCase
 
     public function testHasPermissionHonoursDirectGrantViaRealSchemaJoin(): void
     {
-        // admin role (1) is granted plugins:manage directly via permission_id.
-        $this->grant('admin', 'plugins:manage');
+        // admin role (1) is granted plugins:read directly via permission_id.
+        $this->grant('admin', 'plugins:read');
         $adminUserId = $this->seedUser('admin@example.com', 'admin');
 
         $checker = $this->roleChecker();
@@ -84,7 +85,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         // engine raises "no such column", surfacing as a 500. After the fix it
         // resolves through permissions.name and returns true.
         $this->assertTrue(
-            $checker->hasPermission($adminUserId, 'plugins:manage', 1),
+            $checker->hasPermission($adminUserId, 'plugins:read', 1),
             'A direct role_permissions grant (via permission_id join) must satisfy hasPermission().'
         );
     }
@@ -97,14 +98,14 @@ final class RoleCheckerRealEngineTest extends TestCase
         $checker = $this->roleChecker();
 
         $this->assertFalse(
-            $checker->hasPermission($userId, 'plugins:manage', 1),
+            $checker->hasPermission($userId, 'plugins:read', 1),
             'A role without the grant and without a hierarchy parent must be denied.'
         );
     }
 
     public function testGetPermissionsForUserReadsRealSchema(): void
     {
-        $this->grant('admin', 'plugins:manage');
+        $this->grant('admin', 'plugins:read');
         $this->grant('admin', 'users:read');
         $adminUserId = $this->seedUser('admin@example.com', 'admin');
 
@@ -112,27 +113,62 @@ final class RoleCheckerRealEngineTest extends TestCase
 
         // The admin role is pre-seeded with many production permissions by migrations,
         // so we assert containment rather than an exact set.
-        $this->assertContains('plugins:manage', $perms, 'granted plugins:manage must appear in the result set.');
+        $this->assertContains('plugins:read', $perms, 'granted plugins:read must appear in the result set.');
         $this->assertContains('users:read', $perms, 'granted users:read must appear in the result set.');
     }
 
-    // ==================== Defect 2: migration grants plugins:manage to admin ====================
+    // ============ Defect 2: migration grants the six plugin permissions to admin ============
 
-    public function testMigrationGrantsPluginsManageToAdminSoHasPermissionReturnsTrue(): void
+    /**
+     * The six per-action plugin permissions migration 013 seeds and grants to
+     * admin (WC-218). The retired `plugins:manage` is deliberately absent.
+     *
+     * @var array<int, string>
+     */
+    private const PLUGIN_PERMISSIONS = [
+        'plugins:read',
+        'plugins:enable',
+        'plugins:disable',
+        'plugins:upload',
+        'plugins:uninstall',
+        'plugins:reload',
+    ];
+
+    public function testMigrationGrantsAllSixPluginPermissionsToAdmin(): void
     {
         // SchemaFromMigrations::make() runs all migrations (including this one), so
-        // admin already holds plugins:manage — the "before" assertFalse is not possible
-        // in this environment. We verify the post-migration state remains correct and
-        // that calling up() is idempotent.
+        // admin already holds the six plugin permissions. We verify the
+        // post-migration state and that calling up() again is idempotent.
         $adminUserId = $this->seedUser('admin@example.com', 'admin');
 
         RoleChecker::clearCache();
         GrantPluginsManageToAdmin::up($this->db);
 
-        $this->assertTrue(
+        $checker = $this->roleChecker();
+        foreach (self::PLUGIN_PERMISSIONS as $permission) {
+            $this->assertTrue(
+                $checker->hasPermission($adminUserId, $permission, 1),
+                "After the migration runs, admin must hold {$permission}."
+            );
+        }
+    }
+
+    public function testMigrationDoesNotGrantRetiredPluginsManage(): void
+    {
+        $adminUserId = $this->seedUser('admin@example.com', 'admin');
+
+        RoleChecker::clearCache();
+        GrantPluginsManageToAdmin::up($this->db);
+
+        $this->assertFalse(
             $this->roleChecker()->hasPermission($adminUserId, 'plugins:manage', 1),
-            'After the migration runs, admin must hold plugins:manage.'
+            'The retired plugins:manage permission must never be granted to admin.'
         );
+
+        $catalogueCount = (int) $this->pdo
+            ->query("SELECT COUNT(*) FROM permissions WHERE name = 'plugins:manage'")
+            ->fetchColumn();
+        $this->assertSame(0, $catalogueCount, 'plugins:manage must not exist in the catalogue.');
     }
 
     public function testMigrationSeedsTheFullCoreCatalogue(): void
@@ -147,6 +183,10 @@ final class RoleCheckerRealEngineTest extends TestCase
                 "Catalogue catch-up must seed core permission '{$permission}'."
             );
         }
+        // Explicitly assert the six plugin permissions are present.
+        foreach (self::PLUGIN_PERMISSIONS as $permission) {
+            $this->assertContains($permission, $names, "Catalogue must contain '{$permission}'.");
+        }
     }
 
     public function testMigrationIsIdempotent(): void
@@ -154,33 +194,33 @@ final class RoleCheckerRealEngineTest extends TestCase
         GrantPluginsManageToAdmin::up($this->db);
         GrantPluginsManageToAdmin::up($this->db);
 
-        $catalogueCount = (int) $this->pdo
-            ->query("SELECT COUNT(*) FROM permissions WHERE name = 'plugins:manage'")
-            ->fetchColumn();
-        $grantCount = (int) $this->pdo->query(
-            "SELECT COUNT(*) FROM role_permissions rp
-             JOIN permissions p ON p.id = rp.permission_id
-             JOIN roles r ON r.id = rp.role_id
-             WHERE r.name = 'admin' AND p.name = 'plugins:manage'"
-        )->fetchColumn();
-
-        $this->assertSame(1, $catalogueCount, 'Re-running up() must not duplicate the catalogue row.');
-        $this->assertSame(1, $grantCount, 'Re-running up() must not duplicate the grant.');
+        foreach (self::PLUGIN_PERMISSIONS as $permission) {
+            $this->assertSame(
+                1,
+                $this->countPermission($permission),
+                "Re-running up() must not duplicate the catalogue row for {$permission}."
+            );
+            $this->assertSame(
+                1,
+                $this->countAdminGrant($permission),
+                "Re-running up() must not duplicate the grant for {$permission}."
+            );
+        }
     }
 
-    public function testMigrationDownRemovesExactlyWhatItAdded(): void
+    public function testMigrationDownRemovesExactlyTheSixGrants(): void
     {
         GrantPluginsManageToAdmin::up($this->db);
         GrantPluginsManageToAdmin::down($this->db);
 
-        // The plugins:manage grant on admin is gone.
-        $grantCount = (int) $this->pdo->query(
-            "SELECT COUNT(*) FROM role_permissions rp
-             JOIN permissions p ON p.id = rp.permission_id
-             JOIN roles r ON r.id = rp.role_id
-             WHERE r.name = 'admin' AND p.name = 'plugins:manage'"
-        )->fetchColumn();
-        $this->assertSame(0, $grantCount, 'down() must remove the plugins:manage grant.');
+        // All six plugin grants on admin are gone.
+        foreach (self::PLUGIN_PERMISSIONS as $permission) {
+            $this->assertSame(
+                0,
+                $this->countAdminGrant($permission),
+                "down() must remove the {$permission} grant on admin."
+            );
+        }
 
         // Permissions owned by earlier migrations (migrations 002/005) must survive.
         // Full-catalogue comparison is not feasible here: down() is scoped to what
@@ -190,6 +230,33 @@ final class RoleCheckerRealEngineTest extends TestCase
         foreach (self::PRE_SEEDED_PERMISSIONS as $perm) {
             $this->assertContains($perm, $remaining, "down() must not remove pre-seeded permission '{$perm}'.");
         }
+    }
+
+    /**
+     * Count the catalogue rows for a permission name.
+     */
+    private function countPermission(string $name): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM permissions WHERE name = ?');
+        $stmt->execute([$name]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Count the admin-role grants for a permission name.
+     */
+    private function countAdminGrant(string $name): int
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM role_permissions rp
+             JOIN permissions p ON p.id = rp.permission_id
+             JOIN roles r ON r.id = rp.role_id
+             WHERE r.name = 'admin' AND p.name = ?"
+        );
+        $stmt->execute([$name]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     // ==================== Helpers ====================

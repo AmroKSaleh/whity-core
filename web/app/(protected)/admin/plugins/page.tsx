@@ -37,8 +37,10 @@ import {
   IconChevronRight,
 } from '@tabler/icons-react';
 
-// Core permission required to manage plugins
-const PLUGINS_MANAGE = 'plugins:manage';
+// Core permission required to view the plugins console (WC-218). Read access is
+// gated on plugins:read; the per-action button gating (enable/disable/uninstall/
+// reload/upload) is a later slice.
+const PLUGINS_READ = 'plugins:read';
 
 type PluginEntry = components['schemas']['PluginEntry'];
 
@@ -55,7 +57,7 @@ interface ExtendedPluginEntry extends PluginEntry {
 export default function PluginsPage() {
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
-  const hasAccess = hasPermission(PLUGINS_MANAGE);
+  const hasAccess = hasPermission(PLUGINS_READ);
 
   // Fetch actual backend plugins using useFetch to avoid set-state-in-effect issues
   const { data, loading: loadingPlugins, error, refetch: fetchPlugins } = useFetch(async () => {
@@ -89,7 +91,7 @@ export default function PluginsPage() {
     );
   }
 
-  // RBAC gate: Access Denied if user lacks plugins:manage
+  // RBAC gate: Access Denied if user lacks plugins:read
   if (!hasAccess) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center bg-card border border-border rounded-2xl shadow-sm">
@@ -98,7 +100,7 @@ export default function PluginsPage() {
         </div>
         <h2 className="text-xl font-bold mb-2">Access Denied</h2>
         <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          You do not have the required permissions (`plugins:manage`) to access the Plugin Management Console.
+          You do not have the required permissions (`plugins:read`) to access the Plugin Management Console.
         </p>
         <Button onClick={() => window.history.back()} variant="outline">
           Go Back

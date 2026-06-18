@@ -339,6 +339,19 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::AUDIT_READ,
     ];
     $items[] = [
+        'id' => 'plugins',
+        'label' => 'Plugins',
+        'href' => '/admin/plugins',
+        'icon' => 'plug',
+        'group' => 'admin',
+        'order' => 8,
+        // WC-218: mirrors GET /api/plugins, gated on the plugins:read
+        // permission. The nav item carries the requirement so a permission-aware
+        // client can hide it; the page also enforces it server-side via the
+        // RBAC-protected API (a 403 renders the access-denied state).
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLUGINS_READ,
+    ];
+    $items[] = [
         'id' => 'settings',
         'label' => 'Settings',
         'href' => '/settings',
@@ -529,18 +542,19 @@ $router->register('POST', '/api/deployments/rollback', [$deploymentHandler, 'rol
 $router->register('GET', '/api/deployments/status', [$deploymentHandler, 'status'], 'admin');
 
 // Plugins admin API (WC-9/PR #88, WC-10/PR #104). Pass the live $pluginLoader so
-// list/enable/disable use the WC-9 lifecycle at runtime, and gate every route on
-// the plugins:manage permission (6th positional arg to Router::register; 4th arg
-// requiredRole stays null so RbacMiddleware enforces the permission).
+// list/enable/disable use the WC-9 lifecycle at runtime. WC-218: each route is
+// gated by its OWN per-action plugin permission (6th positional arg to
+// Router::register; 4th arg requiredRole stays null so RbacMiddleware enforces
+// the permission). enable and re-enable share PLUGINS_ENABLE; the rest are 1:1.
 // WC-208: pass the PDO so the orchestrated uninstall (disable → migration
 // rollback → directory removal) has a DB connection for tracking-row cleanup.
 $pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins', $pluginLoader, $db->getPdo());
-$router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], null, null, CorePermissions::PLUGINS_MANAGE);
-$router->register('POST', '/api/plugins/{name}/enable', [$pluginsHandler, 'enable'], null, null, CorePermissions::PLUGINS_MANAGE);
-$router->register('POST', '/api/plugins/{name}/disable', [$pluginsHandler, 'disable'], null, null, CorePermissions::PLUGINS_MANAGE);
-$router->register('POST', '/api/plugins/{id}/re-enable', [$pluginsHandler, 'reEnable'], null, null, CorePermissions::PLUGINS_MANAGE);
-$router->register('POST', '/api/plugins/{id}/uninstall', [$pluginsHandler, 'uninstall'], null, null, CorePermissions::PLUGINS_MANAGE);
-$router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], null, null, CorePermissions::PLUGINS_MANAGE);
+$router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], null, null, CorePermissions::PLUGINS_READ);
+$router->register('POST', '/api/plugins/{name}/enable', [$pluginsHandler, 'enable'], null, null, CorePermissions::PLUGINS_ENABLE);
+$router->register('POST', '/api/plugins/{name}/disable', [$pluginsHandler, 'disable'], null, null, CorePermissions::PLUGINS_DISABLE);
+$router->register('POST', '/api/plugins/{id}/re-enable', [$pluginsHandler, 'reEnable'], null, null, CorePermissions::PLUGINS_ENABLE);
+$router->register('POST', '/api/plugins/{id}/uninstall', [$pluginsHandler, 'uninstall'], null, null, CorePermissions::PLUGINS_UNINSTALL);
+$router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], null, null, CorePermissions::PLUGINS_RELOAD);
 
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
 // Only allow read-only access to migration status via API

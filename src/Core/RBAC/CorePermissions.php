@@ -53,8 +53,19 @@ final class CorePermissions
     // Audit trail (WC-34): read-only access to the security audit log.
     public const AUDIT_READ = 'audit:read';
 
-    // Plugin lifecycle management
-    public const PLUGINS_MANAGE = 'plugins:manage';
+    // Plugin lifecycle management (WC-218). The single coarse `plugins:manage`
+    // permission was replaced by six per-action permissions so each plugin
+    // operation can be delegated independently. Each constant maps to exactly
+    // one lifecycle route (see public/index.php), except PLUGINS_ENABLE which
+    // gates both enable-by-name and re-enable-by-id, and PLUGINS_UPLOAD whose
+    // route is introduced in a later slice but whose permission is defined and
+    // seeded now so it can be granted ahead of the feature landing.
+    public const PLUGINS_READ = 'plugins:read';
+    public const PLUGINS_ENABLE = 'plugins:enable';
+    public const PLUGINS_DISABLE = 'plugins:disable';
+    public const PLUGINS_UPLOAD = 'plugins:upload';
+    public const PLUGINS_UNINSTALL = 'plugins:uninstall';
+    public const PLUGINS_RELOAD = 'plugins:reload';
 
     // Permission delegation management (WC-34). Gates the delegation API; the
     // runtime subset-of-own-permissions invariant is enforced independently in
@@ -94,7 +105,12 @@ final class CorePermissions
             self::OUS_ASSIGN,
             self::PERMISSIONS_READ,
             self::AUDIT_READ,
-            self::PLUGINS_MANAGE,
+            self::PLUGINS_READ,
+            self::PLUGINS_ENABLE,
+            self::PLUGINS_DISABLE,
+            self::PLUGINS_UPLOAD,
+            self::PLUGINS_UNINSTALL,
+            self::PLUGINS_RELOAD,
             self::DELEGATION_MANAGE,
             self::RELATIONS_READ,
             self::RELATIONS_MANAGE,
