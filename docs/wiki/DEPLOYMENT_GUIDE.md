@@ -131,26 +131,3 @@ VUS=10 DURATION=30s ADMIN_PASSWORD='<staging-admin-pw>' ./load-tests/run.sh
 
 See `load-tests/README.md` for full usage and `load-tests/BASELINE.md` for
 committed baseline numbers (throughput, p95 latency, error rate).
-
-### CI: staging-deploy workflow
-
-`.github/workflows/staging-deploy.yml` builds the FrankenPHP image on push to
-`main` (or manual `workflow_dispatch`) and has a **gated** deploy job. The build
-job always runs; the deploy job is skipped (stays green) unless deployment is
-explicitly armed, so the workflow never fails for lack of a real staging host.
-
-To arm the deploy job, configure these under
-**Settings > Secrets and variables > Actions**:
-
-| Kind | Name | Purpose |
-| --- | --- | --- |
-| Variable | `STAGING_DEPLOY_ENABLED` | Set to `true` to arm the deploy job. |
-| Variable | `STAGING_HOST` | Staging host/DNS (parameterizes deploy + environment URL). |
-| Secret | `STAGING_SSH_KEY` | Deploy credential for the staging host. |
-| Secret | `STAGING_JWT_SECRET` | JWT signing secret (>= 32 chars; enforced by the workflow). |
-| Secret | `STAGING_ENCRYPTION_KEY` | TOTP secret-encryption key. |
-| Secret | `STAGING_DB_PASSWORD` | Staging database password. |
-
-Until a real host is provisioned, the deploy step is a documented placeholder
-showing the intended rollout (registry push -> compose up -> migrate/seed ->
-`/api/health` smoke check).
