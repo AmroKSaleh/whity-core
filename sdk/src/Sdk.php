@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.4).
+ * SDK identity (v1.5).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -22,13 +22,16 @@ namespace Whity\Sdk;
  * extends to prove its tenant tables and queries are scoped) →
  * 1.4 (host CORE-version constraint declaration,
  * {@see PluginRequirementsInterface::getCoreConstraint()}, gated against the
- * host's core version independently of the SDK gate). Breaking changes require
- * a new major version.
+ * host's core version independently of the SDK gate) →
+ * 1.5 (multipart upload shapes: {@see \Whity\Sdk\Http\UploadedFile} and the
+ * additive {@see \Whity\Sdk\Http\Request::getUploadedFiles()} upload bag, plus
+ * the host-side {@see \Whity\Sdk\Http\MultipartParser}, WC-217). Breaking
+ * changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.4.0';
+    public const VERSION = '1.5.0';
 
     /**
      * Static identity only — never instantiated.

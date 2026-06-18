@@ -163,12 +163,13 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('array', (string) $return);
     }
 
-    public function testSdkVersionIsOneFourForTheCoreVersionGate(): void
+    public function testSdkVersionIsOneFiveForTheMultipartUploadShapes(): void
     {
         $this->assertSame(
-            '1.4.0',
+            '1.5.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.4 adds the host core-version constraint declaration (WC-211)'
+            'SDK 1.5 adds the multipart upload shapes: UploadedFile + '
+            . 'Request::getUploadedFiles() (WC-217)'
         );
     }
 
