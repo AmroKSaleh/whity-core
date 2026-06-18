@@ -33,7 +33,15 @@ export default function RootLayout({
       lang="en"
       className={cn("h-full", "antialiased", inter.variable, geistMono.variable, "font-sans")}
     >
-      <body className="min-h-full flex flex-col">
+      {/*
+        suppressHydrationWarning (one level deep, body attributes only): browser
+        extensions such as Grammarly inject attributes onto <body> after the SSR
+        HTML is sent but before React hydrates (e.g. data-gr-ext-installed,
+        data-new-gr-c-s-check-loaded), which otherwise trips a dev-only
+        hydration-mismatch warning. This does NOT suppress mismatches in the app's
+        own markup below <body>.
+      */}
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <AuthProvider>
           <ToastProvider>
             <NavigationProvider>
