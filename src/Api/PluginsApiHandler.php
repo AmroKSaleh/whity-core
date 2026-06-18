@@ -7,6 +7,16 @@ namespace Whity\Api;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\PluginLoader;
+use Whity\Core\PluginInstaller;
+use Whity\Core\PluginMigrationRunner;
+use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Exception\PluginAlreadyInstalled;
+use Whity\Core\Exception\PluginEnableMigrationFailed;
+use Whity\Core\Exception\PluginExtractionUnsafe;
+use Whity\Core\Exception\PluginIncompatible;
+use Whity\Core\Exception\PluginInstallException;
+use Whity\Core\Exception\PluginNameUnsafe;
+use Whity\Core\Exception\PluginPackageInvalid;
 
 /**
  * Plugins API Handler
@@ -48,17 +58,91 @@ class PluginsApiHandler
     private ?PluginLoader $pluginLoader;
 
     /**
+     * Optional audit sink for the upload/enable lifecycle records (WC-220).
+     *
+     * Threaded in so {@see upload()} and {@see enable()} can emit secret-free
+     * `plugin.upload` / `plugin.enable` audit rows. Optional so tests that drive
+     * the handler without a DB keep working.
+     */
+    private readonly ?AuditLogger $auditLogger;
+
+    /**
      * @param string $pluginDir Directory containing plugin files.
      * @param PluginLoader|null $pluginLoader Optional live loader for lifecycle state.
      * @param \PDO|null $pdo Optional database connection for migration rollback.
+     * @param AuditLogger|null $auditLogger Optional audit sink (WC-220 upload/enable).
      */
     public function __construct(
         string $pluginDir,
         ?PluginLoader $pluginLoader = null,
-        private readonly ?\PDO $pdo = null
+        private readonly ?\PDO $pdo = null,
+        ?AuditLogger $auditLogger = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->pluginLoader = $pluginLoader;
+        $this->auditLogger = $auditLogger;
+    }
+
+    /**
+     * POST /api/plugins/upload - Stage an uploaded plugin package (lands DISABLED).
+     *
+     * Reads the multipart `package` file part, hands it to {@see PluginInstaller}
+     * which validates (zip-slip / zip-bomb / name allowlist / version gate /
+     * collision), commits the artifact to disk marked DISABLED, and converges the
+     * loader. NO plugin code is executed and NO migrations run here. Typed
+     * installer failures map to uniform envelopes; anything unexpected is logged
+     * server-side and returned as a generic 500 (no raw exception text leaks).
+     *
+     * @param Request $request The incoming multipart/form-data request.
+     * @param array<string, string> $params Route parameters (unused).
+     * @return Response The staged entry (status: disabled) or an error envelope.
+     */
+    public function upload(Request $request, array $params = []): Response
+    {
+        try {
+            $files = $request->getUploadedFiles();
+        } catch (\Throwable $e) {
+            // A malformed multipart body / cap violation from the parser.
+            error_log('[PluginsApiHandler] upload parse failed: ' . $e->getMessage());
+            return Response::error('The uploaded package could not be read.', 400);
+        }
+
+        $package = $files['package'] ?? null;
+        if ($package === null) {
+            return Response::error('A plugin package file (field "package") is required.', 400);
+        }
+
+        $installer = new PluginInstaller($this->pluginDir, $this->pluginLoader, $this->auditLogger);
+
+        try {
+            $entry = $installer->installFromUpload($package);
+        } catch (PluginPackageInvalid | PluginNameUnsafe | PluginExtractionUnsafe $e) {
+            return $this->installError($e, 400);
+        } catch (PluginIncompatible $e) {
+            return $this->installError($e, 422);
+        } catch (PluginAlreadyInstalled $e) {
+            return $this->installError($e, 409);
+        } catch (\Throwable $e) {
+            error_log('[PluginsApiHandler] upload failed: ' . $e->getMessage());
+            return Response::error('Failed to install plugin', 500);
+        }
+
+        return Response::json(['data' => $entry], 200);
+    }
+
+    /**
+     * Build the uniform error envelope for a typed installer failure.
+     *
+     * Surfaces only the exception's SAFE client message + details — never a
+     * stack trace or internal path (WC-186 / WC-216).
+     *
+     * @param PluginInstallException $e The typed installer failure.
+     * @param int $status The HTTP status to return.
+     * @return Response The error envelope.
+     */
+    private function installError(PluginInstallException $e, int $status): Response
+    {
+        return Response::error($e->clientMessage(), $status, $e->clientDetails());
     }
 
     /**
@@ -88,7 +172,11 @@ class PluginsApiHandler
             }
 
             foreach ($files as $file) {
-                if ($file === '.' || $file === '..' || $file === '.gitkeep') {
+                // Skip ALL dot-prefixed entries (`.`, `..`, `.gitkeep`, and the
+                // installer's atomic-commit temp sibling `.<Name>.tmp_<rand>`):
+                // dotfiles/dot-dirs are never plugins and must not be listed
+                // (WC-220 minor; subsumes the prior `.gitkeep` special-case).
+                if (str_starts_with($file, '.')) {
                     continue;
                 }
 
@@ -161,11 +249,29 @@ class PluginsApiHandler
         }
 
         // Prefer the live loader: re-enable a runtime-disabled/failed plugin.
-        if ($this->pluginLoader !== null) {
+        $loader = $this->pluginLoader;
+        if ($loader !== null) {
             $key = $this->resolvePluginKey($identifier);
             if ($key !== null) {
-                $this->pluginLoader->reEnablePlugin($key);
-                $lifecycle = $this->pluginLoader->getLifecycle($key);
+                // WC-220: BEFORE the plugin serves traffic, apply its declared
+                // migrations that are not yet recorded. The plugin is still
+                // disabled here, so on a migration FAILURE we leave it disabled
+                // (sentinel intact) and surface a typed 422 — never activating a
+                // plugin whose schema could not be applied. A second enable is a
+                // migration no-op (already-recorded migrations are skipped).
+                try {
+                    $this->applyMigrationsOnEnable($key);
+                } catch (PluginEnableMigrationFailed $e) {
+                    return $this->installError($e, 422);
+                }
+
+                $loader->reEnablePlugin($key);
+                $lifecycle = $loader->getLifecycle($key);
+
+                $this->auditLogger?->record('plugin.enable', [
+                    'target_type' => 'plugin',
+                    'metadata' => ['plugin' => $identifier, 'result' => 'enabled'],
+                ]);
 
                 return Response::json([
                     'data' => [
@@ -177,6 +283,53 @@ class PluginsApiHandler
         }
 
         return $this->enableOnDisk($identifier);
+    }
+
+    /**
+     * Apply a (currently-disabled) plugin's not-yet-recorded migrations before
+     * it is activated (WC-220).
+     *
+     * Reads the retained plugin instance from the loader (kept across a disable),
+     * runs its declared migrations through {@see PluginMigrationRunner} — each in
+     * its own transaction, tracked `plugin:<Name>:<Class>`, idempotent — and on
+     * ANY failure leaves the plugin disabled, records a
+     * `plugin.enable.migrate_failed` audit entry, and throws a typed error. When
+     * no PDO is wired, migration-on-enable is a no-op (the lifecycle-only flow
+     * used by tests without a database is preserved).
+     *
+     * @param string $key The plugin's stable identity (original FQCN).
+     * @return void
+     * @throws PluginEnableMigrationFailed When a migration fails to apply.
+     */
+    private function applyMigrationsOnEnable(string $key): void
+    {
+        if ($this->pdo === null || $this->pluginLoader === null) {
+            return;
+        }
+
+        $plugin = $this->pluginLoader->getPluginInstance($key);
+        if ($plugin === null) {
+            return;
+        }
+
+        try {
+            (new PluginMigrationRunner($this->pdo))->applyForPlugin($plugin);
+        } catch (\Throwable $e) {
+            // The plugin stays DISABLED (we never reached reEnablePlugin). Log
+            // the raw cause server-side; surface only a safe typed error.
+            error_log('[PluginsApiHandler] enable migration failed for ' . $key . ': ' . $e->getMessage());
+
+            $this->auditLogger?->record('plugin.enable.migrate_failed', [
+                'target_type' => 'plugin',
+                'metadata' => ['plugin' => $plugin->getName(), 'result' => 'migrate_failed'],
+            ]);
+
+            throw new PluginEnableMigrationFailed(
+                'The plugin could not be enabled because its database migration failed.',
+                ['plugin' => $plugin->getName()],
+                $e
+            );
+        }
     }
 
     /**

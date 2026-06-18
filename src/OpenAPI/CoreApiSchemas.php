@@ -586,12 +586,45 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
+            // WC-220: staged plugin upload/install (multipart/form-data, field
+            // "package"). Lands the artifact DISABLED; migration-on-enable runs
+            // its migrations on the subsequent enable.
+            self::permissionRoute('POST', '/api/plugins/upload', 'plugins:upload', [
+                'summary' => 'Upload and stage a plugin package (lands disabled)',
+                'tags' => ['platform-ops'],
+                'request' => [
+                    'required' => true,
+                    'content' => [
+                        'multipart/form-data' => [
+                            'schema' => [
+                                'type' => 'object',
+                                'required' => ['package'],
+                                'properties' => [
+                                    'package' => [
+                                        'type' => 'string',
+                                        'format' => 'binary',
+                                        'description' => 'A .zip or single .php plugin package.',
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Plugin staged (disabled)', 'PluginUploadResponse'),
+                    400 => self::errorResponse('Invalid package, unsafe name, or unsafe archive'),
+                    409 => self::errorResponse('A plugin with this name is already installed'),
+                    422 => self::errorResponse('Plugin incompatible with this host'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
             self::permissionRoute('POST', '/api/plugins/{name}/enable', 'plugins:enable', [
-                'summary' => 'Enable a plugin by name',
+                'summary' => 'Enable a plugin by name (applies pending migrations)',
                 'tags' => ['platform-ops'],
                 'responses' => [
                     200 => self::jsonResponse('Plugin enabled', 'SimpleMessageResponse'),
                     400 => self::errorResponse('Plugin not found or already enabled'),
+                    422 => self::errorResponse('Plugin migration failed during enable'),
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
@@ -1168,6 +1201,10 @@ final class CoreApiSchemas
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('PluginEntry')],
                 'meta' => SchemaBuilder::ref('PluginListMeta'),
             ], ['data', 'meta']),
+            // POST /api/plugins/upload (WC-220): a freshly staged plugin entry.
+            'PluginUploadResponse' => self::object([
+                'data' => SchemaBuilder::ref('PluginEntry'),
+            ], ['data']),
 
             // GET /api/admin/stats
             'AdminStatsResponse' => self::object([

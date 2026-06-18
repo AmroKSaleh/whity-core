@@ -11,13 +11,16 @@
 #               deployments run it as-is (see docs/wiki/Core-Update.md).
 FROM dunglas/frankenphp:1-php8.4 AS base
 
-# Install required packages for PostgreSQL extension
+# Install required packages for the PostgreSQL and zip extensions. libzip-dev
+# backs ext-zip, which the staged plugin-upload installer (WC-220) needs to
+# safely inspect/extract uploaded .zip packages via ZipArchive.
 RUN apt-get update && apt-get install -y \
     libpq-dev \
+    libzip-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PostgreSQL extension
-RUN docker-php-ext-install pgsql pdo_pgsql
+# Install PostgreSQL + zip extensions
+RUN docker-php-ext-install pgsql pdo_pgsql zip
 
 # Set working directory
 WORKDIR /app

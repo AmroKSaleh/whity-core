@@ -563,8 +563,14 @@ $router->register('GET', '/api/deployments/status', [$deploymentHandler, 'status
 // the permission). enable and re-enable share PLUGINS_ENABLE; the rest are 1:1.
 // WC-208: pass the PDO so the orchestrated uninstall (disable → migration
 // rollback → directory removal) has a DB connection for tracking-row cleanup.
-$pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins', $pluginLoader, $db->getPdo());
+// WC-220: pass $auditLogger so staged uploads (plugin.upload) and enable
+// (plugin.enable / plugin.enable.migrate_failed) emit secret-free audit rows.
+$pluginsHandler = new PluginsApiHandler(__DIR__ . '/../plugins', $pluginLoader, $db->getPdo(), $auditLogger);
 $router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], null, null, CorePermissions::PLUGINS_READ);
+// WC-220: staged plugin upload/install. Multipart field name "package"; the
+// installer lands the artifact DISABLED and migration-on-enable applies its
+// migrations on the subsequent enable.
+$router->register('POST', '/api/plugins/upload', [$pluginsHandler, 'upload'], null, null, CorePermissions::PLUGINS_UPLOAD);
 $router->register('POST', '/api/plugins/{name}/enable', [$pluginsHandler, 'enable'], null, null, CorePermissions::PLUGINS_ENABLE);
 $router->register('POST', '/api/plugins/{name}/disable', [$pluginsHandler, 'disable'], null, null, CorePermissions::PLUGINS_DISABLE);
 $router->register('POST', '/api/plugins/{id}/re-enable', [$pluginsHandler, 'reEnable'], null, null, CorePermissions::PLUGINS_ENABLE);

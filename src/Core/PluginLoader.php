@@ -156,6 +156,24 @@ class PluginLoader
     private array $discoveredDisabledByDisk = [];
 
     /**
+     * Disabled DIRECTORY plugins discovered on disk but DELIBERATELY NOT loaded
+     * into this process: FQCN (resolved lexically/by tokenizer, never by
+     * executing the file) => the plugin's entry file path (WC-220 M4).
+     *
+     * A disabled plugin contributes no routes or hooks, so there is no reason to
+     * `require`/instantiate its (untrusted) code in the host worker — doing so
+     * would run its top-level + constructor code and transiently register its
+     * routes before tearing them down. Instead such a plugin is LISTED (a
+     * Disabled lifecycle is registered for it and {@see getPluginMetadata()}
+     * surfaces it) but UNLOADED; its code is `require`d + instantiated only when
+     * it is explicitly enabled (see {@see loadDisabledDirectoryPlugin()}). The
+     * entry file is retained so enable can load it without a full disk rescan.
+     *
+     * @var array<string, string>
+     */
+    private array $disabledDirectoryPlugins = [];
+
+    /**
      * Per-plugin lifecycle state machines, keyed by the plugin's original FQCN.
      *
      * Extends (does not duplicate) the registeredPlugins bookkeeping: while
@@ -328,7 +346,11 @@ class PluginLoader
         }
 
         foreach ($items as $item) {
-            if ($item === '.' || $item === '..') {
+            // Skip ALL dot-prefixed entries (`.`, `..`, `.gitkeep`, and the
+            // installer's atomic-commit temp sibling `.<Name>.tmp_<rand>`):
+            // dotfiles/dot-dirs are never plugins, so they must not register a
+            // PSR-4 namespace prefix (WC-220 minor).
+            if (str_starts_with($item, '.')) {
                 continue;
             }
 
@@ -398,6 +420,50 @@ class PluginLoader
         foreach ($quarantined as $entry) {
             $this->quarantinePlugin($entry['candidate'], $entry['reason']);
         }
+
+        // WC-220 M4: register a Disabled lifecycle for each directory plugin
+        // discovered with a persisted disable, WITHOUT loading its code. A fresh
+        // worker thus converges on the Disabled state (and the plugin appears in
+        // listings) while its untrusted top-level/constructor code stays unrun
+        // until an explicit enable lazily loads it.
+        foreach ($this->disabledDirectoryPlugins as $fqcn => $entryFile) {
+            $this->registerDisabledPlaceholder($fqcn, $entryFile);
+        }
+    }
+
+    /**
+     * Register a Disabled, UNLOADED lifecycle for a directory plugin discovered
+     * carrying a persisted disable signal (WC-220 M4).
+     *
+     * The plugin's code is NOT `require`d or instantiated here: a disabled
+     * plugin contributes no routes/hooks, so there is nothing to register and no
+     * reason to run its (untrusted) top-level + constructor code in the host
+     * worker. A lifecycle keyed by the lexically-resolved FQCN is created in
+     * state Disabled so {@see getLifecycle()} reports it, and a metadata-only
+     * record is retained so {@see getPluginMetadata()} surfaces it (status
+     * disabled) and the enable path can resolve and lazily load it.
+     *
+     * @param string $fqcn The plugin's stable identity (lexically-resolved FQCN).
+     * @param string $entryFile The plugin's entry file path (for lazy load).
+     * @return void
+     */
+    private function registerDisabledPlaceholder(string $fqcn, string $entryFile): void
+    {
+        // Skip if this plugin is already tracked (e.g. an active plugin of the
+        // same key) — a loaded plugin's real bookkeeping always wins.
+        if (isset($this->lifecycles[$fqcn])) {
+            return;
+        }
+
+        // The human-readable name without executing the plugin: the namespace
+        // root of the FQCN is the on-disk directory name (PSR-4 convention),
+        // which is also the name the installer enforces equals getName().
+        $displayName = explode('\\', $fqcn)[0];
+
+        $lifecycle = new PluginLifecycle($fqcn, $displayName);
+        $lifecycle->markLoaded();
+        $lifecycle->disable();
+        $this->lifecycles[$fqcn] = $lifecycle;
     }
 
     /**
@@ -556,6 +622,7 @@ class PluginLoader
         // discovery pass (WC-210). A fresh loader converges on whatever is on
         // disk now, not on a stale snapshot.
         $this->discoveredDisabledByDisk = [];
+        $this->disabledDirectoryPlugins = [];
 
         // 1. Initialize namespaces for all direct subdirectories of pluginDir
         $this->registerPluginNamespaces();
@@ -567,6 +634,13 @@ class PluginLoader
             $cacheValid = true;
             foreach ($cachedPlugins as $fqcn => $filePath) {
                 if (file_exists($filePath)) {
+                    // A directory plugin carrying a persisted disable is LISTED
+                    // disabled but NOT executed in-host (WC-220 M4): record it
+                    // for lazy loading on enable and never `require` it here.
+                    if ($this->hasDirectoryDisableSentinel($filePath)) {
+                        $this->disabledDirectoryPlugins[$fqcn] = $filePath;
+                        continue;
+                    }
                     require_once $filePath;
                     // Check if the class is actually a plugin (triggers autoloading if needed)
                     if (class_exists($fqcn)) {
@@ -574,9 +648,6 @@ class PluginLoader
                             $reflection = new ReflectionClass($fqcn);
                             if ($reflection->implementsInterface(PluginInterface::class)) {
                                 $validDiscovered[$fqcn] = $filePath;
-                                if ($this->hasDirectoryDisableSentinel($filePath)) {
-                                    $this->discoveredDisabledByDisk[$fqcn] = true;
-                                }
                                 continue;
                             }
                         } catch (\Throwable) {
@@ -594,6 +665,7 @@ class PluginLoader
             // The cache was invalidated; discard the partial sentinel snapshot
             // and let the full scan below rebuild it from scratch.
             $this->discoveredDisabledByDisk = [];
+            $this->disabledDirectoryPlugins = [];
         }
 
         // 3. Scan the plugins directory
@@ -617,7 +689,13 @@ class PluginLoader
         }
 
         foreach ($items as $item) {
-            if ($item === '.' || $item === '..') {
+            // Skip ALL dot-prefixed entries (`.`, `..`, `.gitkeep`, and the
+            // installer's atomic-commit temp sibling `.<Name>.tmp_<rand>`):
+            // dotfiles/dot-dirs are never plugins. This also fails closed if a
+            // temp dir is leaked by a hard crash mid-commit (before its
+            // sentinel) — discovery never require_once's its top-level code
+            // (WC-220 minor).
+            if (str_starts_with($item, '.')) {
                 continue;
             }
 
@@ -631,9 +709,34 @@ class PluginLoader
 
                 // A directory plugin carries a persisted administrative disable
                 // as an empty `.disabled` marker in its folder (WC-210). When
-                // present, every plugin discovered in this directory is loaded
-                // into the Disabled lifecycle state instead of Active.
+                // present, the plugin is LISTED disabled but its (untrusted) code
+                // is NOT executed in the host worker — a disabled plugin
+                // contributes no routes/hooks, so requiring/instantiating it
+                // would only run its top-level + constructor code for nothing
+                // (WC-220 M4). Its entry class is identified WITHOUT execution
+                // (source tokenizer, no `require`) and recorded for lazy loading
+                // on enable.
                 $dirDisabled = file_exists($itemPath . '/' . self::DIR_DISABLED_SENTINEL);
+
+                if ($dirDisabled) {
+                    $entryFile = $this->detectPluginEntryFile($phpFiles);
+                    if ($entryFile !== null) {
+                        $fqcn = $this->resolveClassFromFile($entryFile);
+                        if ($fqcn !== null) {
+                            $this->disabledDirectoryPlugins[$fqcn] = $entryFile;
+                            $foundValidPluginInDir = true;
+                        }
+                    }
+                    if (!$foundValidPluginInDir) {
+                        $warningMsg = "No valid plugin class found in directory {$itemPath}.";
+                        if ($this->logger !== null) {
+                            $this->logger->warning($warningMsg);
+                        } else {
+                            error_log($warningMsg);
+                        }
+                    }
+                    continue;
+                }
 
                 foreach ($phpFiles as $filePath) {
                     $fqcn = $this->resolveClassFromFile($filePath);
@@ -651,9 +754,6 @@ class PluginLoader
                             if ($reflection->implementsInterface(PluginInterface::class)) {
                                 $discovered[$fqcn] = $filePath;
                                 $foundValidPluginInDir = true;
-                                if ($dirDisabled) {
-                                    $this->discoveredDisabledByDisk[$fqcn] = true;
-                                }
                             }
                         } catch (\Throwable) {
                             // Ignore
@@ -730,6 +830,95 @@ class PluginLoader
     }
 
     /**
+     * Identify, WITHOUT EXECUTING ANY CODE, the entry file of a directory plugin
+     * (the file declaring a class that implements {@see PluginInterface}).
+     *
+     * Used for a directory plugin discovered DISABLED (WC-220 M4): we must NOT
+     * `require` the (untrusted) file to find its plugin class, so each candidate
+     * file's source is read and tokenized ({@see token_get_all}) — a pure
+     * lexical pass that never runs the code — to detect a `class … implements …`
+     * declaration whose interface list mentions `PluginInterface`. The first
+     * matching file (scanned in sorted order for determinism) is returned.
+     *
+     * This is a heuristic sufficient for the loader's own directory-plugin
+     * convention (one plugin class per package); a false positive at most lists
+     * a non-plugin disabled (harmless, it is never activated without a later
+     * successful instantiation on enable).
+     *
+     * @param array<string> $phpFiles Candidate PHP file paths inside the dir.
+     * @return string|null The entry file path, or null when none is detected.
+     */
+    private function detectPluginEntryFile(array $phpFiles): ?string
+    {
+        $sorted = $phpFiles;
+        sort($sorted);
+
+        foreach ($sorted as $filePath) {
+            $source = @file_get_contents($filePath);
+            if ($source === false || $source === '') {
+                continue;
+            }
+            if ($this->sourceDeclaresPluginClass($source)) {
+                return $filePath;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether a PHP source string declares a class implementing PluginInterface,
+     * determined purely by tokenizing (no execution) (WC-220 M4).
+     *
+     * Scans tokens for a `class` declaration followed (before the class body's
+     * opening brace) by an `implements` clause whose name list includes
+     * `PluginInterface` (matched on the short name, so both the imported alias
+     * and a fully-qualified `\Whity\Sdk\PluginInterface` are caught).
+     *
+     * @param string $source The PHP source to inspect.
+     * @return bool
+     */
+    private function sourceDeclaresPluginClass(string $source): bool
+    {
+        try {
+            $tokens = \PhpToken::tokenize($source);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $inClass = false;
+        $inImplements = false;
+        foreach ($tokens as $token) {
+            if ($token->is(T_CLASS)) {
+                $inClass = true;
+                $inImplements = false;
+                continue;
+            }
+            if (!$inClass) {
+                continue;
+            }
+            if ($token->is(T_IMPLEMENTS)) {
+                $inImplements = true;
+                continue;
+            }
+            // The class body opens: stop scanning this declaration's header.
+            if ($token->text === '{') {
+                $inClass = false;
+                $inImplements = false;
+                continue;
+            }
+            if ($inImplements && $token->is([T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED])) {
+                $short = (string) substr((string) strrchr('\\' . $token->text, '\\'), 1);
+                if ($short === 'PluginInterface') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Resolve the fully qualified class name for a given plugin file path
      *
      * @param string $filePath Absolute or relative file path
@@ -783,6 +972,97 @@ class PluginLoader
     public function getPlugins(): array
     {
         return $this->plugins;
+    }
+
+    /**
+     * Get a single registered plugin instance by its stable key (original FQCN).
+     *
+     * Returns the retained instance from the registration bookkeeping, which
+     * includes plugins that are currently DISABLED (administratively or via a
+     * persisted disk sentinel) — their instance is kept so they can be
+     * re-enabled without a disk reload. Used by the migration-on-enable path
+     * (WC-220) to read {@see PluginInterface::getMigrations()} from a
+     * still-disabled plugin before flipping it active.
+     *
+     * For a directory plugin discovered DISABLED and not yet loaded (WC-220 M4),
+     * the instance is materialised on demand here (its code is required +
+     * instantiated the first time an enable flow asks for it), then retained, so
+     * the migration-on-enable path can read its declared migrations without the
+     * loader ever having executed it during plain discovery.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return PluginInterface|null The instance, or null if the key is unknown.
+     */
+    public function getPluginInstance(string $pluginKey): ?PluginInterface
+    {
+        if (isset($this->registeredPlugins[$pluginKey]['plugin'])) {
+            return $this->registeredPlugins[$pluginKey]['plugin'];
+        }
+
+        // Lazily load a disabled-but-unloaded directory plugin so its instance
+        // (and declared migrations) become available for the enable flow.
+        if (isset($this->disabledDirectoryPlugins[$pluginKey])) {
+            $this->materializeDisabledDirectoryPlugin($pluginKey);
+        }
+
+        return $this->registeredPlugins[$pluginKey]['plugin'] ?? null;
+    }
+
+    /**
+     * Materialise a disabled-but-unloaded directory plugin into the loader's
+     * bookkeeping WITHOUT activating it (WC-220 M4).
+     *
+     * Requires + instantiates the plugin's code (the first time its untrusted
+     * code runs in-host — only ever on an explicit enable flow), registers it
+     * into {@see registeredPlugins} as administratively disabled (no routes/
+     * hooks registered, lifecycle stays Disabled), and removes it from the
+     * unloaded set. Idempotent: a no-op once the plugin is loaded. A load
+     * failure leaves the plugin in its disabled-unloaded state.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return bool True if the plugin is now loaded (registered) and disabled.
+     */
+    private function materializeDisabledDirectoryPlugin(string $pluginKey): bool
+    {
+        if (isset($this->registeredPlugins[$pluginKey])) {
+            return true;
+        }
+        $entryFile = $this->disabledDirectoryPlugins[$pluginKey] ?? null;
+        if ($entryFile === null) {
+            return false;
+        }
+
+        $candidate = $this->instantiatePlugin($pluginKey, $entryFile);
+        if ($candidate === null) {
+            return false;
+        }
+
+        // Register the plugin's bookkeeping (instance + namespace) but DISABLED:
+        // do not register routes/hooks. registerPlugin() would mark it Active, so
+        // build the bookkeeping directly and immediately mark it disabled.
+        unset($this->disabledDirectoryPlugins[$pluginKey]);
+
+        // Reuse / refresh the lifecycle so it remains in the Disabled state.
+        $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+        if ($lifecycle === null) {
+            $lifecycle = new PluginLifecycle($pluginKey, $candidate['plugin']->getName());
+            $lifecycle->markLoaded();
+            $lifecycle->disable();
+            $this->lifecycles[$pluginKey] = $lifecycle;
+        }
+
+        $this->plugins[] = $candidate['plugin'];
+        $this->registeredPlugins[$pluginKey] = [
+            'plugin' => $candidate['plugin'],
+            'namespacePrefix' => $candidate['namespacePrefix'],
+            'hooks' => [],
+            'frontendFeatures' => [],
+        ];
+        // Mark administratively disabled so reEnablePlugin() re-registers its
+        // capabilities from this retained instance.
+        $this->administrativelyDisabled[$pluginKey] = true;
+
+        return true;
     }
 
     /**
@@ -852,6 +1132,30 @@ class PluginLoader
             ];
         }
 
+        // WC-220 M4: surface directory plugins discovered disabled but NOT
+        // loaded (their code is never executed in-host until enable). They are
+        // not in registeredPlugins, so list them here from their lifecycle-only
+        // record. Counts/version are unknown without loading, so report safe
+        // zeros/empty — the plugin is disabled and contributes nothing anyway.
+        foreach ($this->disabledDirectoryPlugins as $fqcn => $entryFile) {
+            if (isset($this->registeredPlugins[$fqcn])) {
+                continue;
+            }
+            $lifecycle = $this->lifecycles[$fqcn] ?? null;
+
+            $metadata[] = [
+                'id' => $fqcn,
+                // Name without executing the plugin: the FQCN's namespace root is
+                // the on-disk directory name (PSR-4), which the installer
+                // enforces equals the declared getName().
+                'name' => explode('\\', $fqcn)[0],
+                'version' => '',
+                'status' => $lifecycle?->getState()->value ?? PluginState::Disabled->value,
+                'routes_count' => 0,
+                'permissions_count' => 0,
+            ];
+        }
+
         return $metadata;
     }
 
@@ -881,6 +1185,17 @@ class PluginLoader
         // Only a disk change (re-gated by reload()) can clear the condition.
         if ($lifecycle->isQuarantined()) {
             return false;
+        }
+
+        // WC-220 M4: a directory plugin discovered disabled was deliberately NOT
+        // loaded. Enabling it is the first time its code runs in-host — lazily
+        // materialise it (require + instantiate, still disabled) so its
+        // capabilities can be registered below from a retained instance.
+        if (
+            !isset($this->registeredPlugins[$pluginKey])
+            && isset($this->disabledDirectoryPlugins[$pluginKey])
+        ) {
+            $this->materializeDisabledDirectoryPlugin($pluginKey);
         }
 
         // A plugin disabled via disablePlugin() had its routes and hooks

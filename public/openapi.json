@@ -3359,6 +3359,132 @@
                 ]
             }
         },
+        "/api/v1/plugins/upload": {
+            "post": {
+                "operationId": "post_api_v1_plugins_upload",
+                "summary": "Upload and stage a plugin package (lands disabled)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "required": [
+                                    "package"
+                                ],
+                                "properties": {
+                                    "package": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "A .zip or single .php plugin package."
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Plugin staged (disabled)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PluginUploadResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid package, unsafe name, or unsafe archive",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A plugin with this name is already installed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Plugin incompatible with this host",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plugins/{id}/re-enable": {
             "post": {
                 "operationId": "post_api_v1_plugins_id_re_enable",
@@ -3670,7 +3796,7 @@
         "/api/v1/plugins/{name}/enable": {
             "post": {
                 "operationId": "post_api_v1_plugins_name_enable",
-                "summary": "Enable a plugin by name",
+                "summary": "Enable a plugin by name (applies pending migrations)",
                 "tags": [
                     "platform-ops"
                 ],
@@ -3737,6 +3863,16 @@
                     },
                     "405": {
                         "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Plugin migration failed during enable",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -7152,6 +7288,17 @@
                 "required": [
                     "data",
                     "meta"
+                ]
+            },
+            "PluginUploadResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/PluginEntry"
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "RelationCreateRequest": {

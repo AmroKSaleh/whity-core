@@ -243,7 +243,13 @@ class SchemaGenerator
         if (is_string($request) && $request !== '') {
             $operation['requestBody'] = $this->jsonBody(SchemaBuilder::ref($request));
         } elseif (is_array($request) && $request !== []) {
-            $operation['requestBody'] = $this->jsonBody($request);
+            // A request array carrying a 'content' key is already a complete
+            // OpenAPI requestBody object (e.g. the multipart/form-data upload
+            // body, WC-220) — pass it through verbatim rather than re-wrapping it
+            // as application/json. Otherwise treat it as an inline JSON schema.
+            $operation['requestBody'] = isset($request['content']) && is_array($request['content'])
+                ? $request
+                : $this->jsonBody($request);
         }
 
         // Responses: declared per-status, or the success-only default. The
