@@ -786,6 +786,24 @@ class PluginLoader
     }
 
     /**
+     * Get a single registered plugin instance by its stable key (original FQCN).
+     *
+     * Returns the retained instance from the registration bookkeeping, which
+     * includes plugins that are currently DISABLED (administratively or via a
+     * persisted disk sentinel) — their instance is kept so they can be
+     * re-enabled without a disk reload. Used by the migration-on-enable path
+     * (WC-220) to read {@see PluginInterface::getMigrations()} from a
+     * still-disabled plugin before flipping it active.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @return PluginInterface|null The instance, or null if the key is unknown.
+     */
+    public function getPluginInstance(string $pluginKey): ?PluginInterface
+    {
+        return $this->registeredPlugins[$pluginKey]['plugin'] ?? null;
+    }
+
+    /**
      * Get the lifecycle state machine for a plugin, keyed by its original FQCN.
      *
      * @param string $pluginKey The plugin's stable identity (original FQCN).

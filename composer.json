@@ -17,6 +17,7 @@
   ],
   "require": {
     "php": ">=8.4",
+    "ext-zip": "*",
     "psr/log": "^1.0 || ^2.0 || ^3.0",
     "spomky-labs/otphp": "^11.4",
     "defuse/php-encryption": "^2.4",

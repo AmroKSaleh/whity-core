@@ -524,6 +524,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plugins/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload and stage a plugin package (lands disabled) */
+        post: operations["post_api_v1_plugins_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plugins/{id}/re-enable": {
         parameters: {
             query?: never;
@@ -584,7 +601,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Enable a plugin by name */
+        /** Enable a plugin by name (applies pending migrations) */
         post: operations["post_api_v1_plugins_name_enable"];
         delete?: never;
         options?: never;
@@ -1098,6 +1115,9 @@ export interface components {
         PluginListResponse: {
             data: components["schemas"]["PluginEntry"][];
             meta: components["schemas"]["PluginListMeta"];
+        };
+        PluginUploadResponse: {
+            data: components["schemas"]["PluginEntry"];
         };
         RelationCreateRequest: {
             from: components["schemas"]["RelationRef"];
@@ -4019,6 +4039,108 @@ export interface operations {
             };
         };
     };
+    post_api_v1_plugins_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description A .zip or single .php plugin package.
+                     */
+                    package: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Plugin staged (disabled) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUploadResponse"];
+                };
+            };
+            /** @description Invalid package, unsafe name, or unsafe archive */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A plugin with this name is already installed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Plugin incompatible with this host */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     post_api_v1_plugins_id_re_enable: {
         parameters: {
             query?: never;
@@ -4323,6 +4445,15 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Plugin migration failed during enable */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

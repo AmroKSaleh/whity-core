@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Http\Middleware;
 
 use Whity\Http\JsonBody;
+use Whity\Sdk\Http\MultipartParser;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 
@@ -90,6 +91,17 @@ final class RequestBodyValidator
     public function handle(Request $request, callable $next): Response
     {
         if (!in_array($request->getMethod(), self::BODY_METHODS, true)) {
+            return $next($request);
+        }
+
+        // Multipart/form-data bodies (file uploads, WC-217/WC-220) are NOT JSON
+        // envelopes: their raw body is a boundary-delimited blob the SDK's
+        // MultipartParser consumes lazily via Request::getUploadedFiles(). This
+        // validator must NOT json_decode (and reject) such a body — it passes a
+        // multipart request through untouched, leaving the body intact for the
+        // parser. The dedicated multipart size caps live in MultipartConfig and
+        // are enforced when the parser runs, not here.
+        if (MultipartParser::isMultipart($request->getHeader('Content-Type'))) {
             return $next($request);
         }
 
