@@ -139,15 +139,18 @@ export class AppShell {
   }
 
   navLink(label: string): Locator {
-    // Locate by href when the label maps to a known sidebar section: nav items
-    // render with a numeric prefix (e.g. "9 Website Settings"), so a name-regex
-    // anchored on the label suffix is ambiguous — "Settings" also matches
-    // "Website Settings". Hrefs are unique, so they disambiguate reliably.
+    // Resolve nav items within the sidebar's <nav> landmark only. Two
+    // disambiguations matter: (1) the footer "Account settings" link ALSO
+    // points at /settings, so a sidebar-wide href match is ambiguous — scoping
+    // to the navigation region excludes it; (2) within the nav, a section's
+    // href is unique (/settings vs /admin/settings), so "Settings" and
+    // "Website Settings" (both end in "Settings") never collide under strict mode.
+    const nav = this.sidebar.getByRole('navigation');
     const section = SIDEBAR_SECTIONS.find((s) => s.label === label);
     if (section) {
-      return this.sidebar.locator(`a[href="${section.href}"]`);
+      return nav.locator(`a[href="${section.href}"]`);
     }
-    return this.sidebar.getByRole('link', { name: new RegExp(`\\b${escapeRegExp(label)}$`) });
+    return nav.getByRole('link', { name: new RegExp(`\\b${escapeRegExp(label)}$`) });
   }
 
   /** The desktop collapse/expand toggle in the sidebar header (title attr). */
