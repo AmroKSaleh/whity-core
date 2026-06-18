@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Core;
 
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 use Tests\Support\PluginPackageFixtures;
 use Whity\Core\Exception\PluginAlreadyInstalled;
 use Whity\Core\Exception\PluginExtractionUnsafe;
@@ -586,6 +587,94 @@ final class PluginInstallerTest extends TestCase
             self::assertStringNotContainsString('.tmp_', $id, 'list() must not surface a temp sibling');
         }
         self::assertFileDoesNotExist($marker, 'list() must NOT execute a dot-prefixed entry');
+    }
+
+    /**
+     * Invoke the pure CLI-resolver helper with stubbed runtime values so the
+     * FrankenPHP branch — unreachable under php:8.4-cli — is covered (WC-221).
+     *
+     * @param callable(string): bool $isExecutable
+     * @return array{bin: string, prefixArgs: list<string>}|null
+     */
+    private function selectPhpCli(string $sapi, string $phpBinary, string $phpBindir, callable $isExecutable): ?array
+    {
+        $method = new ReflectionMethod(PluginInstaller::class, 'selectPhpCli');
+
+        /** @var array{bin: string, prefixArgs: list<string>}|null $result */
+        $result = $method->invoke(null, $sapi, $phpBinary, $phpBindir, $isExecutable);
+
+        return $result;
+    }
+
+    public function testResolverUsesPhpBinaryDirectlyInCliContext(): void
+    {
+        // (1) Genuine CLI context with a runnable PHP_BINARY: use it as-is — this
+        // is the local php:8.4-cli path and must never regress.
+        $resolved = $this->selectPhpCli(
+            'cli',
+            '/usr/local/bin/php',
+            '/usr/local/bin',
+            static fn (string $c): bool => $c === '/usr/local/bin/php',
+        );
+
+        self::assertSame(['bin' => '/usr/local/bin/php', 'prefixArgs' => []], $resolved);
+    }
+
+    public function testResolverPrefersRealPhpCliOverFrankenphpBinaryUnderWorkerSapi(): void
+    {
+        // (2) Under a non-CLI (FrankenPHP worker) SAPI, PHP_BINARY is the
+        // frankenphp binary; the resolver must IGNORE it and pick the standalone
+        // php CLI shipped at PHP_BINDIR, invoked directly (no prefix).
+        $resolved = $this->selectPhpCli(
+            'frankenphp',
+            '/usr/local/bin/frankenphp',
+            '/usr/local/bin',
+            static fn (string $c): bool => $c === '/usr/local/bin/php',
+        );
+
+        self::assertSame(['bin' => '/usr/local/bin/php', 'prefixArgs' => []], $resolved);
+    }
+
+    public function testResolverTriesWellKnownCliPathsWhenBindirHasNone(): void
+    {
+        // (2) Fall through PHP_BINDIR (no CLI there) to the /usr/bin/php fallback.
+        $resolved = $this->selectPhpCli(
+            'frankenphp',
+            '/usr/local/bin/frankenphp',
+            '/opt/empty',
+            static fn (string $c): bool => $c === '/usr/bin/php',
+        );
+
+        self::assertSame(['bin' => '/usr/bin/php', 'prefixArgs' => []], $resolved);
+    }
+
+    public function testResolverFallsBackToFrankenphpPhpCliSubcommand(): void
+    {
+        // (3) No standalone php CLI exists anywhere, but PHP_BINARY is FrankenPHP:
+        // drive it via its `php-cli` subcommand (`frankenphp php-cli <script>`).
+        $resolved = $this->selectPhpCli(
+            'frankenphp',
+            '/usr/local/bin/frankenphp',
+            '/opt/empty',
+            static fn (string $c): bool => false,
+        );
+
+        self::assertSame(['bin' => '/usr/local/bin/frankenphp', 'prefixArgs' => ['php-cli']], $resolved);
+    }
+
+    public function testResolverReturnsNullWhenNothingRunnable(): void
+    {
+        // (4) Non-CLI SAPI, PHP_BINARY is neither runnable nor frankenphp-like,
+        // and no well-known CLI exists: nothing resolves (caller then throws the
+        // typed inspection failure rather than spawning something broken).
+        $resolved = $this->selectPhpCli(
+            'fpm-fcgi',
+            '/usr/sbin/php-fpm',
+            '/opt/empty',
+            static fn (string $c): bool => false,
+        );
+
+        self::assertNull($resolved);
     }
 
     private function assertPluginDirEmpty(): void
