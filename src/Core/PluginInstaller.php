@@ -562,7 +562,15 @@ final class PluginInstaller
     private function introspect(array $files): array
     {
         $script = $this->introspectorScriptPath();
-        $php = (defined('PHP_BINARY') && PHP_BINARY !== '') ? PHP_BINARY : 'php';
+
+        // Resolve a REAL php CLI for the child. Under FrankenPHP (the
+        // production/e2e runtime) PHP_BINARY is the `frankenphp` binary and
+        // PHP_SAPI is NOT 'cli' — spawning `frankenphp <script>` does NOT run the
+        // script as a plain CLI; the child misbehaves/blocks and the upload
+        // request hangs (WC-221). The resolver below picks a standalone php CLI
+        // (or, as a last resort, FrankenPHP's `php-cli` subcommand) so the child
+        // is always a short-lived CLI that emits its result and exits.
+        $resolved = $this->resolvePhpCli();
 
         // Single-use, unguessable nonce keying the result markers (WC-220 M3):
         // the child embeds it in its genuine emit, so a plugin that prints
@@ -580,9 +588,15 @@ final class PluginInstaller
         // host memory/CPU even within the wall-clock deadline (WC-220 M1). The
         // staged files are the only argv entries — the nonce is NEVER an
         // argument (it would be readable via /proc/self/cmdline).
-        $cmd = array_merge(
+        //
+        // `prefixArgs` is empty for a standalone php CLI and `['php-cli']` when
+        // we must invoke FrankenPHP's CLI subcommand (`frankenphp php-cli
+        // <script>`); the `-d` hardening flags and argv layout are identical
+        // either way — the staged files stay the only non-flag args.
+        $phpArgv = array_merge(
+            [$resolved['bin']],
+            $resolved['prefixArgs'],
             [
-                $php,
                 '-d', 'memory_limit=' . self::CHILD_MEMORY_LIMIT,
                 '-d', 'max_execution_time=' . self::CHILD_MAX_EXECUTION_TIME,
                 $script,
@@ -590,12 +604,50 @@ final class PluginInstaller
             $files
         );
 
+        // ROOT-CAUSE FIX (WC-221): close the parent's inherited descriptors in
+        // the child BEFORE exec'ing php. Under the FrankenPHP worker runtime the
+        // PHP "workers" are threads inside ONE process, so a proc_open() child
+        // inherits ALL of that process's open fds — including the live client
+        // CONNECTION socket and the per-worker script handles (those fds are not
+        // O_CLOEXEC). While the child held a copy of the connection fd, Caddy did
+        // not treat the HTTP response as complete until the child finally closed
+        // it, so the upload SUCCEEDED but only after the proxy/keepalive idle
+        // timeout elapsed (~41s, varying) — failing the e2e and being terrible
+        // UX. Resolving a real php CLI alone did not fix this: `bypass_shell`
+        // skips the `sh` wrapper but does NOT close inherited fds, and this PHP
+        // build ships no posix_close()/pcntl to close a raw fd by number from
+        // inside the script.
+        //
+        // The fix runs the child through a tiny wrapper shell that closes every
+        // fd >= 3 it inherited (enumerated from /proc/self/fd on the Linux
+        // runtime) and then `exec`s php — so the shell REPLACES itself with php
+        // (nothing lingers owning the descriptors) and php starts with only
+        // 0/1/2 open. The php binary and its args are passed as the shell's
+        // positional parameters and run via `exec "$@"`, so NONE of them
+        // (including the staged file paths) are ever re-parsed by the shell — no
+        // injection surface. All WC-220 hardening is preserved: the nonce still
+        // arrives over stdin only, the deadline-bounded read and proc_terminate
+        // are unchanged, and the staged files remain the only php argv entries.
+        $cmd = array_merge($this->fdClosingWrapperPrefix(), $phpArgv);
+
         $descriptors = [
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
-        $process = @proc_open($cmd, $descriptors, $pipes);
+
+        // `bypass_shell` is essential: it makes proc_open exec our argv array
+        // DIRECTLY (execvp), so the array above runs verbatim as
+        // `<shell> -c '<close-fds>; exec "$@"' <shell> <php> <args...>`. Without
+        // it, proc_open would itself flatten the array into a string and wrap it
+        // in ANOTHER `sh -c "<string>"`, re-parsing (and corrupting) the argv.
+        // Our OWN wrapper shell `exec`s php and so does not survive the call. A
+        // minimal env is passed (no inherited request env leaking to untrusted
+        // load-time code); PATH is preserved so the wrapper and a bare `php`
+        // lookup — if one ever occurs — still resolve.
+        $otherOptions = ['bypass_shell' => true];
+        $env = ['PATH' => getenv('PATH') !== false ? getenv('PATH') : '/usr/local/bin:/usr/bin:/bin'];
+        $process = @proc_open($cmd, $descriptors, $pipes, null, $env, $otherOptions);
         if (!is_resource($process)) {
             throw new PluginPackageInvalid('The package could not be inspected.');
         }
@@ -682,6 +734,155 @@ final class PluginInstaller
             'sdk_constraint' => is_string($plugin['sdk_constraint'] ?? null) ? $plugin['sdk_constraint'] : null,
             'core_constraint' => is_string($plugin['core_constraint'] ?? null) ? $plugin['core_constraint'] : null,
         ];
+    }
+
+    /**
+     * Build the argv prefix for the wrapper shell that closes inherited fds and
+     * then `exec`s the resolved php CLI (WC-221 root-cause fix). See the caller
+     * in {@see introspect()} for the why.
+     *
+     * The wrapper enumerates /proc/self/fd and closes every descriptor >= 3 that
+     * this child inherited from the FrankenPHP worker (the live connection socket
+     * and the per-worker script handles), then `exec "$@"` replaces the shell
+     * with php — passing the php binary and its args as positional parameters so
+     * they are never re-parsed by the shell.
+     *
+     * BASH is preferred and used when available because POSIX `sh`/dash only
+     * recognises SINGLE-digit fd numbers in a `N>&-` redirection — it parses
+     * `10>&-` as "run command 10", so it CANNOT close the multi-digit fds (8..15)
+     * the worker leaks. Bash closes arbitrary fd numbers. When no bash is found
+     * we fall back to `sh` closing the single-digit fds (3..9): that still drops
+     * the critical connection socket (observed at fd 4), so the response is no
+     * longer pinned even on a bash-less host.
+     *
+     * @return list<string> The wrapper argv prefix (shell, -c, script, $0).
+     */
+    private function fdClosingWrapperPrefix(): array
+    {
+        return self::buildFdClosingWrapperPrefix(
+            static fn (string $candidate): bool => @is_executable($candidate),
+        );
+    }
+
+    /**
+     * Pure builder for the fd-closing wrapper argv prefix, with an injectable
+     * is-executable probe so the bash-vs-sh selection is unit-testable (WC-221).
+     *
+     * @param callable(string): bool $isExecutable Probe for a runnable shell path.
+     * @return list<string> [shell, '-c', script, '$0'] — see {@see fdClosingWrapperPrefix()}.
+     */
+    private static function buildFdClosingWrapperPrefix(callable $isExecutable): array
+    {
+        // Close fds >= 3 found under /proc/self/fd, then exec the real command.
+        // Bash handles multi-digit fds; the loop is a silent no-op if /proc is
+        // absent (the loop body simply never iterates), so php still execs.
+        $script = 'for fd in $(ls /proc/$$/fd 2>/dev/null); do '
+            . 'if [ "$fd" -ge 3 ] 2>/dev/null; then eval "exec $fd>&-" 2>/dev/null || true; fi; '
+            . 'done; exec "$@"';
+
+        // Prefer bash: POSIX sh/dash only recognise SINGLE-digit fd numbers in a
+        // `N>&-` redirection (it parses `10>&-` as "run command 10"), so it
+        // cannot close the multi-digit fds the worker leaks. Bash closes any fd.
+        foreach (['/bin/bash', '/usr/bin/bash'] as $bash) {
+            if ($isExecutable($bash)) {
+                return [$bash, '-c', $script, 'bash'];
+            }
+        }
+
+        // POSIX fallback: sh can only close single-digit fds, but that covers the
+        // leaked connection socket; multi-digit script handles linger harmlessly.
+        return ['/bin/sh', '-c', $script, 'sh'];
+    }
+
+    /**
+     * Resolve a real PHP CLI to spawn the introspection child under (WC-221).
+     *
+     * Binds the live runtime values (PHP_SAPI, PHP_BINARY, PHP_BINDIR) and an
+     * is_executable() probe, then defers to the pure {@see selectPhpCli()} so the
+     * decision is unit-testable with stubbed inputs (the FrankenPHP branch cannot
+     * be exercised under php:8.4-cli).
+     *
+     * @return array{bin: string, prefixArgs: list<string>}
+     * @throws PluginPackageInvalid When no runnable php CLI can be resolved.
+     */
+    private function resolvePhpCli(): array
+    {
+        $resolved = self::selectPhpCli(
+            PHP_SAPI,
+            defined('PHP_BINARY') ? PHP_BINARY : '',
+            defined('PHP_BINDIR') ? PHP_BINDIR : '',
+            static fn (string $candidate): bool => $candidate !== '' && @is_executable($candidate),
+        );
+
+        if ($resolved === null) {
+            $this->logger->error('[PluginInstaller] no runnable php CLI for introspection', [
+                'event' => 'plugin.upload.introspect_failed',
+                'php_sapi' => PHP_SAPI,
+                'php_binary' => defined('PHP_BINARY') ? PHP_BINARY : '',
+            ]);
+            throw new PluginPackageInvalid('The package could not be inspected.');
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * Pure selection of the PHP CLI binary (+ optional subcommand prefix) used to
+     * run the introspection child. Pulled out of {@see resolvePhpCli()} so its
+     * resolution order is testable with stubbed runtime values (WC-221).
+     *
+     * Resolution order:
+     *  1. A genuine CLI context (`PHP_SAPI === 'cli'`) whose PHP_BINARY is a
+     *     runnable executable → use PHP_BINARY directly. This covers local
+     *     php:8.4-cli and any CLI invocation, and must NOT regress.
+     *  2. Otherwise (FrankenPHP worker / non-CLI SAPI) look for a standalone php
+     *     CLI: `PHP_BINDIR/php`, then `/usr/local/bin/php`, then `/usr/bin/php`;
+     *     the first executable wins and is invoked directly. The FrankenPHP base
+     *     image (dunglas/frankenphp, built on the official php image) ships such a
+     *     CLI, typically at PHP_BINDIR.
+     *  3. Last resort: if PHP_BINARY looks like FrankenPHP, invoke its CLI
+     *     subcommand — the command becomes `frankenphp php-cli <script>` — so a
+     *     plain PHP script still runs as a short-lived CLI.
+     *  4. Nothing runnable → null (the caller throws the typed inspection
+     *     failure rather than spawning something broken).
+     *
+     * @param string $sapi The PHP_SAPI value.
+     * @param string $phpBinary The PHP_BINARY value ('' when undefined/empty).
+     * @param string $phpBindir The PHP_BINDIR value ('' when undefined/empty).
+     * @param callable(string): bool $isExecutable Probe for a runnable path.
+     * @return array{bin: string, prefixArgs: list<string>}|null
+     */
+    private static function selectPhpCli(
+        string $sapi,
+        string $phpBinary,
+        string $phpBindir,
+        callable $isExecutable,
+    ): ?array {
+        // (1) Genuine CLI context with a runnable PHP_BINARY — use it as-is.
+        if ($sapi === 'cli' && $phpBinary !== '' && $isExecutable($phpBinary)) {
+            return ['bin' => $phpBinary, 'prefixArgs' => []];
+        }
+
+        // (2) Non-CLI SAPI (e.g. FrankenPHP worker): find a standalone php CLI.
+        $candidates = [];
+        if ($phpBindir !== '') {
+            $candidates[] = rtrim($phpBindir, '/\\') . '/php';
+        }
+        $candidates[] = '/usr/local/bin/php';
+        $candidates[] = '/usr/bin/php';
+        foreach ($candidates as $candidate) {
+            if ($isExecutable($candidate)) {
+                return ['bin' => $candidate, 'prefixArgs' => []];
+            }
+        }
+
+        // (3) Last resort: PHP_BINARY is FrankenPHP — drive it via `php-cli`.
+        if ($phpBinary !== '' && str_contains(strtolower(basename($phpBinary)), 'frankenphp')) {
+            return ['bin' => $phpBinary, 'prefixArgs' => ['php-cli']];
+        }
+
+        // (4) Nothing runnable resolved.
+        return null;
     }
 
     /**

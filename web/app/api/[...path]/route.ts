@@ -70,9 +70,20 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
 
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       if (request.body) {
-        const bodyText = await request.text();
-        if (bodyText) {
-          options.body = bodyText;
+        // Forward the body as RAW BYTES, never as a decoded string (WC-221).
+        // `request.text()` decodes the body as UTF-8; for a BINARY body — e.g. a
+        // `multipart/form-data` plugin upload whose part is a `.zip` — the zip's
+        // non-UTF-8 bytes (local-file-header magic, CRC-32, sizes) are replaced
+        // with U+FFFD on decode and re-encoded at a DIFFERENT byte length. The
+        // multipart framing then no longer matches its boundary/declared sizes,
+        // so the FrankenPHP backend keeps waiting for body bytes that never come
+        // and the request hangs until the proxy/socket idle timeout (~45s) — the
+        // plugin-upload e2e timeout. (A direct `curl` sends the bytes intact, so
+        // it never reproduced this.) `arrayBuffer()` is byte-exact, so JSON and
+        // binary bodies alike are forwarded verbatim.
+        const bodyBytes = await request.arrayBuffer();
+        if (bodyBytes.byteLength > 0) {
+          options.body = bodyBytes;
           options.duplex = 'half';
         }
       }

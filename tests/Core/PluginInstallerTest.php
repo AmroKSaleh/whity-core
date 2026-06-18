@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Core;
 
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 use Tests\Support\PluginPackageFixtures;
 use Whity\Core\Exception\PluginAlreadyInstalled;
 use Whity\Core\Exception\PluginExtractionUnsafe;
@@ -586,6 +587,146 @@ final class PluginInstallerTest extends TestCase
             self::assertStringNotContainsString('.tmp_', $id, 'list() must not surface a temp sibling');
         }
         self::assertFileDoesNotExist($marker, 'list() must NOT execute a dot-prefixed entry');
+    }
+
+    /**
+     * Invoke the pure CLI-resolver helper with stubbed runtime values so the
+     * FrankenPHP branch — unreachable under php:8.4-cli — is covered (WC-221).
+     *
+     * @param callable(string): bool $isExecutable
+     * @return array{bin: string, prefixArgs: list<string>}|null
+     */
+    private function selectPhpCli(string $sapi, string $phpBinary, string $phpBindir, callable $isExecutable): ?array
+    {
+        $method = new ReflectionMethod(PluginInstaller::class, 'selectPhpCli');
+
+        /** @var array{bin: string, prefixArgs: list<string>}|null $result */
+        $result = $method->invoke(null, $sapi, $phpBinary, $phpBindir, $isExecutable);
+
+        return $result;
+    }
+
+    public function testResolverUsesPhpBinaryDirectlyInCliContext(): void
+    {
+        // (1) Genuine CLI context with a runnable PHP_BINARY: use it as-is — this
+        // is the local php:8.4-cli path and must never regress.
+        $resolved = $this->selectPhpCli(
+            'cli',
+            '/usr/local/bin/php',
+            '/usr/local/bin',
+            static fn (string $c): bool => $c === '/usr/local/bin/php',
+        );
+
+        self::assertSame(['bin' => '/usr/local/bin/php', 'prefixArgs' => []], $resolved);
+    }
+
+    public function testResolverPrefersRealPhpCliOverFrankenphpBinaryUnderWorkerSapi(): void
+    {
+        // (2) Under a non-CLI (FrankenPHP worker) SAPI, PHP_BINARY is the
+        // frankenphp binary; the resolver must IGNORE it and pick the standalone
+        // php CLI shipped at PHP_BINDIR, invoked directly (no prefix).
+        $resolved = $this->selectPhpCli(
+            'frankenphp',
+            '/usr/local/bin/frankenphp',
+            '/usr/local/bin',
+            static fn (string $c): bool => $c === '/usr/local/bin/php',
+        );
+
+        self::assertSame(['bin' => '/usr/local/bin/php', 'prefixArgs' => []], $resolved);
+    }
+
+    public function testResolverTriesWellKnownCliPathsWhenBindirHasNone(): void
+    {
+        // (2) Fall through PHP_BINDIR (no CLI there) to the /usr/bin/php fallback.
+        $resolved = $this->selectPhpCli(
+            'frankenphp',
+            '/usr/local/bin/frankenphp',
+            '/opt/empty',
+            static fn (string $c): bool => $c === '/usr/bin/php',
+        );
+
+        self::assertSame(['bin' => '/usr/bin/php', 'prefixArgs' => []], $resolved);
+    }
+
+    public function testResolverFallsBackToFrankenphpPhpCliSubcommand(): void
+    {
+        // (3) No standalone php CLI exists anywhere, but PHP_BINARY is FrankenPHP:
+        // drive it via its `php-cli` subcommand (`frankenphp php-cli <script>`).
+        $resolved = $this->selectPhpCli(
+            'frankenphp',
+            '/usr/local/bin/frankenphp',
+            '/opt/empty',
+            static fn (string $c): bool => false,
+        );
+
+        self::assertSame(['bin' => '/usr/local/bin/frankenphp', 'prefixArgs' => ['php-cli']], $resolved);
+    }
+
+    public function testResolverReturnsNullWhenNothingRunnable(): void
+    {
+        // (4) Non-CLI SAPI, PHP_BINARY is neither runnable nor frankenphp-like,
+        // and no well-known CLI exists: nothing resolves (caller then throws the
+        // typed inspection failure rather than spawning something broken).
+        $resolved = $this->selectPhpCli(
+            'fpm-fcgi',
+            '/usr/sbin/php-fpm',
+            '/opt/empty',
+            static fn (string $c): bool => false,
+        );
+
+        self::assertNull($resolved);
+    }
+
+    /**
+     * Invoke the pure fd-closing-wrapper builder with a stubbed shell probe
+     * (WC-221).
+     *
+     * @param callable(string): bool $isExecutable
+     * @return list<string>
+     */
+    private function buildFdClosingWrapperPrefix(callable $isExecutable): array
+    {
+        $method = new ReflectionMethod(PluginInstaller::class, 'buildFdClosingWrapperPrefix');
+
+        /** @var list<string> $result */
+        $result = $method->invoke(null, $isExecutable);
+
+        return $result;
+    }
+
+    public function testFdClosingWrapperPrefersBashWhenAvailable(): void
+    {
+        // The introspection child must close the FrankenPHP worker's inherited
+        // fds before exec'ing php, or it pins the HTTP connection open and the
+        // upload hangs ~41s (WC-221). bash is required to close the MULTI-DIGIT
+        // fds the worker leaks (sh/dash cannot), so it is preferred when present.
+        $prefix = $this->buildFdClosingWrapperPrefix(
+            static fn (string $c): bool => $c === '/bin/bash',
+        );
+
+        self::assertSame('/bin/bash', $prefix[0]);
+        self::assertSame('-c', $prefix[1]);
+        self::assertSame('bash', $prefix[3], 'the shell name is passed as $0');
+        // The wrapper closes inherited fds (>= 3) and then execs the real argv
+        // WITHOUT re-parsing it (positional `"$@"`), so there is no injection
+        // surface from the staged file paths.
+        self::assertStringContainsString('exec "$@"', $prefix[2]);
+        self::assertStringContainsString('/proc/$$/fd', $prefix[2]);
+        self::assertStringContainsString('-ge 3', $prefix[2]);
+    }
+
+    public function testFdClosingWrapperFallsBackToShWhenNoBash(): void
+    {
+        // Bash-less host: fall back to POSIX sh, which still drops the leaked
+        // single-digit connection socket fd. The closing script is unchanged.
+        $prefix = $this->buildFdClosingWrapperPrefix(
+            static fn (string $c): bool => false,
+        );
+
+        self::assertSame('/bin/sh', $prefix[0]);
+        self::assertSame('-c', $prefix[1]);
+        self::assertSame('sh', $prefix[3]);
+        self::assertStringContainsString('exec "$@"', $prefix[2]);
     }
 
     private function assertPluginDirEmpty(): void
