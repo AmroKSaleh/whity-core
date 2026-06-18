@@ -1,12 +1,26 @@
 name: Automated Tests
 
+# Doc-only changes can't affect the build, tests, or generated artifacts, so
+# skip the suite when every changed path is documentation. `paths-ignore` only
+# suppresses a run when ALL changed files match — a PR that touches both code
+# and docs still runs the full gate. (No required status checks are configured
+# on `main`, so a skipped run never leaves a doc-only PR blocked on a pending
+# check.)
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
 
 jobs:
   test:
