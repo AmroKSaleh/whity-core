@@ -85,6 +85,31 @@ final class SettingsApiRealEngineTest extends TestCase
         self::assertSame([], $data['overridden']);
     }
 
+    public function testGetSettingsReportsTenantOverridableTrueForRegularTenant(): void
+    {
+        // WC-224: a regular tenant HAS a per-tenant override layer, so the UI may
+        // present the editable tenant form. The flag is server-computed.
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->handler->get($this->req('GET', '/api/settings', null, self::USER_READ_ONLY));
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertTrue($this->decode($response)['data']['tenant_overridable']);
+    }
+
+    public function testGetSettingsReportsTenantOverridableFalseForSystemTenant(): void
+    {
+        // WC-224: the system tenant (0) has globals only — no per-tenant override
+        // layer — so the editable tenant form must be hidden client-side. The
+        // server signals this with tenant_overridable=false to prevent the 422.
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->handler->get(
+            $this->req('GET', '/api/settings', null, self::USER_FULL, self::SYSTEM_TENANT)
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertFalse($this->decode($response)['data']['tenant_overridable']);
+    }
+
     // ==================== PATCH /api/settings (settings:write) ====================
 
     public function testPatchSettingsRejectsReadOnlyCaller(): void

@@ -77,8 +77,13 @@ const GLOBAL = {
   support_email: '',
 };
 
-function settingsResponse(overridden: string[] = ['site_name']) {
-  return { data: { data: { effective: EFFECTIVE, registry: REGISTRY, overridden } }, error: undefined };
+function settingsResponse(overridden: string[] = ['site_name'], tenantOverridable = true) {
+  return {
+    data: {
+      data: { effective: EFFECTIVE, registry: REGISTRY, overridden, tenant_overridable: tenantOverridable },
+    },
+    error: undefined,
+  };
 }
 
 function globalResponse() {
@@ -89,10 +94,10 @@ function globalResponse() {
  * Default GET router: `/api/v1/settings` → tenant payload,
  * `/api/v1/settings/global` → global payload.
  */
-function routeGet(overridden: string[] = ['site_name']) {
+function routeGet(overridden: string[] = ['site_name'], tenantOverridable = true) {
   mockApiGet.mockImplementation((path: string) => {
     if (path === '/api/v1/settings/global') return Promise.resolve(globalResponse());
-    return Promise.resolve(settingsResponse(overridden));
+    return Promise.resolve(settingsResponse(overridden, tenantOverridable));
   });
 }
 
@@ -240,6 +245,72 @@ describe('AdminSettingsPage — save flow', () => {
     await waitFor(() =>
       expect(addToast).toHaveBeenCalledWith('Validation failed', 'error')
     );
+  });
+});
+
+describe('AdminSettingsPage — system-tenant gating (WC-224)', () => {
+  it('hides the editable tenant form and Save when tenant_overridable is false', async () => {
+    // The system tenant (0) has globals only; the server reports
+    // tenant_overridable=false. The tenant section must NOT render the editable
+    // fields or the Save button (so the user can never trigger the 422), and
+    // must instead point at Global defaults.
+    grant('settings:read', 'settings:write', 'settings:manage');
+    routeGet(['site_name'], false);
+    render(<AdminSettingsPage />);
+
+    // The explanatory notice is shown and references Global defaults.
+    expect(await screen.findByTestId('tenant-no-override-notice')).toHaveTextContent(
+      /global defaults/i
+    );
+    // No editable tenant inputs and no tenant Save button.
+    expect(screen.queryByLabelText(/^site name$/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /save tenant settings/i })
+    ).not.toBeInTheDocument();
+    // The Global defaults section is still present for the superuser.
+    expect(screen.getByRole('heading', { name: /global defaults/i })).toBeInTheDocument();
+  });
+
+  it('renders the editable tenant form when tenant_overridable is true', async () => {
+    // A regular tenant keeps the existing editable form (gated on settings:write).
+    grant('settings:read', 'settings:write');
+    routeGet(['site_name'], true);
+    render(<AdminSettingsPage />);
+
+    expect(await screen.findByLabelText(/^site name$/i)).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: /save tenant settings/i })
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('tenant-no-override-notice')).not.toBeInTheDocument();
+  });
+});
+
+describe('AdminSettingsPage — errorMessage details fallback (WC-224)', () => {
+  it('surfaces a per-field detail message from a 422 envelope, not the generic error', async () => {
+    grant('settings:read', 'settings:write');
+    mockApiPatch.mockResolvedValue({
+      data: undefined,
+      error: {
+        error: 'Validation failed',
+        details: {
+          site_name: 'The system tenant has no per-tenant override layer; edit the global default instead.',
+        },
+      },
+    });
+    render(<AdminSettingsPage />);
+    const siteName = await screen.findByLabelText(/^site name$/i);
+
+    fireEvent.change(siteName, { target: { value: 'Another' } });
+    fireEvent.click(screen.getByRole('button', { name: /save tenant settings/i }));
+
+    // The toast carries the helpful field message, NOT the generic top-level one.
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(
+        'The system tenant has no per-tenant override layer; edit the global default instead.',
+        'error'
+      )
+    );
+    expect(addToast).not.toHaveBeenCalledWith('Validation failed', 'error');
   });
 });
 

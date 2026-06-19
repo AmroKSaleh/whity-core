@@ -1271,6 +1271,7 @@ export interface components {
                 effective: components["schemas"]["SettingsValueMap"];
                 registry: components["schemas"]["SettingsRegistryEntry"][];
                 overridden: string[];
+                tenant_overridable: boolean;
             };
         };
         SettingsUpdateRequest: {
