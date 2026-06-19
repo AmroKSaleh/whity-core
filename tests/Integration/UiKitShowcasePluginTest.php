@@ -50,8 +50,8 @@ final class UiKitShowcasePluginTest extends TestCase
     {
         $plugin = new UiKitShowcasePlugin();
 
-        // Blocks landed in SDK 1.6, so the plugin requires that range.
-        $this->assertSame('^1.6', $plugin->getSdkConstraint());
+        // Data-bound blocks landed in SDK 1.7, so the plugin requires that range.
+        $this->assertSame('^1.7', $plugin->getSdkConstraint());
         $this->assertSame('', $plugin->getCoreConstraint());
         $this->assertSame([], $plugin->getPluginDependencies());
 

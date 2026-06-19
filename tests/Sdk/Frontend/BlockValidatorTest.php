@@ -299,9 +299,9 @@ final class BlockValidatorTest extends TestCase
         sort($types);
 
         $expected = [
-            'alert', 'badge', 'button', 'card', 'code', 'divider', 'grid',
-            'heading', 'icon', 'keyValue', 'list', 'row', 'section', 'stat',
-            'tab', 'table', 'tabs', 'text',
+            'alert', 'badge', 'button', 'card', 'code', 'dataList', 'dataStat',
+            'dataTable', 'divider', 'grid', 'heading', 'icon', 'keyValue', 'list',
+            'row', 'section', 'stat', 'tab', 'table', 'tabs', 'text',
         ];
         sort($expected);
 
@@ -321,5 +321,215 @@ final class BlockValidatorTest extends TestCase
     public function testRulesForUnknownTypeIsNull(): void
     {
         $this->assertNull(BlockContract::rulesFor('wormhole'));
+    }
+
+    // ==================== SP2 data-bound block types (WC-229) ====================
+
+    /**
+     * A representative tree with all three data-bound leaf types passes
+     * validation when every required prop is present and well-formed.
+     */
+    public function testDataBoundTreeWithAllThreeTypesIsValid(): void
+    {
+        $tree = [
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [
+                    ['key' => 'name', 'label' => 'Name'],
+                    ['key' => 'role', 'label' => 'Role'],
+                ],
+            ],
+            [
+                'type' => 'dataStat',
+                'source' => '/api/uikit/demo/metric',
+                'label' => 'Active users',
+                'valueField' => 'value',
+            ],
+            [
+                'type' => 'dataList',
+                'source' => '/api/uikit/demo/rows',
+                'itemField' => 'name',
+            ],
+        ];
+
+        $result = BlockValidator::validate($tree);
+
+        $this->assertSame(['ok' => true, 'errors' => []], $result);
+    }
+
+    public function testDataTableMissingSourceIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testDataTableSourceWithNoApiPrefixIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => 'hello/greetings',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testDataTableSourceWithDoubleSlashIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api//x',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testDataTableSourceWithDotDotIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/../secret',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testDataTableSourceWithSchemeIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => 'http://evil/api/x',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testDataTableSourceWithWhitespaceIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/x y',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testDataTableMissingColumnsIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('columns', $joined);
+    }
+
+    public function testDataStatMissingValueFieldIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataStat',
+                'source' => '/api/uikit/demo/metric',
+                'label' => 'Stat label',
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('valueField', $joined);
+    }
+
+    public function testDataListMissingItemFieldIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataList',
+                'source' => '/api/uikit/demo/rows',
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('itemField', $joined);
+    }
+
+    public function testDataTableWithChildrenIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+                'children' => [
+                    ['type' => 'text', 'value' => 'nope'],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('children', $joined);
+    }
+
+    public function testDataBoundTypesAreInTheWhitelist(): void
+    {
+        $types = BlockContract::types();
+        $this->assertContains('dataTable', $types);
+        $this->assertContains('dataStat', $types);
+        $this->assertContains('dataList', $types);
+    }
+
+    public function testDataBoundTypesAreLeafBlocks(): void
+    {
+        $this->assertFalse(BlockContract::isContainer('dataTable'));
+        $this->assertFalse(BlockContract::isContainer('dataStat'));
+        $this->assertFalse(BlockContract::isContainer('dataList'));
     }
 }

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk\Frontend\Blocks;
 
 /**
- * Validates a platform-neutral block tree against {@see BlockContract} (WC-225).
+ * Validates a platform-neutral block tree against {@see BlockContract} (WC-225, WC-229).
  *
  * {@see validate()} is the single gate every server-driven plugin-UI screen
  * passes before any renderer sees it. It is PURE and worker-safe — no static
@@ -158,9 +158,9 @@ final class BlockValidator
     /**
      * Validate every declared prop of a node against the type's prop rules.
      *
-     * @param array<mixed>                                                $node
-     * @param array<string, array{type: string, required: bool, values?: list<string|int>}> $propRules
-     * @param list<string>                                                $errors by reference
+     * @param array<mixed>                                                                                     $node
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath', required: bool, values?: list<string|int>}> $propRules
+     * @param list<string>                                                                                     $errors by reference
      */
     private static function validateProps(
         array $node,
@@ -187,9 +187,9 @@ final class BlockValidator
     /**
      * Validate a single present prop value against its rule.
      *
-     * @param mixed                                                       $value
-     * @param array{type: string, values?: list<string|int>, required: bool} $rule
-     * @param list<string>                                                $errors by reference
+     * @param mixed                                                                                                                                        $value
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath', values?: list<string|int>, required: bool} $rule
+     * @param list<string>                                                                                                                                 $errors by reference
      */
     private static function validatePropValue(
         mixed $value,
@@ -270,6 +270,21 @@ final class BlockValidator
                 }
 
                 break;
+
+            case 'apiPath':
+                if (
+                    !\is_string($value)
+                    || !str_starts_with($value, '/api/')
+                    || str_contains($value, '//')
+                    || str_contains($value, '..')
+                    || str_contains($value, '\\')
+                    || preg_match('/[\s\x00-\x1f\x7f]/', $value) === 1
+                ) {
+                    $errors[] = "{$path}: '{$type}.{$prop}' must be a relative API path starting with '/api/' "
+                        . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($value);
+                }
+
+                break;
         }
     }
 
@@ -304,7 +319,7 @@ final class BlockValidator
     }
 
     /**
-     * `table.columns`: a list of `{key: string, label: string}`.
+     * `table.columns` / `dataTable.columns`: a list of `{key: string, label: string}`.
      *
      * @param mixed        $value
      * @param list<string> $errors by reference
