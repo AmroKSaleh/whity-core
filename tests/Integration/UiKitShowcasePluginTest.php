@@ -13,6 +13,8 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Router;
 use Whity\Sdk\Frontend\Blocks\BlockContract;
 use Whity\Sdk\Frontend\Blocks\BlockValidator;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
@@ -21,16 +23,17 @@ require_once dirname(__DIR__, 2) . '/plugins/UiKitShowcase/UiKitShowcasePlugin.p
 require_once dirname(__DIR__, 2) . '/plugins/UiKitShowcase/Migrations/GrantUiKitViewToAdmin.php';
 
 /**
- * WC-228: the UiKitShowcase example plugin proves and documents the SP1 block
- * system end-to-end. It is a SANCTIONED example plugin (named for the SDK
- * feature it documents) that contributes ONE `screen: 'blocks'` feature whose
- * tree (a) passes {@see BlockValidator::validate()} and (b) contains a live
- * instance of EVERY block type in {@see BlockContract::types()} beside the PHP
- * snippet that declares it.
+ * WC-228 / WC-232: the UiKitShowcase example plugin proves and documents the
+ * full SP1 + SP2 block system end-to-end. It contributes ONE `screen: 'blocks'`
+ * feature whose tree (a) passes {@see BlockValidator::validate()} and
+ * (b) contains a live instance of EVERY block type in
+ * {@see BlockContract::types()} — including the SP2 data-bound types
+ * (dataTable, dataStat, dataList, added in WC-232) — beside the PHP snippet
+ * that declares it.
  *
- * It declares NO API routes, NO hooks, and NO DB resource — the screen is a
- * purely declarative static block tree — so the only persisted side effect is
- * its one permission (`uikit:view`) and the migration that grants it to admin.
+ * As of WC-232 the plugin also exposes two read-only demo endpoints
+ * (`GET /api/uikit/demo/rows` and `GET /api/uikit/demo/metric`) that the
+ * data-bound blocks bind to via their `source` prop.
  */
 final class UiKitShowcasePluginTest extends TestCase
 {
@@ -46,21 +49,22 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertSame('1.0.0', $plugin->getVersion());
     }
 
-    public function testDeclaresTheBlocksSdkConstraintAndNoBackendSurface(): void
+    public function testDeclaresTheSdkConstraintAndBackendSurface(): void
     {
         $plugin = new UiKitShowcasePlugin();
 
-        // Blocks landed in SDK 1.6, so the plugin requires that range.
-        $this->assertSame('^1.6', $plugin->getSdkConstraint());
+        // Data-bound block types landed in SDK 1.7, so the plugin requires that range.
+        $this->assertSame('^1.7', $plugin->getSdkConstraint());
         $this->assertSame('', $plugin->getCoreConstraint());
         $this->assertSame([], $plugin->getPluginDependencies());
 
-        // A purely declarative screen: no API routes, no hooks.
-        $this->assertSame([], $plugin->getRoutes());
+        // No hooks; migrations unchanged.
         $this->assertSame([], $plugin->getHooks());
-
-        // One forward, idempotent permission-grant migration.
         $this->assertSame([GrantUiKitViewToAdmin::class], $plugin->getMigrations());
+
+        // Two demo routes now declared (SP2, WC-232).
+        $routes = $plugin->getRoutes();
+        $this->assertNotSame([], $routes, 'The showcase now declares demo routes (SP2)');
     }
 
     public function testDeclaresTheSingleColonNotationPermission(): void
@@ -94,6 +98,119 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertIsArray($feature['blocks']);
     }
 
+    // ---- WC-232: demo routes ----
+
+    public function testGetRoutesIncludesTheTwoDemoEndpoints(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+        $routes = $plugin->getRoutes();
+
+        /** @var array<string, array<string, mixed>> $byPath */
+        $byPath = [];
+        foreach ($routes as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            $method = is_string($r['method'] ?? null) ? (string) $r['method'] : '';
+            $path   = is_string($r['path'] ?? null)   ? (string) $r['path']   : '';
+            if ($method !== '' && $path !== '') {
+                $byPath[$method . ' ' . $path] = $r;
+            }
+        }
+
+        $this->assertArrayHasKey(
+            'GET /api/uikit/demo/rows',
+            $byPath,
+            'getRoutes() must include GET /api/uikit/demo/rows'
+        );
+        $this->assertArrayHasKey(
+            'GET /api/uikit/demo/metric',
+            $byPath,
+            'getRoutes() must include GET /api/uikit/demo/metric'
+        );
+
+        foreach (['GET /api/uikit/demo/rows', 'GET /api/uikit/demo/metric'] as $key) {
+            $this->assertSame(
+                'uikit:view',
+                $byPath[$key]['requiredPermission'] ?? null,
+                "Route {$key} must carry requiredPermission='uikit:view'"
+            );
+            $this->assertNull(
+                $byPath[$key]['requiredRole'] ?? null,
+                "Route {$key} must carry requiredRole=null"
+            );
+        }
+    }
+
+    public function testDemoRowsHandlerReturnsDataArrayWithNameAndRole(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        // Find the handler for GET /api/uikit/demo/rows and invoke it directly.
+        $handler = null;
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'GET' && ($r['path'] ?? '') === '/api/uikit/demo/rows') {
+                $handler = is_callable($r['handler']) ? $r['handler'] : null;
+            }
+        }
+        $this->assertNotNull($handler, 'Must find a handler for GET /api/uikit/demo/rows');
+
+        $request = new Request('GET', '/api/uikit/demo/rows', [], '');
+        $response = $handler($request, []);
+
+        $this->assertInstanceOf(Response::class, $response);
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertIsArray($body);
+        $this->assertArrayHasKey('data', $body, 'Response body must have a "data" key');
+
+        /** @var mixed $data */
+        $data = $body['data'];
+        $this->assertIsArray($data, '"data" must be an array (collection)');
+        $this->assertNotEmpty($data, '"data" must contain at least one row');
+
+        $first = $data[0];
+        $this->assertIsArray($first);
+        $this->assertArrayHasKey('name', $first, 'Each row must have a "name" key');
+        $this->assertArrayHasKey('role', $first, 'Each row must have a "role" key');
+        $this->assertIsString($first['name']);
+        $this->assertIsString($first['role']);
+    }
+
+    public function testDemoMetricHandlerReturnsDataObjectWithValueKey(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $handler = null;
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'GET' && ($r['path'] ?? '') === '/api/uikit/demo/metric') {
+                $handler = is_callable($r['handler']) ? $r['handler'] : null;
+            }
+        }
+        $this->assertNotNull($handler, 'Must find a handler for GET /api/uikit/demo/metric');
+
+        $request = new Request('GET', '/api/uikit/demo/metric', [], '');
+        $response = $handler($request, []);
+
+        $this->assertInstanceOf(Response::class, $response);
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertIsArray($body);
+        $this->assertArrayHasKey('data', $body, 'Response body must have a "data" key');
+
+        /** @var mixed $data */
+        $data = $body['data'];
+        $this->assertIsArray($data, '"data" must be an object (associative array)');
+        $this->assertArrayHasKey('value', $data, '"data" must have a "value" key');
+        $this->assertIsString($data['value']);
+        $this->assertNotSame('', $data['value']);
+    }
+
+    // ---- SP1 + SP2 contract: blocks tree ----
+
     public function testTheBlocksTreePassesTheContractValidator(): void
     {
         $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
@@ -109,7 +226,12 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertSame([], $result['errors']);
     }
 
-    public function testTheBlocksTreeCoversEverySp1BlockType(): void
+    /**
+     * WC-232: the data-bound demos are now in the tree, so the coverage
+     * assertion is restored to ALL BlockContract::types() (not just display
+     * types).
+     */
+    public function testTheBlocksTreeCoversEveryBlockType(): void
     {
         $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
 
@@ -117,7 +239,7 @@ final class UiKitShowcasePluginTest extends TestCase
         $blocks = $feature['blocks'];
         $present = $this->collectTypes($blocks);
 
-        foreach ($this->displayBlockTypes() as $type) {
+        foreach (BlockContract::types() as $type) {
             $this->assertContains(
                 $type,
                 $present,
@@ -125,23 +247,52 @@ final class UiKitShowcasePluginTest extends TestCase
             );
         }
 
-        // The set present is a SUPERSET of every SP1 DISPLAY type. Data-bound
-        // types (dataTable/dataStat/dataList) are documented in WC-232, where
-        // their live demos gain the plugin's demo endpoint to bind to.
-        $expected = $this->displayBlockTypes();
+        // The set present is a SUPERSET of ALL block types (18 display + 3 data-bound = 21).
+        $expected = BlockContract::types();
         $this->assertSame(
             $expected,
             array_values(array_filter($expected, static fn (string $t): bool => in_array($t, $present, true))),
-            'Every SP1 display block type must be present at least once'
+            'Every block type must be present at least once'
         );
     }
 
+    public function testDataBoundBlocksHaveSourcesThatArePluginOwnedGetRoutes(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+        $feature = $plugin->getFrontendFeatures()[0];
+
+        /** @var array<mixed> $blocks */
+        $blocks = $feature['blocks'];
+
+        // Collect every GET route path the plugin registers.
+        $registeredGetPaths = [];
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'GET' && is_string($r['path'] ?? null)) {
+                $registeredGetPaths[] = (string) $r['path'];
+            }
+        }
+
+        // Walk the tree; for each data-bound node, assert its source is a
+        // registered GET path (the ownership invariant that WC-230 enforces).
+        $dataBoundTypes = ['dataTable', 'dataStat', 'dataList'];
+        $foundBound = ['dataTable' => false, 'dataStat' => false, 'dataList' => false];
+
+        $this->walkDataBound($blocks, $dataBoundTypes, $registeredGetPaths, $foundBound);
+
+        foreach ($dataBoundTypes as $type) {
+            $this->assertTrue(
+                $foundBound[$type],
+                "The tree must contain at least one '{$type}' block with a plugin-owned source"
+            );
+        }
+    }
+
+    // ---- WC-232: loader integration — versioned sources ----
+
     public function testTheRealLoaderDiscoversTheShowcaseAndExposesTheBlocksFeature(): void
     {
-        // Point the loader at the REAL plugins/ directory so we exercise the
-        // exact discovery + descriptor-validation path used in production. The
-        // directory carries other plugins (HelloWorld, etc.); we only assert on
-        // UiKitShowcase so the test tolerates them.
         $pluginDir = dirname(__DIR__, 2) . '/plugins';
 
         $loader = new PluginLoader(
@@ -158,11 +309,6 @@ final class UiKitShowcasePluginTest extends TestCase
         );
         $this->assertContains('UiKitShowcase', $names);
 
-        // The blocks feature survives the loader's fail-closed descriptor
-        // validation (screen:'blocks' + a contract-valid tree) and is exposed
-        // with the owning plugin name attached and the validated tree intact —
-        // proving the SDK-contract -> host-validation pipeline for the REAL
-        // plugin, exactly what the frontend-features endpoint then serves.
         $byId = array_column($loader->getFrontendFeatures(), null, 'id');
         $this->assertArrayHasKey('ui-kit-reference', $byId);
         $feature = $byId['ui-kit-reference'];
@@ -172,34 +318,123 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertArrayHasKey('blocks', $feature);
         $this->assertIsArray($feature['blocks']);
 
-        // The exposed tree still covers every SP1 DISPLAY type and still
-        // validates. Data-bound types are documented in WC-232 (see above).
+        // The exposed tree now covers EVERY block type (SP1 + SP2 data-bound)
+        // and still validates.
         $present = $this->collectTypes($feature['blocks']);
-        foreach ($this->displayBlockTypes() as $type) {
+        foreach (BlockContract::types() as $type) {
             $this->assertContains($type, $present, "Loader-exposed tree must include '{$type}'");
         }
         $this->assertTrue(BlockValidator::validate($feature['blocks'])['ok']);
     }
 
+    public function testLoaderVersionsDataBoundSourcesInTheServedDescriptor(): void
+    {
+        // The loader (WC-230) rewrites each data-bound block's `source` from
+        // the unversioned form the plugin declares (e.g. '/api/uikit/demo/rows')
+        // to the versioned URL the browser calls (e.g. '/api/v1/uikit/demo/rows').
+        // A Router('') has an empty version prefix, so sources are NOT rewritten
+        // when the prefix is empty. Instantiate with '/v1' to exercise the rewrite.
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+
+        $loader = new PluginLoader(
+            $pluginDir,
+            new Router('/v1'),
+            new PermissionRegistry(),
+            new HookManager()
+        );
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('ui-kit-reference', $byId);
+        $feature = $byId['ui-kit-reference'];
+        $this->assertIsArray($feature['blocks']);
+
+        // Collect every source value from data-bound nodes in the served descriptor.
+        $servedSources = $this->collectDataBoundSources($feature['blocks']);
+
+        $this->assertNotEmpty($servedSources, 'The served descriptor must contain data-bound blocks');
+
+        foreach ($servedSources as $source) {
+            $this->assertStringStartsWith(
+                '/api/v1/',
+                $source,
+                "Served data-bound source '{$source}' must be the versioned form"
+            );
+        }
+
+        // Verify the two specific paths.
+        $this->assertContains('/api/v1/uikit/demo/rows', $servedSources);
+        $this->assertContains('/api/v1/uikit/demo/metric', $servedSources);
+    }
+
+    // ---- helpers ----
+
     /**
-     * The SP1 DISPLAY block types the showcase documents directly: every
-     * contract type EXCEPT the data-bound ones (those carrying an `apiPath`
-     * `source` prop), whose live demos require the plugin's demo endpoint and
-     * are added in WC-232. Computed from the contract so it never drifts.
+     * Walk `$nodes` depth-first; for each node whose type is in `$dataBoundTypes`,
+     * assert its `source` is in `$registeredGetPaths` and mark the type as found.
      *
+     * @param array<mixed>  $nodes
+     * @param list<string>  $dataBoundTypes
+     * @param list<string>  $registeredGetPaths
+     * @param array<string, bool> $foundBound mutated in-place
+     */
+    private function walkDataBound(
+        array $nodes,
+        array $dataBoundTypes,
+        array $registeredGetPaths,
+        array &$foundBound
+    ): void {
+        foreach ($nodes as $node) {
+            if (!is_array($node) || !isset($node['type']) || !is_string($node['type'])) {
+                continue;
+            }
+
+            if (in_array($node['type'], $dataBoundTypes, true)) {
+                $source = $node['source'] ?? null;
+                $this->assertIsString($source, "Data-bound node of type '{$node['type']}' must have a string 'source'");
+                $this->assertContains(
+                    $source,
+                    $registeredGetPaths,
+                    "Data-bound block source '{$source}' must be a GET route registered by the plugin"
+                );
+                $foundBound[$node['type']] = true;
+            }
+
+            if (isset($node['children']) && is_array($node['children'])) {
+                $this->walkDataBound($node['children'], $dataBoundTypes, $registeredGetPaths, $foundBound);
+            }
+        }
+    }
+
+    /**
+     * Walk the tree and collect every `source` value from data-bound nodes.
+     *
+     * @param array<mixed> $nodes
      * @return list<string>
      */
-    private function displayBlockTypes(): array
+    private function collectDataBoundSources(array $nodes): array
     {
-        return array_values(array_filter(
-            BlockContract::types(),
-            static function (string $type): bool {
-                $rule = BlockContract::rulesFor($type);
-
-                return $rule === null
-                    || ($rule['props']['source']['type'] ?? null) !== 'apiPath';
+        $sources = [];
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
             }
-        ));
+            if (
+                isset($node['type'], $node['source'])
+                && is_string($node['type'])
+                && in_array($node['type'], ['dataTable', 'dataStat', 'dataList'], true)
+                && is_string($node['source'])
+            ) {
+                $sources[] = $node['source'];
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                foreach ($this->collectDataBoundSources($node['children']) as $s) {
+                    $sources[] = $s;
+                }
+            }
+        }
+
+        return array_values(array_unique($sources));
     }
 
     /**

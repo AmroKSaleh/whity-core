@@ -30,8 +30,8 @@ use Whity\OpenAPI\SchemaGenerator;
  * with no workflow change required.
  *
  * Faithful-to-CI regeneration: the spec is rebuilt over ONLY the committed
- * reference plugins (ExamplePlugin + HelloWorld), the same set a clean CI
- * checkout sees. A real plugin deploy-copied into plugins/ on a dev machine
+ * reference plugins (ExamplePlugin + HelloWorld + UiKitShowcase), the same set
+ * a clean CI checkout sees. A real plugin deploy-copied into plugins/ on a dev machine
  * (gitignored — see plugins/.gitignore) contributes extra routes that are
  * never committed; comparing against the live plugins/ directory would make
  * this gate fail on dev boxes and pass in CI, which is exactly backwards. The
@@ -62,6 +62,11 @@ final class OpenApiSpecDriftTest extends TestCase
 
         copy($source . '/ExamplePlugin.php', self::$referencePluginsDir . '/ExamplePlugin.php');
         self::copyDirectory($source . '/HelloWorld', self::$referencePluginsDir . '/HelloWorld');
+        // UiKitShowcase is a COMMITTED reference/example plugin (not gitignored)
+        // and, since WC-232, registers real demo routes — so a clean CI checkout
+        // of plugins/ includes it and `generate:openapi` bakes its routes into
+        // the committed spec. It therefore belongs in this baseline set.
+        self::copyDirectory($source . '/UiKitShowcase', self::$referencePluginsDir . '/UiKitShowcase');
     }
 
     public static function tearDownAfterClass(): void

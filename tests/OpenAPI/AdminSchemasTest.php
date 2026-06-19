@@ -50,6 +50,12 @@ final class AdminSchemasTest extends TestCase
 
         copy($source . '/ExamplePlugin.php', self::$referencePluginsDir . '/ExamplePlugin.php');
         self::copyDirectory($source . '/HelloWorld', self::$referencePluginsDir . '/HelloWorld');
+        // UiKitShowcase is a committed reference/example plugin (SP1/SP2) and,
+        // since WC-232, registers real demo routes; its contribution is part of
+        // the core baseline spec, so it must be in the reference set the
+        // snapshot regenerates from — matching `generate:openapi`, which loads
+        // every plugin under plugins/.
+        self::copyDirectory($source . '/UiKitShowcase', self::$referencePluginsDir . '/UiKitShowcase');
     }
 
     public static function tearDownAfterClass(): void

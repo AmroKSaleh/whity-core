@@ -5574,6 +5574,144 @@
                 ]
             }
         },
+        "/api/v1/uikit/demo/metric": {
+            "get": {
+                "operationId": "get_api_v1_uikit_demo_metric",
+                "summary": "Demo metric for data-bound stat block example",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoMetricResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoMetricResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/uikit/demo/rows": {
+            "get": {
+                "operationId": "get_api_v1_uikit_demo_rows",
+                "summary": "Demo collection for data-bound block examples",
+                "tags": [
+                    "uikit-showcase"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "UiKitDemoRowsResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UiKitDemoRowsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing uikit:view permission"
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/users": {
             "get": {
                 "operationId": "get_api_v1_users",
@@ -7918,6 +8056,66 @@
                     "slug": {
                         "type": "string",
                         "pattern": "^[a-z0-9-]+$"
+                    }
+                }
+            },
+            "UiKitDemoMetricResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "required": [
+                            "label",
+                            "value",
+                            "trend",
+                            "hint"
+                        ],
+                        "properties": {
+                            "label": {
+                                "type": "string"
+                            },
+                            "value": {
+                                "type": "string"
+                            },
+                            "trend": {
+                                "type": "string"
+                            },
+                            "hint": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "UiKitDemoRow": {
+                "type": "object",
+                "required": [
+                    "name",
+                    "role"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    }
+                }
+            },
+            "UiKitDemoRowsResponse": {
+                "type": "object",
+                "required": [
+                    "data"
+                ],
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/UiKitDemoRow"
+                        }
                     }
                 }
             },
