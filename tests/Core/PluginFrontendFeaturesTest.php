@@ -37,6 +37,7 @@ final class PluginFrontendFeaturesTest extends TestCase
     private static string $mismatchDir;
     private static string $shadowDir;
     private static string $actionDir;
+    private static string $blocksDir;
 
     public static function setUpBeforeClass(): void
     {
@@ -49,6 +50,7 @@ final class PluginFrontendFeaturesTest extends TestCase
         self::$mismatchDir = sys_get_temp_dir() . '/whity_feat_mismatch_' . uniqid();
         self::$shadowDir = sys_get_temp_dir() . '/whity_feat_shadow_' . uniqid();
         self::$actionDir = sys_get_temp_dir() . '/whity_feat_action_' . uniqid();
+        self::$blocksDir = sys_get_temp_dir() . '/whity_feat_blocks_' . uniqid();
 
         // ---- mainDir: one healthy plugin with a crud + a custom descriptor ----
         self::writePlugin(self::$mainDir, 'FeatGood', <<<'PHP'
@@ -378,6 +380,40 @@ PHP);
         ];
     }
 PHP);
+
+        // ---- blocksDir: screen='blocks' descriptors (SDK 1.6, WC-225/226) ----
+        // The loader admits a `screen:'blocks'` feature whose `blocks` tree
+        // passes the SDK BlockValidator, drops a tree with an unknown block type
+        // or a non-array `blocks`, and carries the valid tree through under
+        // 'blocks'. No API routes are needed (a blocks screen is declarative).
+        self::writePlugin(self::$blocksDir, 'FeatBlocks', <<<'PHP'
+    public function getPermissions(): array { return ['featblk:view']; }
+    public function getRoutes(): array { return []; }
+    public function getFrontendFeatures(): array
+    {
+        return [
+            // VALID: a small but contract-valid tree.
+            ['id' => 'blk-valid', 'label' => 'Block screen', 'screen' => 'blocks',
+             'requiredPermission' => 'featblk:view', 'icon' => 'components', 'order' => 20,
+             'blocks' => [
+                 ['type' => 'section', 'title' => 'Demo', 'children' => [
+                     ['type' => 'heading', 'level' => 2, 'text' => 'Hi'],
+                     ['type' => 'text', 'value' => 'A declarative block screen.'],
+                 ]],
+             ]],
+            // INVALID: an unknown block type fails contract validation.
+            ['id' => 'blk-bad-type', 'label' => 'Bad tree', 'screen' => 'blocks',
+             'requiredPermission' => 'featblk:view',
+             'blocks' => [['type' => 'wormhole', 'warp' => 9]]],
+            // INVALID: blocks is not an array.
+            ['id' => 'blk-non-array', 'label' => 'No tree', 'screen' => 'blocks',
+             'requiredPermission' => 'featblk:view', 'blocks' => 'not-an-array'],
+            // INVALID: a blocks screen with no blocks key at all.
+            ['id' => 'blk-missing', 'label' => 'Missing tree', 'screen' => 'blocks',
+             'requiredPermission' => 'featblk:view'],
+        ];
+    }
+PHP);
     }
 
     public static function tearDownAfterClass(): void
@@ -385,7 +421,7 @@ PHP);
         $dirs = [
             self::$mainDir, self::$invalidDir, self::$dupDir, self::$throwingDir,
             self::$routePermDir, self::$hardeningDir, self::$mismatchDir, self::$shadowDir,
-            self::$actionDir,
+            self::$actionDir, self::$blocksDir,
         ];
         foreach ($dirs as $dir) {
             self::removeDirectory($dir);
@@ -600,6 +636,60 @@ PHP);
             ],
             'requiredPermission' => 'featact:run',
         ], $byId['act-valid']);
+    }
+
+    // ==================== screen='blocks' (declarative block screens) ====================
+
+    /**
+     * A `screen:'blocks'` descriptor (SDK 1.6, WC-225/226) is admitted by the
+     * loader only when its `blocks` tree passes the SDK BlockValidator. A tree
+     * with an unknown block type, a non-array `blocks`, or no `blocks` key at
+     * all drops fail-closed; the valid tree is carried through verbatim under
+     * 'blocks' on the normalized descriptor.
+     */
+    public function testBlocksDescriptorValidationAndNormalization(): void
+    {
+        [$loader] = $this->loadDir(self::$blocksDir);
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $ids = array_keys($byId);
+
+        $this->assertSame(['blk-valid'], $ids, 'Only the single valid blocks descriptor survives');
+        $this->assertNotContains('blk-bad-type', $ids, 'A tree with an unknown block type fails contract validation');
+        $this->assertNotContains('blk-non-array', $ids, "screen='blocks' with a non-array blocks must drop");
+        $this->assertNotContains('blk-missing', $ids, "screen='blocks' with no blocks key must drop");
+
+        $this->assertSame([
+            'id' => 'blk-valid',
+            'plugin' => 'FeatBlocks',
+            'label' => 'Block screen',
+            'icon' => 'components',
+            'group' => 'plugins',
+            'order' => 20,
+            'screen' => 'blocks',
+            'resource' => null,
+            'action' => null,
+            'requiredPermission' => 'featblk:view',
+            'blocks' => [
+                ['type' => 'section', 'title' => 'Demo', 'children' => [
+                    ['type' => 'heading', 'level' => 2, 'text' => 'Hi'],
+                    ['type' => 'text', 'value' => 'A declarative block screen.'],
+                ]],
+            ],
+        ], $byId['blk-valid'], 'The validated tree is carried through verbatim under blocks');
+    }
+
+    /**
+     * Non-blocks screens must NOT gain a `blocks` key — the existing contract
+     * for crud/custom/action descriptors is unchanged.
+     */
+    public function testNonBlocksScreensDoNotGainABlocksKey(): void
+    {
+        [$loader] = $this->loadDir(self::$mainDir);
+
+        foreach ($loader->getFrontendFeatures() as $feature) {
+            $this->assertArrayNotHasKey('blocks', $feature, "A {$feature['screen']} screen must not carry a blocks key");
+        }
     }
 
     /**

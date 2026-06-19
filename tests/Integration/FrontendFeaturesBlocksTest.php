@@ -33,10 +33,12 @@ use Whity\Core\Tenant\TenantContext;
  *  - existing crud/custom/action features are unaffected.
  *
  * The handler sources features from {@see PluginLoader::getFrontendFeatures()}.
- * The loader's own descriptor validation does not (yet) admit `screen:'blocks'`
- * through its on-disk normalization path, so this slice injects already-shaped
- * loader descriptors via a tiny PluginLoader subclass — exactly the contract the
- * handler consumes — keeping the test focused on the handler's block validation.
+ * The loader's own on-disk normalization path now admits `screen:'blocks'`
+ * features (WC-228), and the handler re-validates the tree as a defence-in-depth
+ * gate; this slice injects already-shaped loader descriptors via a tiny
+ * PluginLoader subclass — exactly the contract the handler consumes — to keep the
+ * test focused on the handler's OWN block validation (including the malformed
+ * trees the loader would itself reject, exercised here at the handler boundary).
  * RoleChecker is mocked per the sibling FrontendFeatures handler test so each
  * caller's permission set is precise.
  */

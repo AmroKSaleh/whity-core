@@ -13,6 +13,7 @@ use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
 use Psr\Log\LoggerInterface;
 use Composer\Semver\Semver;
+use Whity\Sdk\Frontend\Blocks\BlockValidator;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
@@ -2300,7 +2301,7 @@ class PluginLoader
      * present, and the exact reason — the plugin itself keeps loading):
      *
      *  (a) shape — id/label/screen/requiredPermission present and well-typed;
-     *      id matches the kebab-case slug pattern; screen ∈ {crud, custom, action};
+     *      id matches the kebab-case slug pattern; screen ∈ {crud, custom, action, blocks};
      *  (b) requiredPermission matches the `resource:action` pattern, is one of
      *      the permissions THIS plugin declares via getPermissions(), is NOT a
      *      core permission name (self-declaring 'users:read' does not make it
@@ -2318,6 +2319,10 @@ class PluginLoader
      *      requiredPermission EQUALS the descriptor's — same ownership +
      *      gate-alignment rule as (c), for a route rather than a collection.
      *      action.fields (optional) declare the generic form's inputs;
+     *  (c3) screen='blocks' requires a 'blocks' array tree that passes the SDK
+     *      {@see BlockValidator::validate()} contract; a missing, non-array, or
+     *      invalid tree drops the descriptor (fail-closed) and the valid tree is
+     *      carried through under 'blocks';
      *  (d) ids are unique across all plugins (first claimant wins).
      *
      * Surviving descriptors are normalized: defaults filled (group 'plugins',
@@ -2418,8 +2423,8 @@ class PluginLoader
         }
 
         $screen = $descriptor['screen'] ?? null;
-        if ($screen !== 'crud' && $screen !== 'custom' && $screen !== 'action') {
-            return $drop("screen must be 'crud', 'custom', or 'action'", $id);
+        if ($screen !== 'crud' && $screen !== 'custom' && $screen !== 'action' && $screen !== 'blocks') {
+            return $drop("screen must be 'crud', 'custom', 'action', or 'blocks'", $id);
         }
 
         // (b) requiredPermission: well-formed AND owned by THIS plugin. A
@@ -2605,6 +2610,30 @@ class PluginLoader
             ];
         }
 
+        // (c3) blocks: REQUIRED for blocks screens (SDK 1.6, WC-225/226). A
+        // `screen:'blocks'` feature carries a platform-neutral `blocks` tree the
+        // host validates against the SDK block whitelist before any renderer
+        // sees it. Fail-closed exactly like the other screen kinds: a missing,
+        // non-array, or contract-invalid tree drops the descriptor with the
+        // exact reason logged. A valid tree passes through to the normalized
+        // descriptor under 'blocks', where the frontend-features endpoint
+        // re-validates it as a defence-in-depth gate (WC-226).
+        $blocks = null;
+        if ($screen === 'blocks') {
+            $rawBlocks = $descriptor['blocks'] ?? null;
+            if (!is_array($rawBlocks)) {
+                return $drop("screen 'blocks' requires a 'blocks' array tree", $id);
+            }
+            $result = BlockValidator::validate($rawBlocks);
+            if ($result['ok'] !== true) {
+                return $drop(
+                    'blocks tree failed contract validation: ' . implode('; ', $result['errors']),
+                    $id
+                );
+            }
+            $blocks = $rawBlocks;
+        }
+
         // Optional presentation fields: type-checked fail-closed (a mistyped
         // declaration is a bug worth surfacing, not silently defaulting).
         $icon = $descriptor['icon'] ?? null;
@@ -2628,7 +2657,7 @@ class PluginLoader
         }
         $this->claimedFeatureIds[$id] = $pluginKey;
 
-        return [
+        $normalized = [
             'id' => $id,
             'plugin' => $pluginName,
             'label' => $label,
@@ -2640,6 +2669,14 @@ class PluginLoader
             'action' => $action,
             'requiredPermission' => $permission,
         ];
+
+        // A `screen:'blocks'` feature carries its validated tree under 'blocks';
+        // every other screen omits the key so the existing contract is unchanged.
+        if ($blocks !== null) {
+            $normalized['blocks'] = $blocks;
+        }
+
+        return $normalized;
     }
 
     /**
