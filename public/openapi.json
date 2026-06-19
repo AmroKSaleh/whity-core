@@ -6394,7 +6394,8 @@
                         "enum": [
                             "crud",
                             "custom",
-                            "action"
+                            "action",
+                            "blocks"
                         ]
                     },
                     "resource": {
@@ -6493,6 +6494,13 @@
                             "canEdit",
                             "canDelete"
                         ]
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 },
                 "required": [

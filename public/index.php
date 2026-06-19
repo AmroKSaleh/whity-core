@@ -509,7 +509,10 @@ $router->register('GET', '/api/me/capabilities', [$meCapabilitiesHandler, 'list'
 // per-caller write capabilities (canCreate/canEdit/canDelete) server-side from
 // the resource's registered routes' RBAC, so the renderer can hide controls the
 // caller may not use.
-$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router);
+// WC-226: pass $logger so a plugin's `screen:'blocks'` feature whose block tree
+// fails host validation is dropped fail-closed with a structured, secret-free
+// reason (feature id + validator errors) — never leaked to the client.
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router, $logger);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
