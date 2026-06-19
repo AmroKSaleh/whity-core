@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { IconAlertCircle, IconDeviceFloppy, IconWorld } from '@tabler/icons-react';
+import { IconAlertCircle, IconDeviceFloppy, IconInfoCircle, IconWorld } from '@tabler/icons-react';
 
 // Granular RBAC for the Website Settings console (mirrors the backend catalogue):
 //   read   → may view the effective/editable set (else Access Denied)
@@ -84,12 +84,46 @@ function validate(values: SettingsValueMap, requireSiteName: boolean): string | 
   return null;
 }
 
-/** Extract the uniform `{ error }` envelope message from a failed client call. */
+/**
+ * Narrow a `details` envelope to a `Record<string, string>` (per-field messages
+ * keyed by setting key), discarding any non-string entries. Returns null when
+ * the value is not a usable details object.
+ */
+function fieldDetails(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const details: Record<string, string> = {};
+  for (const [key, message] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof message === 'string' && message !== '') {
+      details[key] = message;
+    }
+  }
+  return Object.keys(details).length > 0 ? details : null;
+}
+
+/**
+ * Extract a human-friendly message from a failed client call.
+ *
+ * The uniform error envelope is `{ error, details? }`. When a 422 carries a
+ * `details` object of per-field messages (e.g. `{ site_name: "..." }`), surface
+ * those — joining multiple — so the toast is the actionable field guidance, not
+ * the generic top-level "Validation failed". Falls back to the top-level
+ * `error` string, then to the provided fallback when neither is present.
+ */
 function errorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object' && 'error' in error) {
-    const value = (error as { error?: unknown }).error;
-    if (typeof value === 'string' && value !== '') {
-      return value;
+  if (error && typeof error === 'object') {
+    if ('details' in error) {
+      const details = fieldDetails((error as { details?: unknown }).details);
+      if (details) {
+        return Object.values(details).join(' ');
+      }
+    }
+    if ('error' in error) {
+      const value = (error as { error?: unknown }).error;
+      if (typeof value === 'string' && value !== '') {
+        return value;
+      }
     }
   }
   return fallback;
@@ -256,6 +290,11 @@ function TenantSettingsSection({
 
   const effective = data?.effective;
   const overridden = useMemo(() => new Set(data?.overridden ?? []), [data]);
+  // WC-224: the server reports whether THIS tenant has a per-tenant override
+  // layer. The system tenant (0) has globals only, so a per-tenant write always
+  // 422s — when false we hide the editable form entirely and point at Global
+  // defaults. Default to true so a loading/legacy payload keeps the prior form.
+  const tenantOverridable = data?.tenant_overridable ?? true;
 
   useEffect(() => {
     if (error) {
@@ -318,7 +357,8 @@ function TenantSettingsSection({
         </CardTitle>
         <CardDescription className="text-sm">
           Overrides for your current tenant. Cleared fields fall back to the global default.
-          {!canWrite && ' You have read-only access (settings:write required to edit).'}
+          {effective && tenantOverridable && !canWrite &&
+            ' You have read-only access (settings:write required to edit).'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -327,6 +367,21 @@ function TenantSettingsSection({
             {SETTING_KEYS.map((key) => (
               <div key={key} className="h-12 animate-pulse rounded-md bg-muted/40" />
             ))}
+          </div>
+        ) : !tenantOverridable ? (
+          // WC-224: the system tenant has no per-tenant override layer — a write
+          // would always 422 — so we never show the editable fields or Save. The
+          // notice routes the user to the Global defaults form below instead.
+          <div
+            data-testid="tenant-no-override-notice"
+            role="note"
+            className="flex items-start gap-3 rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground"
+          >
+            <IconInfoCircle className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <p>
+              As the system tenant, you have no per-tenant overrides. Edit the platform-wide values
+              in <strong className="font-medium text-foreground">Global defaults</strong> below.
+            </p>
           </div>
         ) : (
           <>

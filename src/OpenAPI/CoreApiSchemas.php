@@ -1335,12 +1335,16 @@ final class CoreApiSchemas
                 'type' => self::str(),
                 'default' => self::str(),
             ], ['key', 'type', 'default']),
-            // GET /api/settings — effective values, registry shape, overridden keys.
+            // GET /api/settings — effective values, registry shape, overridden
+            // keys, and (WC-224) whether the caller's tenant has a per-tenant
+            // override layer (false for the system tenant 0 → the UI hides the
+            // editable tenant form and points at Global defaults instead).
             'SettingsResponse' => self::dataEnvelope(self::object([
                 'effective' => SchemaBuilder::ref('SettingsValueMap'),
                 'registry' => ['type' => 'array', 'items' => SchemaBuilder::ref('SettingsRegistryEntry')],
                 'overridden' => ['type' => 'array', 'items' => self::str()],
-            ], ['effective', 'registry', 'overridden'])),
+                'tenant_overridable' => self::bool(),
+            ], ['effective', 'registry', 'overridden', 'tenant_overridable'])),
             // GET /api/settings/global — the global defaults plus registry shape.
             'GlobalSettingsResponse' => self::dataEnvelope(self::object([
                 'global' => SchemaBuilder::ref('SettingsValueMap'),

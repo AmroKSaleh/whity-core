@@ -69,6 +69,12 @@ final class SettingsApiHandler
                     'effective' => $this->settings->effective($tenantId),
                     'registry' => SettingsRegistry::describe(),
                     'overridden' => $this->settings->overriddenKeys($tenantId),
+                    // WC-224: whether THIS caller's tenant has a per-tenant override
+                    // layer. The system tenant (0) has globals only — it can never
+                    // persist a per-tenant override — so the client must hide the
+                    // editable tenant form and point the user at Global defaults
+                    // instead of letting a write 422 (writeTenant rejects tenant 0).
+                    'tenant_overridable' => $tenantId !== SettingsService::SYSTEM_TENANT_ID,
                 ],
             ], 200);
         } catch (\Throwable $e) {

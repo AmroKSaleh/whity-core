@@ -7755,12 +7755,16 @@
                                 "items": {
                                     "type": "string"
                                 }
+                            },
+                            "tenant_overridable": {
+                                "type": "boolean"
                             }
                         },
                         "required": [
                             "effective",
                             "registry",
-                            "overridden"
+                            "overridden",
+                            "tenant_overridable"
                         ]
                     }
                 },
