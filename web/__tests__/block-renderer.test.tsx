@@ -1,5 +1,5 @@
 /**
- * WC-227: web BlockRenderer for `screen: 'blocks'` plugin features.
+ * WC-227 + WC-231: web BlockRenderer for `screen: 'blocks'` plugin features.
  *
  * The renderer draws a platform-neutral tree of semantic UI blocks (the SP1
  * block set, mirrored from the SDK `BlockContract`) using existing
@@ -11,12 +11,39 @@
  *   - NO INJECTION: plugin strings are React text children — a `text` value of
  *     `<img src=x onerror=alert(1)>` renders LITERALLY (no <img> is created);
  *   - a `button` with a non-relative href is inert (renders no navigating link).
+ *
+ * WC-231 additions:
+ *   - data-bound blocks (dataTable/dataStat/dataList) show loading skeletons,
+ *     error + Retry, empty + emptyText, and ready state (reusing SP1 static
+ *     renderers with fetched data).
+ *   - INJECTION guard: a fetched cell value `<img src=x onerror=alert(1)>`
+ *     renders as literal text, never an HTML element.
  */
 
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import type { Block } from '@/lib/plugin-features';
+import { apiClient } from '@/lib/api-client';
+
+jest.mock('@/lib/api-client', () => ({
+  apiClient: jest.fn(),
+}));
+
+const mockApiClient = apiClient as jest.MockedFunction<typeof apiClient>;
+
+function stubResponse(ok: boolean, status: number, body: unknown): Response {
+  return {
+    ok,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
+}
+
+beforeEach(() => {
+  mockApiClient.mockReset();
+});
 
 describe('BlockRenderer', () => {
   it('renders a heading at the requested semantic level', () => {
@@ -357,5 +384,393 @@ describe('BlockRenderer', () => {
   it('renders nothing for an empty block list', () => {
     const { container } = render(<BlockRenderer blocks={[]} />);
     expect(within(container).queryByText(/Unsupported block/i)).toBeNull();
+  });
+});
+
+// ---- WC-231: data-bound block renderers ----
+
+describe('BlockRenderer — data-bound blocks (WC-231)', () => {
+  // ---- dataTable ----
+
+  it('dataTable: shows loading skeleton before apiClient resolves', () => {
+    mockApiClient.mockReturnValue(new Promise(() => undefined));
+
+    const { container } = render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+          },
+        ]}
+      />
+    );
+
+    expect(container.querySelector('[data-slot="block-data-loading"]')).not.toBeNull();
+  });
+
+  it('dataTable ready: renders column headers and fetched row cells', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [{ name: 'Ada', role: 'Admin' }] })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [
+              { key: 'name', label: 'Name' },
+              { key: 'role', label: 'Role' },
+            ],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Name')).toBeInTheDocument());
+    expect(screen.getByText('Role')).toBeInTheDocument();
+    expect(screen.getByText('Ada')).toBeInTheDocument();
+    expect(screen.getByText('Admin')).toBeInTheDocument();
+  });
+
+  it('dataTable error: renders error state with Retry button', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(false, 500, { error: 'fail' })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    );
+    expect(screen.getByText(/Failed to load data/i)).toBeInTheDocument();
+  });
+
+  it('dataTable error: Retry re-invokes apiClient', async () => {
+    mockApiClient
+      .mockResolvedValueOnce(stubResponse(false, 500, { error: 'fail' }))
+      .mockResolvedValueOnce(
+        stubResponse(true, 200, { data: [{ name: 'Bo' }] })
+      );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => expect(screen.getByText('Bo')).toBeInTheDocument());
+    expect(mockApiClient).toHaveBeenCalledTimes(2);
+  });
+
+  it('dataTable empty: renders emptyText', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [] })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+            emptyText: 'No rows yet.',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('No rows yet.')).toBeInTheDocument()
+    );
+  });
+
+  it('dataTable: injection guard — fetched cell value renders as literal text, not HTML', async () => {
+    const payload = '<img src=x onerror=alert(1)>';
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [{ name: payload }] })
+    );
+
+    const { container } = render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText(payload)).toBeInTheDocument());
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('dataTable: missing columns renders UnsupportedBlock', () => {
+    const blocks = [
+      { type: 'dataTable', source: '/api/v1/x/rows' },
+    ] as unknown as Block[];
+
+    render(<BlockRenderer blocks={blocks} />);
+
+    expect(screen.getByText(/Unsupported block/i)).toBeInTheDocument();
+  });
+
+  // ---- dataStat ----
+
+  it('dataStat: shows loading skeleton before apiClient resolves', () => {
+    mockApiClient.mockReturnValue(new Promise(() => undefined));
+
+    const { container } = render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataStat',
+            source: '/api/v1/x/metric',
+            label: 'Users',
+            valueField: 'value',
+          },
+        ]}
+      />
+    );
+
+    expect(container.querySelector('[data-slot="block-data-loading"]')).not.toBeNull();
+  });
+
+  it('dataStat ready: renders label and the valueField value', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: { value: '1,284', trend: 'up', hint: '+12%' } })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataStat',
+            source: '/api/v1/x/metric',
+            label: 'Active Users',
+            valueField: 'value',
+            trendField: 'trend',
+            hintField: 'hint',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('Active Users')).toBeInTheDocument()
+    );
+    expect(screen.getByText('1,284')).toBeInTheDocument();
+    expect(screen.getByText('+12%')).toBeInTheDocument();
+  });
+
+  it('dataStat error: renders error state with Retry button', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(false, 403, { error: 'Forbidden' })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataStat',
+            source: '/api/v1/x/metric',
+            label: 'Users',
+            valueField: 'value',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    );
+  });
+
+  it('dataStat empty: renders default empty text when emptyText is not set', async () => {
+    // valueField not present → parse returns null → empty
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: {} })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataStat',
+            source: '/api/v1/x/metric',
+            label: 'Users',
+            valueField: 'value',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/No data available/i)
+      ).toBeInTheDocument()
+    );
+  });
+
+  it('dataStat empty: renders emptyText when provided', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: {} })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataStat',
+            source: '/api/v1/x/metric',
+            label: 'Users',
+            valueField: 'value',
+            emptyText: 'No metric yet.',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('No metric yet.')).toBeInTheDocument()
+    );
+  });
+
+  // ---- dataList ----
+
+  it('dataList: shows loading skeleton before apiClient resolves', () => {
+    mockApiClient.mockReturnValue(new Promise(() => undefined));
+
+    const { container } = render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+          },
+        ]}
+      />
+    );
+
+    expect(container.querySelector('[data-slot="block-data-loading"]')).not.toBeNull();
+  });
+
+  it('dataList ready: renders an item from itemField', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [{ name: 'Alice' }, { name: 'Bob' }] })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('Alice')).toBeInTheDocument()
+    );
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+  });
+
+  it('dataList error: renders error state with Retry button', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(false, 500, { error: 'fail' })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    );
+  });
+
+  it('dataList empty: renders emptyText', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [] })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+            emptyText: 'No items.',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('No items.')).toBeInTheDocument()
+    );
+  });
+
+  it('dataList: injection guard — fetched item renders as literal text', async () => {
+    const payload = '<img src=x onerror=alert(1)>';
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [{ name: payload }] })
+    );
+
+    const { container } = render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText(payload)).toBeInTheDocument());
+    expect(container.querySelector('img')).toBeNull();
   });
 });

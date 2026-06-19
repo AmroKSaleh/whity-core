@@ -150,8 +150,45 @@ export interface CodeBlock {
   content: string;
 }
 
+// ---- SP2 data-bound leaf blocks (WC-231) ----
+
 /**
- * The discriminated union of every SP1 block, keyed on `type`. The host has
+ * Leaf: a table whose rows are fetched at runtime from `source`.
+ * `source` is the versioned API path served by the host (e.g. `/api/v1/x/rows`).
+ */
+export interface DataTableBlock {
+  type: 'dataTable';
+  source: string;
+  columns: { key: string; label: string }[];
+  emptyText?: string;
+}
+
+/**
+ * Leaf: a single metric tile whose value is fetched at runtime from `source`.
+ */
+export interface DataStatBlock {
+  type: 'dataStat';
+  source: string;
+  label: string;
+  valueField: string;
+  hintField?: string;
+  trendField?: string;
+  emptyText?: string;
+}
+
+/**
+ * Leaf: an ordered or unordered list whose items are fetched at runtime from `source`.
+ */
+export interface DataListBlock {
+  type: 'dataList';
+  source: string;
+  itemField: string;
+  ordered?: boolean;
+  emptyText?: string;
+}
+
+/**
+ * The discriminated union of every SP1 + SP2 block, keyed on `type`. The host has
  * already validated the tree, but the web renderer revalidates defensively so a
  * malformed node degrades to a placeholder rather than crashing.
  */
@@ -173,7 +210,10 @@ export type Block =
   | TableBlock
   | ButtonBlock
   | IconBlock
-  | CodeBlock;
+  | CodeBlock
+  | DataTableBlock
+  | DataStatBlock
+  | DataListBlock;
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {
