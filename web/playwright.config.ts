@@ -88,6 +88,16 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },
+    // WC-228: the UiKitShowcase example plugin's UI-Kit Reference block screen
+    // runs admin-authenticated (the migration grants uikit:view to admin, so
+    // the admin sees the feature). It proves the SDK block contract -> host
+    // validation -> web renderer -> example-plugin pipeline end-to-end.
+    {
+      name: 'plugins-uikit',
+      testMatch: /ui-kit-showcase\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
+    },
     // The multi-role matrix (WC-173): one spec file, three role projects.
     // All three share the same testMatch, so every e2e/matrix-*.spec.ts runs
     // once per role; specs read the role via the `role` fixture (which parses

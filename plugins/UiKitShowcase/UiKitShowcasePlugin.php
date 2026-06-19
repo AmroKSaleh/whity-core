@@ -1,0 +1,593 @@
+<?php
+
+declare(strict_types=1);
+
+namespace UiKitShowcase;
+
+use UiKitShowcase\Migrations\GrantUiKitViewToAdmin;
+use Whity\Sdk\PluginFrontendInterface;
+use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginRequirementsInterface;
+
+/**
+ * UiKitShowcasePlugin (WC-228)
+ *
+ * The capstone example plugin for the SP1 server-driven plugin-UI block system
+ * (SDK 1.6, WC-225). It is a SANCTIONED example plugin — named for the SDK
+ * feature it documents — that proves AND documents the entire pipeline:
+ *
+ *   SDK BlockContract whitelist (WC-225)
+ *     -> host BlockValidator validation of `screen: 'blocks'` features (WC-226)
+ *       -> web BlockRenderer at /admin/x/[featureId] (WC-227)
+ *         -> THIS plugin's single `ui-kit-reference` feature.
+ *
+ * The plugin contributes ONE `screen: 'blocks'` feature whose declarative tree
+ * renders a LIVE instance of every one of the 18 SP1 block types beside the
+ * exact PHP snippet that declares it, so a plugin author can read the page and
+ * copy-paste any block. The page itself is laid out with `tabs`/`section`/
+ * `card`/`grid`/`row`, so it doubles as a layout demo.
+ *
+ * It is deliberately MINIMAL on the backend: NO API routes, NO hooks, and NO DB
+ * resource — the screen is purely declarative static blocks. The only persisted
+ * side effect is its single permission (`uikit:view`) plus the migration that
+ * seeds and grants it to admin, so a fresh install shows the screen to admins
+ * out-of-the-box. Props are SEMANTIC throughout (never CSS/hex/pixels), exactly
+ * as the contract requires.
+ *
+ * It lives in its own directory (`plugins/UiKitShowcase/`) so the PluginLoader
+ * resolves it under the `UiKitShowcase` namespace prefix (directory name) and
+ * auto-discovers it without any manual registration.
+ */
+final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
+{
+    /**
+     * @inheritDoc
+     */
+    public function getName(): string
+    {
+        return 'UiKitShowcase';
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function getVersion(): string
+    {
+        return '1.0.0';
+    }
+
+    /**
+     * Blocks landed in SDK 1.6 ({@see \Whity\Sdk\Sdk::VERSION}); the showcase
+     * requires that range.
+     *
+     * @inheritDoc
+     */
+    public function getSdkConstraint(): string
+    {
+        return '^1.6';
+    }
+
+    /**
+     * No host core-version constraint: the showcase runs against any core that
+     * ships the SDK range it requires.
+     *
+     * @inheritDoc
+     */
+    public function getCoreConstraint(): string
+    {
+        return '';
+    }
+
+    /**
+     * The showcase depends on no other plugin.
+     *
+     * @inheritDoc
+     */
+    public function getPluginDependencies(): array
+    {
+        return [];
+    }
+
+    /**
+     * NO API routes — the screen is a purely declarative static block tree.
+     *
+     * @inheritDoc
+     */
+    public function getRoutes(): array
+    {
+        return [];
+    }
+
+    /**
+     * One permission, in the mandated `resource:action` colon notation, that
+     * the `ui-kit-reference` feature is gated on.
+     *
+     * @inheritDoc
+     */
+    public function getPermissions(): array
+    {
+        return ['uikit:view'];
+    }
+
+    /**
+     * No hooks — the showcase observes no platform events.
+     *
+     * @inheritDoc
+     */
+    public function getHooks(): array
+    {
+        return [];
+    }
+
+    /**
+     * Seed and grant `uikit:view` so admins see the reference screen on a fresh
+     * install.
+     *
+     * @inheritDoc
+     */
+    public function getMigrations(): array
+    {
+        return [GrantUiKitViewToAdmin::class];
+    }
+
+    /**
+     * Declare the single `screen: 'blocks'` reference feature (SDK 1.6).
+     *
+     * UI metadata only — the descriptor grants nothing; the host validates the
+     * `blocks` tree against {@see \Whity\Sdk\Frontend\Blocks\BlockValidator} and
+     * filters the descriptor per caller against `uikit:view`.
+     *
+     * @inheritDoc
+     */
+    public function getFrontendFeatures(): array
+    {
+        return [
+            [
+                'id' => 'ui-kit-reference',
+                'label' => 'UI-Kit Reference',
+                'icon' => 'components',
+                'group' => 'plugins',
+                'order' => 20,
+                'screen' => 'blocks',
+                'blocks' => $this->blocks(),
+                'requiredPermission' => 'uikit:view',
+            ],
+        ];
+    }
+
+    /**
+     * Build the reference block tree.
+     *
+     * Top level: an intro section, then a `tabs` set splitting the catalogue
+     * into Containers / Content / Data / Interactive — each tab pairing a live
+     * block with the PHP that declares it (via {@see self::demo()}). Every one
+     * of the 18 SP1 block types appears at least once, and the result passes
+     * {@see \Whity\Sdk\Frontend\Blocks\BlockValidator::validate()}.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function blocks(): array
+    {
+        return [
+            [
+                'type' => 'section',
+                'title' => 'Block catalogue',
+                'children' => [
+                    [
+                        'type' => 'heading',
+                        'level' => 1,
+                        'text' => 'SP1 UI Blocks',
+                    ],
+                    [
+                        'type' => 'text',
+                        'value' => 'A live reference for every server-driven plugin-UI block. '
+                            . 'Each example renders the real block beside the exact PHP that declares it — '
+                            . 'copy any snippet straight into your plugin\'s getFrontendFeatures().',
+                        'tone' => 'muted',
+                    ],
+                    [
+                        'type' => 'alert',
+                        'variant' => 'info',
+                        'title' => 'Platform-neutral by design',
+                        'body' => 'Props are SEMANTIC, never presentational — say variant => \'danger\', '
+                            . 'never a color or pixel value. The same tree renders idiomatically on web, '
+                            . 'mobile, and desktop.',
+                    ],
+                ],
+            ],
+            [
+                'type' => 'tabs',
+                'children' => [
+                    [
+                        'type' => 'tab',
+                        'label' => 'Containers',
+                        'children' => $this->containersTab(),
+                    ],
+                    [
+                        'type' => 'tab',
+                        'label' => 'Content',
+                        'children' => $this->contentTab(),
+                    ],
+                    [
+                        'type' => 'tab',
+                        'label' => 'Data',
+                        'children' => $this->dataTab(),
+                    ],
+                    [
+                        'type' => 'tab',
+                        'label' => 'Interactive',
+                        'children' => $this->interactiveTab(),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The "Containers" tab: section, card, grid, row, tabs (this very tab set),
+     * tab, and divider.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function containersTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Layout containers',
+            ],
+            [
+                'type' => 'text',
+                'value' => 'Containers carry a children array; leaves do not. tabs / tab build '
+                    . 'this very tab set, and grid / row arrange their children.',
+            ],
+            $this->demo(
+                'section',
+                'A labelled vertical grouping of blocks.',
+                [
+                    'type' => 'section',
+                    'title' => 'A nested section',
+                    'children' => [
+                        [
+                            'type' => 'text',
+                            'value' => 'Sections stack their children vertically under an optional title.',
+                        ],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'section', 'title' => 'A nested section', 'children' => [
+                        ['type' => 'text', 'value' => '...'],
+                    ]]
+                    PHP,
+            ),
+            $this->demo(
+                'card',
+                'A surface with an optional title/description and a body.',
+                [
+                    'type' => 'card',
+                    'title' => 'Card title',
+                    'description' => 'An optional supporting description.',
+                    'children' => [
+                        [
+                            'type' => 'text',
+                            'value' => 'Card bodies hold any blocks.',
+                        ],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'card', 'title' => 'Card title',
+                     'description' => 'An optional supporting description.', 'children' => [
+                        ['type' => 'text', 'value' => 'Card bodies hold any blocks.'],
+                    ]]
+                    PHP,
+            ),
+            $this->demo(
+                'grid',
+                'An N-column responsive grid (columns: 1 | 2 | 3 | 4).',
+                [
+                    'type' => 'grid',
+                    'columns' => 3,
+                    'children' => [
+                        ['type' => 'badge', 'variant' => 'info', 'label' => 'One'],
+                        ['type' => 'badge', 'variant' => 'success', 'label' => 'Two'],
+                        ['type' => 'badge', 'variant' => 'warning', 'label' => 'Three'],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'grid', 'columns' => 3, 'children' => [
+                        ['type' => 'badge', 'variant' => 'info', 'label' => 'One'],
+                        ['type' => 'badge', 'variant' => 'success', 'label' => 'Two'],
+                        ['type' => 'badge', 'variant' => 'warning', 'label' => 'Three'],
+                    ]]
+                    PHP,
+            ),
+            $this->demo(
+                'row',
+                'A horizontal row with an optional align (start | center | end | between).',
+                [
+                    'type' => 'row',
+                    'align' => 'between',
+                    'children' => [
+                        ['type' => 'badge', 'variant' => 'neutral', 'label' => 'Left'],
+                        ['type' => 'badge', 'variant' => 'neutral', 'label' => 'Right'],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'row', 'align' => 'between', 'children' => [
+                        ['type' => 'badge', 'variant' => 'neutral', 'label' => 'Left'],
+                        ['type' => 'badge', 'variant' => 'neutral', 'label' => 'Right'],
+                    ]]
+                    PHP,
+            ),
+            [
+                'type' => 'card',
+                'title' => 'tabs + tab',
+                'description' => 'A tab set whose children are tab blocks — the tabs above this page '
+                    . 'demonstrate them. A tab is only valid as a direct child of tabs.',
+                'children' => [
+                    [
+                        'type' => 'code',
+                        'language' => 'php',
+                        'content' => <<<'PHP'
+                            ['type' => 'tabs', 'children' => [
+                                ['type' => 'tab', 'label' => 'First', 'children' => [ /* ... */ ]],
+                                ['type' => 'tab', 'label' => 'Second', 'children' => [ /* ... */ ]],
+                            ]]
+                            PHP,
+                    ],
+                ],
+            ],
+            $this->demo(
+                'divider',
+                'A horizontal separator between blocks.',
+                ['type' => 'divider'],
+                "['type' => 'divider']",
+            ),
+        ];
+    }
+
+    /**
+     * The "Content" tab: heading, text, alert, badge, icon, code.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function contentTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Content blocks',
+            ],
+            $this->demo(
+                'heading',
+                'A semantic heading at one of four levels (level: 1 | 2 | 3 | 4).',
+                ['type' => 'heading', 'level' => 3, 'text' => 'A level-3 heading'],
+                "['type' => 'heading', 'level' => 3, 'text' => 'A level-3 heading']",
+            ),
+            $this->demo(
+                'text',
+                'A paragraph, optionally muted (tone: default | muted).',
+                ['type' => 'text', 'value' => 'Body copy, optionally muted.', 'tone' => 'muted'],
+                "['type' => 'text', 'value' => 'Body copy, optionally muted.', 'tone' => 'muted']",
+            ),
+            $this->demo(
+                'alert',
+                'A callout banner (variant: info | success | warning | danger).',
+                [
+                    'type' => 'alert',
+                    'variant' => 'warning',
+                    'title' => 'Heads up',
+                    'body' => 'Use alerts for state the reader must notice.',
+                ],
+                <<<'PHP'
+                    ['type' => 'alert', 'variant' => 'warning', 'title' => 'Heads up',
+                     'body' => 'Use alerts for state the reader must notice.']
+                    PHP,
+            ),
+            $this->demo(
+                'badge',
+                'A small status pill (variant: neutral | info | success | warning | danger).',
+                [
+                    'type' => 'row',
+                    'children' => [
+                        ['type' => 'badge', 'variant' => 'neutral', 'label' => 'neutral'],
+                        ['type' => 'badge', 'variant' => 'info', 'label' => 'info'],
+                        ['type' => 'badge', 'variant' => 'success', 'label' => 'success'],
+                        ['type' => 'badge', 'variant' => 'warning', 'label' => 'warning'],
+                        ['type' => 'badge', 'variant' => 'danger', 'label' => 'danger'],
+                    ],
+                ],
+                "['type' => 'badge', 'variant' => 'success', 'label' => 'active']",
+            ),
+            $this->demo(
+                'icon',
+                'A Tabler icon by name (tone: default | muted).',
+                [
+                    'type' => 'row',
+                    'children' => [
+                        ['type' => 'icon', 'name' => 'rocket'],
+                        ['type' => 'icon', 'name' => 'bell', 'tone' => 'muted'],
+                        ['type' => 'icon', 'name' => 'check'],
+                    ],
+                ],
+                "['type' => 'icon', 'name' => 'rocket', 'tone' => 'default']",
+            ),
+            $this->demo(
+                'code',
+                'A monospaced code sample, rendered as literal text (never executed).',
+                [
+                    'type' => 'code',
+                    'language' => 'json',
+                    'content' => '{ "screen": "blocks", "requiredPermission": "uikit:view" }',
+                ],
+                <<<'PHP'
+                    ['type' => 'code', 'language' => 'json',
+                     'content' => '{ "screen": "blocks" }']
+                    PHP,
+            ),
+        ];
+    }
+
+    /**
+     * The "Data" tab: stat, keyValue, list, table.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function dataTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Data display',
+            ],
+            $this->demo(
+                'stat',
+                'A metric tile with an optional hint and trend (up | down | flat).',
+                [
+                    'type' => 'grid',
+                    'columns' => 3,
+                    'children' => [
+                        ['type' => 'stat', 'label' => 'Active users', 'value' => '1,284', 'trend' => 'up', 'hint' => '+12% this week'],
+                        ['type' => 'stat', 'label' => 'Errors', 'value' => '3', 'trend' => 'down'],
+                        ['type' => 'stat', 'label' => 'Uptime', 'value' => '99.9%', 'trend' => 'flat'],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'stat', 'label' => 'Active users', 'value' => '1,284',
+                     'trend' => 'up', 'hint' => '+12% this week']
+                    PHP,
+            ),
+            $this->demo(
+                'keyValue',
+                'A definition list of label/value pairs.',
+                [
+                    'type' => 'keyValue',
+                    'items' => [
+                        ['label' => 'Plugin', 'value' => 'UiKitShowcase'],
+                        ['label' => 'SDK', 'value' => '^1.6'],
+                        ['label' => 'Screen', 'value' => 'blocks'],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'keyValue', 'items' => [
+                        ['label' => 'Plugin', 'value' => 'UiKitShowcase'],
+                        ['label' => 'SDK', 'value' => '^1.6'],
+                    ]]
+                    PHP,
+            ),
+            $this->demo(
+                'list',
+                'An ordered or unordered list of plain strings.',
+                [
+                    'type' => 'list',
+                    'ordered' => true,
+                    'items' => [
+                        'Declare the feature with screen => \'blocks\'.',
+                        'Build the tree from whitelisted blocks.',
+                        'The host validates and ships it verbatim.',
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'list', 'ordered' => true, 'items' => [
+                        'Declare the feature.', 'Build the tree.', 'Ship it.',
+                    ]]
+                    PHP,
+            ),
+            $this->demo(
+                'table',
+                'A static table of string cells keyed by column.',
+                [
+                    'type' => 'table',
+                    'columns' => [
+                        ['key' => 'block', 'label' => 'Block'],
+                        ['key' => 'kind', 'label' => 'Kind'],
+                    ],
+                    'rows' => [
+                        ['block' => 'section', 'kind' => 'container'],
+                        ['block' => 'heading', 'kind' => 'leaf'],
+                        ['block' => 'table', 'kind' => 'leaf'],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'table',
+                     'columns' => [['key' => 'block', 'label' => 'Block'],
+                                   ['key' => 'kind', 'label' => 'Kind']],
+                     'rows' => [['block' => 'section', 'kind' => 'container'],
+                                ['block' => 'heading', 'kind' => 'leaf']]]
+                    PHP,
+            ),
+        ];
+    }
+
+    /**
+     * The "Interactive" tab: button (every variant) — the only interactive leaf.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function interactiveTab(): array
+    {
+        return [
+            [
+                'type' => 'heading',
+                'level' => 2,
+                'text' => 'Actions',
+            ],
+            [
+                'type' => 'text',
+                'value' => 'A button links to an INTERNAL route only — its href must be a relative '
+                    . 'path starting with "/". The renderer makes any non-internal href inert.',
+                'tone' => 'muted',
+            ],
+            $this->demo(
+                'button',
+                'A labelled link to an internal route (variant: primary | secondary | outline | ghost | destructive).',
+                [
+                    'type' => 'row',
+                    'children' => [
+                        ['type' => 'button', 'label' => 'Primary', 'href' => '/admin', 'variant' => 'primary'],
+                        ['type' => 'button', 'label' => 'Secondary', 'href' => '/admin', 'variant' => 'secondary'],
+                        ['type' => 'button', 'label' => 'Outline', 'href' => '/admin', 'variant' => 'outline'],
+                        ['type' => 'button', 'label' => 'Ghost', 'href' => '/admin', 'variant' => 'ghost'],
+                        ['type' => 'button', 'label' => 'Destructive', 'href' => '/admin', 'variant' => 'destructive'],
+                    ],
+                ],
+                <<<'PHP'
+                    ['type' => 'button', 'label' => 'Open dashboard',
+                     'href' => '/admin', 'variant' => 'primary']
+                    PHP,
+            ),
+        ];
+    }
+
+    /**
+     * Emit one documented demo: a `card` titled by the block name, holding the
+     * LIVE example block above a `code` block carrying the exact PHP that
+     * declares it. Keeps the tree readable and uniform across every type.
+     *
+     * @param string               $blockType   the block type being documented (the card title)
+     * @param string               $description one-line description of the block
+     * @param array<string, mixed> $live        the live example node rendered to the reader
+     * @param string               $snippet     the PHP source that declares the block
+     *
+     * @return array<string, mixed> a `card` node
+     */
+    private function demo(string $blockType, string $description, array $live, string $snippet): array
+    {
+        return [
+            'type' => 'card',
+            'title' => $blockType,
+            'description' => $description,
+            'children' => [
+                $live,
+                [
+                    'type' => 'code',
+                    'language' => 'php',
+                    'content' => $snippet,
+                ],
+            ],
+        ];
+    }
+}
