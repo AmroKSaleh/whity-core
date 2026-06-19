@@ -10,9 +10,15 @@ namespace Whity\Database;
  * Seeds default tenant, roles, and users with hashed passwords.
  * All inserts use ON CONFLICT for idempotent execution.
  *
- * Initial user passwords are sourced from the INITIAL_ADMIN_PASSWORD and
- * INITIAL_USER_PASSWORD environment variables; when unset, a random password is
- * generated and printed once (see {@see InitialPassword}). No static default.
+ * Initial user passwords are sourced from the INITIAL_ADMIN_PASSWORD,
+ * INITIAL_USER_PASSWORD and INITIAL_SUPERUSER_PASSWORD environment variables;
+ * when unset, a random password is generated and printed once
+ * (see {@see InitialPassword}). No static default.
+ *
+ * In addition to the two default-tenant accounts, the seeder provisions a
+ * system-tenant (id 0) superuser (superuser@example.com) holding the admin role.
+ * Unlike the default-tenant admin, a system-tenant admin may manage the global
+ * base roles (NULL-tenant roles) and every tenant — see WC-110/WC-223.
  */
 class Seeder
 {
@@ -59,6 +65,7 @@ class Seeder
         // INITIAL_USER_PASSWORD) or a one-time random value — never a static literal.
         $adminPassword = InitialPassword::hashFor('INITIAL_ADMIN_PASSWORD', 'admin@example.com');
         $userPassword = InitialPassword::hashFor('INITIAL_USER_PASSWORD', 'user@example.com');
+        $superuserPassword = InitialPassword::hashFor('INITIAL_SUPERUSER_PASSWORD', 'superuser@example.com');
 
         // Insert admin user (idempotent with ON CONFLICT)
         $db->query(
@@ -83,6 +90,22 @@ class Seeder
                 ':email' => 'user@example.com',
                 ':password' => $userPassword,
                 ':role_id' => $userRoleId,
+            ]
+        );
+
+        // Insert system-tenant superuser (idempotent with ON CONFLICT).
+        // Tenant id 0 is the system tenant (created by migration
+        // 010_create_system_tenant, which runs before seeding); a system-tenant
+        // admin may manage global base roles and every tenant (WC-110/WC-223).
+        // @tenant-guard-ignore: seed-time bootstrap; system-tenant (0) superuser
+        $db->query(
+            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
+             VALUES (0, :email, :password, :role_id, NOW())
+             ON CONFLICT (tenant_id, email) DO NOTHING',
+            [
+                ':email' => 'superuser@example.com',
+                ':password' => $superuserPassword,
+                ':role_id' => $adminRoleId,
             ]
         );
     }

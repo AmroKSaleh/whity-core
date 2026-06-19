@@ -97,6 +97,7 @@ Environment variables (defaults shown are for development; **production fails fa
 | `WORKER_MEMORY_LIMIT_MB` | Memory ceiling that triggers graceful worker recycling | `128` |
 | `DB_CONNECT_TIMEOUT` / `DB_MAX_LIFETIME` / `DB_PING_INTERVAL` | Connection-pool tuning (seconds) | `5` / `1800` / `5` |
 | `INITIAL_ADMIN_PASSWORD` / `INITIAL_USER_PASSWORD` / `INITIAL_SYSTEM_ADMIN_PASSWORD` | Seed passwords (random if unset) | — |
+| `INITIAL_SUPERUSER_PASSWORD` | Seeds the system-tenant (id 0) superuser `superuser@example.com`, which can manage global base roles and every tenant (random if unset) | — |
 
 See [.env.example](.env.example).
 

@@ -17,6 +17,7 @@ namespace Whity\Database;
  * - INITIAL_ADMIN_PASSWORD         seed admin (admin@example.com)
  * - INITIAL_USER_PASSWORD          seed regular user (user@example.com)
  * - INITIAL_SYSTEM_ADMIN_PASSWORD  system-tenant admin (system@whity.local)
+ * - INITIAL_SUPERUSER_PASSWORD     system-tenant superuser (superuser@example.com)
  */
 final class InitialPassword
 {

@@ -66,6 +66,7 @@ The variables consumed by [`docker-compose.yml`](docker-compose.yml) and
 | `CORS_ALLOWED_ORIGINS` | Comma-separated browser-origin allowlist. The request `Origin` is reflected (with credentials) only on an exact match — never `*`. | `http://localhost:3000` |
 | `WORKER_MEMORY_LIMIT_MB` | Per-worker memory ceiling; crossing ~90% triggers graceful worker recycling. | `128` |
 | `INITIAL_ADMIN_PASSWORD` / `INITIAL_USER_PASSWORD` / `INITIAL_SYSTEM_ADMIN_PASSWORD` | Seed/system-admin passwords. If unset, a random password is generated and printed **once** to the log — there is no hardcoded fallback. | _(random)_ |
+| `INITIAL_SUPERUSER_PASSWORD` | Seeds the system-tenant (id 0) superuser `superuser@example.com` — a system-tenant admin that can manage global base roles and every tenant. Same random-if-unset / no-hardcoded-fallback behaviour. | _(random)_ |
 
 Outside `APP_ENV=development`, the app **fails fast** if `JWT_SECRET` or
 `ENCRYPTION_KEY` is unset/empty, or if `JWT_SECRET` is shorter than 32

@@ -121,6 +121,7 @@ jobs:
           INITIAL_ADMIN_PASSWORD=admin123
           INITIAL_USER_PASSWORD=user123
           INITIAL_SYSTEM_ADMIN_PASSWORD=systemadmin123
+          INITIAL_SUPERUSER_PASSWORD=superuser123
           EOF
 
       - name: Run migrations on real PostgreSQL
