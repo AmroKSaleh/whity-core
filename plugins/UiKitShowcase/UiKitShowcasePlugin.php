@@ -5,34 +5,38 @@ declare(strict_types=1);
 namespace UiKitShowcase;
 
 use UiKitShowcase\Migrations\GrantUiKitViewToAdmin;
+use Whity\Sdk\Http\Request;
+use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 
 /**
- * UiKitShowcasePlugin (WC-228)
+ * UiKitShowcasePlugin (WC-228 / WC-232)
  *
- * The capstone example plugin for the SP1 server-driven plugin-UI block system
- * (SDK 1.6, WC-225). It is a SANCTIONED example plugin — named for the SDK
- * feature it documents — that proves AND documents the entire pipeline:
+ * The capstone example plugin for the SP1 + SP2 server-driven plugin-UI block
+ * system (SDK 1.7, WC-225–WC-232). It is a SANCTIONED example plugin — named
+ * for the SDK feature it documents — that proves AND documents the entire
+ * pipeline:
  *
  *   SDK BlockContract whitelist (WC-225)
  *     -> host BlockValidator validation of `screen: 'blocks'` features (WC-226)
  *       -> web BlockRenderer at /admin/x/[featureId] (WC-227)
  *         -> THIS plugin's single `ui-kit-reference` feature.
  *
- * The plugin contributes ONE `screen: 'blocks'` feature whose declarative tree
- * renders a LIVE instance of every one of the 18 SP1 block types beside the
- * exact PHP snippet that declares it, so a plugin author can read the page and
- * copy-paste any block. The page itself is laid out with `tabs`/`section`/
- * `card`/`grid`/`row`, so it doubles as a layout demo.
+ * As of WC-232, the plugin also exposes two read-only demo endpoints returning
+ * static fixtures (no DB), both gated on `uikit:view`, that the SP2 data-bound
+ * block demos (`dataTable`, `dataStat`, `dataList`) bind to. The host (WC-230)
+ * verifies each block's `source` is one of the plugin's own registered GET
+ * routes, then rewrites it to the versioned URL before serving the descriptor.
  *
- * It is deliberately MINIMAL on the backend: NO API routes, NO hooks, and NO DB
- * resource — the screen is purely declarative static blocks. The only persisted
- * side effect is its single permission (`uikit:view`) plus the migration that
- * seeds and grants it to admin, so a fresh install shows the screen to admins
- * out-of-the-box. Props are SEMANTIC throughout (never CSS/hex/pixels), exactly
- * as the contract requires.
+ * The plugin contributes ONE `screen: 'blocks'` feature whose declarative tree
+ * renders a LIVE instance of every one of the 21 block types (18 SP1 + 3 SP2)
+ * beside the exact PHP snippet that declares it, so a plugin author can read
+ * the page and copy-paste any block.
+ *
+ * Props are SEMANTIC throughout (never CSS/hex/pixels), exactly as the
+ * contract requires.
  *
  * It lives in its own directory (`plugins/UiKitShowcase/`) so the PluginLoader
  * resolves it under the `UiKitShowcase` namespace prefix (directory name) and
@@ -57,14 +61,14 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Blocks landed in SDK 1.6 ({@see \Whity\Sdk\Sdk::VERSION}); the showcase
-     * requires that range.
+     * Data-bound block types landed in SDK 1.7 ({@see \Whity\Sdk\Sdk::VERSION});
+     * the showcase requires that range as of WC-232.
      *
      * @inheritDoc
      */
     public function getSdkConstraint(): string
     {
-        return '^1.6';
+        return '^1.7';
     }
 
     /**
@@ -89,18 +93,98 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * NO API routes — the screen is a purely declarative static block tree.
+     * Two read-only demo endpoints returning static fixtures (WC-232). Both are
+     * gated on `uikit:view` (the single existing permission — no new permission
+     * or migration). The data-bound block demos in the reference screen bind to
+     * these paths via their `source` prop; the host (WC-230) verifies ownership
+     * and rewrites to the versioned URL before serving.
      *
      * @inheritDoc
      */
     public function getRoutes(): array
     {
-        return [];
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/rows',
+                'handler' => [$this, 'demoRows'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo collection for data-bound block examples',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoRowsResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/metric',
+                'handler' => [$this, 'demoMetric'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo metric for data-bound stat block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoMetricResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/rows (requires uikit:view).
+     *
+     * Returns a static fixture collection used by the data-bound block demos
+     * (dataTable and dataList). No PDO, no side effects.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response Static demo rows.
+     */
+    public function demoRows(Request $request, array $params = []): Response
+    {
+        return Response::json([
+            'data' => [
+                ['name' => 'Anika Patel', 'role' => 'Administrator'],
+                ['name' => 'Bjorn Larsen', 'role' => 'Editor'],
+                ['name' => 'Camille Dupont', 'role' => 'Viewer'],
+            ],
+        ]);
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/metric (requires uikit:view).
+     *
+     * Returns a static fixture metric used by the data-bound stat block demo.
+     * No PDO, no side effects.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response Static demo metric.
+     */
+    public function demoMetric(Request $request, array $params = []): Response
+    {
+        return Response::json([
+            'data' => [
+                'label' => 'Active users',
+                'value' => '1,284',
+                'trend' => 'up',
+                'hint' => '+12% this week',
+            ],
+        ]);
     }
 
     /**
      * One permission, in the mandated `resource:action` colon notation, that
-     * the `ui-kit-reference` feature is gated on.
+     * the `ui-kit-reference` feature and demo endpoints are gated on.
      *
      * @inheritDoc
      */
@@ -131,7 +215,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Declare the single `screen: 'blocks'` reference feature (SDK 1.6).
+     * Declare the single `screen: 'blocks'` reference feature (SDK 1.7).
      *
      * UI metadata only — the descriptor grants nothing; the host validates the
      * `blocks` tree against {@see \Whity\Sdk\Frontend\Blocks\BlockValidator} and
@@ -161,7 +245,8 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
      * Top level: an intro section, then a `tabs` set splitting the catalogue
      * into Containers / Content / Data / Interactive — each tab pairing a live
      * block with the PHP that declares it (via {@see self::demo()}). Every one
-     * of the 18 SP1 block types appears at least once, and the result passes
+     * of the 21 block types (18 SP1 + 3 SP2 data-bound) appears at least once,
+     * and the result passes
      * {@see \Whity\Sdk\Frontend\Blocks\BlockValidator::validate()}.
      *
      * @return list<array<string, mixed>>
@@ -431,7 +516,8 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * The "Data" tab: stat, keyValue, list, table.
+     * The "Data" tab: stat, keyValue, list, table (SP1 static) plus the SP2
+     * data-bound demos in a "Live data" section: dataTable, dataStat, dataList.
      *
      * @return list<array<string, mixed>>
      */
@@ -467,14 +553,14 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'type' => 'keyValue',
                     'items' => [
                         ['label' => 'Plugin', 'value' => 'UiKitShowcase'],
-                        ['label' => 'SDK', 'value' => '^1.6'],
+                        ['label' => 'SDK', 'value' => '^1.7'],
                         ['label' => 'Screen', 'value' => 'blocks'],
                     ],
                 ],
                 <<<'PHP'
                     ['type' => 'keyValue', 'items' => [
                         ['label' => 'Plugin', 'value' => 'UiKitShowcase'],
-                        ['label' => 'SDK', 'value' => '^1.6'],
+                        ['label' => 'SDK', 'value' => '^1.7'],
                     ]]
                     PHP,
             ),
@@ -519,6 +605,100 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                 ['block' => 'heading', 'kind' => 'leaf']]]
                     PHP,
             ),
+            // ---- SP2 data-bound demos (WC-232) ----
+            [
+                'type' => 'section',
+                'title' => 'Live data',
+                'children' => [
+                    [
+                        'type' => 'text',
+                        'value' => 'Data-bound blocks fetch their content from one of the plugin\'s '
+                            . 'own RBAC-gated endpoints at render time. '
+                            . 'Declare a `source` (an unversioned `/api/...` path the plugin itself registers); '
+                            . 'the host verifies ownership and rewrites it to the versioned URL.',
+                        'tone' => 'muted',
+                    ],
+                    $this->dataBoundDemo(
+                        'dataTable',
+                        'A table whose rows are fetched from a plugin endpoint at render time.',
+                        [
+                            'type' => 'dataTable',
+                            'source' => '/api/uikit/demo/rows',
+                            'columns' => [
+                                ['key' => 'name', 'label' => 'Name'],
+                                ['key' => 'role', 'label' => 'Role'],
+                            ],
+                        ],
+                        <<<'PHP'
+                            ['type' => 'dataTable',
+                             'source' => '/api/uikit/demo/rows',
+                             'columns' => [
+                                 ['key' => 'name', 'label' => 'Name'],
+                                 ['key' => 'role', 'label' => 'Role'],
+                             ]]
+                            PHP,
+                        <<<'PHP'
+                            // GET /api/uikit/demo/rows — returns:
+                            // { "data": [{"name":"Anika Patel","role":"..."},] }
+                            public function demoRows(Request $r, array $p = []): Response {
+                                return Response::json(['data' => [
+                                    ['name' => 'Anika Patel',   'role' => 'Administrator'],
+                                    ['name' => 'Bjorn Larsen',  'role' => 'Editor'],
+                                    ['name' => 'Camille Dupont','role' => 'Viewer'],
+                                ]]);
+                            }
+                            PHP,
+                    ),
+                    $this->dataBoundDemo(
+                        'dataStat',
+                        'A metric tile whose value, trend, and hint are fetched from a plugin endpoint.',
+                        [
+                            'type' => 'dataStat',
+                            'source' => '/api/uikit/demo/metric',
+                            'label' => 'Active users',
+                            'valueField' => 'value',
+                            'trendField' => 'trend',
+                            'hintField' => 'hint',
+                        ],
+                        <<<'PHP'
+                            ['type' => 'dataStat',
+                             'source' => '/api/uikit/demo/metric',
+                             'label' => 'Active users',
+                             'valueField' => 'value',
+                             'trendField' => 'trend',
+                             'hintField' => 'hint']
+                            PHP,
+                        <<<'PHP'
+                            // GET /api/uikit/demo/metric — returns:
+                            // { "data": {"label":"Active users","value":"1,284","trend":"up","hint":"..."} }
+                            public function demoMetric(Request $r, array $p = []): Response {
+                                return Response::json(['data' => [
+                                    'label' => 'Active users', 'value' => '1,284',
+                                    'trend' => 'up', 'hint' => '+12% this week',
+                                ]]);
+                            }
+                            PHP,
+                    ),
+                    $this->dataBoundDemo(
+                        'dataList',
+                        'An unordered list whose items are fetched from a plugin endpoint.',
+                        [
+                            'type' => 'dataList',
+                            'source' => '/api/uikit/demo/rows',
+                            'itemField' => 'name',
+                        ],
+                        <<<'PHP'
+                            ['type' => 'dataList',
+                             'source' => '/api/uikit/demo/rows',
+                             'itemField' => 'name']
+                            PHP,
+                        <<<'PHP'
+                            // Same GET /api/uikit/demo/rows endpoint — `itemField`
+                            // picks the column to render as list items.
+                            PHP,
+                    ),
+                ],
+            ],
         ];
     }
 
@@ -586,6 +766,93 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'type' => 'code',
                     'language' => 'php',
                     'content' => $snippet,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Emit a data-bound demo card: a `card` holding the LIVE data-bound block,
+     * the PHP block declaration snippet, and the endpoint handler snippet.
+     *
+     * Kept separate from {@see self::demo()} to make the three-child card shape
+     * explicit and avoid overloading the generic helper's type annotations.
+     *
+     * @param string               $blockType        the data-bound block type (card title)
+     * @param string               $description      one-line description
+     * @param array<string, mixed> $live             the live data-bound block node
+     * @param string               $blockSnippet     PHP for the block declaration
+     * @param string               $endpointSnippet  PHP for the endpoint handler
+     *
+     * @return array<string, mixed> a `card` node
+     */
+    private function dataBoundDemo(
+        string $blockType,
+        string $description,
+        array $live,
+        string $blockSnippet,
+        string $endpointSnippet
+    ): array {
+        return [
+            'type' => 'card',
+            'title' => $blockType,
+            'description' => $description,
+            'children' => [
+                $live,
+                [
+                    'type' => 'code',
+                    'language' => 'php',
+                    'content' => $blockSnippet,
+                ],
+                [
+                    'type' => 'code',
+                    'language' => 'php',
+                    'content' => $endpointSnippet,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The OpenAPI component schemas for the demo endpoints.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private static function demoComponents(): array
+    {
+        return [
+            'UiKitDemoRow' => [
+                'type' => 'object',
+                'required' => ['name', 'role'],
+                'properties' => [
+                    'name' => ['type' => 'string'],
+                    'role' => ['type' => 'string'],
+                ],
+            ],
+            'UiKitDemoRowsResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'array',
+                        'items' => ['$ref' => '#/components/schemas/UiKitDemoRow'],
+                    ],
+                ],
+            ],
+            'UiKitDemoMetricResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'object',
+                        'required' => ['label', 'value', 'trend', 'hint'],
+                        'properties' => [
+                            'label' => ['type' => 'string'],
+                            'value' => ['type' => 'string'],
+                            'trend' => ['type' => 'string'],
+                            'hint' => ['type' => 'string'],
+                        ],
+                    ],
                 ],
             ],
         ];
