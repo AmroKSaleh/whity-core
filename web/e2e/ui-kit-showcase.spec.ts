@@ -95,9 +95,10 @@ test.describe('UiKitShowcase: UI-Kit Reference block screen (WC-228)', () => {
     // text — so scope to the first match (the live stat tile, not the code).
     await expect(page.getByText('Active users').first()).toBeVisible();
 
-    // table: the block-catalogue table — a header cell and a body cell.
+    // table: the block-catalogue table. Column labels render as <th> (role
+    // columnheader); row values render as <td> (role cell). Assert one of each.
     await expect(
-      page.getByRole('cell', { name: 'Block', exact: true })
+      page.getByRole('columnheader', { name: 'Block', exact: true })
     ).toBeVisible();
     await expect(
       page.getByRole('cell', { name: 'section', exact: true })
