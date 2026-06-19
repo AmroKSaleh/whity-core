@@ -141,6 +141,8 @@ services:
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-admin123}
       INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD:-user123}
       INITIAL_SYSTEM_ADMIN_PASSWORD: ${INITIAL_SYSTEM_ADMIN_PASSWORD:-systemadmin123}
+      # Seeds the system-tenant (id 0) superuser superuser@example.com.
+      INITIAL_SUPERUSER_PASSWORD: ${INITIAL_SUPERUSER_PASSWORD:-superuser123}
     depends_on:
       postgres:
         condition: service_healthy

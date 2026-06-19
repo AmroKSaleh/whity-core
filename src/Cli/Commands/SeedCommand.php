@@ -29,8 +29,10 @@ class SeedCommand
             echo "  - Default Tenant created\n";
             echo "  - Admin user: admin@example.com\n";
             echo "  - Regular user: user@example.com\n";
-            echo "  Passwords are taken from INITIAL_ADMIN_PASSWORD / INITIAL_USER_PASSWORD;\n";
-            echo "  if unset, a random password was generated and printed above.\n\n";
+            echo "  - Superuser (system tenant): superuser@example.com\n";
+            echo "  Passwords are taken from INITIAL_ADMIN_PASSWORD / INITIAL_USER_PASSWORD /\n";
+            echo "  INITIAL_SUPERUSER_PASSWORD; if unset, a random password was generated and\n";
+            echo "  printed above.\n\n";
 
             return 0;
         } catch (\Exception $e) {
