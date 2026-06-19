@@ -2631,6 +2631,99 @@ class PluginLoader
                     $id
                 );
             }
+
+            // (c3-b) data-bound source ownership + versioning (WC-230).
+            // Walk the validated tree depth-first. For each node whose type's
+            // contract rule has a `source` prop of kind `apiPath` (data-bound
+            // leaf), verify the unversioned `source` is a GET route this plugin
+            // actually registered (ownership, fail-closed — any foreign source
+            // drops the ENTIRE feature, mirroring how crud's basePath works),
+            // then rewrite it to the versioned URL exactly as basePath/path are
+            // rewritten for crud and action screens.
+            $vp = $this->router->getVersionPrefix();
+
+            // $dropSource captures the violating path from any depth so the
+            // outer $drop() call can include it in the logged reason.
+            $dropSource = null;
+
+            /**
+             * Walk a node array depth-first, rewriting data-bound sources.
+             * Returns the (possibly-rewritten) node array, or null when an
+             * ownership violation is found (signals the caller to drop the
+             * feature). $dropSource is set to the offending path on violation.
+             *
+             * @param array<string, mixed> $node
+             * @return array<string, mixed>|null
+             */
+            $walkNode = null;
+            $walkNode = static function (array $node) use (
+                $registeredGetRoutes,
+                $vp,
+                &$walkNode,
+                &$dropSource
+            ): ?array {
+                $type = $node['type'] ?? null;
+                if (is_string($type)) {
+                    $rule = \Whity\Sdk\Frontend\Blocks\BlockContract::rulesFor($type);
+                    $isDataBound = $rule !== null
+                        && (($rule['props']['source']['type'] ?? null) === 'apiPath');
+                    if ($isDataBound) {
+                        /** @var string $source — guaranteed a valid apiPath by BlockValidator */
+                        $source = $node['source'];
+                        if (!array_key_exists($source, $registeredGetRoutes)) {
+                            // Ownership violation — record the offending path
+                            // and signal the caller to drop the feature.
+                            $dropSource = $source;
+                            return null;
+                        }
+                        if ($vp !== '') {
+                            $pos = strpos($source, '/', 1);
+                            $node['source'] = $pos === false
+                                ? $source . $vp
+                                : substr($source, 0, $pos) . $vp . substr($source, $pos);
+                        }
+                    }
+                }
+
+                // Recurse into children (container nodes).
+                if (isset($node['children']) && is_array($node['children'])) {
+                    $rewrittenChildren = [];
+                    foreach ($node['children'] as $child) {
+                        if (!is_array($child)) {
+                            $rewrittenChildren[] = $child;
+                            continue;
+                        }
+                        $rewritten = $walkNode($child);
+                        if ($rewritten === null) {
+                            return null; // propagate ownership violation up.
+                        }
+                        $rewrittenChildren[] = $rewritten;
+                    }
+                    $node['children'] = $rewrittenChildren;
+                }
+
+                return $node;
+            };
+
+            $rewrittenBlocks = [];
+            foreach ($rawBlocks as $topNode) {
+                if (!is_array($topNode)) {
+                    $rewrittenBlocks[] = $topNode;
+                    continue;
+                }
+                $rewritten = $walkNode($topNode);
+                if ($rewritten === null) {
+                    // A data-bound node referenced a route this plugin does not
+                    // own — drop the entire feature (fail-closed, same as crud).
+                    return $drop(
+                        "data-bound block source '{$dropSource}' is not a GET route this plugin registered",
+                        $id
+                    );
+                }
+                $rewrittenBlocks[] = $rewritten;
+            }
+            $rawBlocks = $rewrittenBlocks;
+
             $blocks = $rawBlocks;
         }
 
