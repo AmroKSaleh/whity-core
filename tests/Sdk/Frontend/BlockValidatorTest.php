@@ -453,6 +453,22 @@ final class BlockValidatorTest extends TestCase
         $this->assertStringContainsString('source', $joined);
     }
 
+    public function testDataTableSourceWithBackslashIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/x\\y',
+                'columns' => [['key' => 'id', 'label' => 'ID']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
     public function testDataTableMissingColumnsIsRejected(): void
     {
         $result = BlockValidator::validate([
