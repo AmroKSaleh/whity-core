@@ -90,8 +90,10 @@ test.describe('UiKitShowcase: UI-Kit Reference block screen (WC-228)', () => {
 
     await page.getByRole('tab', { name: 'Data' }).click();
 
-    // stat: a metric tile from the stat demo grid.
-    await expect(page.getByText('Active users')).toBeVisible();
+    // stat: a metric tile from the stat demo grid. Each demo renders the live
+    // block ABOVE its PHP `code` snippet, and the snippet repeats the label
+    // text — so scope to the first match (the live stat tile, not the code).
+    await expect(page.getByText('Active users').first()).toBeVisible();
 
     // table: the block-catalogue table — a header cell and a body cell.
     await expect(
