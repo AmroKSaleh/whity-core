@@ -163,14 +163,40 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('array', (string) $return);
     }
 
-    public function testSdkVersionIsOneFiveForTheMultipartUploadShapes(): void
+    public function testSdkVersionIsOneSixForTheBlockContract(): void
     {
         $this->assertSame(
-            '1.5.0',
+            '1.6.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.5 adds the multipart upload shapes: UploadedFile + '
-            . 'Request::getUploadedFiles() (WC-217)'
+            'SDK 1.6 adds the server-driven plugin-UI block contract: '
+            . 'BlockContract + BlockValidator and the screen:"blocks" '
+            . 'frontend-feature value (WC-225)'
         );
+    }
+
+    /**
+     * SDK 1.6 (WC-225): the platform-neutral plugin-UI block contract +
+     * validator ship in the SDK so distributable plugins can declare a
+     * server-driven `screen: 'blocks'` tree with only whity/plugin-sdk
+     * installed.
+     */
+    public function testBlockContractAndValidatorLiveInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Frontend\Blocks\BlockContract::class),
+            'The block whitelist/contract must live in the SDK'
+        );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Frontend\Blocks\BlockValidator::class),
+            'The block validator must live in the SDK'
+        );
+
+        $this->assertSame(32, \Whity\Sdk\Frontend\Blocks\BlockContract::MAX_DEPTH);
+        $this->assertSame(500, \Whity\Sdk\Frontend\Blocks\BlockContract::MAX_NODES);
+
+        $validate = new \ReflectionMethod(\Whity\Sdk\Frontend\Blocks\BlockValidator::class, 'validate');
+        $this->assertTrue($validate->isStatic(), 'validate() is a pure static gate');
+        $this->assertSame('array', (string) $validate->getReturnType());
     }
 
     /**
