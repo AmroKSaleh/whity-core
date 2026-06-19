@@ -50,8 +50,8 @@ final class UiKitShowcasePluginTest extends TestCase
     {
         $plugin = new UiKitShowcasePlugin();
 
-        // Data-bound blocks landed in SDK 1.7, so the plugin requires that range.
-        $this->assertSame('^1.7', $plugin->getSdkConstraint());
+        // Blocks landed in SDK 1.6, so the plugin requires that range.
+        $this->assertSame('^1.6', $plugin->getSdkConstraint());
         $this->assertSame('', $plugin->getCoreConstraint());
         $this->assertSame([], $plugin->getPluginDependencies());
 
@@ -117,7 +117,7 @@ final class UiKitShowcasePluginTest extends TestCase
         $blocks = $feature['blocks'];
         $present = $this->collectTypes($blocks);
 
-        foreach (BlockContract::types() as $type) {
+        foreach ($this->displayBlockTypes() as $type) {
             $this->assertContains(
                 $type,
                 $present,
@@ -125,12 +125,14 @@ final class UiKitShowcasePluginTest extends TestCase
             );
         }
 
-        // The set present is a SUPERSET of all 18 SP1 types.
-        $expected = BlockContract::types();
+        // The set present is a SUPERSET of every SP1 DISPLAY type. Data-bound
+        // types (dataTable/dataStat/dataList) are documented in WC-232, where
+        // their live demos gain the plugin's demo endpoint to bind to.
+        $expected = $this->displayBlockTypes();
         $this->assertSame(
             $expected,
             array_values(array_filter($expected, static fn (string $t): bool => in_array($t, $present, true))),
-            'Every SP1 block type must be present at least once'
+            'Every SP1 display block type must be present at least once'
         );
     }
 
@@ -170,12 +172,34 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertArrayHasKey('blocks', $feature);
         $this->assertIsArray($feature['blocks']);
 
-        // The exposed tree still covers every SP1 block type and still validates.
+        // The exposed tree still covers every SP1 DISPLAY type and still
+        // validates. Data-bound types are documented in WC-232 (see above).
         $present = $this->collectTypes($feature['blocks']);
-        foreach (BlockContract::types() as $type) {
+        foreach ($this->displayBlockTypes() as $type) {
             $this->assertContains($type, $present, "Loader-exposed tree must include '{$type}'");
         }
         $this->assertTrue(BlockValidator::validate($feature['blocks'])['ok']);
+    }
+
+    /**
+     * The SP1 DISPLAY block types the showcase documents directly: every
+     * contract type EXCEPT the data-bound ones (those carrying an `apiPath`
+     * `source` prop), whose live demos require the plugin's demo endpoint and
+     * are added in WC-232. Computed from the contract so it never drifts.
+     *
+     * @return list<string>
+     */
+    private function displayBlockTypes(): array
+    {
+        return array_values(array_filter(
+            BlockContract::types(),
+            static function (string $type): bool {
+                $rule = BlockContract::rulesFor($type);
+
+                return $rule === null
+                    || ($rule['props']['source']['type'] ?? null) !== 'apiPath';
+            }
+        ));
     }
 
     /**

@@ -27,11 +27,12 @@ use Whity\Sdk\PluginRequirementsInterface;
  * copy-paste any block. The page itself is laid out with `tabs`/`section`/
  * `card`/`grid`/`row`, so it doubles as a layout demo.
  *
- * WC-229 (SP2) extends the tree with the three data-bound leaf types —
- * `dataTable`, `dataStat`, `dataList` — declared in the "Live data" grouping
- * of the Data tab. Their `source` paths (`/api/uikit/demo/…`) will be backed
- * by real endpoints added in WC-232; until then they render the loading/error
- * state in the web renderer. The `getSdkConstraint()` is bumped to `^1.7`.
+ * It is deliberately MINIMAL on the backend: NO API routes, NO hooks, and NO DB
+ * resource — the screen is purely declarative static blocks. The only persisted
+ * side effect is its single permission (`uikit:view`) plus the migration that
+ * seeds and grants it to admin, so a fresh install shows the screen to admins
+ * out-of-the-box. Props are SEMANTIC throughout (never CSS/hex/pixels), exactly
+ * as the contract requires.
  *
  * It lives in its own directory (`plugins/UiKitShowcase/`) so the PluginLoader
  * resolves it under the `UiKitShowcase` namespace prefix (directory name) and
@@ -56,14 +57,14 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Data-bound blocks landed in SDK 1.7 ({@see \Whity\Sdk\Sdk::VERSION});
-     * the showcase requires that range.
+     * Blocks landed in SDK 1.6 ({@see \Whity\Sdk\Sdk::VERSION}); the showcase
+     * requires that range.
      *
      * @inheritDoc
      */
     public function getSdkConstraint(): string
     {
-        return '^1.7';
+        return '^1.6';
     }
 
     /**
@@ -175,7 +176,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     [
                         'type' => 'heading',
                         'level' => 1,
-                        'text' => 'SP1 + SP2 UI Blocks',
+                        'text' => 'SP1 UI Blocks',
                     ],
                     [
                         'type' => 'text',
@@ -430,7 +431,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * The "Data" tab: stat, keyValue, list, table, dataTable, dataStat, dataList.
+     * The "Data" tab: stat, keyValue, list, table.
      *
      * @return list<array<string, mixed>>
      */
@@ -516,75 +517,6 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                    ['key' => 'kind', 'label' => 'Kind']],
                      'rows' => [['block' => 'section', 'kind' => 'container'],
                                 ['block' => 'heading', 'kind' => 'leaf']]]
-                    PHP,
-            ),
-            [
-                'type' => 'heading',
-                'level' => 2,
-                'text' => 'Live data (SP2)',
-            ],
-            [
-                'type' => 'text',
-                'value' => 'Data-bound blocks (SDK 1.7) fetch their rows or metric from a plugin-owned '
-                    . 'API endpoint at render time — loading / empty / error / ready states, '
-                    . 'with a manual Refresh. The source must be a relative /api/ path the plugin registers.',
-                'tone' => 'muted',
-            ],
-            $this->demo(
-                'dataTable',
-                'A live table fetched from a relative API endpoint at render time.',
-                [
-                    'type' => 'dataTable',
-                    'source' => '/api/uikit/demo/rows',
-                    'columns' => [
-                        ['key' => 'name', 'label' => 'Name'],
-                        ['key' => 'role', 'label' => 'Role'],
-                    ],
-                    'emptyText' => 'No rows returned.',
-                ],
-                <<<'PHP'
-                    ['type' => 'dataTable',
-                     'source' => '/api/uikit/demo/rows',
-                     'columns' => [['key' => 'name', 'label' => 'Name'],
-                                   ['key' => 'role', 'label' => 'Role']],
-                     'emptyText' => 'No rows returned.']
-                    PHP,
-            ),
-            $this->demo(
-                'dataStat',
-                'A live metric tile fetched from a relative API endpoint at render time.',
-                [
-                    'type' => 'dataStat',
-                    'source' => '/api/uikit/demo/metric',
-                    'label' => 'Active users',
-                    'valueField' => 'value',
-                    'trendField' => 'trend',
-                    'hintField' => 'hint',
-                ],
-                <<<'PHP'
-                    ['type' => 'dataStat',
-                     'source' => '/api/uikit/demo/metric',
-                     'label' => 'Active users',
-                     'valueField' => 'value',
-                     'trendField' => 'trend',
-                     'hintField' => 'hint']
-                    PHP,
-            ),
-            $this->demo(
-                'dataList',
-                'A live list fetched from a relative API endpoint at render time.',
-                [
-                    'type' => 'dataList',
-                    'source' => '/api/uikit/demo/rows',
-                    'itemField' => 'name',
-                    'ordered' => false,
-                    'emptyText' => 'No items returned.',
-                ],
-                <<<'PHP'
-                    ['type' => 'dataList',
-                     'source' => '/api/uikit/demo/rows',
-                     'itemField' => 'name',
-                     'ordered' => false]
                     PHP,
             ),
         ];
