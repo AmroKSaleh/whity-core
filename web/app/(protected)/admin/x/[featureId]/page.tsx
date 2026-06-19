@@ -9,6 +9,7 @@ import {
 } from '@/lib/plugin-ui-registry';
 import { CrudScreen } from '@/components/plugin/crud-screen';
 import { ActionScreen } from '@/components/plugin/action-screen';
+import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Skeleton } from '@/components/ui/skeleton';
 import { IconPuzzle, IconShieldLock } from '@tabler/icons-react';
@@ -102,6 +103,18 @@ export default function PluginFeaturePage() {
 
   if (feature.screen === 'action' && feature.action !== null) {
     return <ActionScreen feature={feature} />;
+  }
+
+  if (feature.screen === 'blocks') {
+    return (
+      <div className="space-y-8">
+        <AdminHeader
+          title={feature.label}
+          description={`Provided by the ${feature.plugin} plugin.`}
+        />
+        <BlockRenderer blocks={feature.blocks ?? []} />
+      </div>
+    );
   }
 
   return (

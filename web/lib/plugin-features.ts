@@ -10,6 +10,171 @@
 
 import { apiClient } from '@/lib/api-client';
 
+/**
+ * The SP1 server-driven plugin-UI block set (WC-225/226/227), mirrored from the
+ * SDK's `BlockContract` as a TypeScript discriminated union keyed on `type`.
+ *
+ * A plugin describes a screen as a platform-NEUTRAL tree of semantic UI blocks;
+ * the host validates and serves it verbatim, and each platform's renderer maps
+ * the semantics to native widgets. Props are semantic, never presentational —
+ * no CSS classes, colors, or pixels ever cross this boundary.
+ *
+ * Containers carry a `children: Block[]` array; leaves do not. The `type`
+ * literal is the discriminant.
+ */
+
+/** Container: a labelled vertical grouping of blocks. */
+export interface SectionBlock {
+  type: 'section';
+  title?: string;
+  children: Block[];
+}
+
+/** Container: a surface with an optional title/description and a body. */
+export interface CardBlock {
+  type: 'card';
+  title?: string;
+  description?: string;
+  children: Block[];
+}
+
+/** Container: an N-column responsive grid of blocks. */
+export interface GridBlock {
+  type: 'grid';
+  columns: 1 | 2 | 3 | 4;
+  children: Block[];
+}
+
+/** Container: a horizontal row with an optional main-axis alignment. */
+export interface RowBlock {
+  type: 'row';
+  align?: 'start' | 'center' | 'end' | 'between';
+  children: Block[];
+}
+
+/** Container: a tab set whose children are `tab` blocks. */
+export interface TabsBlock {
+  type: 'tabs';
+  children: TabBlock[];
+}
+
+/** Container: one labelled tab panel; only valid as a child of `tabs`. */
+export interface TabBlock {
+  type: 'tab';
+  label: string;
+  children: Block[];
+}
+
+/** Leaf: a horizontal separator. */
+export interface DividerBlock {
+  type: 'divider';
+}
+
+/** Leaf: a semantic heading at one of four levels. */
+export interface HeadingBlock {
+  type: 'heading';
+  level: 1 | 2 | 3 | 4;
+  text: string;
+}
+
+/** Leaf: a paragraph of text, optionally muted. */
+export interface TextBlock {
+  type: 'text';
+  value: string;
+  tone?: 'default' | 'muted';
+}
+
+/** Leaf: a callout banner with a semantic variant. */
+export interface AlertBlock {
+  type: 'alert';
+  variant: 'info' | 'success' | 'warning' | 'danger';
+  title?: string;
+  body: string;
+}
+
+/** Leaf: a small status pill. */
+export interface BadgeBlock {
+  type: 'badge';
+  variant: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+  label: string;
+}
+
+/** Leaf: a single metric tile with an optional hint and trend. */
+export interface StatBlock {
+  type: 'stat';
+  label: string;
+  value: string;
+  hint?: string;
+  trend?: 'up' | 'down' | 'flat';
+}
+
+/** Leaf: a definition list of label/value pairs. */
+export interface KeyValueBlock {
+  type: 'keyValue';
+  items: { label: string; value: string }[];
+}
+
+/** Leaf: an ordered or unordered list of plain strings. */
+export interface ListBlock {
+  type: 'list';
+  ordered?: boolean;
+  items: string[];
+}
+
+/** Leaf: a static table of string cells keyed by column. */
+export interface TableBlock {
+  type: 'table';
+  columns: { key: string; label: string }[];
+  rows: Record<string, string>[];
+}
+
+/** Leaf: a labelled action that links to an internal route. */
+export interface ButtonBlock {
+  type: 'button';
+  label: string;
+  href: string;
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+}
+
+/** Leaf: a Tabler icon referenced by name. */
+export interface IconBlock {
+  type: 'icon';
+  name: string;
+  tone?: 'default' | 'muted';
+}
+
+/** Leaf: a monospaced code sample, rendered as literal text. */
+export interface CodeBlock {
+  type: 'code';
+  language?: string;
+  content: string;
+}
+
+/**
+ * The discriminated union of every SP1 block, keyed on `type`. The host has
+ * already validated the tree, but the web renderer revalidates defensively so a
+ * malformed node degrades to a placeholder rather than crashing.
+ */
+export type Block =
+  | SectionBlock
+  | CardBlock
+  | GridBlock
+  | RowBlock
+  | TabsBlock
+  | TabBlock
+  | DividerBlock
+  | HeadingBlock
+  | TextBlock
+  | AlertBlock
+  | BadgeBlock
+  | StatBlock
+  | KeyValueBlock
+  | ListBlock
+  | TableBlock
+  | ButtonBlock
+  | IconBlock
+  | CodeBlock;
+
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {
   /** Unique kebab-case slug, also used in the /admin/x/[featureId] route. */
@@ -26,9 +191,10 @@ export interface PluginFeature {
   order: number;
   /**
    * "crud" renders the generic schema-driven screen; "action" renders the
-   * generic action form; "custom" expects a registered override.
+   * generic action form; "blocks" renders a platform-neutral block tree;
+   * "custom" expects a registered override.
    */
-  screen: 'crud' | 'custom' | 'action';
+  screen: 'crud' | 'custom' | 'action' | 'blocks';
   /** REST resource backing a crud screen; null for custom/action screens. */
   resource: {
     /** Collection endpoint, e.g. "/api/v1/hello/greetings". */
@@ -58,6 +224,11 @@ export interface PluginFeature {
       required: boolean;
     }[];
   } | null;
+  /**
+   * Block tree backing a `screen: 'blocks'` feature; absent for other screens.
+   * The host has already validated this against the SDK block whitelist.
+   */
+  blocks?: Block[];
   /** Permission the server used to filter this feature (informational). */
   requiredPermission: string;
   /**
