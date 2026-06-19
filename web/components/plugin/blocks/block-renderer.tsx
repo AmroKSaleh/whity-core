@@ -9,6 +9,7 @@ import {
   IconArrowUpRight,
   IconMinus,
   IconPointFilled,
+  IconRefresh,
 } from '@tabler/icons-react';
 import type {
   AlertBlock,
@@ -17,6 +18,9 @@ import type {
   ButtonBlock,
   CardBlock,
   CodeBlock,
+  DataListBlock,
+  DataStatBlock,
+  DataTableBlock,
   GridBlock,
   HeadingBlock,
   IconBlock,
@@ -30,7 +34,9 @@ import type {
   TabsBlock,
   TextBlock,
 } from '@/lib/plugin-features';
+import { usePluginData } from '@/lib/use-plugin-data';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Alert,
   AlertDescription,
@@ -478,6 +484,267 @@ function CodeRenderer({ block }: { block: CodeBlock }) {
   );
 }
 
+// ---- SP2 data-bound renderers (WC-231) ----
+
+/**
+ * DataTableRenderer — fetches rows from `block.source` and reuses
+ * `TableRenderer` for the ready state.
+ */
+function DataTableRenderer({ block }: { block: DataTableBlock }) {
+  type Rows = Record<string, unknown>[];
+  const state = usePluginData<Rows>(block.source, (body) => {
+    if (!Array.isArray(body) || body.length === 0) return null;
+    return body as Rows;
+  });
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-data-loading">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-3/4" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-error"
+      >
+        <span>Failed to load data.</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={state.retry}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-empty"
+      >
+        <span>{block.emptyText ?? 'No data available.'}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    );
+  }
+
+  // ready
+  const rows: Record<string, string>[] = state.data.map((row) =>
+    Object.fromEntries(
+      block.columns.map((col) => [col.key, String(row[col.key] ?? '')])
+    )
+  );
+
+  return (
+    <div className="space-y-1" data-slot="block-data-refresh">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      <TableRenderer block={{ type: 'table', columns: block.columns, rows }} />
+    </div>
+  );
+}
+
+/**
+ * DataStatRenderer — fetches a metric object from `block.source` and reuses
+ * `StatRenderer` for the ready state.
+ */
+function DataStatRenderer({ block }: { block: DataStatBlock }) {
+  type Metric = Record<string, unknown>;
+  const state = usePluginData<Metric>(block.source, (body) => {
+    if (typeof body !== 'object' || body === null) return null;
+    const obj = body as Record<string, unknown>;
+    if (!(block.valueField in obj)) return null;
+    return obj;
+  });
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-data-loading">
+        <Skeleton className="h-16 w-full" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-error"
+      >
+        <span>Failed to load data.</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={state.retry}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-empty"
+      >
+        <span>{block.emptyText ?? 'No data available.'}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    );
+  }
+
+  // ready
+  const obj = state.data;
+  const trendRaw = block.trendField ? obj[block.trendField] : undefined;
+  const trend = isOneOf(trendRaw, ['up', 'down', 'flat'] as const)
+    ? trendRaw
+    : undefined;
+
+  return (
+    <div className="space-y-1" data-slot="block-data-refresh">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      <StatRenderer
+        block={{
+          type: 'stat',
+          label: block.label,
+          value: String(obj[block.valueField] ?? ''),
+          hint: block.hintField ? String(obj[block.hintField] ?? '') : undefined,
+          trend,
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * DataListRenderer — fetches rows from `block.source` and reuses
+ * `ListRenderer` for the ready state.
+ */
+function DataListRenderer({ block }: { block: DataListBlock }) {
+  type Rows = Record<string, unknown>[];
+  const state = usePluginData<Rows>(block.source, (body) => {
+    if (!Array.isArray(body) || body.length === 0) return null;
+    return body as Rows;
+  });
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-data-loading">
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-4 w-1/2" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-error"
+      >
+        <span>Failed to load data.</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={state.retry}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-empty"
+      >
+        <span>{block.emptyText ?? 'No data available.'}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    );
+  }
+
+  // ready
+  const items = state.data.map((row) => String(row[block.itemField] ?? ''));
+
+  return (
+    <div className="space-y-1" data-slot="block-data-refresh">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      <ListRenderer block={{ type: 'list', ordered: block.ordered, items }} />
+    </div>
+  );
+}
+
 // ---- dispatch: validate per the contract, then render or degrade ----
 
 /**
@@ -612,6 +879,26 @@ function BlockNode({ block }: { block: Block }): React.ReactElement {
         <CodeRenderer block={block} />
       ) : (
         <UnsupportedBlock type="code" />
+      );
+    case 'dataTable':
+      return isNonEmptyString(block.source) && isColumnList(block.columns) ? (
+        <DataTableRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="dataTable" />
+      );
+    case 'dataStat':
+      return isNonEmptyString(block.source) &&
+        isNonEmptyString(block.label) &&
+        isNonEmptyString(block.valueField) ? (
+        <DataStatRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="dataStat" />
+      );
+    case 'dataList':
+      return isNonEmptyString(block.source) && isNonEmptyString(block.itemField) ? (
+        <DataListRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="dataList" />
       );
     default: {
       // Unknown type: TypeScript narrows `block` to `never`, but a malformed
