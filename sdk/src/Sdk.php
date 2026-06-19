@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.6).
+ * SDK identity (v1.7).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -29,13 +29,15 @@ namespace Whity\Sdk;
  * 1.6 (server-driven plugin-UI block contract: the platform-neutral
  * {@see \Whity\Sdk\Frontend\Blocks\BlockContract} whitelist and the
  * {@see \Whity\Sdk\Frontend\Blocks\BlockValidator}, plus the new
- * `screen: 'blocks'` frontend-feature value, WC-225). Breaking changes
- * require a new major version.
+ * `screen: 'blocks'` frontend-feature value, WC-225) →
+ * 1.7 (data-bound block types: `dataTable`, `dataStat`, `dataList` leaves with
+ * the new `apiPath` prop-rule kind — strict relative API path validation, WC-229).
+ * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.6.0';
+    public const VERSION = '1.7.0';
 
     /**
      * Static identity only — never instantiated.

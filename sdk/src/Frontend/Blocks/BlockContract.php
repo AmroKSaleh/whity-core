@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk\Frontend\Blocks;
 
 /**
- * The SP1 server-driven plugin-UI block whitelist (SDK 1.6, WC-225).
+ * The SP2 server-driven plugin-UI block whitelist (SDK 1.7, WC-229).
  *
  * A plugin describes a screen as a platform-NEUTRAL tree of semantic UI
  * "blocks". The host stores and ships that tree verbatim; per-platform
@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -205,6 +205,27 @@ final class BlockContract
                     'content' => ['type' => 'string', 'required' => true],
                 ],
             ],
+
+            // ---- data-bound leaves (SP2, WC-229) ----
+            'dataTable' => ['container' => false, 'props' => [
+                'source'    => ['type' => 'apiPath',    'required' => true],
+                'columns'   => ['type' => 'columnList', 'required' => true],
+                'emptyText' => ['type' => 'string',     'required' => false],
+            ]],
+            'dataStat' => ['container' => false, 'props' => [
+                'source'     => ['type' => 'apiPath', 'required' => true],
+                'label'      => ['type' => 'string',  'required' => true],
+                'valueField' => ['type' => 'string',  'required' => true],
+                'hintField'  => ['type' => 'string',  'required' => false],
+                'trendField' => ['type' => 'string',  'required' => false],
+                'emptyText'  => ['type' => 'string',  'required' => false],
+            ]],
+            'dataList' => ['container' => false, 'props' => [
+                'source'    => ['type' => 'apiPath',    'required' => true],
+                'itemField' => ['type' => 'string',     'required' => true],
+                'ordered'   => ['type' => 'bool',       'required' => false],
+                'emptyText' => ['type' => 'string',     'required' => false],
+            ]],
         ];
     }
 

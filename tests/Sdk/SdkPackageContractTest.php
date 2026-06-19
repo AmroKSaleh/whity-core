@@ -163,14 +163,13 @@ final class SdkPackageContractTest extends TestCase
         $this->assertSame('array', (string) $return);
     }
 
-    public function testSdkVersionIsOneSixForTheBlockContract(): void
+    public function testSdkVersionIsOneSevenForDataBoundBlocks(): void
     {
         $this->assertSame(
-            '1.6.0',
+            '1.7.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.6 adds the server-driven plugin-UI block contract: '
-            . 'BlockContract + BlockValidator and the screen:"blocks" '
-            . 'frontend-feature value (WC-225)'
+            'SDK 1.7 adds data-bound block types (dataTable, dataStat, dataList) '
+            . 'and the apiPath prop-rule kind to the server-driven plugin-UI block contract (WC-229)'
         );
     }
 
