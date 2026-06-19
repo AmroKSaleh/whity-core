@@ -1071,7 +1071,7 @@ final class CoreApiSchemas
                 'icon' => self::str(true),
                 'group' => self::str(),
                 'order' => self::int(),
-                'screen' => ['type' => 'string', 'enum' => ['crud', 'custom', 'action']],
+                'screen' => ['type' => 'string', 'enum' => ['crud', 'custom', 'action', 'blocks']],
                 'resource' => [
                     'type' => 'object',
                     'nullable' => true,
@@ -1109,6 +1109,15 @@ final class CoreApiSchemas
                     'canEdit' => self::bool(),
                     'canDelete' => self::bool(),
                 ], ['canCreate', 'canEdit', 'canDelete']),
+                // WC-226: present (and host-validated) ONLY for screen='blocks' —
+                // the platform-neutral block tree a renderer translates to native
+                // widgets. A coarse array of objects here; the SDK BlockValidator
+                // is the authoritative contract for each node's type/props, so the
+                // items stay open rather than re-declaring that whitelist.
+                'blocks' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'object', 'additionalProperties' => true],
+                ],
             ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'requiredPermission', 'capabilities']),
             'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
 

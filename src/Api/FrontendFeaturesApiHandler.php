@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Whity\Api;
 
+use Psr\Log\LoggerInterface;
 use Whity\Auth\RoleChecker;
 use Whity\Core\PluginLoader;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Sdk\Frontend\Blocks\BlockValidator;
 
 /**
  * Frontend Features API Handler (WC-169 / WC-175).
@@ -44,23 +46,48 @@ use Whity\Core\Tenant\TenantContext;
  * SERVER-SIDE from the resource's registered routes' RBAC — exactly what
  * RbacMiddleware will enforce on submit. A feature without a resource gets all
  * false. The {@see RoleChecker} is the only authority; no direct DB access.
+ *
+ * Server-driven `screen:'blocks'` features (WC-226)
+ * -------------------------------------------------
+ * A plugin may expose a `screen:'blocks'` feature carrying a platform-neutral
+ * `blocks` tree ({@see \Whity\Sdk\Frontend\Blocks\BlockContract}). The host is
+ * the authoritative gate: every such tree is run through
+ * {@see BlockValidator::validate()} before it can reach any renderer. The
+ * validation is FAIL-CLOSED and applied IN ADDITION to (never instead of) the
+ * per-caller permission filter:
+ *  - a VALID tree → the feature is served WITH its `blocks` intact (still
+ *    permission-filtered as every other feature);
+ *  - an INVALID tree, or a `screen:'blocks'` feature whose `blocks` is missing
+ *    or not an array → the feature is OMITTED and a structured, secret-free
+ *    reason is logged (feature id + validator errors) via the optional logger.
+ *    The raw validator errors are NEVER returned to the client; the endpoint
+ *    still returns 200 with the OTHER valid features — never a 500.
+ * Validation never throws (the SDK validator is pure and worker-safe), so a
+ * malformed plugin tree can neither crash the request nor leak across workers.
  */
 final class FrontendFeaturesApiHandler
 {
     private PluginLoader $pluginLoader;
     private RoleChecker $roleChecker;
     private Router $router;
+    private ?LoggerInterface $logger;
 
     /**
-     * @param PluginLoader $pluginLoader The live loader carrying the validated descriptors.
-     * @param RoleChecker  $roleChecker  Authoritative RBAC resolver for per-caller filtering.
-     * @param Router       $router       The live router whose routes back each feature's capabilities.
+     * @param PluginLoader        $pluginLoader The live loader carrying the validated descriptors.
+     * @param RoleChecker         $roleChecker  Authoritative RBAC resolver for per-caller filtering.
+     * @param Router              $router       The live router whose routes back each feature's capabilities.
+     * @param LoggerInterface|null $logger      Optional PSR-3 sink for fail-closed omit reasons (WC-226).
      */
-    public function __construct(PluginLoader $pluginLoader, RoleChecker $roleChecker, Router $router)
-    {
+    public function __construct(
+        PluginLoader $pluginLoader,
+        RoleChecker $roleChecker,
+        Router $router,
+        ?LoggerInterface $logger = null
+    ) {
         $this->pluginLoader = $pluginLoader;
         $this->roleChecker = $roleChecker;
         $this->router = $router;
+        $this->logger = $logger;
     }
 
     /**
@@ -101,7 +128,20 @@ final class FrontendFeaturesApiHandler
                     continue;
                 }
 
-                $data[] = $this->toPublicFeature($feature, $permission, $userId, $tenantId);
+                // WC-226: fail-closed block-tree validation for `screen:'blocks'`
+                // features. Applied IN ADDITION to the permission filter above —
+                // a permitted feature with an invalid (or missing/!array) tree is
+                // still omitted. Returns the validated tree to pass through, or
+                // null when the feature must be dropped (already logged).
+                $validatedBlocks = null;
+                if (($feature['screen'] ?? null) === 'blocks') {
+                    $validatedBlocks = $this->validateBlocksOrNull($feature);
+                    if ($validatedBlocks === null) {
+                        continue;
+                    }
+                }
+
+                $data[] = $this->toPublicFeature($feature, $permission, $userId, $tenantId, $validatedBlocks);
             }
 
             return Response::json(['data' => $data], 200);
@@ -121,10 +161,18 @@ final class FrontendFeaturesApiHandler
      * @param string $permission The descriptor's required permission.
      * @param int $userId The resolved caller user id (for capability resolution).
      * @param int $tenantId The resolved tenant id (for capability resolution).
+     * @param list<mixed>|null $validatedBlocks The already-validated block tree for a
+     *        `screen:'blocks'` feature (emitted verbatim under `blocks`), or null
+     *        for every other screen (no `blocks` key is added).
      * @return array<string, mixed> The public entry.
      */
-    private function toPublicFeature(array $feature, string $permission, int $userId, int $tenantId): array
-    {
+    private function toPublicFeature(
+        array $feature,
+        string $permission,
+        int $userId,
+        int $tenantId,
+        ?array $validatedBlocks = null
+    ): array {
         $resource = null;
         $basePath = null;
         if (isset($feature['resource']) && is_array($feature['resource'])) {
@@ -165,7 +213,7 @@ final class FrontendFeaturesApiHandler
             ];
         }
 
-        return [
+        $public = [
             'id' => (string) ($feature['id'] ?? ''),
             'plugin' => (string) ($feature['plugin'] ?? ''),
             'label' => (string) ($feature['label'] ?? ''),
@@ -178,6 +226,72 @@ final class FrontendFeaturesApiHandler
             'requiredPermission' => $permission,
             'capabilities' => $this->resolveCapabilities($basePath, $userId, $tenantId),
         ];
+
+        // WC-226: a `screen:'blocks'` feature carries its host-validated block
+        // tree verbatim. The key is added ONLY for blocks features — every other
+        // screen keeps the existing exhaustive contract unchanged.
+        if ($validatedBlocks !== null) {
+            $public['blocks'] = $validatedBlocks;
+        }
+
+        return $public;
+    }
+
+    /**
+     * Validate a `screen:'blocks'` feature's tree, fail-closed (WC-226).
+     *
+     * Returns the block tree to pass through when it is present, an array, AND
+     * structurally valid per {@see BlockValidator::validate()}. Otherwise returns
+     * null (the feature must be omitted) after logging a structured, secret-free
+     * reason naming the feature id and carrying the validator errors. The raw
+     * errors are for operators only and never surface to the client.
+     *
+     * @param array<string, mixed> $feature The normalized loader descriptor.
+     * @return list<mixed>|null The validated tree, or null when the feature must be dropped.
+     */
+    private function validateBlocksOrNull(array $feature): ?array
+    {
+        $featureId = isset($feature['id']) && is_string($feature['id']) ? $feature['id'] : '(no id)';
+        $pluginName = isset($feature['plugin']) && is_string($feature['plugin']) ? $feature['plugin'] : '(unknown)';
+
+        $blocks = $feature['blocks'] ?? null;
+        if (!is_array($blocks)) {
+            $this->logBlocksDropped($pluginName, $featureId, ["'blocks' must be an array, got " . get_debug_type($blocks)]);
+
+            return null;
+        }
+
+        $result = BlockValidator::validate($blocks);
+        if ($result['ok'] !== true) {
+            $this->logBlocksDropped($pluginName, $featureId, $result['errors']);
+
+            return null;
+        }
+
+        /** @var list<mixed> $blocks */
+        return $blocks;
+    }
+
+    /**
+     * Log the fail-closed omission of a `screen:'blocks'` feature (WC-226).
+     *
+     * Structured + secret-free: the validator errors are path-qualified contract
+     * diagnostics (block type/prop names), never request data or secrets, and are
+     * passed as PSR-3 context for operator triage — they are NEVER returned to the
+     * client. A no-op when no logger is wired.
+     *
+     * @param list<string> $errors The validator errors (path-qualified contract diagnostics).
+     */
+    private function logBlocksDropped(string $pluginName, string $featureId, array $errors): void
+    {
+        $this->logger?->warning(
+            'Frontend feature with screen:blocks dropped: invalid block tree',
+            [
+                'plugin' => $pluginName,
+                'feature_id' => $featureId,
+                'errors' => $errors,
+            ]
+        );
     }
 
     /**

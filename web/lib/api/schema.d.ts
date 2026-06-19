@@ -935,7 +935,7 @@ export interface components {
             group: string;
             order: number;
             /** @enum {string} */
-            screen: "crud" | "custom" | "action";
+            screen: "crud" | "custom" | "action" | "blocks";
             resource: {
                 basePath: string;
                 titleField: string | null;
@@ -959,6 +959,9 @@ export interface components {
                 canEdit: boolean;
                 canDelete: boolean;
             };
+            blocks?: {
+                [key: string]: unknown;
+            }[];
         };
         FrontendFeatureListResponse: {
             data: components["schemas"]["FrontendFeature"][];
