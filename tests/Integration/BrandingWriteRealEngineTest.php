@@ -42,7 +42,7 @@ final class BrandingWriteRealEngineTest extends TestCase
     private const SYSTEM_TENANT = 0;
     private const USER_FULL = 10;
     private const USER_READ_ONLY = 11;
-    private const USER_NONE = 12;
+    private const USER_NONE = 12; // @phpstan-ignore classConstant.unused
     private const USER_WRITE_NO_MANAGE = 13;
 
     private PDO $pdo;
@@ -134,6 +134,16 @@ final class BrandingWriteRealEngineTest extends TestCase
         $req = $this->plainReq('DELETE', '/api/v1/branding/assets/nope', self::USER_WRITE_NO_MANAGE);
         $res = $this->handler->clearTenant($req, ['key' => 'nope']);
         self::assertSame(404, $res->getStatusCode());
+    }
+
+    public function testSystemTenantClear422(): void
+    {
+        // System tenant (0) has no per-tenant override layer; clearTenant must
+        // return 422 rather than attempting a clear that has no target.
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $req = $this->plainReq('DELETE', '/api/v1/branding/assets/logo_wide', self::USER_FULL);
+        $res = $this->handler->clearTenant($req, ['key' => 'logo_wide']);
+        self::assertSame(422, $res->getStatusCode(), $res->getBody());
     }
 
     // ==================== Task 3.3: uploadGlobal / clearGlobal ====================
@@ -253,8 +263,9 @@ final class BrandingWriteRealEngineTest extends TestCase
 
     /**
      * Build a multipart/form-data request carrying the given file bytes in a
-     * 'file' field. The body-based multipart parser in BrandingApiHandler will
-     * find the bytes without needing a real temp file.
+     * 'file' field. The SDK's getUploadedFiles() will parse the body via
+     * MultipartParser and spill the part to a real temp file, so
+     * BrandingApiHandler can read it via file_get_contents(getStreamPath()).
      */
     private function multipartReq(string $method, string $path, int $userId, string $bytes): Request
     {
@@ -279,6 +290,7 @@ final class BrandingWriteRealEngineTest extends TestCase
         return $req;
     }
 
+    /** @param array<string, mixed> $body */
     private function jsonReq(string $method, string $path, int $userId, array $body): Request
     {
         $req = new Request($method, $path, ['Content-Type' => 'application/json'], (string) json_encode($body));
@@ -313,8 +325,12 @@ final class BrandingWriteRealEngineTest extends TestCase
                 (102, 'settings-writer', '', 1, datetime('now'))
         ");
 
-        $readPermId  = (int) $pdo->query("SELECT id FROM permissions WHERE name = 'settings:read'")->fetchColumn();
-        $writePermId = (int) $pdo->query("SELECT id FROM permissions WHERE name = 'settings:write'")->fetchColumn();
+        /** @var \PDOStatement $readStmt */
+        $readStmt   = $pdo->query("SELECT id FROM permissions WHERE name = 'settings:read'");
+        /** @var \PDOStatement $writeStmt */
+        $writeStmt  = $pdo->query("SELECT id FROM permissions WHERE name = 'settings:write'");
+        $readPermId  = (int) $readStmt->fetchColumn();
+        $writePermId = (int) $writeStmt->fetchColumn();
         $pdo->exec("
             INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES
                 (100, {$readPermId},  datetime('now')),

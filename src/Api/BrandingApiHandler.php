@@ -62,7 +62,11 @@ final class BrandingApiHandler
         return $this->hostResolver->resolveTenantIdByHost($host) ?? 0;
     }
 
-    /** GET /api/v1/branding/asset/{tenantId}/{name} — public, hardened. */
+    /**
+     * GET /api/v1/branding/asset/{tenantId}/{name} — public, hardened.
+     *
+     * @param array<string, mixed> $params
+     */
     public function serveAsset(Request $request, array $params = []): Response
     {
         if ($this->storage === null) {
@@ -94,30 +98,47 @@ final class BrandingApiHandler
         ]);
     }
 
-    /** POST /api/v1/branding/assets/{key} — tenant override upload (settings:write). */
+    /**
+     * POST /api/v1/branding/assets/{key} — tenant override upload (settings:write).
+     *
+     * @param array<string, mixed> $params
+     */
     public function uploadTenant(Request $request, array $params = []): Response
     {
         return $this->handleUpload($request, $params, CorePermissions::SETTINGS_WRITE, false);
     }
 
-    /** DELETE /api/v1/branding/assets/{key} — clear tenant override (settings:write). */
+    /**
+     * DELETE /api/v1/branding/assets/{key} — clear tenant override (settings:write).
+     *
+     * @param array<string, mixed> $params
+     */
     public function clearTenant(Request $request, array $params = []): Response
     {
         return $this->handleClear($request, $params, CorePermissions::SETTINGS_WRITE, false);
     }
 
-    /** POST /api/v1/branding/global/assets/{key} — global default upload (settings:manage). */
+    /**
+     * POST /api/v1/branding/global/assets/{key} — global default upload (settings:manage).
+     *
+     * @param array<string, mixed> $params
+     */
     public function uploadGlobal(Request $request, array $params = []): Response
     {
         return $this->handleUpload($request, $params, CorePermissions::SETTINGS_MANAGE, true);
     }
 
-    /** DELETE /api/v1/branding/global/assets/{key} — clear global default (settings:manage). */
+    /**
+     * DELETE /api/v1/branding/global/assets/{key} — clear global default (settings:manage).
+     *
+     * @param array<string, mixed> $params
+     */
     public function clearGlobal(Request $request, array $params = []): Response
     {
         return $this->handleClear($request, $params, CorePermissions::SETTINGS_MANAGE, true);
     }
 
+    /** @param array<string, mixed> $params */
     private function handleUpload(Request $request, array $params, string $perm, bool $global): Response
     {
         $ctx = $this->authorize($request, $perm);
@@ -128,8 +149,11 @@ final class BrandingApiHandler
         if (!BrandingAssetKind::isValid($assetKey)) {
             return Response::error('Unknown branding asset', 404);
         }
-        // Read file bytes from multipart body
+        // Read file bytes via getUploadedFiles() — the only supported upload path.
         $bytes = $this->readUploadedFile($request);
+        if ($bytes instanceof Response) {
+            return $bytes;
+        }
         if ($bytes === null) {
             return Response::error('A file (field "file") is required.', 400);
         }
@@ -157,6 +181,7 @@ final class BrandingApiHandler
         return Response::json(['data' => $view->toArray()], 200);
     }
 
+    /** @param array<string, mixed> $params */
     private function handleClear(Request $request, array $params, string $perm, bool $global): Response
     {
         $ctx = $this->authorize($request, $perm);
@@ -189,7 +214,11 @@ final class BrandingApiHandler
         return Response::json(['data' => $view->toArray()], 200);
     }
 
-    /** PUT /api/v1/tenants/{id}/branding-host — set/clear a custom host (settings:manage). */
+    /**
+     * PUT /api/v1/tenants/{id}/branding-host — set/clear a custom host (settings:manage).
+     *
+     * @param array<string, mixed> $params
+     */
     public function setBrandingHost(Request $request, array $params = []): Response
     {
         $ctx = $this->authorize($request, CorePermissions::SETTINGS_MANAGE);
@@ -238,50 +267,47 @@ final class BrandingApiHandler
         return ['tenantId' => $tenantId, 'userId' => $userId];
     }
 
-    /** Read the 'file' part from a multipart/form-data body. Returns null if not found. */
-    private function readUploadedFile(Request $request): ?string
+    /**
+     * Read the 'file' part from a multipart/form-data request via getUploadedFiles().
+     *
+     * Returns the raw file bytes on success, null when the 'file' field is absent,
+     * or a Response on error (unreadable temp file or parse failure).
+     *
+     * The SDK's getUploadedFiles() spills each part to a real temp file via
+     * MultipartParser — both in tests (body-parse path) and in production
+     * (FrankenPHP captures $_FILES into phpFilesSuperglobal). Raw-body / manual
+     * multipart parsing is intentionally absent: FrankenPHP drains php://input
+     * with enable_post_data_reading=On, so a body-parse fallback would silently
+     * receive an empty body and mask real upload failures.
+     *
+     * @return string|null|Response File bytes, null when field is absent, Response on error.
+     */
+    private function readUploadedFile(Request $request): string|null|Response
     {
-        // Try getUploadedFiles() — available in SDK v1.5+
         try {
             $files = $request->getUploadedFiles();
-            $file = $files['file'] ?? null;
-            if ($file !== null) {
-                $path = $file->getStreamPath();
-                if ($path !== '' && is_file($path)) {
-                    $bytes = file_get_contents($path);
-                    return $bytes !== false ? $bytes : null;
-                }
-                // Temp file may not exist in test context; try inline bytes via
-                // the fallback multipart parser instead.
-            }
-        } catch (\Throwable) {
-            // Fall through to body-based parser
+        } catch (\Throwable $e) {
+            error_log('[BrandingApiHandler] getUploadedFiles failed: ' . $e->getMessage());
+            return Response::error('The uploaded file could not be read.', 400);
         }
-        // Fallback: parse multipart body manually (used in tests where
-        // getUploadedFiles() spills to a temp file that may not exist)
-        return $this->parseMultipartFile($request);
-    }
 
-    private function parseMultipartFile(Request $request): ?string
-    {
-        $contentType = $request->getHeader('Content-Type') ?? '';
-        if (!preg_match('/boundary=(.+)$/i', $contentType, $m)) {
+        $file = $files['file'] ?? null;
+        if ($file === null) {
             return null;
         }
-        $boundary = trim($m[1]);
-        $body = $request->getBody();
-        $parts = explode('--' . $boundary, $body);
-        foreach ($parts as $part) {
-            if (str_contains($part, 'name="file"') || str_contains($part, "name='file'")) {
-                // Split headers from body on double CRLF
-                $pos = strpos($part, "\r\n\r\n");
-                if ($pos !== false) {
-                    $fileBytes = substr($part, $pos + 4);
-                    // Trim trailing CRLF
-                    return rtrim($fileBytes, "\r\n");
-                }
-            }
+
+        $path = $file->getStreamPath();
+        if (!is_file($path)) {
+            error_log('[BrandingApiHandler] uploaded file temp path is not a file: ' . $path);
+            return Response::error('The uploaded file could not be read.', 400);
         }
-        return null;
+
+        $bytes = file_get_contents($path);
+        if ($bytes === false) {
+            error_log('[BrandingApiHandler] could not read uploaded file temp path: ' . $path);
+            return Response::error('The uploaded file could not be read.', 400);
+        }
+
+        return $bytes;
     }
 }

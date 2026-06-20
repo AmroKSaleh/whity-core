@@ -79,6 +79,6 @@ final class BrandingServiceResolutionTest extends TestCase
         $settings->setTenant(1, 'support_email', 'secret@acme.com');
         $arr = (new BrandingService($settings))->effective(1)->toArray();
         self::assertSame(['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl'], array_keys($arr));
-        self::assertStringNotContainsString('secret@acme.com', json_encode($arr));
+        self::assertStringNotContainsString('secret@acme.com', (string) json_encode($arr));
     }
 }

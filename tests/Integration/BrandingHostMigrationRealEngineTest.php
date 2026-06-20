@@ -15,7 +15,9 @@ final class BrandingHostMigrationRealEngineTest extends TestCase
     {
         $pdo = SchemaFromMigrations::make(true);
         $pdo->exec("INSERT INTO tenants (id, name, branding_host) VALUES (1, 'acme', NULL)");
-        $host = $pdo->query("SELECT branding_host FROM tenants WHERE id = 1")->fetchColumn();
+        /** @var \PDOStatement $stmt */
+        $stmt = $pdo->query("SELECT branding_host FROM tenants WHERE id = 1");
+        $host = $stmt->fetchColumn();
         self::assertNull($host);
     }
 

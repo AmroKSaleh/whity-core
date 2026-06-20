@@ -56,6 +56,7 @@ final class BrandingApiRealEngineTest extends TestCase
         TenantContext::reset();
     }
 
+    /** @param array<string, string> $headers */
     private function req(string $path, array $headers = []): Request
     {
         return new Request('GET', $path, $headers, '');

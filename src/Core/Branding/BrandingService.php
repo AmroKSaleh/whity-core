@@ -6,6 +6,7 @@ namespace Whity\Core\Branding;
 
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
+use Whity\Core\Settings\SettingsValidationException;
 use Whity\Storage\StorageDriverInterface;
 use Whity\Storage\StorageKey;
 
@@ -67,6 +68,7 @@ final class BrandingService
      * @throws \LogicException When constructed without storage/validator.
      * @throws \InvalidArgumentException When the asset key is unknown.
      * @throws BrandingAssetRejectedException Via the validator.
+     * @throws SettingsValidationException When the settings layer rejects the key/scope.
      */
     public function uploadAsset(int $tenantId, string $assetKey, string $rawBytes): string
     {
@@ -107,6 +109,7 @@ final class BrandingService
      *
      * @throws \LogicException When constructed without storage.
      * @throws \InvalidArgumentException When the asset key is unknown.
+     * @throws SettingsValidationException When the settings layer rejects the key/scope.
      */
     public function clearAsset(int $tenantId, string $assetKey): void
     {
