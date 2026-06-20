@@ -2642,15 +2642,20 @@ class PluginLoader
             // rewritten for crud and action screens.
             $vp = $this->router->getVersionPrefix();
 
-            // $dropSource captures the violating path from any depth so the
-            // outer $drop() call can include it in the logged reason.
+            // $dropSource / $dropReason captures the violating path or reason
+            // from any depth so the outer $drop() call can include it in the
+            // logged reason. $dropReason is set by any violation (data-bound or
+            // interactive); $dropSource is the legacy data-bound form used as a
+            // fallback when $dropReason is not explicitly set.
             $dropSource = null;
+            $dropReason = null;
 
             /**
-             * Walk a node array depth-first, rewriting data-bound sources.
-             * Returns the (possibly-rewritten) node array, or null when an
-             * ownership violation is found (signals the caller to drop the
-             * feature). $dropSource is set to the offending path on violation.
+             * Walk a node array depth-first, rewriting data-bound sources and
+             * validating + versioning interactive endpoint nodes (form, actionButton).
+             * Returns the (possibly-rewritten) node array, or null when a
+             * violation is found (signals the caller to drop the feature).
+             * $dropReason is set to the human-readable reason on any violation.
              *
              * @param array<string, mixed> $node
              * @return array<string, mixed>|null
@@ -2658,9 +2663,11 @@ class PluginLoader
             $walkNode = null;
             $walkNode = static function (array $node) use (
                 $registeredGetRoutes,
+                $registeredActionRoutes,
                 $vp,
                 &$walkNode,
-                &$dropSource
+                &$dropSource,
+                &$dropReason
             ): ?array {
                 $type = $node['type'] ?? null;
                 if (is_string($type)) {
@@ -2683,6 +2690,54 @@ class PluginLoader
                                 : substr($source, 0, $pos) . $vp . substr($source, $pos);
                         }
                     }
+
+                    // (c3-c) Interactive endpoint ownership + versioning (WC-234).
+                    // A `form` node's `submit` spec and an `actionButton` node's
+                    // `action` spec declare a POST/PUT endpoint the block submits
+                    // to. The endpoint must be a route THIS plugin actually
+                    // registered and the route's requiredPermission must EQUAL the
+                    // block's declared requiredPermission (fail-closed). Mirrors
+                    // the screen:'action' pattern exactly (PluginLoader.php ~2515).
+                    $endpointSpec = null;
+                    if ($type === 'form' && isset($node['submit']) && is_array($node['submit'])) {
+                        $endpointSpec = [
+                            'ref'      => 'submit',
+                            'method'   => $node['submit']['method']   ?? '',
+                            'endpoint' => $node['submit']['endpoint'] ?? '',
+                            'perm'     => $node['requiredPermission'] ?? null,
+                        ];
+                    } elseif ($type === 'actionButton' && isset($node['action']) && is_array($node['action'])) {
+                        $endpointSpec = [
+                            'ref'      => 'action',
+                            'method'   => $node['action']['method']   ?? '',
+                            'endpoint' => $node['action']['endpoint'] ?? '',
+                            'perm'     => $node['requiredPermission'] ?? null,
+                        ];
+                    }
+
+                    if ($endpointSpec !== null) {
+                        $key = strtoupper((string) $endpointSpec['method']) . ' ' . (string) $endpointSpec['endpoint'];
+                        if (!array_key_exists($key, $registeredActionRoutes)) {
+                            $dropReason = "interactive block endpoint '{$key}' is not a POST/PUT route this plugin registered";
+                            return null;
+                        }
+                        if ($registeredActionRoutes[$key] !== $endpointSpec['perm']) {
+                            $dropReason = "interactive block endpoint '{$key}' route requiredPermission does not match the block's requiredPermission";
+                            return null;
+                        }
+                        // Version-rewrite the endpoint in place — same insertion
+                        // logic as $source above (keep the /api/ prefix so that
+                        // FrontendFeaturesApiHandler re-validation still passes).
+                        if ($vp !== '') {
+                            $e   = (string) $endpointSpec['endpoint'];
+                            $pos = strpos($e, '/', 1);
+                            $versioned = $pos === false
+                                ? $e . $vp
+                                : substr($e, 0, $pos) . $vp . substr($e, $pos);
+                            $ref = (string) $endpointSpec['ref'];
+                            $node[$ref]['endpoint'] = $versioned;
+                        }
+                    }
                 }
 
                 // Recurse into children (container nodes).
@@ -2695,7 +2750,7 @@ class PluginLoader
                         }
                         $rewritten = $walkNode($child);
                         if ($rewritten === null) {
-                            return null; // propagate ownership violation up.
+                            return null; // propagate violation up.
                         }
                         $rewrittenChildren[] = $rewritten;
                     }
@@ -2713,10 +2768,10 @@ class PluginLoader
                 }
                 $rewritten = $walkNode($topNode);
                 if ($rewritten === null) {
-                    // A data-bound node referenced a route this plugin does not
-                    // own — drop the entire feature (fail-closed, same as crud).
+                    // A block referenced a route this plugin does not own, or one
+                    // whose permission does not match — drop the feature fail-closed.
                     return $drop(
-                        "data-bound block source '{$dropSource}' is not a GET route this plugin registered",
+                        $dropReason ?? "data-bound block source '{$dropSource}' is not a GET route this plugin registered",
                         $id
                     );
                 }
