@@ -189,26 +189,31 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     await api.dispose();
   });
 
-  test('uploading a wide logo shows an <img> in the sidebar (not text)', async ({ page }) => {
+  test('uploading a wide logo shows an <img> in the sidebar (not text)', async ({ page, baseURL }) => {
     // Navigate to /admin/settings, find the BrandingSettings "Wide logo"
     // global-scope file input (data-testid), upload a PNG, wait for the
     // success toast, then navigate to the dashboard and assert the sidebar
     // renders an <img alt="…"> rather than an <h1> text node.
+    if (!baseURL) test.skip();
+
     await page.goto('/admin/settings');
     await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible();
 
     // Use the data-testid selector for the hidden file input — more reliable
     // than the accept-attribute selector when multiple inputs share a type.
     const fileInput = page.getByTestId('branding-file-input-logo_wide-global');
+
+    // Minimal 1×1 red PNG (valid magic bytes, parseable by the backend validator).
+    // We keep the exact bytes so we can assert round-trip byte integrity below.
+    const uploadedPngHex =
+      '89504e470d0a1a0a0000000d49484452000000010000000108020000009001' +
+      '2e00000000c49444154789c6260f8cfc00000000200016dd8a600000000049454e44ae426082';
+    const uploadedPngBytes = Buffer.from(uploadedPngHex, 'hex');
+
     await fileInput.setInputFiles({
       name: 'logo-wide.png',
       mimeType: 'image/png',
-      // Minimal 1×1 red PNG (valid magic bytes, parseable by the backend validator)
-      buffer: Buffer.from(
-        '89504e470d0a1a0a0000000d49484452000000010000000108020000009001' +
-          '2e00000000c49444154789c6260f8cfc00000000200016dd8a600000000049454e44ae426082',
-        'hex'
-      ),
+      buffer: uploadedPngBytes,
     });
 
     await expect(page.getByText('Wide logo uploaded successfully.')).toBeVisible({
@@ -219,19 +224,50 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     // The sidebar brand slot must now be an <img>, not a text heading.
     await expect(page.locator('aside img[alt]').first()).toBeVisible();
     await expect(page.locator('aside h1')).toHaveCount(0);
+
+    // --- Byte-integrity check (Fix 2): prove the proxy forwards the PNG
+    // byte-exact without corrupting non-UTF-8 bytes via text() decode. ---
+    const branding = await fetchEffectiveBranding(baseURL!);
+    const logoUrl = branding.logoWideUrl;
+    expect(logoUrl, 'branding API must return a logoWideUrl after upload').not.toBeNull();
+
+    // Resolve the asset URL against baseURL (it may be a relative path or
+    // already absolute — page.request.get accepts both).
+    const assetUrl = logoUrl!.startsWith('http') ? logoUrl! : `${baseURL}${logoUrl!}`;
+    const assetResp = await page.request.get(assetUrl);
+    expect(assetResp.status()).toBe(200);
+    expect(
+      assetResp.headers()['content-type'],
+      'asset content-type must start with image/'
+    ).toMatch(/^image\//);
+
+    const bodyBytes = await assetResp.body();
+    // Body must be non-empty and match the uploaded file length byte-for-byte.
+    expect(bodyBytes.length).toBeGreaterThan(0);
+    expect(bodyBytes.length).toBe(uploadedPngBytes.length);
+    // PNG magic bytes: 0x89 0x50 0x4E 0x47 (first 4 bytes of every valid PNG).
+    expect(bodyBytes[0]).toBe(0x89);
+    expect(bodyBytes[1]).toBe(0x50); // 'P'
+    expect(bodyBytes[2]).toBe(0x4e); // 'N'
+    expect(bodyBytes[3]).toBe(0x47); // 'G'
   });
 
-  test('uploading a favicon changes the <link rel="icon"> href', async ({ page }) => {
+  test('uploading a favicon changes the <link rel="icon"> href', async ({ page, baseURL }) => {
     // After uploading a .ico favicon via the branding settings, a fresh page
     // render should include a <link rel="icon"> pointing at the branding asset
     // route. This is testable via page.evaluate on document.head.
+    if (!baseURL) test.skip();
+
     await page.goto('/admin/settings');
+
+    // Minimal ICO header — keep the bytes so we can assert round-trip integrity.
+    const uploadedIcoBytes = Buffer.from('00000100', 'hex');
 
     const faviconInput = page.getByTestId('branding-file-input-favicon-global');
     await faviconInput.setInputFiles({
       name: 'favicon.ico',
       mimeType: 'image/x-icon',
-      buffer: Buffer.from('00000100', 'hex'), // Minimal ICO header
+      buffer: uploadedIcoBytes,
     });
     await expect(page.getByText('Favicon uploaded successfully.')).toBeVisible({
       timeout: 10_000,
@@ -243,6 +279,16 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
       return link?.href ?? null;
     });
     expect(iconHref).toMatch(/\/api\/v1\/branding\/asset\//);
+
+    // --- Byte-integrity check: favicon bytes must survive the proxy unchanged. ---
+    if (iconHref) {
+      const faviconResp = await page.request.get(iconHref);
+      expect(faviconResp.status()).toBe(200);
+      expect(faviconResp.headers()['content-type']).toMatch(/^image\//);
+      const faviconBody = await faviconResp.body();
+      expect(faviconBody.length).toBeGreaterThan(0);
+      expect(faviconBody.length).toBe(uploadedIcoBytes.length);
+    }
   });
 
   test('clearing a logo reverts the sidebar to text', async ({ page }) => {

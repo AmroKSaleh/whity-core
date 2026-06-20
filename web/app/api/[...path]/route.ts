@@ -93,14 +93,21 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
 
     const responseHeaders = new Headers(response.headers);
     responseHeaders.delete('transfer-encoding');
-    responseHeaders.delete('content-encoding'); // Remove since we've already decompressed via response.text()
-    responseHeaders.delete('content-length'); // Recalculate based on decompressed text length
+    // We requested identity encoding from the backend, so no decompression is
+    // needed. Drop content-encoding anyway to avoid any client confusion.
+    responseHeaders.delete('content-encoding');
+    // content-length is forwarded as-is; arrayBuffer() reads the exact bytes
+    // the backend sent, so the length remains accurate. If the backend omits it
+    // (chunked), it stays absent — which is fine.
 
     // A null-body status (e.g. 204 No Content from an OU/role delete) must be
     // forwarded WITHOUT a body, or `new Response(...)` throws and the proxy
     // surfaces a 500. Read/forward the body only for statuses that allow one.
     const isNullBody = NULL_BODY_STATUSES.has(response.status);
-    const responseBody = isNullBody ? null : await response.text();
+    // Use arrayBuffer() so binary responses (PNG/WEBP/ICO/SVG) are forwarded
+    // byte-exact. text() would UTF-8-decode then re-encode, corrupting any
+    // non-UTF-8 bytes. arrayBuffer() is also lossless for JSON/text bodies.
+    const responseBody = isNullBody ? null : await response.arrayBuffer();
 
     const result = new Response(responseBody, {
       status: response.status,
