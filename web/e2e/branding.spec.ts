@@ -117,11 +117,19 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SKIPPED — require Slice-5 upload UI (web/components/branding-settings.tsx
-// mounted at /admin/settings). Re-enable after Slice 5 is merged.
+// Logo/favicon round-trips — require Slice-5 upload UI
+// (web/components/branding-settings.tsx mounted at /admin/settings).
+//
+// Controls are driven via data-testid attributes added by BrandingSettings:
+//   branding-file-input-logo_wide-global   (hidden file input, wide logo global scope)
+//   branding-file-input-favicon-global     (hidden file input, favicon global scope)
+//   branding-clear-btn-logo_wide-global    (Clear button for wide logo global scope)
+//   branding-upload-btn-logo_wide-global   (Upload trigger button)
+// The global scope is used because admin@example.com is the system tenant
+// (tenantOverridable=false), which shows only global controls.
 // ---------------------------------------------------------------------------
 
-test.describe.skip('Branding — logo/favicon round-trips (requires Slice 5)', () => {
+test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => {
   test.afterAll(async ({ baseURL }) => {
     if (!baseURL) return;
     // Clean up any uploaded assets via the branding API.
@@ -133,14 +141,16 @@ test.describe.skip('Branding — logo/favicon round-trips (requires Slice 5)', (
   });
 
   test('uploading a wide logo shows an <img> in the sidebar (not text)', async ({ page }) => {
-    // Navigate to /admin/settings, find the "Wide logo" uploader in the
-    // BrandingSettings section, upload a PNG, wait for the success toast, then
-    // navigate to the dashboard and assert the sidebar renders an <img alt="…">
-    // rather than an <h1> text node.
+    // Navigate to /admin/settings, find the BrandingSettings "Wide logo"
+    // global-scope file input (data-testid), upload a PNG, wait for the
+    // success toast, then navigate to the dashboard and assert the sidebar
+    // renders an <img alt="…"> rather than an <h1> text node.
     await page.goto('/admin/settings');
     await expect(page.getByRole('heading', { name: 'Branding' })).toBeVisible();
 
-    const fileInput = page.locator('input[accept*="image/png"]').first();
+    // Use the data-testid selector for the hidden file input — more reliable
+    // than the accept-attribute selector when multiple inputs share a type.
+    const fileInput = page.getByTestId('branding-file-input-logo_wide-global');
     await fileInput.setInputFiles({
       name: 'logo-wide.png',
       mimeType: 'image/png',
@@ -152,7 +162,9 @@ test.describe.skip('Branding — logo/favicon round-trips (requires Slice 5)', (
       ),
     });
 
-    await expect(page.getByText('Wide logo uploaded')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Wide logo uploaded successfully.')).toBeVisible({
+      timeout: 10_000,
+    });
 
     await page.goto('/dashboard');
     // The sidebar brand slot must now be an <img>, not a text heading.
@@ -165,13 +177,16 @@ test.describe.skip('Branding — logo/favicon round-trips (requires Slice 5)', (
     // render should include a <link rel="icon"> pointing at the branding asset
     // route. This is testable via page.evaluate on document.head.
     await page.goto('/admin/settings');
-    const faviconInput = page.locator('input[accept*="image/x-icon"]').first();
+
+    const faviconInput = page.getByTestId('branding-file-input-favicon-global');
     await faviconInput.setInputFiles({
       name: 'favicon.ico',
       mimeType: 'image/x-icon',
       buffer: Buffer.from('00000100', 'hex'), // Minimal ICO header
     });
-    await expect(page.getByText('Favicon uploaded')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Favicon uploaded successfully.')).toBeVisible({
+      timeout: 10_000,
+    });
 
     await page.goto('/');
     const iconHref = await page.evaluate(() => {
@@ -182,11 +197,12 @@ test.describe.skip('Branding — logo/favicon round-trips (requires Slice 5)', (
   });
 
   test('clearing a logo reverts the sidebar to text', async ({ page }) => {
-    // With a logo uploaded from the previous test, click the Clear button in
-    // the branding settings, then assert the sidebar reverts to text.
+    // With a logo uploaded from the previous test, click the Clear button for
+    // the wide logo in the branding settings (global scope), then assert the
+    // sidebar reverts to text.
     await page.goto('/admin/settings');
-    await page.getByRole('button', { name: /Clear.*logo/i }).first().click();
-    await expect(page.getByText(/logo cleared/i)).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('branding-clear-btn-logo_wide-global').click();
+    await expect(page.getByText('Wide logo cleared.')).toBeVisible({ timeout: 10_000 });
 
     await page.goto('/dashboard');
     await expect(page.locator('aside h1')).toBeVisible();
