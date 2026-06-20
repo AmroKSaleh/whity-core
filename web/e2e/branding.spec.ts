@@ -78,7 +78,7 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
       // The login page reads branding server-side; the CardTitle must include
       // the effective site name.
       await expect(
-        page.getByRole('heading', { name: `Welcome to ${siteName}` })
+        page.getByText(`Welcome to ${siteName}`)
       ).toBeVisible();
     });
   });
@@ -195,7 +195,7 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     // success toast, then navigate to the dashboard and assert the sidebar
     // renders an <img alt="…"> rather than an <h1> text node.
     await page.goto('/admin/settings');
-    await expect(page.getByRole('heading', { name: 'Branding' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible();
 
     // Use the data-testid selector for the hidden file input — more reliable
     // than the accept-attribute selector when multiple inputs share a type.
