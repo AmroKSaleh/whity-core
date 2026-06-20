@@ -100,7 +100,7 @@ final class SvgSanitizer
         }
         foreach ($children as $child) {
             if ($child instanceof DOMElement) {
-                if (!isset(self::ALLOWED_ELEMENTS[strtolower($child->localName)])) {
+                if (!isset(self::ALLOWED_ELEMENTS[strtolower($child->localName ?? '')])) {
                     $el->removeChild($child);
                     continue;
                 }
