@@ -228,10 +228,16 @@ final class UiKitShowcasePluginTest extends TestCase
 
     /**
      * WC-232: the data-bound demos are now in the tree, so the coverage
-     * assertion is restored to ALL BlockContract::types() (not just display
-     * types).
+     * assertion covers SP1 display + SP2 data-bound block types.
+     *
+     * WC-233: interactive types (form, submitButton, actionButton, textInput,
+     * textArea, numberInput, select, checkbox, slider, dateInput, fileInput,
+     * colorInput) are temporarily excluded here — their demo endpoint
+     * (/api/uikit/demo/echo) and interactive showcase section are added in
+     * WC-236 once the host-side endpoint ownership + web renderers exist.
+     * This exclusion is removed in WC-236 when the interactive demos land.
      */
-    public function testTheBlocksTreeCoversEveryBlockType(): void
+    public function testTheBlocksTreeCoversEverySp1AndSp2BlockType(): void
     {
         $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
 
@@ -239,7 +245,7 @@ final class UiKitShowcasePluginTest extends TestCase
         $blocks = $feature['blocks'];
         $present = $this->collectTypes($blocks);
 
-        foreach (BlockContract::types() as $type) {
+        foreach (self::nonInteractiveBlockTypes() as $type) {
             $this->assertContains(
                 $type,
                 $present,
@@ -247,12 +253,12 @@ final class UiKitShowcasePluginTest extends TestCase
             );
         }
 
-        // The set present is a SUPERSET of ALL block types (18 display + 3 data-bound = 21).
-        $expected = BlockContract::types();
+        // The set present is a SUPERSET of all non-interactive block types.
+        $expected = self::nonInteractiveBlockTypes();
         $this->assertSame(
             $expected,
             array_values(array_filter($expected, static fn (string $t): bool => in_array($t, $present, true))),
-            'Every block type must be present at least once'
+            'Every non-interactive block type must be present at least once'
         );
     }
 
@@ -318,10 +324,11 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertArrayHasKey('blocks', $feature);
         $this->assertIsArray($feature['blocks']);
 
-        // The exposed tree now covers EVERY block type (SP1 + SP2 data-bound)
-        // and still validates.
+        // The exposed tree covers SP1 + SP2 non-interactive block types and validates.
+        // Interactive types (WC-233) are excluded here — their demos land in WC-236
+        // once the demo endpoint and host-side renderers exist.
         $present = $this->collectTypes($feature['blocks']);
-        foreach (BlockContract::types() as $type) {
+        foreach (self::nonInteractiveBlockTypes() as $type) {
             $this->assertContains($type, $present, "Loader-exposed tree must include '{$type}'");
         }
         $this->assertTrue(BlockValidator::validate($feature['blocks'])['ok']);
@@ -368,6 +375,38 @@ final class UiKitShowcasePluginTest extends TestCase
     }
 
     // ---- helpers ----
+
+    /**
+     * The 12 SP3 interactive block types whose showcase demos land in WC-236.
+     * Excluded from the coverage assertions until that slice is complete.
+     *
+     * @return list<string>
+     */
+    private static function interactiveBlockTypes(): array
+    {
+        return [
+            'form', 'submitButton', 'actionButton',
+            'textInput', 'textArea', 'numberInput', 'select',
+            'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
+        ];
+    }
+
+    /**
+     * All block types EXCEPT the 12 SP3 interactive types that are demoed in WC-236.
+     *
+     * @return list<string>
+     */
+    private static function nonInteractiveBlockTypes(): array
+    {
+        $interactive = self::interactiveBlockTypes();
+
+        return array_values(
+            array_filter(
+                BlockContract::types(),
+                static fn (string $t): bool => !in_array($t, $interactive, true)
+            )
+        );
+    }
 
     /**
      * Walk `$nodes` depth-first; for each node whose type is in `$dataBoundTypes`,

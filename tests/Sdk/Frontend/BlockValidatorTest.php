@@ -298,10 +298,13 @@ final class BlockValidatorTest extends TestCase
         $types = BlockContract::types();
         sort($types);
 
+        // SP1 display types + SP2 data-bound types + SP3 interactive types (WC-233)
         $expected = [
-            'alert', 'badge', 'button', 'card', 'code', 'dataList', 'dataStat',
-            'dataTable', 'divider', 'grid', 'heading', 'icon', 'keyValue', 'list',
-            'row', 'section', 'stat', 'tab', 'table', 'tabs', 'text',
+            'actionButton', 'alert', 'badge', 'button', 'card', 'checkbox', 'code',
+            'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
+            'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list',
+            'numberInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
+            'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
         ];
         sort($expected);
 
@@ -547,5 +550,245 @@ final class BlockValidatorTest extends TestCase
         $this->assertFalse(BlockContract::isContainer('dataTable'));
         $this->assertFalse(BlockContract::isContainer('dataStat'));
         $this->assertFalse(BlockContract::isContainer('dataList'));
+    }
+
+    // ==================== SP3 interactive block types (WC-233) ====================
+
+    /**
+     * A full interactive tree: a form with one of each input kind + a
+     * submitButton, plus a standalone actionButton. Must pass validation.
+     */
+    public function testFullInteractiveTreeIsValid(): void
+    {
+        $tree = [
+            [
+                'type'               => 'form',
+                'submit'             => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'requiredPermission' => 'uikit:view',
+                'children'           => [
+                    ['type' => 'textInput',   'name' => 'myText',   'label' => 'Text field'],
+                    ['type' => 'textArea',     'name' => 'myArea',   'label' => 'Text area', 'rows' => 4],
+                    ['type' => 'numberInput',  'name' => 'myNumber', 'label' => 'Number', 'min' => 0, 'max' => 100],
+                    ['type' => 'select',       'name' => 'mySelect', 'label' => 'Select',
+                        'options' => [
+                            ['value' => 'a', 'label' => 'Option A'],
+                            ['value' => 'b', 'label' => 'Option B'],
+                        ],
+                    ],
+                    ['type' => 'checkbox',    'name' => 'myCheck',  'label' => 'Enable'],
+                    ['type' => 'slider',      'name' => 'mySlider', 'label' => 'Volume', 'min' => 0, 'max' => 100],
+                    ['type' => 'dateInput',   'name' => 'myDate',   'label' => 'Date'],
+                    ['type' => 'fileInput',   'name' => 'myFile',   'label' => 'File', 'accept' => '.csv'],
+                    ['type' => 'colorInput',  'name' => 'myColor',  'label' => 'Color'],
+                    ['type' => 'submitButton', 'label' => 'Submit'],
+                ],
+            ],
+            [
+                'type'               => 'actionButton',
+                'label'              => 'Run Action',
+                'action'             => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'requiredPermission' => 'uikit:view',
+                'confirm'            => 'Are you sure?',
+            ],
+        ];
+
+        $result = BlockValidator::validate($tree);
+
+        $this->assertSame(['ok' => true, 'errors' => []], $result);
+    }
+
+    /**
+     * An input nested form→grid→textInput is valid (inForm is an ancestor flag,
+     * not just direct-parent).
+     */
+    public function testFormGridNestedInputIsValid(): void
+    {
+        $tree = [
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [
+                    [
+                        'type'     => 'grid',
+                        'columns'  => 2,
+                        'children' => [
+                            ['type' => 'textInput', 'name' => 'nested', 'label' => 'Nested input'],
+                        ],
+                    ],
+                    ['type' => 'submitButton', 'label' => 'Go'],
+                ],
+            ],
+        ];
+
+        $result = BlockValidator::validate($tree);
+
+        $this->assertSame(['ok' => true, 'errors' => []], $result);
+    }
+
+    public function testTextInputAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'textInput', 'name' => 'field', 'label' => 'Top-level input'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString("'textInput' is only valid inside a 'form'", $joined);
+    }
+
+    public function testSubmitButtonOutsideFormIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'submitButton', 'label' => 'Submit'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString("'submitButton' is only valid inside a 'form'", $joined);
+    }
+
+    public function testDuplicateInputNameWithinFormIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [
+                    ['type' => 'textInput', 'name' => 'dup', 'label' => 'First'],
+                    ['type' => 'textInput', 'name' => 'dup', 'label' => 'Second'],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString("duplicate input name 'dup' within the form", $joined);
+    }
+
+    public function testFormWithInvalidSubmitMethodIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'DELETE', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('submit', $joined);
+    }
+
+    public function testFormWithEndpointMissingApiPrefixIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/users'],
+                'children' => [],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('submit', $joined);
+    }
+
+    public function testSelectWithNoOptionsIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [
+                    ['type' => 'select', 'name' => 'mySelect', 'label' => 'Select'],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('options', $joined);
+    }
+
+    public function testSelectWithBadOptionEntryIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [
+                    [
+                        'type'    => 'select',
+                        'name'    => 'mySelect',
+                        'label'   => 'Select',
+                        'options' => [
+                            ['value' => 'a', 'label' => 'Valid'],
+                            ['value' => 123], // missing label + value is int
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('options', $joined);
+    }
+
+    public function testInputMissingNameIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [
+                    ['type' => 'textInput', 'label' => 'Missing name'],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('name', $joined);
+    }
+
+    public function testActionButtonMissingActionIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'actionButton', 'label' => 'Go'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('action', $joined);
+    }
+
+    public function testInteractiveTypesAreInTheWhitelist(): void
+    {
+        $types = BlockContract::types();
+        foreach ([
+            'form', 'textInput', 'textArea', 'numberInput', 'select',
+            'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
+            'submitButton', 'actionButton',
+        ] as $expectedType) {
+            $this->assertContains($expectedType, $types, "'{$expectedType}' must be in BlockContract::types()");
+        }
+    }
+
+    public function testFormIsAContainerInteractiveInputsAreLeaves(): void
+    {
+        $this->assertTrue(BlockContract::isContainer('form'));
+        foreach (['textInput', 'textArea', 'numberInput', 'select', 'checkbox',
+                  'slider', 'dateInput', 'fileInput', 'colorInput',
+                  'submitButton', 'actionButton'] as $leaf) {
+            $this->assertFalse(BlockContract::isContainer($leaf), "'{$leaf}' must be a leaf");
+        }
     }
 }
