@@ -220,6 +220,76 @@ describe('BlockRenderer — SP3 interactive blocks (WC-235)', () => {
     expect(screen.getByText(/name is required/i)).toBeInTheDocument();
   });
 
+  // ---- nested inputs (any depth) ----
+
+  it('nested input (form > grid > textInput): default is seeded', () => {
+    renderWrapped(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'form',
+            submit: { method: 'POST', endpoint: '/api/v1/x/save' },
+            children: [
+              {
+                type: 'grid',
+                columns: 2,
+                children: [
+                  {
+                    type: 'textInput',
+                    name: 'nested',
+                    label: 'Nested',
+                    default: 'seeded value',
+                  } as Block,
+                ],
+              } as Block,
+              { type: 'submitButton', label: 'Save' } as Block,
+            ],
+          } as Block,
+        ]}
+      />
+    );
+
+    // The default reaches the nested input even though it is not a direct
+    // child of the form (mirrors the SDK validator's any-depth nesting rule).
+    expect(screen.getByRole('textbox', { name: /nested/i })).toHaveValue(
+      'seeded value'
+    );
+  });
+
+  it('nested required input (form > grid > textInput): blocks submit + shows error', async () => {
+    renderWrapped(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'form',
+            submit: { method: 'POST', endpoint: '/api/v1/x/save' },
+            children: [
+              {
+                type: 'grid',
+                columns: 2,
+                children: [
+                  {
+                    type: 'textInput',
+                    name: 'deep',
+                    label: 'Deep',
+                    required: true,
+                  } as Block,
+                ],
+              } as Block,
+              { type: 'submitButton', label: 'Save' } as Block,
+            ],
+          } as Block,
+        ]}
+      />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /save/i }));
+
+    // A required input nested in a layout container is still validated.
+    expect(mockApiClient).not.toHaveBeenCalled();
+    expect(screen.getByText(/deep is required/i)).toBeInTheDocument();
+  });
+
   // ---- 422 issues report ----
 
   it('422 response: renders the issues report', async () => {

@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import type { FormBlock } from '@/lib/plugin-features';
+import type { Block, FormBlock } from '@/lib/plugin-features';
 import { submitPluginAction, type ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { IconAlertTriangle } from '@tabler/icons-react';
@@ -85,35 +85,73 @@ export function IssuesReport({ issues }: { issues: ActionIssue[] }) {
   );
 }
 
+// ---- collect inputs (any depth) ----
+
+/** The input-leaf block types that participate in a form's value map. */
+const FORM_INPUT_TYPES = [
+  'textInput',
+  'textArea',
+  'numberInput',
+  'select',
+  'checkbox',
+  'slider',
+  'dateInput',
+  'fileInput',
+  'colorInput',
+] as const;
+
+/**
+ * Flatten every input-leaf descendant of a form's children at ANY depth —
+ * inputs nested inside layout containers (section, card, grid, row, tabs) are
+ * included. This mirrors the SDK `BlockValidator`, which permits inputs
+ * anywhere inside a `form` (the `inForm` ancestor rule), so default-seeding and
+ * required-validation must reach them too. A nested `form` owns its own
+ * inputs, so we never descend into one.
+ */
+function collectFormInputs(blocks: Block[]): Block[] {
+  const inputs: Block[] = [];
+  for (const block of blocks) {
+    if ((FORM_INPUT_TYPES as readonly string[]).includes(block.type)) {
+      inputs.push(block);
+      continue;
+    }
+    if (block.type === 'form') {
+      continue;
+    }
+    const nested = (block as { children?: unknown }).children;
+    if (Array.isArray(nested)) {
+      inputs.push(...collectFormInputs(nested as Block[]));
+    }
+  }
+  return inputs;
+}
+
 // ---- seed defaults ----
 
 /**
- * Walk a `form` block's children once to collect each input's `default` value.
- * We only look one level deep here; inputs nested inside layout containers
- * (card, section, grid, row) are not seeded — they start empty. The plan
- * states "walk block.children once to collect defaults", so direct children
- * only is the correct interpretation.
+ * Collect each input's `default` value across ALL descendant inputs of a form
+ * (any depth — see {@link collectFormInputs}).
  */
 function collectDefaults(
   children: FormBlock['children']
 ): Record<string, string | boolean> {
   const defaults: Record<string, string | boolean> = {};
-  for (const child of children) {
-    if (
-      child.type === 'textInput' ||
-      child.type === 'textArea' ||
-      child.type === 'numberInput' ||
-      child.type === 'select' ||
-      child.type === 'slider' ||
-      child.type === 'dateInput' ||
-      child.type === 'colorInput'
-    ) {
-      if (typeof child.default === 'string') {
-        defaults[child.name] = child.default;
+  for (const input of collectFormInputs(children)) {
+    if (input.type === 'checkbox') {
+      if (typeof input.default === 'boolean') {
+        defaults[input.name] = input.default;
       }
-    } else if (child.type === 'checkbox') {
-      if (typeof child.default === 'boolean') {
-        defaults[child.name] = child.default;
+    } else if (
+      input.type === 'textInput' ||
+      input.type === 'textArea' ||
+      input.type === 'numberInput' ||
+      input.type === 'select' ||
+      input.type === 'slider' ||
+      input.type === 'dateInput' ||
+      input.type === 'colorInput'
+    ) {
+      if (typeof input.default === 'string') {
+        defaults[input.name] = input.default;
       }
     }
   }
@@ -162,9 +200,9 @@ export function FormProvider({
   );
 
   const submit = React.useCallback(() => {
-    // Collect required-field errors from direct children only.
+    // Collect required-field errors across all descendant inputs (any depth).
     const newErrors: Record<string, string> = {};
-    for (const child of block.children) {
+    for (const child of collectFormInputs(block.children)) {
       if (
         (child.type === 'textInput' ||
           child.type === 'textArea' ||
