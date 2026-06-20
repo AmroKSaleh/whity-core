@@ -3,6 +3,11 @@
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type { PluginFeature } from '@/lib/plugin-features';
+import {
+  type ActionIssue,
+  extractIssues,
+  extractError,
+} from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@/components/ui/button';
@@ -20,35 +25,11 @@ import { IconAlertTriangle } from '@tabler/icons-react';
  *
  * Unlike the CRUD screen this needs no OpenAPI fetch — the descriptor's
  * `action.fields` fully describe the form.
+ *
+ * `ActionIssue`, `extractIssues`, and `extractError` are now imported from
+ * `@/lib/plugin-action-submit` (WC-235 DRY refactor); this component's
+ * behavior including file-download is unchanged.
  */
-
-/** One issue from a server validation report (best-effort shape). */
-interface ActionIssue {
-  severity?: string;
-  message?: string;
-  item?: number | null;
-  column?: string | null;
-}
-
-function extractIssues(body: unknown): ActionIssue[] | null {
-  if (typeof body === 'object' && body !== null && 'issues' in body) {
-    const issues = (body as { issues: unknown }).issues;
-    if (Array.isArray(issues)) {
-      return issues as ActionIssue[];
-    }
-  }
-  return null;
-}
-
-function extractError(body: unknown): string | null {
-  if (typeof body === 'object' && body !== null && 'error' in body) {
-    const error = (body as { error: unknown }).error;
-    if (typeof error === 'string') {
-      return error;
-    }
-  }
-  return null;
-}
 
 function filenameFromDisposition(disposition: string | null, fallback: string): string {
   if (disposition === null) {
