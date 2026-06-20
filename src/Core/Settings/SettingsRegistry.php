@@ -91,6 +91,45 @@ final class SettingsRegistry
     }
 
     /**
+     * The text-kind setting keys only (excludes asset-kind keys).
+     *
+     * Use this when building the settings API surface so that branding asset
+     * keys — managed via the branding endpoints — are never exposed on the
+     * text settings endpoints.
+     *
+     * @return list<string>
+     */
+    public static function textKeys(): array
+    {
+        return array_values(array_filter(
+            self::keys(),
+            static fn (string $k): bool => !in_array($k, self::ASSET_KEYS, true)
+        ));
+    }
+
+    /**
+     * Like {@see describe()} but restricted to text-kind keys only.
+     *
+     * Intended for the settings API handler so asset-kind keys are not published
+     * on the GET /api/v1/settings surface.
+     *
+     * @return list<array{key: string, type: string, default: string}>
+     */
+    public static function describeText(): array
+    {
+        $descriptors = [];
+        foreach (self::textKeys() as $key) {
+            $descriptors[] = [
+                'key' => $key,
+                'type' => self::typeFor($key),
+                'default' => self::defaultFor($key),
+            ];
+        }
+
+        return $descriptors;
+    }
+
+    /**
      * Whether the given key is a known setting key.
      */
     public static function isKnown(string $key): bool

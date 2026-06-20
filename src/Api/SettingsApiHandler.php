@@ -64,11 +64,21 @@ final class SettingsApiHandler
         ['tenantId' => $tenantId] = $context;
 
         try {
+            $textKeys = array_flip(SettingsRegistry::textKeys());
+            $allEffective = $this->settings->effective($tenantId);
+            $allOverridden = $this->settings->overriddenKeys($tenantId);
+
             return Response::json([
                 'data' => [
-                    'effective' => $this->settings->effective($tenantId),
-                    'registry' => SettingsRegistry::describe(),
-                    'overridden' => $this->settings->overriddenKeys($tenantId),
+                    // Asset-kind keys are excluded from the settings API surface:
+                    // they are managed via the branding endpoints. Only text-kind
+                    // keys are visible here (WC-233).
+                    'effective' => array_intersect_key($allEffective, $textKeys),
+                    'registry' => SettingsRegistry::describeText(),
+                    'overridden' => array_values(array_filter(
+                        $allOverridden,
+                        static fn (string $k): bool => isset($textKeys[$k])
+                    )),
                     // WC-224: whether THIS caller's tenant has a per-tenant override
                     // layer. The system tenant (0) has globals only — it can never
                     // persist a per-tenant override — so the client must hide the
@@ -100,7 +110,10 @@ final class SettingsApiHandler
         return $this->applyWrites(
             $request,
             fn (string $key, ?string $value): null => $this->writeTenant($tenantId, $key, $value),
-            fn (int $tenantIdInner): array => $this->settings->effective($tenantIdInner),
+            fn (int $tenantIdInner): array => array_intersect_key(
+                $this->settings->effective($tenantIdInner),
+                array_flip(SettingsRegistry::textKeys())
+            ),
             $tenantId
         );
     }
@@ -116,10 +129,14 @@ final class SettingsApiHandler
         }
 
         try {
+            $textKeys = array_flip(SettingsRegistry::textKeys());
+            $allGlobal = $this->settings->getGlobal();
+
             return Response::json([
                 'data' => [
-                    'global' => $this->settings->getGlobal(),
-                    'registry' => SettingsRegistry::describe(),
+                    // Asset-kind keys excluded from the settings API surface (WC-233).
+                    'global' => array_intersect_key($allGlobal, $textKeys),
+                    'registry' => SettingsRegistry::describeText(),
                 ],
             ], 200);
         } catch (\Throwable $e) {
@@ -144,7 +161,10 @@ final class SettingsApiHandler
         return $this->applyWrites(
             $request,
             fn (string $key, ?string $value): null => $this->writeGlobal($key, $value),
-            fn (): array => $this->settings->getGlobal()
+            fn (): array => array_intersect_key(
+                $this->settings->getGlobal(),
+                array_flip(SettingsRegistry::textKeys())
+            )
         );
     }
 

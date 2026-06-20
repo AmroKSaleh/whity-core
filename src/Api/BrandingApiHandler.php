@@ -172,7 +172,7 @@ final class BrandingApiHandler
         } catch (SettingsValidationException $e) {
             return Response::error('Validation failed', 422, [$e->settingKey() => $e->reason()]);
         } catch (BrandingAssetRejectedException $e) {
-            return Response::error($e->getMessage(), 422);
+            return Response::error('Branding asset rejected', 422, ['asset' => $e->reason()]);
         } catch (\Throwable $e) {
             error_log('[BrandingApiHandler] upload failed: ' . $e->getMessage());
             return Response::error('Failed to store asset', 500);
