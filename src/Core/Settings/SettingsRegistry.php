@@ -36,6 +36,23 @@ final class SettingsRegistry
     public const LOCALE = 'locale';
     public const SUPPORT_EMAIL = 'support_email';
 
+    public const BRANDING_LOGO_WIDE = 'branding_logo_wide';
+    public const BRANDING_LOGO_SQUARE = 'branding_logo_square';
+    public const BRANDING_FAVICON = 'branding_favicon';
+
+    /**
+     * The asset-kind keys (Tenant Branding). Their stored value is a storage
+     * key (or '' when unset). They are NEVER writable via the text PATCH path —
+     * uploads go through BrandingService and the binary endpoints.
+     *
+     * @var list<string>
+     */
+    private const ASSET_KEYS = [
+        self::BRANDING_LOGO_WIDE,
+        self::BRANDING_LOGO_SQUARE,
+        self::BRANDING_FAVICON,
+    ];
+
     /**
      * Maximum length of the site name, in characters.
      */
@@ -51,6 +68,9 @@ final class SettingsRegistry
         self::TIMEZONE => 'UTC',
         self::LOCALE => 'en',
         self::SUPPORT_EMAIL => '',
+        self::BRANDING_LOGO_WIDE => '',
+        self::BRANDING_LOGO_SQUARE => '',
+        self::BRANDING_FAVICON => '',
     ];
 
     /**
@@ -68,6 +88,45 @@ final class SettingsRegistry
     public static function keys(): array
     {
         return array_keys(self::DEFAULTS);
+    }
+
+    /**
+     * The text-kind setting keys only (excludes asset-kind keys).
+     *
+     * Use this when building the settings API surface so that branding asset
+     * keys — managed via the branding endpoints — are never exposed on the
+     * text settings endpoints.
+     *
+     * @return list<string>
+     */
+    public static function textKeys(): array
+    {
+        return array_values(array_filter(
+            self::keys(),
+            static fn (string $k): bool => !in_array($k, self::ASSET_KEYS, true)
+        ));
+    }
+
+    /**
+     * Like {@see describe()} but restricted to text-kind keys only.
+     *
+     * Intended for the settings API handler so asset-kind keys are not published
+     * on the GET /api/v1/settings surface.
+     *
+     * @return list<array{key: string, type: string, default: string}>
+     */
+    public static function describeText(): array
+    {
+        $descriptors = [];
+        foreach (self::textKeys() as $key) {
+            $descriptors[] = [
+                'key' => $key,
+                'type' => self::typeFor($key),
+                'default' => self::defaultFor($key),
+            ];
+        }
+
+        return $descriptors;
     }
 
     /**
@@ -103,19 +162,30 @@ final class SettingsRegistry
     }
 
     /**
-     * The simple value-type of a known key (always 'string' for v1; the four
-     * fields are all stored as TEXT). Exposed so the API can publish the
-     * registry shape to the client.
+     * The kind of a known key: 'asset' for the branding logo/favicon keys
+     * (binary, set only via BrandingService), 'text' for everything else.
      *
      * @throws \InvalidArgumentException When the key is unknown.
      */
-    public static function typeFor(string $key): string
+    public static function kindFor(string $key): string
     {
         if (!self::isKnown($key)) {
             throw new \InvalidArgumentException("Unknown setting key: {$key}");
         }
 
-        return 'string';
+        return in_array($key, self::ASSET_KEYS, true) ? 'asset' : 'text';
+    }
+
+    /**
+     * The simple value-type of a known key: 'asset' for branding binary keys,
+     * 'string' for text keys. Exposed so the API can publish the registry
+     * shape to the client.
+     *
+     * @throws \InvalidArgumentException When the key is unknown.
+     */
+    public static function typeFor(string $key): string
+    {
+        return self::kindFor($key) === 'asset' ? 'asset' : 'string';
     }
 
     /**
@@ -150,6 +220,10 @@ final class SettingsRegistry
      */
     public static function validate(string $key, string $value): ?string
     {
+        if (self::isKnown($key) && self::kindFor($key) === 'asset') {
+            return "{$key} is an uploaded asset and cannot be set as text; use the branding upload endpoint.";
+        }
+
         return match ($key) {
             self::SITE_NAME => self::validateSiteName($value),
             self::TIMEZONE => self::validateTimezone($value),

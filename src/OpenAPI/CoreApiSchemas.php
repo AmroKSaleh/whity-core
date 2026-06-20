@@ -89,7 +89,8 @@ final class CoreApiSchemas
             self::meRoutes(),
             self::platformOpsRoutes(),
             self::familyRelationsRoutes(),
-            self::settingsRoutes()
+            self::settingsRoutes(),
+            self::brandingRoutes()
         );
     }
 
@@ -834,6 +835,102 @@ final class CoreApiSchemas
     }
 
     /**
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function brandingRoutes(): array
+    {
+        $multipartBody = [
+            'requestBody' => [
+                'required' => true,
+                'content' => [
+                    'multipart/form-data' => [
+                        'schema' => self::object([
+                            'file' => ['type' => 'string', 'format' => 'binary'],
+                        ], ['file']),
+                    ],
+                ],
+            ],
+        ];
+
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/branding',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Get effective branding for the resolved tenant (public)',
+                    'tags' => ['branding'],
+                    'responses' => [
+                        200 => self::jsonResponse('The effective branding', 'BrandingResponse'),
+                        500 => self::errorResponse('Internal error'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/branding/asset/{tenantId}/{name}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Stream a branding asset (public)',
+                    'tags' => ['branding'],
+                    'responses' => [
+                        200 => ['description' => 'The asset bytes', 'content' => ['image/*' => ['schema' => ['type' => 'string', 'format' => 'binary']]]],
+                        404 => self::errorResponse('Asset not found'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('POST', '/api/branding/assets/{key}', 'settings:write', array_merge([
+                'summary' => 'Upload a tenant branding asset override',
+                'tags' => ['branding'],
+                'responses' => [
+                    200 => self::jsonResponse('The updated effective branding', 'BrandingResponse'),
+                    400 => self::errorResponse('No file provided'),
+                    404 => self::errorResponse('Unknown branding key'),
+                    422 => self::errorResponse('Validation failed or asset rejected'),
+                ] + self::authErrors(),
+            ], $multipartBody)),
+            self::permissionRoute('DELETE', '/api/branding/assets/{key}', 'settings:write', [
+                'summary' => 'Clear a tenant branding asset override',
+                'tags' => ['branding'],
+                'responses' => [
+                    200 => self::jsonResponse('The updated effective branding', 'BrandingResponse'),
+                    404 => self::errorResponse('Unknown branding key'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/branding/global/assets/{key}', 'settings:manage', array_merge([
+                'summary' => 'Upload a global branding asset default',
+                'tags' => ['branding'],
+                'responses' => [
+                    200 => self::jsonResponse('The updated effective branding', 'BrandingResponse'),
+                    400 => self::errorResponse('No file provided'),
+                    404 => self::errorResponse('Unknown branding key'),
+                    422 => self::errorResponse('Validation failed or asset rejected'),
+                ] + self::authErrors(),
+            ], $multipartBody)),
+            self::permissionRoute('DELETE', '/api/branding/global/assets/{key}', 'settings:manage', [
+                'summary' => 'Clear a global branding asset default',
+                'tags' => ['branding'],
+                'responses' => [
+                    200 => self::jsonResponse('The updated effective branding', 'BrandingResponse'),
+                    404 => self::errorResponse('Unknown branding key'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/tenants/{id}/branding-host', 'settings:manage', [
+                'summary' => 'Set or clear a tenant\'s custom branding hostname',
+                'tags' => ['branding'],
+                'request' => 'BrandingHostRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The set hostname', 'BrandingHostResponse'),
+                    409 => self::errorResponse('Hostname already claimed by another tenant'),
+                    422 => self::errorResponse('Invalid hostname format'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
      * The component schemas the admin resources publish.
      *
      * @return array<string, array<string, mixed>>
@@ -1370,6 +1467,25 @@ final class CoreApiSchemas
                     'additionalProperties' => ['type' => 'string', 'nullable' => true],
                 ],
             ], ['settings']),
+
+            // ---- Tenant Branding schemas (WC-233) ----
+
+            // The effective branding for a tenant: site name + up to three asset
+            // URLs (null when unset). The API exposes ONLY these fields — no other
+            // settings are included — so callers can safely cache without leaking
+            // tenant data.
+            'Branding' => self::object([
+                'siteName' => self::str(),
+                'logoWideUrl' => ['type' => 'string', 'nullable' => true],
+                'logoSquareUrl' => ['type' => 'string', 'nullable' => true],
+                'faviconUrl' => ['type' => 'string', 'nullable' => true],
+            ], ['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl']),
+            // GET /api/branding — the standard data envelope around Branding.
+            'BrandingResponse' => self::dataEnvelope(SchemaBuilder::ref('Branding')),
+            // PUT /api/tenants/{id}/branding-host request body.
+            'BrandingHostRequest' => self::object(['host' => self::str(true)], []),
+            // PUT /api/tenants/{id}/branding-host response body.
+            'BrandingHostResponse' => self::dataEnvelope(self::object(['branding_host' => self::str(true)], ['branding_host'])),
         ];
     }
 

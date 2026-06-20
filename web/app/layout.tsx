@@ -8,6 +8,8 @@ import { NavigationProvider } from "@/lib/navigation-context";
 import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
 import { ToastContainer } from "@/components/ui/toast-container";
 import "@/lib/plugin-screens";
+import { getBranding } from "@/lib/branding";
+import { BrandingProvider } from "@/lib/branding-context";
 
 // Design-token font families (see src/design/tokens/base.json):
 // Inter drives --font-sans / --font-heading, Geist Mono drives --font-mono.
@@ -18,16 +20,21 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "Whity Core",
-  description: "Authentication and plugin management platform",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const b = await getBranding();
+  return {
+    title: b.siteName,
+    description: "Authentication and plugin management platform",
+    ...(b.faviconUrl ? { icons: { icon: b.faviconUrl } } : {}),
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const branding = await getBranding();
   return (
     <html
       lang="en"
@@ -42,16 +49,18 @@ export default function RootLayout({
         own markup below <body>.
       */}
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
-        <AuthProvider>
-          <ToastProvider>
-            <NavigationProvider>
-              <PluginFeaturesProvider>
-                {children}
-                <ToastContainer />
-              </PluginFeaturesProvider>
-            </NavigationProvider>
-          </ToastProvider>
-        </AuthProvider>
+        <BrandingProvider initial={branding}>
+          <AuthProvider>
+            <ToastProvider>
+              <NavigationProvider>
+                <PluginFeaturesProvider>
+                  {children}
+                  <ToastContainer />
+                </PluginFeaturesProvider>
+              </NavigationProvider>
+            </ToastProvider>
+          </AuthProvider>
+        </BrandingProvider>
       </body>
     </html>
   );
