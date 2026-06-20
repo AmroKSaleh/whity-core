@@ -59,24 +59,28 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
     await expect(page).toHaveTitle(CUSTOM_SITE_NAME);
   });
 
-  test('login page "Welcome to …" uses the effective site_name', async ({ page, baseURL }) => {
+  test.describe('login page — unauthenticated', () => {
+    // This group navigates to /login without any persisted auth session so
+    // the page is not redirected away by the auth middleware.
     test.use({ storageState: { cookies: [], origins: [] } });
 
-    if (!baseURL) test.skip();
+    test('login page "Welcome to …" uses the effective site_name', async ({ page, baseURL }) => {
+      if (!baseURL) test.skip();
 
-    // Ensure the custom name is set (from the previous test or set it fresh).
-    const api = await createAuthedApi(baseURL!, ADMIN);
-    await api.patch('/api/v1/settings', {
-      data: { settings: { site_name: CUSTOM_SITE_NAME } },
+      // Ensure the custom name is set (from the previous test or set it fresh).
+      const api = await createAuthedApi(baseURL!, ADMIN);
+      await api.patch('/api/v1/settings', {
+        data: { settings: { site_name: CUSTOM_SITE_NAME } },
+      });
+      await api.dispose();
+
+      await page.goto('/login');
+      // The login page reads branding server-side; the CardTitle must include the
+      // custom site name.
+      await expect(
+        page.getByRole('heading', { name: `Welcome to ${CUSTOM_SITE_NAME}` })
+      ).toBeVisible();
     });
-    await api.dispose();
-
-    await page.goto('/login');
-    // The login page reads branding server-side; the CardTitle must include the
-    // custom site name.
-    await expect(
-      page.getByRole('heading', { name: `Welcome to ${CUSTOM_SITE_NAME}` })
-    ).toBeVisible();
   });
 
   test('sidebar shows site_name text when no logo is uploaded', async ({ page, baseURL }) => {
