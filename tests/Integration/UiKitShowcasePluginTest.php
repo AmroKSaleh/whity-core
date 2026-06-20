@@ -53,8 +53,8 @@ final class UiKitShowcasePluginTest extends TestCase
     {
         $plugin = new UiKitShowcasePlugin();
 
-        // Data-bound block types landed in SDK 1.7, so the plugin requires that range.
-        $this->assertSame('^1.7', $plugin->getSdkConstraint());
+        // Interactive block types landed in SDK 1.8, so the plugin requires that range (WC-236).
+        $this->assertSame('^1.8', $plugin->getSdkConstraint());
         $this->assertSame('', $plugin->getCoreConstraint());
         $this->assertSame([], $plugin->getPluginDependencies());
 
@@ -62,9 +62,9 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertSame([], $plugin->getHooks());
         $this->assertSame([GrantUiKitViewToAdmin::class], $plugin->getMigrations());
 
-        // Two demo routes now declared (SP2, WC-232).
+        // Three demo routes now declared (SP2 GET rows+metric, SP3 POST echo, WC-236).
         $routes = $plugin->getRoutes();
-        $this->assertNotSame([], $routes, 'The showcase now declares demo routes (SP2)');
+        $this->assertNotSame([], $routes, 'The showcase now declares demo routes (SP2+SP3)');
     }
 
     public function testDeclaresTheSingleColonNotationPermission(): void
@@ -100,7 +100,7 @@ final class UiKitShowcasePluginTest extends TestCase
 
     // ---- WC-232: demo routes ----
 
-    public function testGetRoutesIncludesTheTwoDemoEndpoints(): void
+    public function testGetRoutesIncludesAllDemoEndpoints(): void
     {
         $plugin = new UiKitShowcasePlugin();
         $routes = $plugin->getRoutes();
@@ -128,6 +128,13 @@ final class UiKitShowcasePluginTest extends TestCase
             'getRoutes() must include GET /api/uikit/demo/metric'
         );
 
+        // WC-236: the interactive echo endpoint.
+        $this->assertArrayHasKey(
+            'POST /api/uikit/demo/echo',
+            $byPath,
+            'getRoutes() must include POST /api/uikit/demo/echo (WC-236)'
+        );
+
         foreach (['GET /api/uikit/demo/rows', 'GET /api/uikit/demo/metric'] as $key) {
             $this->assertSame(
                 'uikit:view',
@@ -139,6 +146,138 @@ final class UiKitShowcasePluginTest extends TestCase
                 "Route {$key} must carry requiredRole=null"
             );
         }
+
+        $this->assertSame(
+            'uikit:view',
+            $byPath['POST /api/uikit/demo/echo']['requiredPermission'] ?? null,
+            'POST /api/uikit/demo/echo must carry requiredPermission=\'uikit:view\''
+        );
+        $this->assertNull(
+            $byPath['POST /api/uikit/demo/echo']['requiredRole'] ?? null,
+            'POST /api/uikit/demo/echo must carry requiredRole=null'
+        );
+    }
+
+    // ---- WC-236: echo handler ----
+
+    public function testEchoHandlerReturns200WithDataForValidBody(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $handler = null;
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'POST' && ($r['path'] ?? '') === '/api/uikit/demo/echo') {
+                $handler = is_callable($r['handler']) ? $r['handler'] : null;
+            }
+        }
+        $this->assertNotNull($handler, 'Must find a handler for POST /api/uikit/demo/echo');
+
+        $body = json_encode(['name' => 'Alice', 'role' => 'admin', 'active' => true]) ?: '';
+        $request = new Request('POST', '/api/uikit/demo/echo', [], $body);
+        /** @var Response $response */
+        $response = $handler($request, []);
+
+        $this->assertInstanceOf(Response::class, $response);
+        $this->assertSame(200, $response->getStatusCode());
+
+        $parsed = json_decode($response->getBody(), true);
+        $this->assertIsArray($parsed);
+        $this->assertArrayHasKey('data', $parsed, 'Valid body must return {data}');
+        $this->assertIsArray($parsed['data']);
+        $this->assertArrayHasKey('received', $parsed['data'], 'data must contain "received"');
+    }
+
+    public function testEchoHandlerReturns422ForMissingNameField(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $handler = null;
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'POST' && ($r['path'] ?? '') === '/api/uikit/demo/echo') {
+                $handler = is_callable($r['handler']) ? $r['handler'] : null;
+            }
+        }
+        $this->assertNotNull($handler, 'Must find a handler for POST /api/uikit/demo/echo');
+
+        // Missing 'name' field — must return 422 with issues.
+        $body = json_encode(['role' => 'editor']) ?: '';
+        $request = new Request('POST', '/api/uikit/demo/echo', [], $body);
+        /** @var Response $response */
+        $response = $handler($request, []);
+
+        $this->assertInstanceOf(Response::class, $response);
+        $this->assertSame(422, $response->getStatusCode());
+
+        $parsed = json_decode($response->getBody(), true);
+        $this->assertIsArray($parsed);
+        $this->assertArrayHasKey('issues', $parsed, 'Missing name must return {issues}');
+        $this->assertIsArray($parsed['issues']);
+        $this->assertNotEmpty($parsed['issues'], 'issues must not be empty');
+
+        $issue = $parsed['issues'][0];
+        $this->assertIsArray($issue);
+        $this->assertSame('error', $issue['severity'] ?? null);
+        $this->assertSame('name', $issue['column'] ?? null);
+    }
+
+    public function testEchoHandlerReturns200ForEmptyBody(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $handler = null;
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'POST' && ($r['path'] ?? '') === '/api/uikit/demo/echo') {
+                $handler = is_callable($r['handler']) ? $r['handler'] : null;
+            }
+        }
+        $this->assertNotNull($handler, 'Must find a handler for POST /api/uikit/demo/echo');
+
+        // actionButton sends an empty {} payload — must return 200 (no form data to validate).
+        $body = json_encode([]) ?: '';
+        $request = new Request('POST', '/api/uikit/demo/echo', [], $body);
+        /** @var Response $response */
+        $response = $handler($request, []);
+
+        $this->assertInstanceOf(Response::class, $response);
+        $this->assertSame(200, $response->getStatusCode());
+
+        $parsed = json_decode($response->getBody(), true);
+        $this->assertIsArray($parsed);
+        $this->assertArrayHasKey('data', $parsed, 'Empty body must return {data}');
+    }
+
+    public function testEchoHandlerReturns422ForEmptyNameField(): void
+    {
+        $plugin = new UiKitShowcasePlugin();
+
+        $handler = null;
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'POST' && ($r['path'] ?? '') === '/api/uikit/demo/echo') {
+                $handler = is_callable($r['handler']) ? $r['handler'] : null;
+            }
+        }
+        $this->assertNotNull($handler, 'Must find a handler for POST /api/uikit/demo/echo');
+
+        // Empty 'name' — must return 422.
+        $body = json_encode(['name' => '', 'role' => 'editor']) ?: '';
+        $request = new Request('POST', '/api/uikit/demo/echo', [], $body);
+        /** @var Response $response */
+        $response = $handler($request, []);
+
+        $this->assertInstanceOf(Response::class, $response);
+        $this->assertSame(422, $response->getStatusCode());
+
+        $parsed = json_decode($response->getBody(), true);
+        $this->assertIsArray($parsed);
+        $this->assertArrayHasKey('issues', $parsed, 'Empty name must return {issues}');
     }
 
     public function testDemoRowsHandlerReturnsDataArrayWithNameAndRole(): void
@@ -227,17 +366,11 @@ final class UiKitShowcasePluginTest extends TestCase
     }
 
     /**
-     * WC-232: the data-bound demos are now in the tree, so the coverage
-     * assertion covers SP1 display + SP2 data-bound block types.
-     *
-     * WC-233: interactive types (form, submitButton, actionButton, textInput,
-     * textArea, numberInput, select, checkbox, slider, dateInput, fileInput,
-     * colorInput) are temporarily excluded here — their demo endpoint
-     * (/api/uikit/demo/echo) and interactive showcase section are added in
-     * WC-236 once the host-side endpoint ownership + web renderers exist.
-     * This exclusion is removed in WC-236 when the interactive demos land.
+     * WC-236: interactive demos are now in the tree, so the coverage assertion
+     * is restored to ALL BlockContract::types() (SP1 + SP2 + SP3 interactive).
+     * Total: 33 types (21 SP1+SP2 + 12 SP3 interactive).
      */
-    public function testTheBlocksTreeCoversEverySp1AndSp2BlockType(): void
+    public function testTheBlocksTreeCoversEveryBlockType(): void
     {
         $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
 
@@ -245,7 +378,7 @@ final class UiKitShowcasePluginTest extends TestCase
         $blocks = $feature['blocks'];
         $present = $this->collectTypes($blocks);
 
-        foreach (self::nonInteractiveBlockTypes() as $type) {
+        foreach (BlockContract::types() as $type) {
             $this->assertContains(
                 $type,
                 $present,
@@ -253,12 +386,12 @@ final class UiKitShowcasePluginTest extends TestCase
             );
         }
 
-        // The set present is a SUPERSET of all non-interactive block types.
-        $expected = self::nonInteractiveBlockTypes();
+        // The set present is a SUPERSET of ALL block types (SP1 + SP2 + SP3 = 33).
+        $expected = BlockContract::types();
         $this->assertSame(
             $expected,
             array_values(array_filter($expected, static fn (string $t): bool => in_array($t, $present, true))),
-            'Every non-interactive block type must be present at least once'
+            'Every block type must be present at least once'
         );
     }
 
@@ -324,11 +457,9 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertArrayHasKey('blocks', $feature);
         $this->assertIsArray($feature['blocks']);
 
-        // The exposed tree covers SP1 + SP2 non-interactive block types and validates.
-        // Interactive types (WC-233) are excluded here — their demos land in WC-236
-        // once the demo endpoint and host-side renderers exist.
+        // WC-236: interactive demos are now in the tree, so assert ALL block types.
         $present = $this->collectTypes($feature['blocks']);
-        foreach (self::nonInteractiveBlockTypes() as $type) {
+        foreach (BlockContract::types() as $type) {
             $this->assertContains($type, $present, "Loader-exposed tree must include '{$type}'");
         }
         $this->assertTrue(BlockValidator::validate($feature['blocks'])['ok']);
@@ -374,38 +505,229 @@ final class UiKitShowcasePluginTest extends TestCase
         $this->assertContains('/api/v1/uikit/demo/metric', $servedSources);
     }
 
+    // ---- WC-236: interactive demos in the blocks tree ----
+
+    public function testTheBlocksTreeContainsAFormWithSubmitButtonAndEndpoint(): void
+    {
+        $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
+
+        /** @var array<mixed> $blocks */
+        $blocks = $feature['blocks'];
+
+        $plugin = new UiKitShowcasePlugin();
+        $postRoutes = [];
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'POST' && is_string($r['path'] ?? null)) {
+                $postRoutes[(string) $r['path']] = $r;
+            }
+        }
+
+        // Walk tree and assert a form block exists with a plugin-owned POST endpoint.
+        $foundForm = false;
+        $this->walkInteractive($blocks, $postRoutes, $foundForm);
+        $this->assertTrue($foundForm, 'The tree must contain a form block with a plugin-owned submit endpoint');
+    }
+
+    public function testTheBlocksTreeContainsAnActionButtonWithPluginOwnedEndpoint(): void
+    {
+        $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
+
+        /** @var array<mixed> $blocks */
+        $blocks = $feature['blocks'];
+
+        $plugin = new UiKitShowcasePlugin();
+        $postRoutes = [];
+        foreach ($plugin->getRoutes() as $route) {
+            /** @var array<string, mixed> $r */
+            $r = $route;
+            if (($r['method'] ?? '') === 'POST' && is_string($r['path'] ?? null)) {
+                $postRoutes[(string) $r['path']] = $r;
+            }
+        }
+
+        $foundAction = false;
+        $this->walkInteractiveAction($blocks, $postRoutes, $foundAction);
+        $this->assertTrue($foundAction, 'The tree must contain an actionButton block with a plugin-owned action endpoint');
+    }
+
+    public function testFormAndActionButtonDeclareMatchingRequiredPermission(): void
+    {
+        $feature = (new UiKitShowcasePlugin())->getFrontendFeatures()[0];
+
+        /** @var array<mixed> $blocks */
+        $blocks = $feature['blocks'];
+
+        // Walk tree and collect form and actionButton blocks.
+        $formPerms = [];
+        $actionPerms = [];
+        $this->collectInteractivePerms($blocks, $formPerms, $actionPerms);
+
+        $this->assertNotEmpty($formPerms, 'Must find at least one form block');
+        $this->assertNotEmpty($actionPerms, 'Must find at least one actionButton block');
+
+        // Each must declare requiredPermission = 'uikit:view' (matching the echo route).
+        foreach ($formPerms as $perm) {
+            $this->assertSame('uikit:view', $perm, "form.requiredPermission must be 'uikit:view'");
+        }
+        foreach ($actionPerms as $perm) {
+            $this->assertSame('uikit:view', $perm, "actionButton.requiredPermission must be 'uikit:view'");
+        }
+    }
+
+    public function testLoaderVersionsInteractiveEndpointsInTheServedDescriptor(): void
+    {
+        // WC-236: verify the echo endpoint is versioned by the loader (/api/v1/uikit/demo/echo).
+        $pluginDir = dirname(__DIR__, 2) . '/plugins';
+
+        $loader = new PluginLoader(
+            $pluginDir,
+            new Router('/v1'),
+            new PermissionRegistry(),
+            new HookManager()
+        );
+        $loader->load();
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('ui-kit-reference', $byId);
+        $feature = $byId['ui-kit-reference'];
+        $this->assertIsArray($feature['blocks']);
+
+        // The loader must rewrite form.submit.endpoint and actionButton.action.endpoint.
+        $versionedEndpoints = $this->collectInteractiveEndpoints($feature['blocks']);
+
+        $this->assertNotEmpty($versionedEndpoints, 'The served descriptor must contain interactive endpoint blocks');
+
+        foreach ($versionedEndpoints as $endpoint) {
+            $this->assertStringStartsWith(
+                '/api/v1/',
+                $endpoint,
+                "Served interactive endpoint '{$endpoint}' must be the versioned form"
+            );
+        }
+
+        $this->assertContains('/api/v1/uikit/demo/echo', $versionedEndpoints);
+    }
+
     // ---- helpers ----
 
     /**
-     * The 12 SP3 interactive block types whose showcase demos land in WC-236.
-     * Excluded from the coverage assertions until that slice is complete.
+     * Walk the tree depth-first and find a form block with a plugin-owned submit endpoint.
      *
-     * @return list<string>
+     * @param array<mixed>                     $nodes
+     * @param array<string, array<string, mixed>> $postRoutes
      */
-    private static function interactiveBlockTypes(): array
+    private function walkInteractive(array $nodes, array $postRoutes, bool &$foundForm): void
     {
-        return [
-            'form', 'submitButton', 'actionButton',
-            'textInput', 'textArea', 'numberInput', 'select',
-            'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-        ];
+        foreach ($nodes as $node) {
+            if (!is_array($node) || !isset($node['type']) || !is_string($node['type'])) {
+                continue;
+            }
+            if ($node['type'] === 'form' && isset($node['submit']) && is_array($node['submit'])) {
+                $endpoint = $node['submit']['endpoint'] ?? '';
+                if (is_string($endpoint) && array_key_exists($endpoint, $postRoutes)) {
+                    $foundForm = true;
+                }
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                $this->walkInteractive($node['children'], $postRoutes, $foundForm);
+            }
+        }
     }
 
     /**
-     * All block types EXCEPT the 12 SP3 interactive types that are demoed in WC-236.
+     * Walk the tree depth-first and find an actionButton block with a plugin-owned action endpoint.
      *
+     * @param array<mixed>                     $nodes
+     * @param array<string, array<string, mixed>> $postRoutes
+     */
+    private function walkInteractiveAction(array $nodes, array $postRoutes, bool &$foundAction): void
+    {
+        foreach ($nodes as $node) {
+            if (!is_array($node) || !isset($node['type']) || !is_string($node['type'])) {
+                continue;
+            }
+            if ($node['type'] === 'actionButton' && isset($node['action']) && is_array($node['action'])) {
+                $endpoint = $node['action']['endpoint'] ?? '';
+                if (is_string($endpoint) && array_key_exists($endpoint, $postRoutes)) {
+                    $foundAction = true;
+                }
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                $this->walkInteractiveAction($node['children'], $postRoutes, $foundAction);
+            }
+        }
+    }
+
+    /**
+     * Walk the tree and collect requiredPermission values for form and actionButton blocks.
+     *
+     * @param array<mixed>    $nodes
+     * @param list<string|null> $formPerms
+     * @param list<string|null> $actionPerms
+     */
+    private function collectInteractivePerms(array $nodes, array &$formPerms, array &$actionPerms): void
+    {
+        foreach ($nodes as $node) {
+            if (!is_array($node) || !isset($node['type']) || !is_string($node['type'])) {
+                continue;
+            }
+            if ($node['type'] === 'form') {
+                $formPerms[] = isset($node['requiredPermission']) && is_string($node['requiredPermission'])
+                    ? $node['requiredPermission']
+                    : null;
+            }
+            if ($node['type'] === 'actionButton') {
+                $actionPerms[] = isset($node['requiredPermission']) && is_string($node['requiredPermission'])
+                    ? $node['requiredPermission']
+                    : null;
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                $this->collectInteractivePerms($node['children'], $formPerms, $actionPerms);
+            }
+        }
+    }
+
+    /**
+     * Walk the tree and collect endpoint strings from form.submit and actionButton.action.
+     *
+     * @param array<mixed> $nodes
      * @return list<string>
      */
-    private static function nonInteractiveBlockTypes(): array
+    private function collectInteractiveEndpoints(array $nodes): array
     {
-        $interactive = self::interactiveBlockTypes();
+        $endpoints = [];
+        foreach ($nodes as $node) {
+            if (!is_array($node)) {
+                continue;
+            }
+            if (
+                isset($node['type'], $node['submit'])
+                && $node['type'] === 'form'
+                && is_array($node['submit'])
+                && isset($node['submit']['endpoint'])
+                && is_string($node['submit']['endpoint'])
+            ) {
+                $endpoints[] = $node['submit']['endpoint'];
+            }
+            if (
+                isset($node['type'], $node['action'])
+                && $node['type'] === 'actionButton'
+                && is_array($node['action'])
+                && isset($node['action']['endpoint'])
+                && is_string($node['action']['endpoint'])
+            ) {
+                $endpoints[] = $node['action']['endpoint'];
+            }
+            if (isset($node['children']) && is_array($node['children'])) {
+                foreach ($this->collectInteractiveEndpoints($node['children']) as $ep) {
+                    $endpoints[] = $ep;
+                }
+            }
+        }
 
-        return array_values(
-            array_filter(
-                BlockContract::types(),
-                static fn (string $t): bool => !in_array($t, $interactive, true)
-            )
-        );
+        return array_values(array_unique($endpoints));
     }
 
     /**

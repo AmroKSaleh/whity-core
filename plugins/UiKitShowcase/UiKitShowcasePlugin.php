@@ -12,11 +12,11 @@ use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 
 /**
- * UiKitShowcasePlugin (WC-228 / WC-232)
+ * UiKitShowcasePlugin (WC-228 / WC-232 / WC-236)
  *
- * The capstone example plugin for the SP1 + SP2 server-driven plugin-UI block
- * system (SDK 1.7, WC-225–WC-232). It is a SANCTIONED example plugin — named
- * for the SDK feature it documents — that proves AND documents the entire
+ * The capstone example plugin for the SP1 + SP2 + SP3 server-driven plugin-UI
+ * block system (SDK 1.8, WC-225–WC-236). It is a SANCTIONED example plugin —
+ * named for the SDK feature it documents — that proves AND documents the entire
  * pipeline:
  *
  *   SDK BlockContract whitelist (WC-225)
@@ -24,16 +24,23 @@ use Whity\Sdk\PluginRequirementsInterface;
  *       -> web BlockRenderer at /admin/x/[featureId] (WC-227)
  *         -> THIS plugin's single `ui-kit-reference` feature.
  *
- * As of WC-232, the plugin also exposes two read-only demo endpoints returning
+ * As of WC-232, the plugin exposes two read-only GET demo endpoints returning
  * static fixtures (no DB), both gated on `uikit:view`, that the SP2 data-bound
  * block demos (`dataTable`, `dataStat`, `dataList`) bind to. The host (WC-230)
  * verifies each block's `source` is one of the plugin's own registered GET
  * routes, then rewrites it to the versioned URL before serving the descriptor.
  *
+ * As of WC-236, the plugin also exposes a write demo endpoint:
+ * `POST /api/uikit/demo/echo` (gated on `uikit:view`, DB-free). It reads the
+ * JSON body; if the required `name` field is missing or empty it returns a 422
+ * with `{issues:[{severity:'error',message,column:'name'}]}`; otherwise it
+ * echoes the body back as `{data:{received:…}}`. The Interactive tab demos
+ * an SP3 `form` (all 9 input leaf types + a `submitButton`) and a standalone
+ * `actionButton`, both targeting this endpoint and gated on `uikit:view`.
+ *
  * The plugin contributes ONE `screen: 'blocks'` feature whose declarative tree
- * renders a LIVE instance of every one of the 21 block types (18 SP1 + 3 SP2)
- * beside the exact PHP snippet that declares it, so a plugin author can read
- * the page and copy-paste any block.
+ * renders a LIVE instance of every one of the 33 block types (21 SP1+SP2 + 12
+ * SP3 interactive) beside the exact PHP snippet that declares it.
  *
  * Props are SEMANTIC throughout (never CSS/hex/pixels), exactly as the
  * contract requires.
@@ -61,14 +68,14 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Data-bound block types landed in SDK 1.7 ({@see \Whity\Sdk\Sdk::VERSION});
-     * the showcase requires that range as of WC-232.
+     * Interactive block types landed in SDK 1.8 ({@see \Whity\Sdk\Sdk::VERSION});
+     * the showcase requires that range as of WC-236.
      *
      * @inheritDoc
      */
     public function getSdkConstraint(): string
     {
-        return '^1.7';
+        return '^1.8';
     }
 
     /**
@@ -93,11 +100,12 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Two read-only demo endpoints returning static fixtures (WC-232). Both are
-     * gated on `uikit:view` (the single existing permission — no new permission
-     * or migration). The data-bound block demos in the reference screen bind to
-     * these paths via their `source` prop; the host (WC-230) verifies ownership
-     * and rewrites to the versioned URL before serving.
+     * Three demo endpoints (WC-232 + WC-236). All are gated on `uikit:view`
+     * (the single existing permission — no new permission or migration).
+     *
+     * GET /api/uikit/demo/rows   — static fixture collection (SP2 data-bound demos)
+     * GET /api/uikit/demo/metric — static fixture metric (SP2 data-bound stat demo)
+     * POST /api/uikit/demo/echo  — interactive echo for SP3 form + actionButton demos
      *
      * @inheritDoc
      */
@@ -131,6 +139,25 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'tags' => ['uikit-showcase'],
                     'responses' => [
                         200 => 'UiKitDemoMetricResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            // WC-236: write endpoint for SP3 interactive block demos.
+            [
+                'method' => 'POST',
+                'path' => '/api/uikit/demo/echo',
+                'handler' => [$this, 'demoEcho'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo echo endpoint for interactive block examples',
+                    'tags' => ['uikit-showcase'],
+                    'request' => 'UiKitDemoEchoRequest',
+                    'responses' => [
+                        200 => 'UiKitDemoEchoResponse',
+                        422 => 'UiKitDemoEchoIssues',
                         403 => ['description' => 'Missing uikit:view permission'],
                     ],
                     'components' => self::demoComponents(),
@@ -183,6 +210,57 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
+     * Handle POST /api/uikit/demo/echo (requires uikit:view).
+     *
+     * Reads the JSON body. If the required `name` field is missing or empty,
+     * returns a 422 with `{issues:[{severity:'error',message,column:'name'}]}`.
+     * Otherwise echoes the body back as `{data:{received:…}}` (200).
+     *
+     * DB-free, FrankenPHP-safe (no static state).
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response 200 with echo data or 422 with validation issues.
+     */
+    public function demoEcho(Request $request, array $params = []): Response
+    {
+        $raw = $request->getBody();
+        /** @var mixed $body */
+        $body = json_decode($raw, true);
+
+        if (!is_array($body)) {
+            $body = [];
+        }
+
+        // Validate `name` only when the body is non-empty (i.e. at least one
+        // field was submitted — the form always includes fields; the actionButton
+        // sends `{}` and should succeed without providing form data).
+        if (count($body) > 0) {
+            $name = $body['name'] ?? null;
+            if (!is_string($name) || trim($name) === '') {
+                return Response::json(
+                    [
+                        'issues' => [
+                            [
+                                'severity' => 'error',
+                                'message' => 'Name is required',
+                                'column' => 'name',
+                            ],
+                        ],
+                    ],
+                    422
+                );
+            }
+        }
+
+        return Response::json([
+            'data' => [
+                'received' => $body,
+            ],
+        ]);
+    }
+
+    /**
      * One permission, in the mandated `resource:action` colon notation, that
      * the `ui-kit-reference` feature and demo endpoints are gated on.
      *
@@ -215,7 +293,7 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Declare the single `screen: 'blocks'` reference feature (SDK 1.7).
+     * Declare the single `screen: 'blocks'` reference feature (SDK 1.8).
      *
      * UI metadata only — the descriptor grants nothing; the host validates the
      * `blocks` tree against {@see \Whity\Sdk\Frontend\Blocks\BlockValidator} and
@@ -245,8 +323,8 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
      * Top level: an intro section, then a `tabs` set splitting the catalogue
      * into Containers / Content / Data / Interactive — each tab pairing a live
      * block with the PHP that declares it (via {@see self::demo()}). Every one
-     * of the 21 block types (18 SP1 + 3 SP2 data-bound) appears at least once,
-     * and the result passes
+     * of the 33 block types (21 SP1+SP2 + 12 SP3 interactive) appears at least
+     * once, and the result passes
      * {@see \Whity\Sdk\Frontend\Blocks\BlockValidator::validate()}.
      *
      * @return list<array<string, mixed>>
@@ -553,14 +631,14 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'type' => 'keyValue',
                     'items' => [
                         ['label' => 'Plugin', 'value' => 'UiKitShowcase'],
-                        ['label' => 'SDK', 'value' => '^1.7'],
+                        ['label' => 'SDK', 'value' => '^1.8'],
                         ['label' => 'Screen', 'value' => 'blocks'],
                     ],
                 ],
                 <<<'PHP'
                     ['type' => 'keyValue', 'items' => [
                         ['label' => 'Plugin', 'value' => 'UiKitShowcase'],
-                        ['label' => 'SDK', 'value' => '^1.7'],
+                        ['label' => 'SDK', 'value' => '^1.8'],
                     ]]
                     PHP,
             ),
@@ -703,7 +781,12 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * The "Interactive" tab: button (every variant) — the only interactive leaf.
+     * The "Interactive" tab: button (every variant) plus the SP3 interactive
+     * blocks — a form with all 9 input leaf types and a submitButton, and a
+     * standalone actionButton. Both the form and actionButton target the plugin's
+     * own `POST /api/uikit/demo/echo` endpoint and declare
+     * `requiredPermission: 'uikit:view'` so the host (WC-234) accepts them and
+     * the web (WC-235) gates the trigger accordingly.
      *
      * @return list<array<string, mixed>>
      */
@@ -739,6 +822,173 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                      'href' => '/admin', 'variant' => 'primary']
                     PHP,
             ),
+            // ---- SP3 interactive demos (WC-236) ----
+            [
+                'type' => 'section',
+                'title' => 'Interactive blocks',
+                'children' => [
+                    [
+                        'type' => 'text',
+                        'value' => 'Interactive blocks POST/PUT to a plugin-owned, RBAC-gated endpoint. '
+                            . 'Declare `requiredPermission` on both the block and the route — the host '
+                            . 'verifies ownership + permission match and rewrites the endpoint to the '
+                            . 'versioned URL. The web renderer gates the trigger via PermissionButton.',
+                        'tone' => 'muted',
+                    ],
+                    $this->dataBoundDemo(
+                        'form',
+                        'A form container with input leaves and a submitButton. '
+                            . 'Submits the collected JSON to the plugin\'s own POST/PUT endpoint.',
+                        [
+                            'type' => 'form',
+                            'submit' => [
+                                'method' => 'POST',
+                                'endpoint' => '/api/uikit/demo/echo',
+                            ],
+                            'requiredPermission' => 'uikit:view',
+                            'children' => [
+                                [
+                                    'type' => 'textInput',
+                                    'name' => 'name',
+                                    'label' => 'Name',
+                                    'placeholder' => 'Enter your name',
+                                    'required' => true,
+                                ],
+                                [
+                                    'type' => 'textArea',
+                                    'name' => 'bio',
+                                    'label' => 'Bio',
+                                    'rows' => 3,
+                                ],
+                                [
+                                    'type' => 'numberInput',
+                                    'name' => 'age',
+                                    'label' => 'Age',
+                                    'min' => 0,
+                                    'max' => 120,
+                                ],
+                                [
+                                    'type' => 'select',
+                                    'name' => 'role',
+                                    'label' => 'Role',
+                                    'options' => [
+                                        ['value' => 'viewer', 'label' => 'Viewer'],
+                                        ['value' => 'editor', 'label' => 'Editor'],
+                                        ['value' => 'admin', 'label' => 'Administrator'],
+                                    ],
+                                ],
+                                [
+                                    'type' => 'checkbox',
+                                    'name' => 'active',
+                                    'label' => 'Active',
+                                    'default' => true,
+                                ],
+                                [
+                                    'type' => 'slider',
+                                    'name' => 'level',
+                                    'label' => 'Experience level',
+                                    'min' => 1,
+                                    'max' => 10,
+                                ],
+                                [
+                                    'type' => 'dateInput',
+                                    'name' => 'since',
+                                    'label' => 'Member since',
+                                ],
+                                [
+                                    'type' => 'fileInput',
+                                    'name' => 'avatar',
+                                    'label' => 'Avatar',
+                                    'accept' => 'image/*',
+                                ],
+                                [
+                                    'type' => 'colorInput',
+                                    'name' => 'accent',
+                                    'label' => 'Accent colour',
+                                    'default' => '#6366f1',
+                                ],
+                                [
+                                    'type' => 'submitButton',
+                                    'label' => 'Submit',
+                                    'requiredPermission' => 'uikit:view',
+                                    'variant' => 'primary',
+                                ],
+                            ],
+                        ],
+                        <<<'PHP'
+                            ['type' => 'form',
+                             'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                             'requiredPermission' => 'uikit:view',
+                             'children' => [
+                                 ['type' => 'textInput',   'name' => 'name',  'label' => 'Name', 'required' => true],
+                                 ['type' => 'textArea',    'name' => 'bio',   'label' => 'Bio',  'rows' => 3],
+                                 ['type' => 'numberInput', 'name' => 'age',   'label' => 'Age',  'min' => 0, 'max' => 120],
+                                 ['type' => 'select',      'name' => 'role',  'label' => 'Role',
+                                  'options' => [['value' => 'viewer', 'label' => 'Viewer'],
+                                                ['value' => 'editor', 'label' => 'Editor']]],
+                                 ['type' => 'checkbox',    'name' => 'active', 'label' => 'Active', 'default' => true],
+                                 ['type' => 'slider',      'name' => 'level', 'label' => 'Experience level', 'min' => 1, 'max' => 10],
+                                 ['type' => 'dateInput',   'name' => 'since', 'label' => 'Member since'],
+                                 ['type' => 'fileInput',   'name' => 'avatar','label' => 'Avatar', 'accept' => 'image/*'],
+                                 ['type' => 'colorInput',  'name' => 'accent','label' => 'Accent colour', 'default' => '#6366f1'],
+                                 ['type' => 'submitButton','label' => 'Submit','requiredPermission' => 'uikit:view','variant' => 'primary'],
+                             ]]
+                            PHP,
+                        <<<'PHP'
+                            // POST /api/uikit/demo/echo — reads JSON body; when the body
+                            // is non-empty, validates that `name` is present and non-blank;
+                            // returns 200 {data:{received:…}} or 422 {issues:[…]}.
+                            // An empty {} (actionButton payload) bypasses validation.
+                            public function demoEcho(Request $r, array $p = []): Response {
+                                $body = json_decode($r->getBody(), true) ?? [];
+                                if (count($body) > 0) {
+                                    $name = $body['name'] ?? null;
+                                    if (!is_string($name) || trim($name) === '') {
+                                        return Response::json(['issues' => [[
+                                            'severity' => 'error',
+                                            'message'  => 'Name is required',
+                                            'column'   => 'name',
+                                        ]]], 422);
+                                    }
+                                }
+                                return Response::json(['data' => ['received' => $body]]);
+                            }
+                            PHP,
+                    ),
+                    $this->dataBoundDemo(
+                        'actionButton',
+                        'A standalone one-click mutation button that POSTs to the plugin\'s own endpoint. '
+                            . 'An optional `confirm` shows a confirmation dialog before firing.',
+                        [
+                            'type' => 'actionButton',
+                            'label' => 'Run action',
+                            'action' => [
+                                'method' => 'POST',
+                                'endpoint' => '/api/uikit/demo/echo',
+                            ],
+                            'requiredPermission' => 'uikit:view',
+                            'confirm' => 'Run the demo action?',
+                            'variant' => 'secondary',
+                        ],
+                        <<<'PHP'
+                            ['type' => 'actionButton',
+                             'label' => 'Run action',
+                             'action' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                             'requiredPermission' => 'uikit:view',
+                             'confirm' => 'Run the demo action?',
+                             'variant' => 'secondary']
+                            PHP,
+                        <<<'PHP'
+                            // Same POST /api/uikit/demo/echo endpoint — the actionButton sends an
+                            // empty body {}; the handler returns 200 {data:{received:{}}} because
+                            // the form's required `name` check is skipped for an empty payload
+                            // (the echo route exists to demonstrate the feedback paths — the form
+                            // enforces the `name` field; the actionButton sends whatever {} it likes).
+                            // In a real plugin, use a dedicated endpoint per action.
+                            PHP,
+                    ),
+                ],
+            ],
         ];
     }
 
@@ -772,15 +1022,17 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Emit a data-bound demo card: a `card` holding the LIVE data-bound block,
+     * Emit a data-bound demo card: a `card` holding the LIVE block,
      * the PHP block declaration snippet, and the endpoint handler snippet.
      *
      * Kept separate from {@see self::demo()} to make the three-child card shape
      * explicit and avoid overloading the generic helper's type annotations.
+     * Also reused for SP3 interactive demos that pair a block snippet with an
+     * endpoint snippet.
      *
-     * @param string               $blockType        the data-bound block type (card title)
+     * @param string               $blockType        the block type (card title)
      * @param string               $description      one-line description
-     * @param array<string, mixed> $live             the live data-bound block node
+     * @param array<string, mixed> $live             the live block node
      * @param string               $blockSnippet     PHP for the block declaration
      * @param string               $endpointSnippet  PHP for the endpoint handler
      *
@@ -851,6 +1103,44 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                             'value' => ['type' => 'string'],
                             'trend' => ['type' => 'string'],
                             'hint' => ['type' => 'string'],
+                        ],
+                    ],
+                ],
+            ],
+            'UiKitDemoEchoRequest' => [
+                'type' => 'object',
+                'required' => ['name'],
+                'properties' => [
+                    'name' => ['type' => 'string', 'minLength' => 1],
+                ],
+            ],
+            'UiKitDemoEchoResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'object',
+                        'required' => ['received'],
+                        'properties' => [
+                            'received' => ['type' => 'object'],
+                        ],
+                    ],
+                ],
+            ],
+            'UiKitDemoEchoIssues' => [
+                'type' => 'object',
+                'required' => ['issues'],
+                'properties' => [
+                    'issues' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'required' => ['severity', 'message', 'column'],
+                            'properties' => [
+                                'severity' => ['type' => 'string'],
+                                'message' => ['type' => 'string'],
+                                'column' => ['type' => 'string'],
+                            ],
                         ],
                     ],
                 ],
