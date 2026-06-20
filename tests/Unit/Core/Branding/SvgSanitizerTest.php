@@ -102,4 +102,11 @@ final class SvgSanitizerTest extends TestCase
         $this->expectException(SvgRejectedException::class);
         $this->san->sanitize('<svg><rect></svg>');
     }
+
+    public function testStripsStyleElementWithUrl(): void
+    {
+        $out = $this->san->sanitize('<svg xmlns="http://www.w3.org/2000/svg"><style>rect{fill:url(http://evil/x)}</style><rect/></svg>');
+        self::assertStringNotContainsStringIgnoringCase('<style', $out);
+        self::assertStringNotContainsString('http://evil', $out);
+    }
 }

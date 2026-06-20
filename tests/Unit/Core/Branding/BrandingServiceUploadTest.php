@@ -72,4 +72,30 @@ final class BrandingServiceUploadTest extends TestCase
         self::assertFalse($storage->exists($key));
         self::assertNull($svc->effective(1)->logoWideUrl);
     }
+
+    public function testClearTenantOverrideDoesNotDeleteGlobalObject(): void
+    {
+        $pdo = SchemaFromMigrations::make(true);
+        $pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 't1')");
+        $root = sys_get_temp_dir() . '/bsu-' . bin2hex(random_bytes(5));
+        $storage = new LocalStorageDriver($root);
+        $settings = new SettingsService(new GlobalSettingsRepository($pdo), new TenantSettingsRepository($pdo));
+        $svc = new BrandingService($settings, $storage, new BrandingAssetValidator(new SvgSanitizer()));
+
+        // Upload a global asset (tenant_id = 0 means global/system).
+        $global = $svc->uploadAsset(0, 'logo_wide', $this->png());
+        self::assertTrue($storage->exists($global), 'Global object must exist after upload');
+
+        // Upload a tenant override with distinct bytes so the content hash differs.
+        $svc->uploadAsset(1, 'logo_wide', $this->png() . 'tenant-override');
+
+        // Global object must still exist after the tenant upload.
+        self::assertTrue($storage->exists($global), 'Tenant upload must not delete the global object');
+
+        // Clear the tenant override.
+        $svc->clearAsset(1, 'logo_wide');
+
+        // Global object must survive the tenant clear.
+        self::assertTrue($storage->exists($global), 'Clearing tenant override must not delete the global object');
+    }
 }

@@ -61,6 +61,15 @@ final class LocalStorageDriverTest extends TestCase
         $d->put('../../etc/evil', 'x');
     }
 
+    public function testBareDotDotKeyIsRejected(): void
+    {
+        $d = new LocalStorageDriver($this->root);
+        // A bare '..' (no trailing slash) must also be rejected — the original
+        // guard only checked for '../' and would have missed this edge case.
+        $this->expectException(\Whity\Storage\StorageException::class);
+        $d->put('..', 'x');
+    }
+
     public function testPublicUrlNotSupported(): void
     {
         $d = new LocalStorageDriver($this->root);

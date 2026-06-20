@@ -30,7 +30,7 @@ final class SvgSanitizer
         'ellipse' => true, 'line' => true, 'polyline' => true, 'polygon' => true,
         'text' => true, 'tspan' => true, 'defs' => true, 'lineargradient' => true,
         'radialgradient' => true, 'stop' => true, 'clippath' => true, 'mask' => true,
-        'use' => true, 'title' => true, 'desc' => true, 'symbol' => true, 'style' => true,
+        'use' => true, 'title' => true, 'desc' => true, 'symbol' => true,
     ];
 
     /** @var array<string, true> Allowed attribute local-names (lowercased). */

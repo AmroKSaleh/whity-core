@@ -137,7 +137,7 @@ final class LocalStorageDriver implements StorageDriverInterface
     private function resolve(string $key): string
     {
         $normalized = str_replace('\\', '/', $key);
-        if (str_contains($normalized, "\0") || str_contains($normalized, '../') || str_starts_with($normalized, '/')) {
+        if (str_contains($normalized, "\0") || str_contains($normalized, '..') || str_starts_with($normalized, '/')) {
             throw new StorageException("Unsafe storage key: {$key}");
         }
         $path = $this->root . '/' . ltrim($normalized, '/');
