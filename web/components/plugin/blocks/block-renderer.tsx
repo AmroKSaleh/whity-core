@@ -12,28 +12,69 @@ import {
   IconRefresh,
 } from '@tabler/icons-react';
 import type {
+  ActionButtonBlock,
   AlertBlock,
   BadgeBlock,
   Block,
   ButtonBlock,
   CardBlock,
+  CheckboxBlock,
   CodeBlock,
+  ColorInputBlock,
   DataListBlock,
   DataStatBlock,
   DataTableBlock,
+  DateInputBlock,
+  FileInputBlock,
+  FormBlock,
   GridBlock,
   HeadingBlock,
   IconBlock,
   KeyValueBlock,
   ListBlock,
+  NumberInputBlock,
   RowBlock,
   SectionBlock,
+  SelectBlock,
+  SliderBlock,
   StatBlock,
+  SubmitButtonBlock,
   TabBlock,
   TableBlock,
   TabsBlock,
+  TextAreaBlock,
   TextBlock,
+  TextInputBlock,
 } from '@/lib/plugin-features';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { PermissionButton } from '@/components/rbac/permission-button';
+import {
+  FormProvider,
+  useFormBlockContext,
+  IssuesReport,
+} from '@/components/plugin/blocks/form-context';
+import { submitPluginAction } from '@/lib/plugin-action-submit';
+import type { ActionIssue } from '@/lib/plugin-action-submit';
+import { useToast } from '@/lib/toast-context';
 import { usePluginData } from '@/lib/use-plugin-data';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -153,6 +194,17 @@ function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value
 
 function isOneOfNumber<T extends number>(value: unknown, allowed: readonly T[]): value is T {
   return typeof value === 'number' && (allowed as readonly number[]).includes(value);
+}
+
+
+function isValidSubmitSpec(value: unknown): value is { method: 'POST' | 'PUT'; endpoint: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    (v.method === 'POST' || v.method === 'PUT') &&
+    typeof v.endpoint === 'string' &&
+    v.endpoint !== ''
+  );
 }
 
 /** The quiet, non-throwing placeholder for any block we cannot render. */
@@ -745,6 +797,251 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
   );
 }
 
+
+// ---- SP3 interactive renderers (WC-235) ----
+
+function InputLabel({ inputId, label, required, error }: { inputId: string; label: string; required?: boolean; error?: string }) {
+  return (
+    <>
+      <label htmlFor={inputId} className="text-sm font-medium">
+        {label}
+        {required === true && <span className="text-destructive" aria-hidden> *</span>}
+      </label>
+      {error !== undefined && <p className="text-xs text-destructive" role="alert">{error}</p>}
+    </>
+  );
+}
+
+function FormRenderer({ block }: { block: FormBlock }) {
+  return (
+    <FormProvider block={block}>
+      <BlockList blocks={block.children} />
+    </FormProvider>
+  );
+}
+
+function TextInputRenderer({ block }: { block: TextInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="textInput" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : '';
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <Input id={inputId} type="text" value={strValue} placeholder={block.placeholder} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+    </div>
+  );
+}
+
+function TextAreaRenderer({ block }: { block: TextAreaBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="textArea" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : '';
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <Textarea id={inputId} value={strValue} rows={block.rows} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+    </div>
+  );
+}
+
+function NumberInputRenderer({ block }: { block: NumberInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="numberInput" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : '';
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <Input id={inputId} type="number" value={strValue} min={block.min} max={block.max} step={block.step} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+    </div>
+  );
+}
+
+function SelectRenderer({ block }: { block: SelectBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="select" />;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : (block.default ?? '');
+  return (
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium">
+        {block.label}
+        {block.required === true && <span className="text-destructive" aria-hidden> *</span>}
+      </label>
+      {ctx.errors[block.name] !== undefined && <p className="text-xs text-destructive" role="alert">{ctx.errors[block.name]}</p>}
+      <Select value={strValue} onValueChange={(v) => ctx.setValue(block.name, v)}>
+        <SelectTrigger aria-label={block.label}><SelectValue placeholder={`Select ${block.label}`} /></SelectTrigger>
+        <SelectContent>
+          {block.options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function CheckboxRenderer({ block }: { block: CheckboxBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="checkbox" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const checked = typeof value === 'boolean' ? value : (block.default ?? false);
+  return (
+    <div className="flex items-center gap-2">
+      <input id={inputId} type="checkbox" checked={checked} onChange={(e) => ctx.setValue(block.name, e.target.checked)} className="h-4 w-4 rounded border-input accent-primary" aria-label={block.label} />
+      <label htmlFor={inputId} className="text-sm font-medium">{block.label}</label>
+    </div>
+  );
+}
+
+function SliderRenderer({ block }: { block: SliderBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="slider" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : (block.default ?? String(block.min));
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} error={ctx.errors[block.name]} />
+      <input id={inputId} type="range" min={block.min} max={block.max} step={block.step ?? 1} value={strValue} onChange={(e) => ctx.setValue(block.name, e.target.value)} className="w-full accent-primary" aria-label={block.label} />
+    </div>
+  );
+}
+
+function DateInputRenderer({ block }: { block: DateInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="dateInput" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : '';
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <Input id={inputId} type="date" value={strValue} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+    </div>
+  );
+}
+
+function FileInputRenderer({ block }: { block: FileInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="fileInput" />;
+  const inputId = `block-input-${block.name}`;
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <Input id={inputId} type="file" accept={block.accept} onChange={(e) => { const file = e.target.files?.[0]; if (file) { void file.text().then((text) => ctx.setValue(block.name, text)); } }} aria-label={block.label} />
+    </div>
+  );
+}
+
+function ColorInputRenderer({ block }: { block: ColorInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="colorInput" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : (block.default ?? '#000000');
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} error={ctx.errors[block.name]} />
+      <Input id={inputId} type="color" value={strValue} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} className="h-9 w-16 cursor-pointer p-0.5" />
+    </div>
+  );
+}
+
+const INTERACTIVE_BUTTON_VARIANT: Record<NonNullable<SubmitButtonBlock["variant"]>, React.ComponentProps<typeof Button>["variant"]> = {
+  primary: "default",
+  secondary: "secondary",
+  outline: "outline",
+  ghost: "ghost",
+  destructive: "destructive",
+};
+
+function SubmitButtonRenderer({ block }: { block: SubmitButtonBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="submitButton" />;
+  const variant = block.variant ? INTERACTIVE_BUTTON_VARIANT[block.variant] : "default";
+  const label = ctx.isSubmitting ? "Working…" : block.label;
+  if (isNonEmptyString(block.requiredPermission)) {
+    return (
+      <PermissionButton permission={block.requiredPermission} variant={variant} disabled={ctx.isSubmitting} onClick={() => ctx.submit()}>
+        {label}
+      </PermissionButton>
+    );
+  }
+  return (
+    <Button type="button" variant={variant} disabled={ctx.isSubmitting} onClick={() => ctx.submit()}>
+      {label}
+    </Button>
+  );
+}
+
+function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
+  const { addToast } = useToast();
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [serverIssues, setServerIssues] = React.useState<ActionIssue[] | null>(null);
+  const variant = block.variant ? INTERACTIVE_BUTTON_VARIANT[block.variant] : "default";
+
+  const handleAction = React.useCallback(() => {
+    setIsSubmitting(true);
+    setServerIssues(null);
+    void submitPluginAction(block.action.endpoint, block.action.method, {}).then((result) => {
+      setIsSubmitting(false);
+      if (result.ok) {
+        addToast("Completed successfully", "success");
+      } else if (result.issues && result.issues.length > 0) {
+        setServerIssues(result.issues);
+        addToast(`${result.issues.length} issue(s) — see the report below`, "error");
+      } else {
+        addToast(result.error ?? "Request failed", "error");
+      }
+    });
+  }, [block.action, addToast]);
+
+  const triggerLabel = isSubmitting ? "Working…" : block.label;
+
+  const renderTrigger = (onClick?: () => void) => {
+    if (isNonEmptyString(block.requiredPermission)) {
+      return (
+        <PermissionButton permission={block.requiredPermission} variant={variant} disabled={isSubmitting} onClick={onClick}>
+          {triggerLabel}
+        </PermissionButton>
+      );
+    }
+    return (
+      <Button type="button" variant={variant} disabled={isSubmitting} onClick={onClick}>
+        {triggerLabel}
+      </Button>
+    );
+  };
+
+  return (
+    <div className="space-y-3" data-slot="action-button-block">
+      {block.confirm ? (
+        <AlertDialog>
+          <AlertDialogTrigger asChild>{renderTrigger(undefined)}</AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{block.label}</AlertDialogTitle>
+              <AlertDialogDescription>{block.confirm}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => handleAction()}>Confirm</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : (
+        renderTrigger(() => handleAction())
+      )}
+      {serverIssues !== null && serverIssues.length > 0 && <IssuesReport issues={serverIssues} />}
+    </div>
+  );
+}
+
 // ---- dispatch: validate per the contract, then render or degrade ----
 
 /**
@@ -900,6 +1197,31 @@ function BlockNode({ block }: { block: Block }): React.ReactElement {
       ) : (
         <UnsupportedBlock type="dataList" />
       );
+
+    case 'form':
+      return Array.isArray(block.children) && isValidSubmitSpec(block.submit) ? <FormRenderer block={block} /> : <UnsupportedBlock type="form" />;
+    case 'textInput':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextInputRenderer block={block} /> : <UnsupportedBlock type="textInput" />;
+    case 'textArea':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextAreaRenderer block={block} /> : <UnsupportedBlock type="textArea" />;
+    case 'numberInput':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <NumberInputRenderer block={block} /> : <UnsupportedBlock type="numberInput" />;
+    case 'select':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isKvList(block.options) ? <SelectRenderer block={block} /> : <UnsupportedBlock type="select" />;
+    case 'checkbox':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <CheckboxRenderer block={block} /> : <UnsupportedBlock type="checkbox" />;
+    case 'slider':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) && typeof block.min === 'number' && typeof block.max === 'number' ? <SliderRenderer block={block} /> : <UnsupportedBlock type="slider" />;
+    case 'dateInput':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <DateInputRenderer block={block} /> : <UnsupportedBlock type="dateInput" />;
+    case 'fileInput':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <FileInputRenderer block={block} /> : <UnsupportedBlock type="fileInput" />;
+    case 'colorInput':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <ColorInputRenderer block={block} /> : <UnsupportedBlock type="colorInput" />;
+    case 'submitButton':
+      return isNonEmptyString(block.label) ? <SubmitButtonRenderer block={block} /> : <UnsupportedBlock type="submitButton" />;
+    case 'actionButton':
+      return isNonEmptyString(block.label) && isValidSubmitSpec(block.action) ? <ActionButtonRenderer block={block} /> : <UnsupportedBlock type="actionButton" />;
     default: {
       // Unknown type: TypeScript narrows `block` to `never`, but a malformed
       // payload at runtime still reaches here — degrade quietly.

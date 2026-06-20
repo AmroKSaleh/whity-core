@@ -187,8 +187,126 @@ export interface DataListBlock {
   emptyText?: string;
 }
 
+// ---- SP3 interactive blocks (WC-235) ----
+
 /**
- * The discriminated union of every SP1 + SP2 block, keyed on `type`. The host has
+ * Container: a form that collects inputs and submits them as JSON to `submit.endpoint`.
+ * The host has already validated and version-rewritten `submit.endpoint`.
+ */
+export interface FormBlock {
+  type: 'form';
+  submit: { method: 'POST' | 'PUT'; endpoint: string };
+  requiredPermission?: string;
+  children: Block[];
+}
+
+/** Leaf (form only): a single-line text input. */
+export interface TextInputBlock {
+  type: 'textInput';
+  name: string;
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  default?: string;
+}
+
+/** Leaf (form only): a multi-line text area. */
+export interface TextAreaBlock {
+  type: 'textArea';
+  name: string;
+  label: string;
+  rows?: number;
+  required?: boolean;
+  default?: string;
+}
+
+/** Leaf (form only): a numeric input. */
+export interface NumberInputBlock {
+  type: 'numberInput';
+  name: string;
+  label: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  required?: boolean;
+  default?: string;
+}
+
+/** Leaf (form only): a single-select dropdown. */
+export interface SelectBlock {
+  type: 'select';
+  name: string;
+  label: string;
+  options: { value: string; label: string }[];
+  required?: boolean;
+  default?: string;
+}
+
+/** Leaf (form only): a boolean checkbox. */
+export interface CheckboxBlock {
+  type: 'checkbox';
+  name: string;
+  label: string;
+  default?: boolean;
+}
+
+/** Leaf (form only): a range slider. */
+export interface SliderBlock {
+  type: 'slider';
+  name: string;
+  label: string;
+  min: number;
+  max: number;
+  step?: number;
+  default?: string;
+}
+
+/** Leaf (form only): a date input. */
+export interface DateInputBlock {
+  type: 'dateInput';
+  name: string;
+  label: string;
+  required?: boolean;
+  default?: string;
+}
+
+/** Leaf (form only): a file input (file content is read as text into the named property). */
+export interface FileInputBlock {
+  type: 'fileInput';
+  name: string;
+  label: string;
+  accept?: string;
+  required?: boolean;
+}
+
+/** Leaf (form only): a colour picker. */
+export interface ColorInputBlock {
+  type: 'colorInput';
+  name: string;
+  label: string;
+  default?: string;
+}
+
+/** Leaf (form only): triggers form submission. */
+export interface SubmitButtonBlock {
+  type: 'submitButton';
+  label: string;
+  requiredPermission?: string;
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+}
+
+/** Leaf (standalone): a one-click mutating action button. */
+export interface ActionButtonBlock {
+  type: 'actionButton';
+  label: string;
+  action: { method: 'POST' | 'PUT'; endpoint: string };
+  requiredPermission?: string;
+  confirm?: string;
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+}
+
+/**
+ * The discriminated union of every SP1 + SP2 + SP3 block, keyed on `type`. The host has
  * already validated the tree, but the web renderer revalidates defensively so a
  * malformed node degrades to a placeholder rather than crashing.
  */
@@ -213,7 +331,19 @@ export type Block =
   | CodeBlock
   | DataTableBlock
   | DataStatBlock
-  | DataListBlock;
+  | DataListBlock
+  | FormBlock
+  | TextInputBlock
+  | TextAreaBlock
+  | NumberInputBlock
+  | SelectBlock
+  | CheckboxBlock
+  | SliderBlock
+  | DateInputBlock
+  | FileInputBlock
+  | ColorInputBlock
+  | SubmitButtonBlock
+  | ActionButtonBlock;
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {
