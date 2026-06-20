@@ -104,6 +104,22 @@ class EnforceTenantIsolation
         // exposes only route shapes, never tenant data, so it bypasses tenant
         // resolution like the other infrastructure probes.
         '/api/openapi.json',
+        // WC-233: public effective branding endpoint — resolves tenant by host,
+        // returns only branding fields (never other settings), no auth required.
+        '/api/v1/branding',
+    ];
+
+    /**
+     * Route prefixes that are reachable without authentication / tenant context.
+     * Any path that starts with one of these prefixes is treated as public.
+     *
+     * @var list<string>
+     */
+    private const PUBLIC_ROUTE_PREFIXES = [
+        // WC-233: public asset-serving route for branding images. The full path
+        // includes the tenant id and filename, so an exact-match list is not
+        // practical — a prefix check is used instead.
+        '/api/v1/branding/asset/',
     ];
 
     private JwtParser $jwtParser;
@@ -412,12 +428,26 @@ class EnforceTenantIsolation
     /**
      * Check whether a route is public (no JWT / tenant context required).
      *
+     * Checks both the exact-match list ({@see self::PUBLIC_ROUTES}) and the
+     * prefix list ({@see self::PUBLIC_ROUTE_PREFIXES}). The prefix check enables
+     * public access to parametrised paths (e.g. asset-serving routes whose full
+     * path includes a tenant id and filename segment) without enumerating every
+     * possible combination.
+     *
      * @param string $path The request path (without query string).
      * @return bool True if the route is public.
      */
     private function isPublicRoute(string $path): bool
     {
-        return in_array($path, self::PUBLIC_ROUTES, true);
+        if (in_array($path, self::PUBLIC_ROUTES, true)) {
+            return true;
+        }
+        foreach (self::PUBLIC_ROUTE_PREFIXES as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
