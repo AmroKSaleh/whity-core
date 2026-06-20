@@ -57,6 +57,20 @@ final class BrandingServiceResolutionTest extends TestCase
         self::assertSame('/api/v1/branding/asset/1/logo_square-sq.png', $b->faviconUrl);
     }
 
+    public function testEachKeyResolvesIndependently(): void
+    {
+        $pdo = SchemaFromMigrations::make(true);
+        $pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 't1')");
+        $settings = new SettingsService(new GlobalSettingsRepository($pdo), new TenantSettingsRepository($pdo));
+        $settings->setGlobal('site_name', 'Platform');
+        $settings->setTenantAsset(1, 'branding_logo_wide', 'tenants/1/branding/logo_wide-ind.png');
+        $b = (new BrandingService($settings))->effective(1);
+        // site_name has no tenant override → falls back to global layer
+        self::assertSame('Platform', $b->siteName);
+        // branding_logo_wide is set at the tenant layer → resolves from tenant
+        self::assertSame('/api/v1/branding/asset/1/logo_wide-ind.png', $b->logoWideUrl);
+    }
+
     public function testEffectiveExposesOnlyBrandingFields(): void
     {
         $pdo = SchemaFromMigrations::make(true);

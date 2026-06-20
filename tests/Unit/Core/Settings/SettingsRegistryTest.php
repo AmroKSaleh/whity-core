@@ -16,7 +16,7 @@ use Whity\Core\Settings\SettingsRegistry;
  */
 final class SettingsRegistryTest extends TestCase
 {
-    public function testKnownKeysAreExactlyTheFourDesignedFields(): void
+    public function testKnownKeysAreExactlyTheSevenDesignedFields(): void
     {
         self::assertSame(
             ['site_name', 'timezone', 'locale', 'support_email',
