@@ -19,7 +19,8 @@ final class SettingsRegistryTest extends TestCase
     public function testKnownKeysAreExactlyTheFourDesignedFields(): void
     {
         self::assertSame(
-            ['site_name', 'timezone', 'locale', 'support_email'],
+            ['site_name', 'timezone', 'locale', 'support_email',
+             'branding_logo_wide', 'branding_logo_square', 'branding_favicon'],
             SettingsRegistry::keys()
         );
     }
@@ -139,7 +140,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(4, $describe);
+        self::assertCount(7, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
