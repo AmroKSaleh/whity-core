@@ -125,6 +125,13 @@ final class SettingsService
     {
         $this->assertKnown($key);
 
+        if (SettingsRegistry::kindFor($key) === 'asset') {
+            throw new SettingsValidationException(
+                $key,
+                "{$key} is an uploaded asset; use the branding upload endpoint, not a text write."
+            );
+        }
+
         if ($value === null) {
             $this->globals->delete($key);
             return;
@@ -153,6 +160,13 @@ final class SettingsService
     {
         $this->assertKnown($key);
 
+        if (SettingsRegistry::kindFor($key) === 'asset') {
+            throw new SettingsValidationException(
+                $key,
+                "{$key} is an uploaded asset; use the branding upload endpoint, not a text write."
+            );
+        }
+
         if ($tenantId === self::SYSTEM_TENANT_ID) {
             throw new SettingsValidationException(
                 $key,
@@ -167,6 +181,56 @@ final class SettingsService
 
         $this->assertValid($key, $value);
         $this->tenants->set($tenantId, $key, SettingsRegistry::normalize($key, $value));
+    }
+
+    /**
+     * Set (or clear) a GLOBAL asset reference (Tenant Branding). The value is a
+     * storage key produced by BrandingService; null clears it (falls back to the
+     * registry default ''). No text validation — the key must be a known asset key.
+     *
+     * @throws SettingsValidationException When the key is unknown or not an asset key.
+     */
+    public function setGlobalAsset(string $key, ?string $storageKey): void
+    {
+        $this->assertAssetKey($key);
+        if ($storageKey === null || $storageKey === '') {
+            $this->globals->delete($key);
+            return;
+        }
+        $this->globals->set($key, $storageKey);
+    }
+
+    /**
+     * Set (or clear) a PER-TENANT asset reference (Tenant Branding). System
+     * tenant (0) has no override layer — rejected.
+     *
+     * @throws SettingsValidationException When the key is unknown/not-asset or tenant is system.
+     */
+    public function setTenantAsset(int $tenantId, string $key, ?string $storageKey): void
+    {
+        $this->assertAssetKey($key);
+        if ($tenantId === self::SYSTEM_TENANT_ID) {
+            throw new SettingsValidationException(
+                $key,
+                'The system tenant has no per-tenant override layer; edit the global default instead.'
+            );
+        }
+        if ($storageKey === null || $storageKey === '') {
+            $this->tenants->delete($tenantId, $key);
+            return;
+        }
+        $this->tenants->set($tenantId, $key, $storageKey);
+    }
+
+    /**
+     * @throws SettingsValidationException When the key is unknown or not an asset key.
+     */
+    private function assertAssetKey(string $key): void
+    {
+        $this->assertKnown($key);
+        if (SettingsRegistry::kindFor($key) !== 'asset') {
+            throw new SettingsValidationException($key, "{$key} is not an asset key.");
+        }
     }
 
     /**

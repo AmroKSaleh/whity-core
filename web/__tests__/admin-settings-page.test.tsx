@@ -42,6 +42,13 @@ jest.mock('@/hooks/useCapabilities', () => ({
   useCapabilities: () => mockCapabilities,
 }));
 
+// Mock useAuth so BrandingSettings (mounted inside AdminSettingsPage) can call
+// useAuth() without an AuthProvider in the tree. The production app wraps the
+// page in AuthProvider via the root layout; this is purely a test-setup stub.
+jest.mock('@/lib/auth-context', () => ({
+  useAuth: () => ({ user: { id: 1, email: 'admin@example.com', role: 'admin', tenant_id: 0 } }),
+}));
+
 // Keep the timezone select small and deterministic regardless of the host ICU
 // data: stub Intl.supportedValuesOf so the option list is stable in CI.
 beforeAll(() => {
@@ -120,7 +127,11 @@ describe('AdminSettingsPage — RBAC gating', () => {
     grant(); // no permissions
     render(<AdminSettingsPage />);
     expect(screen.getByRole('heading', { name: /access denied/i })).toBeInTheDocument();
-    expect(mockApiGet).not.toHaveBeenCalled();
+    // The page prefetches /api/v1/settings unconditionally (to derive
+    // tenantOverridable for BrandingSettings) so we no longer assert
+    // mockApiGet was never called; we only assert that the protected
+    // global-defaults endpoint is never hit without settings:manage.
+    expect(mockApiGet).not.toHaveBeenCalledWith('/api/v1/settings/global');
   });
 
   it('renders the tenant form for a settings:read caller', async () => {

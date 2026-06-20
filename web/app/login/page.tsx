@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
+import { useBranding } from '@/lib/branding-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,6 +37,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading, refreshAuth } = useAuth();
   const { addToast } = useToast();
+  const branding = useBranding();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
@@ -210,7 +212,10 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Welcome to Whity</CardTitle>
+          {branding.logoWideUrl ? (
+            <img src={branding.logoWideUrl} alt={branding.siteName} className="h-10 w-auto max-w-[220px] object-contain mx-auto mb-2" />
+          ) : null}
+          <CardTitle className="text-2xl">{`Welcome to ${branding.siteName}`}</CardTitle>
           <CardDescription>
             {requires2fa ? 'Enter your authenticator code' : 'Sign in to your account to continue'}
           </CardDescription>

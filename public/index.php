@@ -633,6 +633,39 @@ $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'], 
 $router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlobal'], null, null, CorePermissions::SETTINGS_MANAGE);
 
+// 13c. Register the Tenant Branding API (WC-233). Public GET /api/v1/branding
+// resolves the caller's tenant by JWT context → custom branding_host → slug
+// subdomain of BRANDING_BASE_DOMAIN; falls back to the global default. Asset
+// serving is also public. Upload/clear/host-management endpoints are protected
+// by settings:write or settings:manage. The handler issues NO SQL — all access
+// goes through BrandingService and its repositories; the tenant always comes
+// from TenantContext (for write paths) or host resolution (for public read).
+$storageRoot = getenv('STORAGE_ROOT') ?: (__DIR__ . '/../storage');
+$brandingService = new \Whity\Core\Branding\BrandingService(
+    $settingsService,
+    new \Whity\Storage\LocalStorageDriver($storageRoot),
+    new \Whity\Core\Branding\BrandingAssetValidator(new \Whity\Core\Branding\SvgSanitizer())
+);
+$brandingHostRepo = new \Whity\Core\Branding\TenantHostRepository($db->getPdo());
+$hostResolver = new \Whity\Core\Branding\HostResolver(
+    $brandingHostRepo,
+    getenv('BRANDING_BASE_DOMAIN') ?: ''
+);
+$brandingHandler = new \Whity\Api\BrandingApiHandler(
+    $brandingService,
+    $hostResolver,
+    $roleChecker,
+    $brandingHostRepo,
+    new \Whity\Storage\LocalStorageDriver($storageRoot)
+);
+$router->register('GET',    '/api/branding',                        [$brandingHandler, 'get'],          null, null, null);
+$router->register('GET',    '/api/branding/asset/{tenantId}/{name}', [$brandingHandler, 'serveAsset'],   null, null, null);
+$router->register('POST',   '/api/branding/assets/{key}',           [$brandingHandler, 'uploadTenant'],  null, null, CorePermissions::SETTINGS_WRITE);
+$router->register('DELETE', '/api/branding/assets/{key}',           [$brandingHandler, 'clearTenant'],   null, null, CorePermissions::SETTINGS_WRITE);
+$router->register('POST',   '/api/branding/global/assets/{key}',    [$brandingHandler, 'uploadGlobal'],  null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('DELETE', '/api/branding/global/assets/{key}',    [$brandingHandler, 'clearGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHandler, 'setBrandingHost'], null, null, CorePermissions::SETTINGS_MANAGE);
+
 // 14. Register the family relations API (WC-65). Reads are gated on
 // relations:read, writes on relations:manage (6th positional arg; requiredRole
 // stays null so RbacMiddleware enforces the permission). All routes are

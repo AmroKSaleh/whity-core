@@ -294,7 +294,8 @@ class AuthHandler
             'user' => [
                 'id' => $user['id'],
                 'email' => $user['email'],
-                'role' => $roleName
+                'role' => $roleName,
+                'tenant_id' => (int) $user['tenant_id'],
             ]
         ], 200);
     }
@@ -322,7 +323,8 @@ class AuthHandler
             'user' => [
                 'id' => $claims['user_id'],
                 'email' => $claims['email'],
-                'role' => $claims['role']
+                'role' => $claims['role'],
+                'tenant_id' => $claims['tenant_id'],
             ]
         ], 200);
     }

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
+import { useBranding } from '@/lib/branding-context';
 import { Button } from '@/components/ui/button';
 import * as TablerIcons from '@tabler/icons-react';
 import {
@@ -53,6 +54,7 @@ export function Sidebar() {
   const router = useRouter();
   const { logout, user } = useAuth();
   const { getGroupedItems } = useNavigation();
+  const branding = useBranding();
   const groupedItems = getGroupedItems();
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -123,11 +125,19 @@ export function Sidebar() {
           <div className="flex-1">
             {!isCollapsed ? (
               <>
-                <h1 className="text-2xl font-bold">Whity</h1>
+                {branding.logoWideUrl ? (
+                  <img src={branding.logoWideUrl} alt={branding.siteName} className="h-8 w-auto max-w-[180px] object-contain" />
+                ) : (
+                  <h1 className="text-2xl font-bold">{branding.siteName}</h1>
+                )}
                 <p className="text-sm text-muted-foreground mt-1">Admin</p>
               </>
             ) : (
-              <div className="text-xl font-bold text-center font-black">W</div>
+              branding.logoSquareUrl ? (
+                <img src={branding.logoSquareUrl} alt={branding.siteName} className="h-8 w-8 object-contain mx-auto" />
+              ) : (
+                <div className="text-xl font-bold text-center font-black">{branding.siteName.charAt(0).toUpperCase()}</div>
+              )
             )}
           </div>
 

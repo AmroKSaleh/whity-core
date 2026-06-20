@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { IconAlertCircle, IconDeviceFloppy, IconInfoCircle, IconWorld } from '@tabler/icons-react';
+import { BrandingSettings } from '@/components/branding-settings';
 
 // Granular RBAC for the Website Settings console (mirrors the backend catalogue):
 //   read   → may view the effective/editable set (else Access Denied)
@@ -225,6 +226,19 @@ export default function AdminSettingsPage() {
   const canWrite = hasPermission(SETTINGS_WRITE);
   const canManage = hasPermission(SETTINGS_MANAGE);
 
+  // Fetch tenant_overridable at the page level so it can be passed to
+  // BrandingSettings. Must be called unconditionally (Rules of Hooks), before
+  // any early return. The browser dedupes this against TenantSettingsSection's
+  // identical call within the same render cycle.
+  const { data: settingsMeta } = useFetch(async () => {
+    const { data: body } = await api.GET('/api/v1/settings');
+    return body?.data ?? null;
+  }, []);
+
+  // Default to true so the branding section shows the editable form while
+  // loading — same defensive default used in TenantSettingsSection.
+  const tenantOverridable = settingsMeta?.tenant_overridable ?? true;
+
   if (isCapabilitiesLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -258,6 +272,7 @@ export default function AdminSettingsPage() {
         description="Platform-wide defaults that each tenant can override. Editing requires the settings:write (tenant) or settings:manage (global) permission."
       />
       <TenantSettingsSection canWrite={canWrite} addToast={addToast} />
+      <BrandingSettings tenantOverridable={tenantOverridable} />
       {canManage && <GlobalSettingsSection addToast={addToast} />}
     </div>
   );
