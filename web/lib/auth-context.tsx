@@ -7,6 +7,7 @@ interface User {
   id: number;
   email: string;
   role: string;
+  tenant_id: number;
 }
 
 interface AuthContextType {
@@ -128,11 +129,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       } else if (typeof data.token === 'string') {
         const payload = decodeJWT(data.token);
         const userId = payload?.id || payload?.user_id;
+        const tenantId = typeof payload?.tenant_id === 'number' ? payload.tenant_id : 0;
         if (payload && userId && payload.email) {
           setUser({
             id: userId,
             email: payload.email,
             role: payload.role || '',
+            tenant_id: tenantId,
           });
         }
       }

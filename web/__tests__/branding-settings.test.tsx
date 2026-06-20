@@ -32,6 +32,11 @@ jest.mock('@/lib/api/client', () => ({
   },
 }));
 
+// Mock useAuth so the component can read user?.tenant_id without an AuthProvider.
+jest.mock('@/lib/auth-context', () => ({
+  useAuth: () => ({ user: { id: 1, email: 'admin@example.com', role: 'admin', tenant_id: 0 } }),
+}));
+
 // Mock useCapabilities so tests can set permissions declaratively.
 const hasPermission = jest.fn<boolean, [string]>();
 jest.mock('@/hooks/useCapabilities', () => ({

@@ -14,6 +14,7 @@
  */
 
 import { useRef, useState } from 'react';
+import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -100,10 +101,12 @@ interface AssetUploaderProps {
   currentUrl: string | null;
   disabled: boolean;
   onSuccess: (updated: Branding) => void;
+  /** Called after a successful clear; defaults to onSuccess when omitted. */
+  onClearSuccess?: (updated: Branding) => void;
   onError: (message: string) => void;
 }
 
-function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onError }: AssetUploaderProps) {
+function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSuccess, onError }: AssetUploaderProps) {
   const [uploading, setUploading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -129,7 +132,7 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onError }
     setClearing(true);
     try {
       const updated = await clearBrandingAsset(scope, meta.key);
-      onSuccess(updated);
+      (onClearSuccess ?? onSuccess)(updated);
     } catch (err) {
       onError(toErrorMessage(err, `Failed to clear ${meta.label.toLowerCase()}`));
     } finally {
@@ -224,6 +227,7 @@ export interface BrandingSettingsProps {
 }
 
 export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
+  const { user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
 
@@ -280,16 +284,19 @@ export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
   const [savingHost, setSavingHost] = useState(false);
 
   const handleSaveHost = async () => {
+    // Guard: empty field must not silently clear an existing host (Fix 3).
+    // The Save button is disabled when the field is empty, so this is a
+    // belt-and-suspenders check only.
+    const trimmed = customHost.trim();
+    if (trimmed === '') return;
+
     setSavingHost(true);
     try {
-      // Tenant ID from the branding endpoint isn't directly surfaced — use 0 to
-      // address "current tenant as manager". The backend derives tenantId from
-      // the JWT context in the PUT handler. Pass a placeholder that the parent
-      // can override; for now we always target the current JWT tenant's record.
-      // The plan spec uses tenantId from context; passing 0 lets the backend
-      // use TenantContext. The parent (settings page) does not supply tenantId
-      // yet; this is acceptable for the first iteration.
-      await setBrandingHost(0, customHost.trim() === '' ? null : customHost.trim());
+      // Fix 1: use the acting tenant's real numeric id from the auth context.
+      // For the system-tenant admin this is 0; for any other tenant it is their
+      // own id, matching the PATH {id} the backend uses as the write target.
+      const tenantId = user?.tenant_id ?? 0;
+      await setBrandingHost(tenantId, trimmed);
       addToast('Custom host saved.', 'success');
     } catch (err) {
       addToast(toErrorMessage(err, 'Failed to save custom host'), 'error');
@@ -343,6 +350,7 @@ export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
                     currentUrl={effectiveBranding?.[meta.urlField] ?? null}
                     disabled={!canWrite}
                     onSuccess={(updated) => handleSuccess('tenant', meta.key, updated)}
+                    onClearSuccess={(updated) => handleClearSuccess('tenant', meta.key, updated)}
                     onError={handleError}
                   />
                 </div>
@@ -380,7 +388,8 @@ export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
                     scope="global"
                     currentUrl={effectiveBranding?.[meta.urlField] ?? null}
                     disabled={false}
-                    onSuccess={(updated) => handleClearSuccess('global', meta.key, updated)}
+                    onSuccess={(updated) => handleSuccess('global', meta.key, updated)}
+                    onClearSuccess={(updated) => handleClearSuccess('global', meta.key, updated)}
                     onError={handleError}
                   />
                 </div>
@@ -408,7 +417,7 @@ export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
                 />
                 <Button
                   type="button"
-                  disabled={savingHost}
+                  disabled={savingHost || customHost.trim() === ''}
                   onClick={handleSaveHost}
                   className="gap-2 shrink-0"
                   data-testid="branding-custom-host-save"
