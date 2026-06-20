@@ -134,6 +134,15 @@ final class BrandingApiHandler
             return Response::error('A file (field "file") is required.', 400);
         }
         $scopeTenant = $global ? 0 : $ctx['tenantId'];
+        // The tenant endpoint writes per-tenant overrides; the system tenant (0)
+        // has no override layer — use the global endpoint instead.
+        if (!$global && $scopeTenant === 0) {
+            return Response::error(
+                'Validation failed',
+                422,
+                [$assetKey => 'The system tenant has no per-tenant override layer; use the global asset endpoint instead.']
+            );
+        }
         try {
             $this->branding->uploadAsset($scopeTenant, $assetKey, $bytes);
         } catch (SettingsValidationException $e) {
@@ -159,6 +168,15 @@ final class BrandingApiHandler
             return Response::error('Unknown branding asset', 404);
         }
         $scopeTenant = $global ? 0 : $ctx['tenantId'];
+        // Mirror the upload guard: the tenant endpoint operates on per-tenant
+        // overrides; the system tenant has none — use the global endpoint.
+        if (!$global && $scopeTenant === 0) {
+            return Response::error(
+                'Validation failed',
+                422,
+                [$assetKey => 'The system tenant has no per-tenant override layer; use the global asset endpoint instead.']
+            );
+        }
         try {
             $this->branding->clearAsset($scopeTenant, $assetKey);
         } catch (SettingsValidationException $e) {
