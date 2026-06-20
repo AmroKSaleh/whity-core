@@ -185,3 +185,103 @@ test.describe('UiKitShowcase: SP2 data-bound blocks reach ready state (WC-232)',
   });
 });
 
+/**
+ * WC-236 — SP3 interactive block pipeline (capstone e2e).
+ *
+ * Proves the full declare-once → validate → version → render → submit pipeline:
+ *
+ *   UiKitShowcasePlugin.getRoutes() registers POST /api/uikit/demo/echo
+ *   UiKitShowcasePlugin.getFrontendFeatures() declares a form with
+ *     submit: { method: 'POST', endpoint: '/api/uikit/demo/echo' }
+ *     requiredPermission: 'uikit:view'
+ *   Host (WC-234) verifies ownership + permission match + rewrites endpoint
+ *     to /api/v1/uikit/demo/echo
+ *   Web FormProvider (WC-235) collects values; SubmitButtonRenderer fires
+ *     submitPluginAction('/api/v1/uikit/demo/echo', 'POST', values)
+ *   Backend echoes the body → 200 {data:{received:…}}
+ *   Toast: "Completed successfully"
+ *
+ *   Standalone ActionButtonRenderer fires submitPluginAction with {}
+ *   (empty body) — the echo endpoint returns 200 for empty payloads.
+ *   Confirm dialog ("Run the demo action?") is accepted.
+ *   Toast: "Completed successfully"
+ *
+ * Locator discipline (WC-228/232 lesson): the Interactive tab also renders
+ * PHP code snippets in <pre><code>. To avoid collisions:
+ * - Use getByRole('textbox') scoped to the form section (not broad text match).
+ * - Use getByRole('button', { name: 'Submit' }) — buttons are never in <pre>.
+ * - Use getByRole('button', { name: 'Run action' }) for the actionButton.
+ * - Assert the toast via role="status" filter — toasts are outside <pre>.
+ */
+test.describe('UiKitShowcase: SP3 interactive blocks — form + actionButton (WC-236)', () => {
+  test('admin fills the form and gets a success toast on submit', async ({
+    adminPage,
+    page,
+  }) => {
+    void adminPage;
+    await page.goto(`/admin/x/${FEATURE_ID}`);
+
+    // Navigate to the Interactive tab where the SP3 demos live.
+    await page.getByRole('tab', { name: 'Interactive' }).click();
+
+    // The block renderer container is present.
+    await expect(page.locator('[data-slot="block-renderer"]')).toBeVisible();
+
+    // Fill the `name` field (required by the echo endpoint).
+    // The form demo has a textInput with name='name' and label='Name'.
+    // We scope via getByLabel to avoid any code snippet collisions.
+    await page.getByLabel('Name').fill('Test User');
+
+    // Click the 'Submit' button — rendered by SubmitButtonRenderer with
+    // requiredPermission='uikit:view'; admin holds that permission so the
+    // button is enabled.
+    // Role-based: <button> never lives inside <pre><code>.
+    const submitBtn = page.getByRole('button', { name: 'Submit', exact: true });
+    await expect(submitBtn).toBeEnabled();
+    await submitBtn.click();
+
+    // Assert the success toast appears.
+    // ToastContainer renders each toast as role="status"; the text is the
+    // message prop — "Completed successfully".
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Completed successfully' })
+    ).toBeVisible();
+  });
+
+  test('admin clicks the actionButton (with confirm) and gets a success toast', async ({
+    adminPage,
+    page,
+  }) => {
+    void adminPage;
+    await page.goto(`/admin/x/${FEATURE_ID}`);
+
+    // Navigate to the Interactive tab.
+    await page.getByRole('tab', { name: 'Interactive' }).click();
+
+    await expect(page.locator('[data-slot="block-renderer"]')).toBeVisible();
+
+    // Click "Run action" — the actionButton block declares
+    // confirm='Run the demo action?'. The ActionButtonRenderer (WC-235) wraps
+    // the trigger in a Radix AlertDialog when `confirm` is set. Clicking the
+    // button opens the dialog; we then click the 'Confirm' AlertDialogAction.
+    const actionBtn = page.getByRole('button', { name: 'Run action', exact: true });
+    await expect(actionBtn).toBeEnabled();
+    await actionBtn.click();
+
+    // The Radix AlertDialog renders as role="alertdialog". Its footer has
+    // a 'Confirm' button (AlertDialogAction) and a 'Cancel' button.
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+
+    // Click the Confirm button to proceed with the action.
+    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+
+    // Assert the success toast appears.
+    // ActionButtonRenderer sends {} (empty body); the echo endpoint returns 200
+    // for empty payloads, and the renderer shows the "Completed successfully" toast.
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Completed successfully' })
+    ).toBeVisible();
+  });
+});
+

@@ -787,6 +787,23 @@ export interface paths {
         patch: operations["patch_api_v1_tenants_id"];
         trace?: never;
     };
+    "/api/v1/uikit/demo/echo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Demo echo endpoint for interactive block examples */
+        post: operations["post_api_v1_uikit_demo_echo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uikit/demo/metric": {
         parameters: {
             query?: never;
@@ -1348,6 +1365,21 @@ export interface components {
         TenantUpdateRequest: {
             name?: string;
             slug?: string;
+        };
+        UiKitDemoEchoIssues: {
+            issues: {
+                severity: string;
+                message: string;
+                column: string;
+            }[];
+        };
+        UiKitDemoEchoRequest: {
+            name: string;
+        };
+        UiKitDemoEchoResponse: {
+            data: {
+                received: Record<string, never>;
+            };
         };
         UiKitDemoMetricResponse: {
             data: {
@@ -5962,6 +5994,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_uikit_demo_echo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UiKitDemoEchoRequest"];
+            };
+        };
+        responses: {
+            /** @description UiKitDemoEchoResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoEchoResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UiKitDemoEchoIssues */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoEchoIssues"];
                 };
             };
             /** @description Internal server error */
