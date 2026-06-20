@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.7).
+ * SDK identity (v1.8).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -31,13 +31,18 @@ namespace Whity\Sdk;
  * {@see \Whity\Sdk\Frontend\Blocks\BlockValidator}, plus the new
  * `screen: 'blocks'` frontend-feature value, WC-225) →
  * 1.7 (data-bound block types: `dataTable`, `dataStat`, `dataList` leaves with
- * the new `apiPath` prop-rule kind — strict relative API path validation, WC-229).
+ * the new `apiPath` prop-rule kind — strict relative API path validation, WC-229) →
+ * 1.8 (interactive block types: `form` container, 9 input leaves — `textInput`,
+ * `textArea`, `numberInput`, `select`, `checkbox`, `slider`, `dateInput`,
+ * `fileInput`, `colorInput` — plus `submitButton` and `actionButton`; new
+ * `inputName`/`selectOptions`/`submitSpec` prop-rule kinds; form-ancestor
+ * enforcement and per-form duplicate-name detection in the validator, WC-233).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.7.0';
+    public const VERSION = '1.8.0';
 
     /**
      * Static identity only — never instantiated.

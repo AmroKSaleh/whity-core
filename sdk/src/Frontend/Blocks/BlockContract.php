@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk\Frontend\Blocks;
 
 /**
- * The SP2 server-driven plugin-UI block whitelist (SDK 1.7, WC-229).
+ * The SP3 server-driven plugin-UI block whitelist (SDK 1.8, WC-233).
  *
  * A plugin describes a screen as a platform-NEUTRAL tree of semantic UI
  * "blocks". The host stores and ships that tree verbatim; per-platform
@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -225,6 +225,86 @@ final class BlockContract
                 'itemField' => ['type' => 'string',     'required' => true],
                 'ordered'   => ['type' => 'bool',       'required' => false],
                 'emptyText' => ['type' => 'string',     'required' => false],
+            ]],
+
+            // ---- interactive blocks (SP3, WC-233) ----
+            'form' => ['container' => true, 'props' => [
+                'submit'             => ['type' => 'submitSpec', 'required' => true],
+                'requiredPermission' => ['type' => 'string',     'required' => false],
+            ]],
+            'textInput' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'placeholder' => ['type' => 'string',    'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+            ]],
+            'textArea' => ['container' => false, 'props' => [
+                'name'     => ['type' => 'inputName', 'required' => true],
+                'label'    => ['type' => 'string',    'required' => true],
+                'rows'     => ['type' => 'int',       'required' => false],
+                'required' => ['type' => 'bool',      'required' => false],
+                'default'  => ['type' => 'string',    'required' => false],
+            ]],
+            'numberInput' => ['container' => false, 'props' => [
+                'name'     => ['type' => 'inputName', 'required' => true],
+                'label'    => ['type' => 'string',    'required' => true],
+                'min'      => ['type' => 'int',       'required' => false],
+                'max'      => ['type' => 'int',       'required' => false],
+                'step'     => ['type' => 'int',       'required' => false],
+                'required' => ['type' => 'bool',      'required' => false],
+                'default'  => ['type' => 'string',    'required' => false],
+            ]],
+            'select' => ['container' => false, 'props' => [
+                'name'     => ['type' => 'inputName',    'required' => true],
+                'label'    => ['type' => 'string',       'required' => true],
+                'options'  => ['type' => 'selectOptions', 'required' => true],
+                'required' => ['type' => 'bool',         'required' => false],
+                'default'  => ['type' => 'string',       'required' => false],
+            ]],
+            'checkbox' => ['container' => false, 'props' => [
+                'name'    => ['type' => 'inputName', 'required' => true],
+                'label'   => ['type' => 'string',    'required' => true],
+                'default' => ['type' => 'bool',      'required' => false],
+            ]],
+            'slider' => ['container' => false, 'props' => [
+                'name'    => ['type' => 'inputName', 'required' => true],
+                'label'   => ['type' => 'string',    'required' => true],
+                'min'     => ['type' => 'int',       'required' => true],
+                'max'     => ['type' => 'int',       'required' => true],
+                'step'    => ['type' => 'int',       'required' => false],
+                'default' => ['type' => 'string',    'required' => false],
+            ]],
+            'dateInput' => ['container' => false, 'props' => [
+                'name'     => ['type' => 'inputName', 'required' => true],
+                'label'    => ['type' => 'string',    'required' => true],
+                'required' => ['type' => 'bool',      'required' => false],
+                'default'  => ['type' => 'string',    'required' => false],
+            ]],
+            'fileInput' => ['container' => false, 'props' => [
+                'name'     => ['type' => 'inputName', 'required' => true],
+                'label'    => ['type' => 'string',    'required' => true],
+                'accept'   => ['type' => 'string',    'required' => false],
+                'required' => ['type' => 'bool',      'required' => false],
+            ]],
+            'colorInput' => ['container' => false, 'props' => [
+                'name'    => ['type' => 'inputName', 'required' => true],
+                'label'   => ['type' => 'string',    'required' => true],
+                'default' => ['type' => 'string',    'required' => false],
+            ]],
+            'submitButton' => ['container' => false, 'props' => [
+                'label'              => ['type' => 'string', 'required' => true],
+                'requiredPermission' => ['type' => 'string', 'required' => false],
+                'variant'            => ['type' => 'enum',   'required' => false,
+                    'values' => ['primary', 'secondary', 'outline', 'ghost', 'destructive']],
+            ]],
+            'actionButton' => ['container' => false, 'props' => [
+                'label'              => ['type' => 'string',     'required' => true],
+                'action'             => ['type' => 'submitSpec',  'required' => true],
+                'requiredPermission' => ['type' => 'string',     'required' => false],
+                'confirm'            => ['type' => 'string',     'required' => false],
+                'variant'            => ['type' => 'enum',       'required' => false,
+                    'values' => ['primary', 'secondary', 'outline', 'ghost', 'destructive']],
             ]],
         ];
     }
