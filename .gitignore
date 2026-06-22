@@ -23,3 +23,4 @@ docs/*
 .playwright-mcp/
 tests/Local/
 docker-compose.override.yml
+/storage/
