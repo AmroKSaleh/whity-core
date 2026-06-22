@@ -22,3 +22,4 @@ docs/*
 .claude/
 .playwright-mcp/
 tests/Local/
+docker-compose.override.yml
