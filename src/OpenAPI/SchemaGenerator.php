@@ -227,6 +227,11 @@ class SchemaGenerator
                 : [$this->getTag($path)],
         ];
 
+        // RFC 8594 / OpenAPI 3.0 deprecation flag.
+        if (!empty($schema['deprecated'])) {
+            $operation['deprecated'] = true;
+        }
+
         // Declared (query/header) parameters are appended after the
         // auto-declared path parameters.
         $declaredParameters = $schema['parameters'] ?? null;

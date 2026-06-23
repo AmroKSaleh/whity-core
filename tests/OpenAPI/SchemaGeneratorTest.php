@@ -189,6 +189,43 @@ class SchemaGeneratorTest extends TestCase
         return (new SchemaGenerator('Whity API', '1.0.0', $loader, $router))->generate();
     }
 
+    // ── WC-317 deprecation flag ──────────────────────────────────────────────
+
+    public function testDeprecatedRouteEmitsDeprecatedTrueInSpec(): void
+    {
+        $router = new Router('');
+        $router->register('GET', '/api/v1/widgets', static fn() => null, null, null, null, [
+            'deprecated' => true,
+            'summary' => 'List widgets (deprecated)',
+        ]);
+
+        $operation = $this->generateOverRouter($router)['paths']['/api/v1/widgets']['get'];
+
+        $this->assertTrue($operation['deprecated'] ?? false, 'deprecated:true must appear on the operation');
+    }
+
+    public function testNonDeprecatedRouteHasNoDeprecatedField(): void
+    {
+        $router = new Router('');
+        $router->register('GET', '/api/v1/widgets', static fn() => null, null, null, null, [
+            'summary' => 'List widgets',
+        ]);
+
+        $operation = $this->generateOverRouter($router)['paths']['/api/v1/widgets']['get'];
+
+        $this->assertArrayNotHasKey('deprecated', $operation);
+    }
+
+    public function testRouteWithoutSchemaHasNoDeprecatedField(): void
+    {
+        $router = new Router('');
+        $router->register('GET', '/api/v1/widgets', static fn() => null);
+
+        $operation = $this->generateOverRouter($router)['paths']['/api/v1/widgets']['get'];
+
+        $this->assertArrayNotHasKey('deprecated', $operation);
+    }
+
     /**
      * Create a mock plugin for testing
      *
