@@ -1068,6 +1068,7 @@ export interface components {
         };
         DelegationListResponse: {
             data: components["schemas"]["Delegation"][];
+            pagination: components["schemas"]["Pagination"];
         };
         DeploymentApplyRequest: {
             version: string;
@@ -1223,6 +1224,7 @@ export interface components {
         };
         OuListResponse: {
             data: components["schemas"]["OrganizationalUnit"][];
+            pagination: components["schemas"]["Pagination"];
         };
         OuResponse: {
             data: components["schemas"]["OrganizationalUnit"];
@@ -1266,6 +1268,7 @@ export interface components {
         };
         PermissionListResponse: {
             data: components["schemas"]["Permission"][];
+            pagination: components["schemas"]["Pagination"];
         };
         Person: {
             id: number;
@@ -1288,6 +1291,7 @@ export interface components {
         };
         PersonListResponse: {
             data: components["schemas"]["Person"][];
+            pagination: components["schemas"]["Pagination"];
         };
         PersonResponse: {
             data: components["schemas"]["Person"];
@@ -1343,6 +1347,7 @@ export interface components {
         };
         RelationEdgeListResponse: {
             data: components["schemas"]["RelationEdge"][];
+            pagination: components["schemas"]["Pagination"];
         };
         RelationRef: {
             /** @enum {string} */
@@ -1405,6 +1410,7 @@ export interface components {
         };
         RoleListResponse: {
             data: components["schemas"]["Role"][];
+            pagination: components["schemas"]["Pagination"];
         };
         RoleSummary: {
             id: number;
@@ -1462,6 +1468,7 @@ export interface components {
         };
         TenantListResponse: {
             data: components["schemas"]["Tenant"][];
+            pagination: components["schemas"]["Pagination"];
         };
         TenantResponse: {
             data: components["schemas"]["Tenant"];
@@ -1516,6 +1523,7 @@ export interface components {
         };
         UserListResponse: {
             data: components["schemas"]["User"][];
+            pagination: components["schemas"]["Pagination"];
         };
         UserRelationsResponse: {
             data: {
