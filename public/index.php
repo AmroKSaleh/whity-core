@@ -763,10 +763,9 @@ if ($isWorker) {
                 $response = $kernel->handle($request);
 
                 // Merge CORS + security hardening headers into the response (WC-53, WC-187).
-                $headers = array_merge($response->getHeaders(), $corsHeaders, $securityHeaders);
-
-                // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
-                $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
+                // withHeaders() preserves the concrete response type (StreamedResponse etc.)
+                // so the streamer is not lost when merging headers.
+                $response = $response->withHeaders(array_merge($corsHeaders, $securityHeaders));
 
                 // Send response to client
                 $response->send();
@@ -869,10 +868,9 @@ if ($isWorker) {
         $response = $kernel->handle($request);
 
         // Merge CORS + security hardening headers into the response (WC-53, WC-187).
-        $headers = array_merge($response->getHeaders(), $corsHeaders, $securityHeaders);
-
-        // Create new response with CORS headers (correct parameter order: statusCode, body, headers)
-        $response = new Response($response->getStatusCode(), $response->getBody(), $headers);
+        // withHeaders() preserves the concrete response type (StreamedResponse etc.)
+        // so the streamer is not lost when merging headers.
+        $response = $response->withHeaders(array_merge($corsHeaders, $securityHeaders));
 
         // Send response to client
         $response->send();
