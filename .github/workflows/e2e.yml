@@ -62,6 +62,18 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
+      # Pull postgres:15-alpine before compose up so Docker Hub flakiness
+      # (rate-limit / transient auth timeout) can be retried independently.
+      # Three attempts with a backoff are enough to ride out brief outages
+      # without burning the 25-minute job timeout on a single hung pull.
+      - name: Pull Docker base images (with retry)
+        run: |
+          for i in 1 2 3; do
+            docker pull postgres:15-alpine && break
+            echo "Pull attempt $i failed — retrying in 15s..."
+            sleep 15
+          done
+
       # The dev compose file builds whity-core:dev from the Dockerfile `base`
       # target and bind-mounts the checkout. With the APP_ENV=development
       # default, the one-shot db-init service runs migrations + seed before
