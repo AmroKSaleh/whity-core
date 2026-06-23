@@ -13,6 +13,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
+use Whity\Http\PaginationParams;
 use PDO;
 
 /**
@@ -87,15 +88,25 @@ class DelegationsApiHandler
             $includeRevoked = isset($query['includeRevoked'])
                 && in_array(strtolower((string) $query['includeRevoked']), ['1', 'true', 'yes'], true);
 
-            $rows = $this->service->list(
+            $p     = PaginationParams::fromPath($request->getPath());
+            $total = $this->service->count(
                 $tenantId,
                 $granteeType,
                 $granteeId,
                 $grantorUserId,
                 $includeRevoked
             );
+            $rows = $this->service->list(
+                $tenantId,
+                $granteeType,
+                $granteeId,
+                $grantorUserId,
+                $includeRevoked,
+                $p->perPage,
+                $p->offset
+            );
 
-            return Response::json(['data' => array_map([$this, 'toPublic'], $rows)], 200);
+            return Response::json(['data' => array_map([$this, 'toPublic'], $rows), 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to fetch delegations', [
                 'event' => 'delegations.error',

@@ -9,6 +9,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
 use Whity\Http\JsonBody;
+use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
 
@@ -74,19 +75,24 @@ class TenantsApiHandler
     }
 
     /**
-     * GET /api/tenants - List current tenant or all tenants if system user
+     * GET /api/tenants - List tenants visible to the current user (paginated).
      */
     public function list(Request $request): Response
     {
         try {
             $currentTenantId = TenantContext::getTenantId();
 
-            // System users (tenant_id=0) can see all tenants
             $isSystemUser = $currentTenantId === 0;
+            $p = PaginationParams::fromPath($request->getPath());
 
             if ($isSystemUser) {
-                // System user: return all tenants except system tenant itself
-                // @tenant-guard-ignore: system-tenant (isSystemUser) lists all tenants; the users join is for per-tenant counts, scoped else-branch binds t.id = ?
+                // System user: all tenants except the system tenant itself.
+                // @tenant-guard-ignore: system-tenant (isSystemUser) lists all tenants; scoped else-branch binds t.id = :tenant_id
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM tenants t WHERE t.id != 0');
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
                            COUNT(u.id) as userCount
@@ -95,20 +101,33 @@ class TenantsApiHandler
                     WHERE t.id != 0
                     GROUP BY t.id
                     ORDER BY t.created_at DESC
+                    LIMIT :limit OFFSET :offset
                 ');
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
                 $stmt->execute();
             } else {
-                // Regular user: return only their tenant
-                // @tenant-guard-ignore: caller's own tenant; the users join is constrained by the WHERE t.id = ? on the tenants row (per-tenant user count)
+                // Regular user: only their own tenant (at most 1 row).
+                // @tenant-guard-ignore: caller's own tenant; the users join is constrained by the WHERE t.id = :tenant_id on the tenants row
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM tenants t WHERE t.id = :tenant_id AND t.id != 0');
+                $countStmt->bindValue(':tenant_id', $currentTenantId, PDO::PARAM_INT);
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
                            COUNT(u.id) as userCount
                     FROM tenants t
                     LEFT JOIN users u ON t.id = u.tenant_id
-                    WHERE t.id = ?
+                    WHERE t.id = :tenant_id
                     GROUP BY t.id
+                    LIMIT :limit OFFSET :offset
                 ');
-                $stmt->execute([$currentTenantId]);
+                $stmt->bindValue(':tenant_id', $currentTenantId, PDO::PARAM_INT);
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $stmt->execute();
             }
 
             /** @var array<int, array<string, mixed>> $rows */
@@ -127,7 +146,7 @@ class TenantsApiHandler
             // regardless of the engine, mirroring {@see UsersApiHandler::toPublicUser()}.
             $tenants = array_map(fn (array $row): array => $this->toPublicTenant($row), $rows);
 
-            return Response::json(['data' => $tenants], 200);
+            return Response::json(['data' => $tenants, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             error_log('[TenantsApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch tenant', 500);

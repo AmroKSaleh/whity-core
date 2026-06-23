@@ -9,6 +9,7 @@ use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Http\JsonBody;
+use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
 
 /**
@@ -57,7 +58,9 @@ class PersonsApiHandler
             }
 
             $search = $this->queryParam($request, 'search');
-            $rows = $this->persons->list($tenantId, $search);
+            $p      = PaginationParams::fromPath($request->getPath());
+            $total  = $this->persons->count($tenantId, $search);
+            $rows   = $this->persons->list($tenantId, $search, $p->perPage, $p->offset);
 
             $data = array_map(
                 fn (array $row): array => $this->toPublic(
@@ -67,7 +70,7 @@ class PersonsApiHandler
                 $rows
             );
 
-            return Response::json(['data' => $data], 200);
+            return Response::json(['data' => $data, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             error_log('[PersonsApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch persons', 500);

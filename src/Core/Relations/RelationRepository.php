@@ -313,13 +313,35 @@ class RelationRepository
     }
 
     /**
+     * Count all relation edges visible to the tenant.
+     *
+     * @param int $tenantId The acting tenant (0 = system sees all).
+     * @return int Total edges.
+     */
+    public function countEdges(int $tenantId): int
+    {
+        $sql    = 'SELECT COUNT(*) AS cnt FROM relations r';
+        $params = [];
+        if ($tenantId !== 0) {
+            $sql .= ' WHERE r.tenant_id = :tenant_id';
+            $params[':tenant_id'] = $tenantId;
+        }
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? (int)($row['cnt'] ?? 0) : 0;
+    }
+
+    /**
      * List ALL relation edges for a tenant, shaped for the family graph view.
      *
      * Returns the raw stored edges (one row per relationship) with the type name,
      * for rendering the react-flow graph. The graph derives reciprocal labels
      * client-side per viewing node; this returns the canonical stored direction.
      *
-     * @param int $tenantId The acting tenant (0 = system sees all).
+     * @param int      $tenantId The acting tenant (0 = system sees all).
+     * @param int|null $limit    Max rows to return, or null for all.
+     * @param int      $offset   Zero-based row offset (default 0).
      * @return array<int, array{
      *     id: int,
      *     fromPersonId: int,
@@ -329,7 +351,7 @@ class RelationRepository
      *     inverseTypeName: string|null
      * }>
      */
-    public function listEdges(int $tenantId): array
+    public function listEdges(int $tenantId, ?int $limit = null, int $offset = 0): array
     {
         $sql = '
             SELECT r.id,
@@ -348,6 +370,12 @@ class RelationRepository
             $params[':tenant_id'] = $tenantId;
         }
         $sql .= ' ORDER BY r.id ASC';
+
+        if ($limit !== null) {
+            $sql .= ' LIMIT :limit OFFSET :offset';
+            $params[':limit']  = $limit;
+            $params[':offset'] = $offset;
+        }
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);

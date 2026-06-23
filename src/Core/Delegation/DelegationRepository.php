@@ -121,14 +121,93 @@ class DelegationRepository
      * @param bool        $includeRevoked Whether to include revoked delegations.
      * @return array<int, array<string, mixed>> Normalised rows.
      */
-    public function list(
+    /**
+     * Count delegation rows matching the given filters.
+     *
+     * @param int         $tenantId      The acting tenant (0 = system).
+     * @param string|null $granteeType   Filter by grantee type, or null.
+     * @param int|null    $granteeId     Filter by grantee id, or null.
+     * @param int|null    $grantorUserId Filter by grantor, or null.
+     * @param bool        $includeRevoked Whether to include revoked delegations.
+     * @return int Total matching rows.
+     */
+    public function count(
         int $tenantId,
         ?string $granteeType = null,
         ?int $granteeId = null,
         ?int $grantorUserId = null,
         bool $includeRevoked = false
+    ): int {
+        [$where, $params] = $this->buildListWhere($tenantId, $granteeType, $granteeId, $grantorUserId, $includeRevoked);
+
+        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants
+        $sql = 'SELECT COUNT(*) AS cnt FROM permission_delegations';
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? (int)($row['cnt'] ?? 0) : 0;
+    }
+
+    /**
+     * @param int         $tenantId
+     * @param string|null $granteeType
+     * @param int|null    $granteeId
+     * @param int|null    $grantorUserId
+     * @param bool        $includeRevoked
+     * @param int|null    $limit
+     * @param int         $offset
+     * @return array<int, array<string, mixed>> Normalised rows.
+     */
+    public function list(
+        int $tenantId,
+        ?string $granteeType = null,
+        ?int $granteeId = null,
+        ?int $grantorUserId = null,
+        bool $includeRevoked = false,
+        ?int $limit = null,
+        int $offset = 0
     ): array {
-        $where = [];
+        [$where, $params] = $this->buildListWhere($tenantId, $granteeType, $granteeId, $grantorUserId, $includeRevoked);
+
+        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all delegations by design
+        $sql = 'SELECT * FROM permission_delegations';
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+        $sql .= ' ORDER BY granted_at DESC, id DESC';
+
+        if ($limit !== null) {
+            $sql .= ' LIMIT :limit OFFSET :offset';
+            $params[':limit']  = $limit;
+            $params[':offset'] = $offset;
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(fn (array $row): array => $this->normalizeRow($row), $rows);
+    }
+
+    /**
+     * Build the WHERE clause and params array shared by count() and list().
+     *
+     * @return array{array<int, string>, array<string, mixed>}
+     */
+    private function buildListWhere(
+        int $tenantId,
+        ?string $granteeType,
+        ?int $granteeId,
+        ?int $grantorUserId,
+        bool $includeRevoked
+    ): array {
+        $where  = [];
         $params = [];
 
         if ($tenantId !== 0) {
@@ -155,20 +234,7 @@ class DelegationRepository
             $where[] = 'revoked_at IS NULL';
         }
 
-        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all delegations by design
-        $sql = 'SELECT * FROM permission_delegations';
-        if ($where !== []) {
-            $sql .= ' WHERE ' . implode(' AND ', $where);
-        }
-        $sql .= ' ORDER BY granted_at DESC, id DESC';
-
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
-
-        /** @var array<int, array<string, mixed>> $rows */
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        return array_map(fn (array $row): array => $this->normalizeRow($row), $rows);
+        return [$where, $params];
     }
 
     /**

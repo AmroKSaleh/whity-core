@@ -10,6 +10,7 @@ use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Http\PaginationParams;
 
 /**
  * Audit Log API Handler (WC-34).
@@ -51,12 +52,6 @@ final class AuditLogApiHandler
      */
     private const SYSTEM_TENANT_ID = 0;
 
-    /**
-     * Default and maximum page sizes for the listing.
-     */
-    private const DEFAULT_PER_PAGE = 25;
-    private const MAX_PER_PAGE = 100;
-
     private PDO $db;
     private RoleChecker $roleChecker;
 
@@ -96,7 +91,23 @@ final class AuditLogApiHandler
                 return Response::error('Insufficient permissions', 403, ['required' => CorePermissions::AUDIT_READ]);
             }
 
-            $query = $this->parseQuery($request->getPath());
+            // Parse query params from both $_GET (production) and the path query
+            // string (tests). This mirrors PaginationParams::fromPath internals.
+            $query = [];
+            foreach ($_GET as $k => $v) {
+                if (is_string($k) && is_string($v)) {
+                    $query[$k] = $v;
+                }
+            }
+            $qs = parse_url($request->getPath(), PHP_URL_QUERY);
+            if (is_string($qs) && $qs !== '') {
+                parse_str($qs, $parsed);
+                foreach ($parsed as $k => $v) {
+                    if (is_string($k) && is_string($v)) {
+                        $query[$k] = $v;
+                    }
+                }
+            }
 
             // Build the WHERE clause: always tenant-scoped (system tenant sees all),
             // plus any supplied filters. All values are bound, never interpolated.
@@ -142,9 +153,7 @@ final class AuditLogApiHandler
             $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
             $total = $countRow !== false ? (int) ($countRow['cnt'] ?? 0) : 0;
 
-            $perPage = $this->resolvePerPage($query);
-            $page = $this->resolvePage($query);
-            $offset = ($page - 1) * $perPage;
+            $p = PaginationParams::fromQuery($query);
 
             // Newest-first; bound LIMIT/OFFSET as integers (cast, not interpolated
             // arbitrary input — both are validated non-negative ints above).
@@ -158,8 +167,8 @@ final class AuditLogApiHandler
             foreach ($params as $key => $value) {
                 $listStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
             }
-            $listStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
-            $listStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+            $listStmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+            $listStmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
             $listStmt->execute();
 
             /** @var array<int, array<string, mixed>> $rows */
@@ -169,12 +178,7 @@ final class AuditLogApiHandler
 
             return Response::json([
                 'data' => $data,
-                'pagination' => [
-                    'page' => $page,
-                    'perPage' => $perPage,
-                    'total' => $total,
-                    'totalPages' => $perPage > 0 ? (int) ceil($total / $perPage) : 0,
-                ],
+                'pagination' => $p->meta($total),
             ], 200);
         } catch (\Exception $e) {
             error_log('[AuditLogApiHandler] list failed: ' . $e->getMessage());
@@ -227,78 +231,4 @@ final class AuditLogApiHandler
         ];
     }
 
-    /**
-     * Resolve the validated page size from the query (clamped to a sane range).
-     *
-     * @param array<string, string> $query Parsed query parameters.
-     * @return int The page size, in [1, MAX_PER_PAGE].
-     */
-    private function resolvePerPage(array $query): int
-    {
-        $raw = $query['per_page'] ?? null;
-        if (!is_string($raw) || !ctype_digit($raw)) {
-            return self::DEFAULT_PER_PAGE;
-        }
-
-        $value = (int) $raw;
-        if ($value < 1) {
-            return self::DEFAULT_PER_PAGE;
-        }
-
-        return min($value, self::MAX_PER_PAGE);
-    }
-
-    /**
-     * Resolve the validated 1-based page number from the query.
-     *
-     * @param array<string, string> $query Parsed query parameters.
-     * @return int The page number (>= 1).
-     */
-    private function resolvePage(array $query): int
-    {
-        $raw = $query['page'] ?? null;
-        if (!is_string($raw) || !ctype_digit($raw)) {
-            return 1;
-        }
-
-        return max(1, (int) $raw);
-    }
-
-    /**
-     * Parse the query-string parameters for the request.
-     *
-     * Reads from two sources so it works both in production and in tests:
-     *  - the `$_GET` superglobal (how FrankenPHP exposes the query at runtime —
-     *    {@see Request::fromGlobals()} strips the query out of the path), and
-     *  - the query component of the raw request path (how the test suite builds a
-     *    {@see Request}, mirroring {@see \Whity\Http\Middleware\EnforceTenantIsolation}).
-     * Path values win when both are present.
-     *
-     * @param string $rawPath The request path, possibly including a query string.
-     * @return array<string, string> The parsed parameters.
-     */
-    private function parseQuery(string $rawPath): array
-    {
-        $params = [];
-
-        // Runtime source: the $_GET superglobal.
-        foreach ($_GET as $key => $value) {
-            if (is_string($key) && is_string($value)) {
-                $params[$key] = $value;
-            }
-        }
-
-        // Path source (tests / explicit query in the path).
-        $queryString = parse_url($rawPath, PHP_URL_QUERY);
-        if (is_string($queryString) && $queryString !== '') {
-            parse_str($queryString, $parsed);
-            foreach ($parsed as $key => $value) {
-                if (is_string($key) && is_string($value)) {
-                    $params[$key] = $value;
-                }
-            }
-        }
-
-        return $params;
-    }
 }

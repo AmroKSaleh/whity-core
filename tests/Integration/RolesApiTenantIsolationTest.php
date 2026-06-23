@@ -54,7 +54,11 @@ class RolesApiTenantIsolationTest extends TestCase
 
     /**
      * Build a PDO whose role-list query returns $rows only for $ownerTenantId and
-     * an empty set for every other tenant, simulating user_roles scoping.
+     * an empty set for every other tenant, simulating tenant-scoped pagination.
+     *
+     * Pagination adds a COUNT query (fetch) before the SELECT (fetchAll). Both
+     * queries bind :tenant_id via bindValue; the mock captures that value so the
+     * fetchAll callback can scope results to the correct tenant.
      *
      * @param array<int, array<string, mixed>> $rows
      */
@@ -64,17 +68,20 @@ class RolesApiTenantIsolationTest extends TestCase
         $pdo->method('prepare')->willReturnCallback(
             function (string $sql) use ($ownerTenantId, $rows): PDOStatement {
                 $stmt = $this->createMock(PDOStatement::class);
-                $stmt->method('execute')->willReturnCallback(
-                    function (?array $params = null): bool {
-                        // The scoped list binds the requesting tenant id as param 0.
-                        $this->boundTenantId = $params[0] ?? null;
+                $stmt->method('execute')->willReturn(true);
+                // The tenant-scoped queries bind :tenant_id via bindValue (not execute params).
+                $stmt->method('bindValue')->willReturnCallback(
+                    function (mixed $param, mixed $value): bool {
+                        if ($param === ':tenant_id') {
+                            $this->boundTenantId = (int) $value;
+                        }
                         return true;
                     }
                 );
                 $stmt->method('fetchAll')->willReturnCallback(
                     fn(): array => ($this->boundTenantId === $ownerTenantId) ? $rows : []
                 );
-                $stmt->method('fetch')->willReturn(false);
+                $stmt->method('fetch')->willReturn(['cnt' => count($rows)]);
                 return $stmt;
             }
         );

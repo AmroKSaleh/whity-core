@@ -133,19 +133,59 @@ class DelegationService implements DelegatedPermissionResolver
      * @param bool        $includeRevoked Whether to include revoked rows.
      * @return array<int, array<string, mixed>> Normalised delegation rows.
      */
-    public function list(
+    /**
+     * Count delegations matching the given filters.
+     *
+     * @param int         $tenantId
+     * @param string|null $granteeType
+     * @param int|null    $granteeId
+     * @param int|null    $grantorUserId
+     * @param bool        $includeRevoked
+     * @return int Total matching rows.
+     */
+    public function count(
         int $tenantId,
         ?string $granteeType = null,
         ?int $granteeId = null,
         ?int $grantorUserId = null,
         bool $includeRevoked = false
+    ): int {
+        return $this->repository->count(
+            $tenantId,
+            $granteeType,
+            $granteeId,
+            $grantorUserId,
+            $includeRevoked
+        );
+    }
+
+    /**
+     * @param int         $tenantId
+     * @param string|null $granteeType
+     * @param int|null    $granteeId
+     * @param int|null    $grantorUserId
+     * @param bool        $includeRevoked
+     * @param int|null    $limit
+     * @param int         $offset
+     * @return array<int, array<string, mixed>> Normalised delegation rows.
+     */
+    public function list(
+        int $tenantId,
+        ?string $granteeType = null,
+        ?int $granteeId = null,
+        ?int $grantorUserId = null,
+        bool $includeRevoked = false,
+        ?int $limit = null,
+        int $offset = 0
     ): array {
         return $this->repository->list(
             $tenantId,
             $granteeType,
             $granteeId,
             $grantorUserId,
-            $includeRevoked
+            $includeRevoked,
+            $limit,
+            $offset
         );
     }
 
