@@ -532,6 +532,75 @@ class HttpKernelTest extends TestCase
         }
     }
 
+    // ── WC-317 RFC 8594 deprecation headers ─────────────────────────────────
+
+    public function testDeprecatedRouteEmitsDeprecationHeader(): void
+    {
+        $this->router->register(
+            'GET', '/api/v1/legacy', static fn(Request $req) => Response::json(['ok' => true]),
+            null, null, null, ['deprecated' => true]
+        );
+
+        $response = $this->kernel->handle(new Request('GET', '/api/v1/legacy'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('true', $response->getHeaders()['deprecation'] ?? null);
+    }
+
+    public function testDeprecatedRouteWithSunsetEmitsBothHeaders(): void
+    {
+        $this->router->register(
+            'GET', '/api/v1/old', static fn(Request $req) => Response::json(['ok' => true]),
+            null, null, null, ['deprecated' => true, 'sunset' => 'Sat, 31 Dec 2025 00:00:00 GMT']
+        );
+
+        $response = $this->kernel->handle(new Request('GET', '/api/v1/old'));
+        $headers = $response->getHeaders();
+
+        $this->assertSame('true', $headers['deprecation'] ?? null);
+        $this->assertSame('Sat, 31 Dec 2025 00:00:00 GMT', $headers['sunset'] ?? null);
+    }
+
+    public function testNonDeprecatedRouteHasNoDeprecationHeader(): void
+    {
+        $this->router->register(
+            'GET', '/api/v1/current', static fn(Request $req) => Response::json(['ok' => true]),
+            null, null, null, ['summary' => 'Active endpoint']
+        );
+
+        $response = $this->kernel->handle(new Request('GET', '/api/v1/current'));
+
+        $this->assertArrayNotHasKey('deprecation', $response->getHeaders());
+    }
+
+    public function testRouteWithNoSchemaHasNoDeprecationHeader(): void
+    {
+        $this->router->register('GET', '/api/v1/bare', static fn(Request $req) => Response::json([]));
+
+        $response = $this->kernel->handle(new Request('GET', '/api/v1/bare'));
+
+        $this->assertArrayNotHasKey('deprecation', $response->getHeaders());
+    }
+
+    public function testDeprecatedRbacProtectedRouteEmitsDeprecationHeader(): void
+    {
+        $rbacMock = $this->createMock(RbacMiddleware::class);
+        $rbacMock->method('handle')->willReturnCallback(
+            static fn(Request $req, callable $next) => $next($req)
+        );
+        $kernel = new HttpKernel($this->router, $rbacMock);
+
+        $this->router->register(
+            'GET', '/api/v1/admin-legacy',
+            static fn(Request $req) => Response::json(['protected' => true]),
+            'admin', null, null, ['deprecated' => true]
+        );
+
+        $response = $kernel->handle(new Request('GET', '/api/v1/admin-legacy'));
+
+        $this->assertSame('true', $response->getHeaders()['deprecation'] ?? null);
+    }
+
     /**
      * Stress test validating memory stability under heavy requests
      */

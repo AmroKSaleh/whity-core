@@ -194,7 +194,7 @@ class Router
      * Returns route information if a match is found, null otherwise.
      *
      * @param Request $request Request object
-     * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string}|null Array if matched, null otherwise
+     * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string, schema: array<string, mixed>|null}|null Array if matched, null otherwise
      */
     public function match(Request $request): ?array
     {
@@ -222,6 +222,7 @@ class Router
                     'requiredRole' => $route['requiredRole'],
                     'requiredPermission' => $route['requiredPermission'] ?? null,
                     'namespacePrefix' => $route['namespacePrefix'] ?? null,
+                    'schema' => $route['schema'] ?? null,
                 ];
             }
         }
@@ -254,7 +255,7 @@ class Router
     /**
      * Get all registered routes
      *
-     * @return array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string}>
+     * @return array<array{method: string, path: string, pattern: string, handler: callable, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string, schema: array<string, mixed>|null}>
      */
     public function getRoutes(): array
     {

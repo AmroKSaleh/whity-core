@@ -272,6 +272,7 @@ class HttpKernel
             $params = $matchedRoute['params'];
             $requiredRole = $matchedRoute['requiredRole'];
             $requiredPermission = $matchedRoute['requiredPermission'] ?? null;
+            $schema = $matchedRoute['schema'] ?? null;
 
             // If the route declares a required role and/or permission, apply RBAC
             // middleware. Both are forwarded so route-level permissions (WC-14)
@@ -281,12 +282,47 @@ class HttpKernel
                 $next = fn(Request $req) => $handler($req, $params);
 
                 // Pass through RBAC middleware (role + permission).
-                return $this->rbacMiddleware->handle($request, $next, $requiredRole, $requiredPermission);
+                $response = $this->rbacMiddleware->handle($request, $next, $requiredRole, $requiredPermission);
+            } else {
+                // Otherwise, call handler directly with params
+                $response = $handler($request, $params);
             }
 
-            // Otherwise, call handler directly with params
-            return $handler($request, $params);
+            // Emit RFC 8594 Deprecation / Sunset headers when the route schema
+            // declares deprecated:true (WC-317). Headers are merged last so they
+            // survive any withHeaders() chain applied by the outer dispatch loop.
+            $deprecationHeaders = $this->deprecationHeaders($schema);
+            if ($deprecationHeaders !== []) {
+                $response = $response->withHeaders($deprecationHeaders);
+            }
+
+            return $response;
         };
+    }
+
+    /**
+     * Build RFC 8594 Deprecation / Sunset headers from a route schema.
+     *
+     * The schema may declare:
+     *   - `deprecated => true`  → `Deprecation: true`
+     *   - `sunset => '<date>'`  → `Sunset: <date>` (RFC 7231 HTTP-date recommended)
+     *
+     * @param array<string, mixed>|null $schema
+     * @return array<string, string>
+     */
+    private function deprecationHeaders(?array $schema): array
+    {
+        if (empty($schema['deprecated'])) {
+            return [];
+        }
+
+        $headers = ['Deprecation' => 'true'];
+
+        if (isset($schema['sunset']) && is_string($schema['sunset']) && $schema['sunset'] !== '') {
+            $headers['Sunset'] = $schema['sunset'];
+        }
+
+        return $headers;
     }
 
     /**

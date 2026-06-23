@@ -481,11 +481,6 @@ parameters:
 			path: src/OpenAPI/SchemaGenerator.php
 
 		-
-			message: "#^Offset 'schema' on array\\{method\\: string, path\\: string, pattern\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null\\} on left side of \\?\\? does not exist\\.$#"
-			count: 1
-			path: src/OpenAPI/SchemaGenerator.php
-
-		-
 			message: "#^Offset 'tags' on array\\<string, mixed\\> on left side of \\?\\? always exists and is not nullable\\.$#"
 			count: 1
 			path: src/OpenAPI/SchemaGenerator.php
@@ -531,7 +526,7 @@ parameters:
 			path: tests/Api/OusApiHandlerRealEngineTest.php
 
 		-
-			message: "#^Offset 'handler' does not exist on array\\{handler\\: callable\\(\\)\\: mixed, params\\: array\\<string, string\\>, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null\\}\\|null\\.$#"
+			message: "#^Offset 'handler' does not exist on array\\{handler\\: callable\\(\\)\\: mixed, params\\: array\\<string, string\\>, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null, schema\\: array\\<string, mixed\\>\\|null\\}\\|null\\.$#"
 			count: 2
 			path: tests/Api/PluginsApiHandlerTest.php
 
@@ -1009,11 +1004,6 @@ parameters:
 			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
 			count: 3
 			path: tests/Integration/TwoFactorKeyConsistencyTest.php
-
-		-
-			message: "#^Offset 'schema' on array\\{method\\: string, path\\: string, pattern\\: string, handler\\: callable\\(\\)\\: mixed, requiredRole\\: string\\|null, requiredPermission\\: string\\|null, namespacePrefix\\: string\\|null\\} on left side of \\?\\? does not exist\\.$#"
-			count: 1
-			path: tests/OpenAPI/SchemaEngineTest.php
 
 		-
 			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
