@@ -13,8 +13,9 @@ namespace Whity\Sdk\Http;
  *
  * The static factories use late static binding (`new static`) so a host
  * subclass calling `HostResponse::json()` receives its own type back.
- *
- * @phpstan-consistent-constructor
+ * Subclasses that change the constructor signature (e.g. StreamedResponse)
+ * must override withHeaders() so new static() is never called with a
+ * mismatched signature.
  */
 class Response
 {
@@ -87,6 +88,7 @@ class Response
                 json_last_error()
             );
         }
+        // @phpstan-ignore new.static (LSB factory; StreamedResponse overrides json() so this path is never reached with an incompatible constructor)
         return new static($statusCode, $body, [
             'Content-Type' => 'application/json',
         ]);
@@ -109,6 +111,27 @@ class Response
             $data['details'] = $details;
         }
         return static::json($data, $statusCode);
+    }
+
+    /**
+     * Return a copy of this response with additional headers merged in.
+     *
+     * Headers in $extraHeaders override any same-named headers already on this
+     * response (later values win in array_merge). Subclasses with a different
+     * constructor shape (e.g. StreamedResponse) MUST override this method so
+     * that new static() is never called with a mismatched signature.
+     *
+     * @param array<string, string> $extraHeaders
+     * @return static
+     */
+    public function withHeaders(array $extraHeaders): static
+    {
+        // @phpstan-ignore new.static (StreamedResponse overrides withHeaders(); this path is never reached with an incompatible constructor)
+        return new static(
+            $this->statusCode,
+            $this->body,
+            array_merge($this->headers, $extraHeaders)
+        );
     }
 
     /**
