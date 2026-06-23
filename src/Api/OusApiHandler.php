@@ -55,6 +55,7 @@ class OusApiHandler
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
+                // @tenant-guard-ignore: system-tenant (id 0) lists all OUs; scoped else-branch binds tenant_id
                 $stmt = $this->db->prepare('
                     SELECT id, tenant_id, parent_id, name, slug, description, created_at
                     FROM organizational_units

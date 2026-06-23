@@ -93,6 +93,7 @@ class TenantsApiHandler
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
+                // @tenant-guard-ignore: system-tenant (isSystemUser) lists all real tenants; users LEFT JOIN is unscoped by design — each row is a distinct tenant
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
                            COUNT(u.id) as userCount
@@ -115,6 +116,7 @@ class TenantsApiHandler
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
+                // @tenant-guard-ignore: caller's own tenant; WHERE t.id = :tenant_id on tenants constrains the users LEFT JOIN to one tenant's rows
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
                            COUNT(u.id) as userCount

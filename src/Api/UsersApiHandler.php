@@ -98,6 +98,7 @@ class UsersApiHandler
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
+                // @tenant-guard-ignore: system-tenant (id 0) lists all users; scoped else-branch binds u.tenant_id = :tenant_id
                 $stmt = $this->db->prepare('
                     SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
                     FROM users u

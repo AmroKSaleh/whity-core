@@ -113,6 +113,7 @@ class RolesApiHandler
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
+                // @tenant-guard-ignore: system-tenant (id 0) lists all roles; scoped else-branch binds (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)
                 $stmt = $this->db->prepare('
                     SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
                            COUNT(rp.id) AS permission_count
