@@ -11,6 +11,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
 use Whity\Http\JsonBody;
+use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
 
@@ -82,44 +83,59 @@ class UsersApiHandler
     }
 
     /**
-     * GET /api/users - List all users for current tenant or all users if system user
+     * GET /api/users - List users for the current tenant (paginated).
      */
     public function list(Request $request): Response
     {
         try {
             $tenantId = TenantContext::getTenantId();
+            $p = PaginationParams::fromPath($request->getPath());
 
-            // System users (tenant_id=0) can see all users from all tenants
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists users across all tenants; scoped else-branch binds u.tenant_id = ?
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM users u');
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
+                // @tenant-guard-ignore: system-tenant (id 0) lists all users; scoped else-branch binds u.tenant_id = :tenant_id
                 $stmt = $this->db->prepare('
                     SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
                     FROM users u
                     JOIN roles r ON u.role_id = r.id
                     ORDER BY u.tenant_id, u.created_at DESC
+                    LIMIT :limit OFFSET :offset
                 ');
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
                 $stmt->execute();
             } else {
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM users u WHERE u.tenant_id = :tenant_id');
+                $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
                 $stmt = $this->db->prepare('
                     SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
                     FROM users u
                     JOIN roles r ON u.role_id = r.id
-                    WHERE u.tenant_id = ?
+                    WHERE u.tenant_id = :tenant_id
                     ORDER BY u.created_at DESC
+                    LIMIT :limit OFFSET :offset
                 ');
-                $stmt->execute([$tenantId]);
+                $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $stmt->execute();
             }
 
             /** @var array<int, array<string, mixed>> $rows */
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Shape each row into the public contract: expose the fields the
-            // Edit User form binds (name, role, tenantId) plus createdAt, and
-            // never leak the password hash. tenant_id/created_at are aliased to
-            // camelCase so the frontend can consume the payload directly.
             $users = array_map(fn (array $row): array => $this->toPublicUser($row), $rows);
 
-            return Response::json(['data' => $users], 200);
+            return Response::json(['data' => $users, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to fetch users', [
                 'event' => 'users.error',

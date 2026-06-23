@@ -356,14 +356,16 @@ class RolesApiHandlerTest extends TestCase
             ['id' => 1, 'name' => 'Tenant A Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0],
             ['id' => 2, 'name' => 'Tenant B Role', 'description' => '', 'parent_id' => null, 'created_at' => 'now', 'permission_count' => 0],
         ];
-        $stmt = $this->statement(false, $rows);
+        // Pagination adds a COUNT query before the SELECT — provide two stmts.
+        $countStmt = $this->statement(['cnt' => 2]);
+        $listStmt  = $this->statement(false, $rows);
 
         $pdo = $this->createMock(PDO::class);
-        // SYSTEM path uses a query with no bound tenant parameter.
-        $pdo->expects($this->once())
+        // SYSTEM path uses queries with no bound tenant parameter; both avoid user_roles.
+        $pdo->expects($this->exactly(2))
             ->method('prepare')
             ->with($this->logicalNot($this->stringContains('user_roles')))
-            ->willReturn($stmt);
+            ->willReturnOnConsecutiveCalls($countStmt, $listStmt);
 
         $handler = new RolesApiHandler($pdo, $this->passthroughHookManager());
         $response = $handler->list(new Request('GET', '/api/roles'));

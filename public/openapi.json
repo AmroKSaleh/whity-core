@@ -7250,10 +7250,14 @@
                         "items": {
                             "$ref": "#/components/schemas/Delegation"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "DeploymentApplyRequest": {
@@ -7868,10 +7872,14 @@
                         "items": {
                             "$ref": "#/components/schemas/OrganizationalUnit"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "OuResponse": {
@@ -8033,10 +8041,14 @@
                         "items": {
                             "$ref": "#/components/schemas/Permission"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "Person": {
@@ -8123,10 +8135,14 @@
                         "items": {
                             "$ref": "#/components/schemas/Person"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "PersonResponse": {
@@ -8331,10 +8347,14 @@
                         "items": {
                             "$ref": "#/components/schemas/RelationEdge"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "RelationRef": {
@@ -8592,10 +8612,14 @@
                         "items": {
                             "$ref": "#/components/schemas/Role"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "RoleSummary": {
@@ -8822,10 +8846,14 @@
                         "items": {
                             "$ref": "#/components/schemas/Tenant"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "TenantResponse": {
@@ -9042,10 +9070,14 @@
                         "items": {
                             "$ref": "#/components/schemas/User"
                         }
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/Pagination"
                     }
                 },
                 "required": [
-                    "data"
+                    "data",
+                    "pagination"
                 ]
             },
             "UserRelationsResponse": {

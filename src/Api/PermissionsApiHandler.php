@@ -7,6 +7,7 @@ namespace Whity\Api;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Http\PaginationParams;
 use PDO;
 
 /**
@@ -42,10 +43,13 @@ class PermissionsApiHandler
     }
 
     /**
-     * GET /api/permissions - List all permissions.
+     * GET /api/permissions - List all permissions (paginated).
+     *
+     * Registry-defined permissions are merged after the DB fetch so the total
+     * count and page slice both reflect the full merged catalogue.
      *
      * @param Request $request The incoming request.
-     * @return Response JSON list of permissions under the `data` key.
+     * @return Response JSON list of permissions with pagination envelope.
      */
     public function list(Request $request): Response
     {
@@ -61,7 +65,11 @@ class PermissionsApiHandler
 
             $permissions = $this->mergeRegistryPermissions($permissions);
 
-            return Response::json(['data' => $permissions], 200);
+            $p     = PaginationParams::fromPath($request->getPath());
+            $total = count($permissions);
+            $page  = array_slice($permissions, $p->offset, $p->perPage);
+
+            return Response::json(['data' => $page, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             error_log('[PermissionsApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch permissions', 500);

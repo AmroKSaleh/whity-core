@@ -123,6 +123,29 @@ class PersonRepository
     }
 
     /**
+     * Count persons visible to the tenant, with an optional name filter.
+     *
+     * @param int         $tenantId The acting tenant (0 = system).
+     * @param string|null $search   Optional display-name substring filter.
+     * @return int Total matching rows.
+     */
+    public function count(int $tenantId, ?string $search = null): int
+    {
+        [$where, $params] = $this->buildWhereClause($tenantId, $search);
+
+        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants
+        $sql = 'SELECT COUNT(*) AS cnt FROM persons';
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? (int)($row['cnt'] ?? 0) : 0;
+    }
+
+    /**
      * List persons visible to the tenant, with an optional name search.
      *
      * The system tenant (id 0) sees all tenants' persons; any other tenant sees
@@ -131,9 +154,44 @@ class PersonRepository
      *
      * @param int         $tenantId The acting tenant (0 = system).
      * @param string|null $search   Optional display-name substring filter.
+     * @param int|null    $limit    Max rows to return, or null for all.
+     * @param int         $offset   Zero-based row offset (default 0).
      * @return array<int, array<string, mixed>> Normalised rows, ordered by display name.
      */
-    public function list(int $tenantId, ?string $search = null): array
+    public function list(int $tenantId, ?string $search = null, ?int $limit = null, int $offset = 0): array
+    {
+        [$where, $params] = $this->buildWhereClause($tenantId, $search);
+
+        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all persons by design
+        $sql = 'SELECT * FROM persons';
+        if ($where !== []) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+        $sql .= ' ORDER BY display_name ASC, id ASC';
+
+        if ($limit !== null) {
+            $sql .= ' LIMIT :limit OFFSET :offset';
+            $params[':limit']  = $limit;
+            $params[':offset'] = $offset;
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(fn (array $row): array => $this->normalizeRow($row), $rows);
+    }
+
+    /**
+     * Build the shared WHERE clause and params array for count() and list().
+     *
+     * @param int         $tenantId
+     * @param string|null $search
+     * @return array{array<int, string>, array<string, mixed>}
+     */
+    private function buildWhereClause(int $tenantId, ?string $search): array
     {
         $where = [];
         $params = [];
@@ -144,26 +202,11 @@ class PersonRepository
         }
 
         if ($search !== null && trim($search) !== '') {
-            // LOWER(...) LIKE keeps the match case-insensitive on both SQLite and
-            // Postgres without relying on ILIKE (Postgres-only).
             $where[] = 'LOWER(display_name) LIKE :search';
             $params[':search'] = '%' . strtolower(trim($search)) . '%';
         }
 
-        // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all persons by design
-        $sql = 'SELECT * FROM persons';
-        if ($where !== []) {
-            $sql .= ' WHERE ' . implode(' AND ', $where);
-        }
-        $sql .= ' ORDER BY display_name ASC, id ASC';
-
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
-
-        /** @var array<int, array<string, mixed>> $rows */
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        return array_map(fn (array $row): array => $this->normalizeRow($row), $rows);
+        return [$where, $params];
     }
 
     /**

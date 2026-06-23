@@ -1030,7 +1030,7 @@ final class CoreApiSchemas
             'MutationResponse' => self::dataEnvelope($mutationResult),
 
             'User' => $user,
-            'UserListResponse' => self::listEnvelope('User'),
+            'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
             // NOTE: no tenantId field — the handler always creates the user in
             // the caller's TenantContext (a declared field with zero runtime
@@ -1048,7 +1048,7 @@ final class CoreApiSchemas
             ], []),
 
             'Permission' => $permission,
-            'PermissionListResponse' => self::listEnvelope('Permission'),
+            'PermissionListResponse' => self::paginatedListEnvelope('Permission'),
             // The catalogue (GET /api/permissions) merges database rows with
             // registry-only entries, which carry NO database id and a `source`
             // tag instead — a distinct shape from the role-scoped Permission.
@@ -1060,7 +1060,7 @@ final class CoreApiSchemas
             ], ['id', 'name', 'description']),
             'PermissionCatalogueResponse' => self::listEnvelope('PermissionCatalogueEntry'),
             'Role' => $role,
-            'RoleListResponse' => self::listEnvelope('Role'),
+            'RoleListResponse' => self::paginatedListEnvelope('Role'),
             'RoleDetail' => self::object([
                 'id' => self::int(),
                 'name' => self::str(),
@@ -1090,7 +1090,7 @@ final class CoreApiSchemas
             'RoleSummaryListResponse' => self::listEnvelope('RoleSummary'),
 
             'Tenant' => $tenant,
-            'TenantListResponse' => self::listEnvelope('Tenant'),
+            'TenantListResponse' => self::paginatedListEnvelope('Tenant'),
             'TenantResponse' => self::dataEnvelope(SchemaBuilder::ref('Tenant')),
             'TenantCreateRequest' => self::object([
                 'name' => self::str(),
@@ -1102,7 +1102,7 @@ final class CoreApiSchemas
             ], []),
 
             'OrganizationalUnit' => $ou,
-            'OuListResponse' => self::listEnvelope('OrganizationalUnit'),
+            'OuListResponse' => self::paginatedListEnvelope('OrganizationalUnit'),
             'OuResponse' => self::dataEnvelope(SchemaBuilder::ref('OrganizationalUnit')),
             'OuDetail' => self::object([
                 'id' => self::int(),
@@ -1138,7 +1138,7 @@ final class CoreApiSchemas
             'OuRoleAssignmentResponse' => self::dataEnvelope(SchemaBuilder::ref('OuRoleAssignment')),
 
             'Delegation' => $delegation,
-            'DelegationListResponse' => self::listEnvelope('Delegation'),
+            'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),
             'DelegationCreateRequest' => self::object([
                 'granteeType' => ['type' => 'string', 'enum' => ['role', 'user']],
                 'granteeId' => self::int(),
@@ -1373,7 +1373,7 @@ final class CoreApiSchemas
                 'relationCount' => self::int(),
                 'relations' => ['type' => 'array', 'items' => SchemaBuilder::ref('RelationSummary')],
             ], ['id', 'tenantId', 'displayName', 'hasAccount', 'deceased', 'relationCount', 'relations']),
-            'PersonListResponse' => self::listEnvelope('Person'),
+            'PersonListResponse' => self::paginatedListEnvelope('Person'),
             'PersonResponse' => self::dataEnvelope(SchemaBuilder::ref('Person')),
 
             // Person create / update request bodies
@@ -1399,7 +1399,7 @@ final class CoreApiSchemas
                 'typeName' => self::str(),
                 'inverseTypeName' => self::str(true),
             ], ['id', 'fromPersonId', 'toPersonId', 'typeId', 'typeName']),
-            'RelationEdgeListResponse' => self::listEnvelope('RelationEdge'),
+            'RelationEdgeListResponse' => self::paginatedListEnvelope('RelationEdge'),
 
             // GET /api/users/{id}/relations — inline data envelope (personId may be null)
             'UserRelationsResponse' => self::dataEnvelope(self::object([
@@ -1595,6 +1595,20 @@ final class CoreApiSchemas
         return self::object(
             ['data' => ['type' => 'array', 'items' => SchemaBuilder::ref($component)]],
             ['data']
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function paginatedListEnvelope(string $component): array
+    {
+        return self::object(
+            [
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref($component)],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+            ],
+            ['data', 'pagination']
         );
     }
 

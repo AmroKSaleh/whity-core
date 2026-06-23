@@ -64,7 +64,7 @@ export function CreateRoleModal({
   const fetchPermissions = useCallback(async () => {
     try {
       setIsLoadingPermissions(true);
-      const response = await apiClient('/api/v1/permissions');
+      const response = await apiClient('/api/v1/permissions?per_page=100');
 
       if (!response.ok) {
         throw new Error('Failed to fetch permissions');

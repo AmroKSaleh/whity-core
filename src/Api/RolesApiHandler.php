@@ -10,6 +10,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
 use Whity\Http\JsonBody;
+use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
 
@@ -93,19 +94,26 @@ class RolesApiHandler
     }
 
     /**
-     * GET /api/roles - List roles visible to the current tenant.
+     * GET /api/roles - List roles visible to the current tenant (paginated).
      *
      * @param Request $request The incoming request.
-     * @return Response JSON list of roles under the `data` key.
+     * @return Response JSON list of roles with pagination envelope.
      */
     public function list(Request $request): Response
     {
         try {
             $tenantId = TenantContext::getTenantId();
+            $p = PaginationParams::fromPath($request->getPath());
 
             // SYSTEM tenant (id 0) sees every role across all tenants.
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists roles across all tenants; scoped else-branch binds (r.tenant_id = ? OR r.tenant_id IS NULL)
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM roles r');
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
+                // @tenant-guard-ignore: system-tenant (id 0) lists all roles; scoped else-branch binds (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)
                 $stmt = $this->db->prepare('
                     SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
                            COUNT(rp.id) AS permission_count
@@ -113,24 +121,37 @@ class RolesApiHandler
                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
                     GROUP BY r.id, r.tenant_id
                     ORDER BY r.created_at DESC
+                    LIMIT :limit OFFSET :offset
                 ');
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
                 $stmt->execute();
             } else {
                 // A role is visible to a tenant when it is OWNED by that tenant
                 // (roles.tenant_id = currentTenant) OR is a GLOBAL/system role
-                // (roles.tenant_id IS NULL, e.g. the seeded base roles), which
-                // belongs to every tenant. Tenant-owned roles stay isolated to
-                // their owner (WC-110).
+                // (roles.tenant_id IS NULL, e.g. the seeded base roles).
+                $countStmt = $this->db->prepare(
+                    'SELECT COUNT(*) AS cnt FROM roles r WHERE (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)'
+                );
+                $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
                 $stmt = $this->db->prepare('
                     SELECT r.id, r.name, r.description, r.parent_id, r.created_at, r.tenant_id,
                            COUNT(rp.id) AS permission_count
                     FROM roles r
                     LEFT JOIN role_permissions rp ON r.id = rp.role_id
-                    WHERE (r.tenant_id = ? OR r.tenant_id IS NULL)
+                    WHERE (r.tenant_id = :tenant_id OR r.tenant_id IS NULL)
                     GROUP BY r.id, r.tenant_id
                     ORDER BY r.created_at DESC
+                    LIMIT :limit OFFSET :offset
                 ');
-                $stmt->execute([$tenantId]);
+                $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $stmt->execute();
             }
 
             /** @var array<int, array<string, mixed>> $roles */
@@ -162,7 +183,7 @@ class RolesApiHandler
                 return $role;
             }, $roles);
 
-            return Response::json(['data' => $roles], 200);
+            return Response::json(['data' => $roles, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to fetch roles', [
                 'event' => 'roles.error',

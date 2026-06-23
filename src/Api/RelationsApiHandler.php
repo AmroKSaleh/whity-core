@@ -16,6 +16,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
+use Whity\Http\PaginationParams;
 
 /**
  * Relations API Handler (WC-65 — Family Relations Management System).
@@ -95,7 +96,11 @@ class RelationsApiHandler
                 return Response::error('Tenant context is required', 400);
             }
 
-            return Response::json(['data' => $this->relations->listEdges($tenantId)], 200);
+            $p     = PaginationParams::fromPath($request->getPath());
+            $total = $this->relations->countEdges($tenantId);
+            $edges = $this->relations->listEdges($tenantId, $p->perPage, $p->offset);
+
+            return Response::json(['data' => $edges, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to fetch relations', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
             return Response::error('Failed to fetch relations', 500);

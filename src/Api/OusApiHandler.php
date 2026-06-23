@@ -9,6 +9,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Http\JsonBody;
+use Whity\Http\PaginationParams;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
 use PDO;
@@ -39,35 +40,56 @@ class OusApiHandler
     }
 
     /**
-     * GET /api/ous - List all OUs for current tenant
+     * GET /api/ous - List OUs for the current tenant (paginated).
      */
     public function list(Request $request): Response
     {
         try {
             $tenantId = TenantContext::getTenantId();
+            $p = PaginationParams::fromPath($request->getPath());
 
-            // System users (tenant_id=0) can see all OUs from all tenants
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists OUs across all tenants; scoped else-branch binds tenant_id
+                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM organizational_units');
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
+                // @tenant-guard-ignore: system-tenant (id 0) lists all OUs; scoped else-branch binds tenant_id
                 $stmt = $this->db->prepare('
                     SELECT id, tenant_id, parent_id, name, slug, description, created_at
                     FROM organizational_units
                     ORDER BY tenant_id, id
+                    LIMIT :limit OFFSET :offset
                 ');
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
                 $stmt->execute();
             } else {
+                $countStmt = $this->db->prepare(
+                    'SELECT COUNT(*) AS cnt FROM organizational_units WHERE tenant_id = :tenant_id'
+                );
+                $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $countStmt->execute();
+                $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+                $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
+
                 $stmt = $this->db->prepare('
                     SELECT id, tenant_id, parent_id, name, slug, description, created_at
                     FROM organizational_units
-                    WHERE tenant_id = ?
+                    WHERE tenant_id = :tenant_id
                     ORDER BY id
+                    LIMIT :limit OFFSET :offset
                 ');
-                $stmt->execute([$tenantId]);
+                $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+                $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+                $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+                $stmt->execute();
             }
 
             $ous = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            return Response::json(['data' => $ous], 200);
+            return Response::json(['data' => $ous, 'pagination' => $p->meta($total)], 200);
         } catch (\Exception $e) {
             error_log('[OusApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch organizational units', 500);
