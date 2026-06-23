@@ -126,6 +126,10 @@ services:
   # races the 8 FrankenPHP workers. Staging/production do NOT use this file (see
   # docker-compose.staging.yml) and bootstrap via an explicit migrate+seed deploy step.
   db-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
     image: whity-core:dev
     container_name: whity_db_init
     environment:
