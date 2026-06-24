@@ -147,8 +147,11 @@ use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\LoginThrottleService;
 use Whity\Core\Store\DatabaseSharedStore;
+use Whity\Mcp\JsonRpc\Dispatcher;
+use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
+use Whity\Mcp\Lifecycle\InitializeHandler;
+use Whity\Mcp\Lifecycle\PingHandler;
 use Whity\Mcp\Transport\McpTransportHandler;
-use Whity\Mcp\Transport\NullMcpDispatcher;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -705,13 +708,15 @@ $router->register('GET', '/api/users/{id:\d+}/relations', [$relationsHandler, 'u
 $router->register('POST', '/api/relations', [$relationsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
 $router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
 
-// WC-d279a9b3: MCP Streamable-HTTP endpoint. Registered UNVERSIONED so the
+// WC-c10b292e: MCP Streamable-HTTP endpoint. Registered UNVERSIONED so the
 // path is exactly /mcp (not /api/v1/mcp). No requiredRole/requiredPermission —
 // the transport delegates auth to the dispatcher (ADR-0006 per-call contract).
 // Bypasses tenant isolation middleware (see EnforceTenantIsolation::PUBLIC_ROUTES).
-// NullMcpDispatcher is the bootstrap stub; replaced when the real JSON-RPC
-// dispatcher lands (task c10b292e).
-$mcpTransportHandler = new McpTransportHandler(new NullMcpDispatcher());
+$mcpTransportHandler = new McpTransportHandler(new Dispatcher([
+    'initialize'              => new InitializeHandler(),
+    'ping'                    => new PingHandler(),
+    'notifications/cancelled' => new CancelledNotificationHandler(),
+]));
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
 
