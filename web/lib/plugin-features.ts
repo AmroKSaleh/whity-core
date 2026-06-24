@@ -196,6 +196,8 @@ export interface DataListBlock {
 export interface FormBlock {
   type: 'form';
   submit: { method: 'POST' | 'PUT'; endpoint: string };
+  /** If present, the form GETs this path on mount and pre-populates fields with the response. */
+  dataSource?: { method: 'GET'; path: string };
   requiredPermission?: string;
   children: Block[];
 }
@@ -208,6 +210,8 @@ export interface TextInputBlock {
   placeholder?: string;
   required?: boolean;
   default?: string;
+  /** When true, renders as type="password". The sentinel value '••••••' is never sent on submit. */
+  sensitive?: boolean;
 }
 
 /** Leaf (form only): a multi-line text area. */
@@ -270,13 +274,15 @@ export interface DateInputBlock {
   default?: string;
 }
 
-/** Leaf (form only): a file input (file content is read as text into the named property). */
+/** Leaf (form only): a file input. Without encoding the content is read as text; with 'base64' it is encoded as a data URI. */
 export interface FileInputBlock {
   type: 'fileInput';
   name: string;
   label: string;
   accept?: string;
   required?: boolean;
+  /** When 'base64', the file is converted to a data URI via FileReader.readAsDataURL() before submit. */
+  encoding?: 'base64';
 }
 
 /** Leaf (form only): a colour picker. */
