@@ -109,6 +109,11 @@ class EnforceTenantIsolation
         '/api/v1/branding',
         // KeyHub KiCad plugin native-client login — issues JWTs to the desktop app.
         '/api/v1/keyhub/auth/token',
+        // MCP Streamable-HTTP endpoint — handles its own auth via mcp token type
+        // (ADR-0006); the per-call contract validates the token and sets
+        // TenantContext inside the dispatcher. The standard access-token flow
+        // would reject an mcp token here, so /mcp bypasses tenant resolution.
+        '/mcp',
     ];
 
     /**
