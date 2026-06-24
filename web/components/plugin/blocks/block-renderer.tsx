@@ -829,7 +829,7 @@ function TextInputRenderer({ block }: { block: TextInputBlock }) {
   return (
     <div className="space-y-1.5">
       <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
-      <Input id={inputId} type="text" value={strValue} placeholder={block.placeholder} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+      <Input id={inputId} type={block.sensitive === true ? 'password' : 'text'} value={strValue} placeholder={block.placeholder} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
     </div>
   );
 }
@@ -933,7 +933,19 @@ function FileInputRenderer({ block }: { block: FileInputBlock }) {
   return (
     <div className="space-y-1.5">
       <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
-      <Input id={inputId} type="file" accept={block.accept} onChange={(e) => { const file = e.target.files?.[0]; if (file) { void file.text().then((text) => ctx.setValue(block.name, text)); } }} aria-label={block.label} />
+      <Input id={inputId} type="file" accept={block.accept} onChange={(e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (block.encoding === 'base64') {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            ctx.setValue(block.name, (evt.target?.result as string) ?? '');
+          };
+          reader.readAsDataURL(file);
+        } else {
+          void file.text().then((text) => ctx.setValue(block.name, text));
+        }
+      }} aria-label={block.label} />
     </div>
   );
 }

@@ -11,9 +11,13 @@
 
 import * as React from 'react';
 import type { Block, FormBlock } from '@/lib/plugin-features';
+import { apiClient } from '@/lib/api-client';
 import { submitPluginAction, type ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { IconAlertTriangle } from '@tabler/icons-react';
+
+/** Sentinel: when a sensitive field holds this value, it is omitted from the submit payload. */
+export const SENSITIVE_SENTINEL = '••••••';
 
 /** The value shape exposed to all form descendants via context. */
 export interface FormBlockContextValue {
@@ -184,6 +188,30 @@ export function FormProvider({
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [serverIssues, setServerIssues] = React.useState<ActionIssue[] | null>(null);
+  const [isLoading, setIsLoading] = React.useState(block.dataSource !== undefined);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+
+  const dataSourcePath = block.dataSource?.path;
+  const dataSourceMethod = block.dataSource?.method;
+
+  React.useEffect(() => {
+    if (!dataSourcePath || !dataSourceMethod) return;
+    apiClient(dataSourcePath, { method: dataSourceMethod })
+      .then((response) => response.json())
+      .then((data: unknown) => {
+        if (data !== null && typeof data === 'object') {
+          setValues((prev) => ({
+            ...prev,
+            ...(data as Record<string, string | boolean>),
+          }));
+        }
+        setIsLoading(false);
+      })
+      .catch(() => {
+        setLoadError('Failed to load settings');
+        setIsLoading(false);
+      });
+  }, [dataSourcePath, dataSourceMethod]);
 
   const setValue = React.useCallback(
     (name: string, value: string | boolean) => {
@@ -229,7 +257,12 @@ export function FormProvider({
     setIsSubmitting(true);
     setServerIssues(null);
 
-    const payload: Record<string, unknown> = { ...values };
+    // Omit sensitive sentinel values — they mean "unchanged, don't overwrite".
+    const payload: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(values)) {
+      if (val === SENSITIVE_SENTINEL) continue;
+      payload[key] = val;
+    }
 
     void submitPluginAction(block.submit.endpoint, block.submit.method, payload).then(
       (result) => {
@@ -260,7 +293,12 @@ export function FormProvider({
   return (
     <FormBlockContext.Provider value={contextValue}>
       <div className="space-y-3" data-slot="form-block">
-        {children}
+        {loadError !== null && (
+          <p className="text-sm text-destructive" role="alert">{loadError}</p>
+        )}
+        <fieldset disabled={isLoading} className="contents">
+          {children}
+        </fieldset>
         {serverIssues !== null && serverIssues.length > 0 && (
           <IssuesReport issues={serverIssues} />
         )}
