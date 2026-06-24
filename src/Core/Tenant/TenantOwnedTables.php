@@ -73,6 +73,11 @@ final class TenantOwnedTables
         // When a profile verifies an email on a registered domain the policy service
         // auto-provisions or auto-approves the corresponding membership.
         'tenant_email_domains' => '031_create_tenant_email_domains.php',
+
+        // WC-2686308f (Phase C) — MCP AI-principal token registry (migration 033).
+        // Long-lived machine/service tokens scoped to a tenant; tenant isolation
+        // is enforced on listing and revocation by binding user_id + tenant_id.
+        'mcp_tokens' => '033_create_mcp_tokens.php',
     ];
 
     /**

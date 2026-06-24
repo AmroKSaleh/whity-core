@@ -54,6 +54,10 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // applicable (MCP uses its own JSON-RPC discovery surface, not OpenAPI).
         'GET /mcp',
         'POST /mcp',
+        // WC-2686308f: MCP token management — schema to follow in documentation task.
+        'DELETE /api/mcp/tokens/{jti}',
+        'GET /api/mcp/tokens',
+        'POST /api/mcp/tokens',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

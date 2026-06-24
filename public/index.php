@@ -147,6 +147,8 @@ use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\LoginThrottleService;
 use Whity\Core\Store\DatabaseSharedStore;
+use Whity\Mcp\Auth\McpTokenHandler;
+use Whity\Mcp\Auth\McpTokenService;
 use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
 use Whity\Mcp\Lifecycle\InitializeHandler;
@@ -707,6 +709,15 @@ $router->register('GET', '/api/relations', [$relationsHandler, 'listEdges'], nul
 $router->register('GET', '/api/users/{id:\d+}/relations', [$relationsHandler, 'userRelations'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('POST', '/api/relations', [$relationsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
 $router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
+
+// WC-2686308f: MCP token management endpoints (issue / list / revoke).
+// Require a valid access-token cookie — these are human-initiated management
+// actions. Tenant isolation applies via the cookie claims; no explicit
+// requiredRole since every authenticated user can manage their own MCP tokens.
+$mcpTokenHandler = new McpTokenHandler($tokenValidator, new McpTokenService($db->getPdo(), $jwtParser));
+$router->register('POST',   '/api/mcp/tokens',       [$mcpTokenHandler, 'create']);
+$router->register('GET',    '/api/mcp/tokens',       [$mcpTokenHandler, 'list']);
+$router->register('DELETE', '/api/mcp/tokens/{jti}', [$mcpTokenHandler, 'revoke']);
 
 // WC-c10b292e: MCP Streamable-HTTP endpoint. Registered UNVERSIONED so the
 // path is exactly /mcp (not /api/v1/mcp). No requiredRole/requiredPermission —
