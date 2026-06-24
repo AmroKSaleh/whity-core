@@ -22,6 +22,7 @@ use Whity\Auth\TokenValidator;
 use Whity\Auth\TotpService;
 use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Identity\MembershipRepository;
+use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
@@ -744,6 +745,44 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertContains(self::TENANT_B, $tenants);
     }
 
+    // ==================== tenant_email_domains (WC-9b87) ====================
+
+    public function testTenantEmailDomainsListIsTenantScoped(): void
+    {
+        $repo = new TenantEmailDomainsRepository($this->pdo);
+
+        $rowsA = $repo->listForTenant(self::TENANT_A);
+        $rowsB = $repo->listForTenant(self::TENANT_B);
+
+        // Fixture: Tenant A owns 'acme.com', Tenant B owns 'example.org'.
+        $this->assertCount(1, $rowsA, 'Tenant A must see exactly its own domain row.');
+        $this->assertCount(1, $rowsB, 'Tenant B must see exactly its own domain row.');
+        $this->assertSame(self::TENANT_A, $rowsA[0]['tenant_id']);
+        $this->assertSame(self::TENANT_B, $rowsB[0]['tenant_id']);
+    }
+
+    public function testTenantCannotReadForeignDomainRow(): void
+    {
+        $repo = new TenantEmailDomainsRepository($this->pdo);
+
+        // The fixture seeds domain row id=1 for Tenant A and id=2 for Tenant B.
+        $this->assertNotNull($repo->findById(1, self::TENANT_A), 'Tenant A must find its own domain row.');
+        $this->assertNull($repo->findById(2, self::TENANT_A), "Tenant B's domain row must be invisible to Tenant A.");
+    }
+
+    public function testTenantCannotDeleteForeignDomainRowAndItSurvives(): void
+    {
+        $repo = new TenantEmailDomainsRepository($this->pdo);
+
+        $affected = $repo->delete(2, self::TENANT_A);
+
+        $this->assertSame(0, $affected, 'A cross-tenant domain delete must touch zero rows.');
+        $this->assertNotNull(
+            $repo->findById(2, self::TENANT_B),
+            "Tenant B's domain row must survive a cross-tenant delete attempt."
+        );
+    }
+
     // ==================== tenant_settings (Website Settings) ====================
 
     public function testTenantSettingsReadIsTenantScoped(): void
@@ -1032,6 +1071,14 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $pdo->exec("
             INSERT INTO memberships (id, profile_id, tenant_id, role_id, ou_id, status, created_at) VALUES
                 (3, 1, 2, 2, NULL, 'active', datetime('now'))
+        ");
+
+        // Tenant email-domain registrations (tenant_email_domains, migration 031):
+        // disjoint domains per tenant so cross-tenant read/delete rejection can be proven.
+        $pdo->exec("
+            INSERT INTO tenant_email_domains (id, tenant_id, domain, default_role_id, auto_provision, created_at) VALUES
+                (1, 1, 'acme.com',    1, 1, datetime('now')),
+                (2, 2, 'example.org', 1, 1, datetime('now'))
         ");
 
         // Website Settings per-tenant overrides (tenant_settings, migration 025):

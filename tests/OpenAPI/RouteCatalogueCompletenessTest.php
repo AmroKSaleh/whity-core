@@ -45,6 +45,11 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.
         'GET /api/version',
+        // WC-9b87: tenant email-domain policy admin endpoints — OpenAPI schema
+        // declarations to follow in a separate documentation task.
+        'DELETE /api/email-domains/{id}',
+        'GET /api/email-domains',
+        'POST /api/email-domains',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

@@ -68,6 +68,11 @@ final class TenantOwnedTables
         // (status: active | invited | suspended). Tenant-scoped so the predicate
         // guard must police every SELECT/UPDATE/DELETE against it.
         'memberships' => '030_create_memberships.php',
+
+        // ADR 0005 (Phase B) — tenant email-domain ownership registry (migration 031).
+        // When a profile verifies an email on a registered domain the policy service
+        // auto-provisions or auto-approves the corresponding membership.
+        'tenant_email_domains' => '031_create_tenant_email_domains.php',
     ];
 
     /**

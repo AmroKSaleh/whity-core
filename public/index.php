@@ -124,6 +124,7 @@ use Whity\Api\MeCapabilitiesApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
 use Whity\Api\OpenApiHandler;
+use Whity\Api\TenantEmailDomainApiHandler;
 use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Delegation\DelegationService;
 use Whity\Core\Relations\PersonRepository;
@@ -665,6 +666,13 @@ $router->register('DELETE', '/api/branding/assets/{key}',           [$brandingHa
 $router->register('POST',   '/api/branding/global/assets/{key}',    [$brandingHandler, 'uploadGlobal'],  null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('DELETE', '/api/branding/global/assets/{key}',    [$brandingHandler, 'clearGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHandler, 'setBrandingHost'], null, null, CorePermissions::SETTINGS_MANAGE);
+
+// 13d. Register the Tenant Email-Domain API (WC-9b87). Admin-gated; tenant-scoped
+// in the handler via TenantContext so a caller can only manage its own domains.
+$emailDomainHandler = new TenantEmailDomainApiHandler($db->getPdo());
+$router->register('GET',    '/api/email-domains',           [$emailDomainHandler, 'list'],   'admin');
+$router->register('POST',   '/api/email-domains',           [$emailDomainHandler, 'create'], 'admin');
+$router->register('DELETE', '/api/email-domains/{id:\d+}',  [$emailDomainHandler, 'delete'], 'admin');
 
 // 14. Register the family relations API (WC-65). Reads are gated on
 // relations:read, writes on relations:manage (6th positional arg; requiredRole
