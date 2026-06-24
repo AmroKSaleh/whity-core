@@ -21,6 +21,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\TotpService;
 use Whity\Core\Delegation\DelegationRepository;
+use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
@@ -673,6 +674,76 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ==================== memberships (WC-101) ====================
+
+    public function testMembershipsListIsTenantScoped(): void
+    {
+        $repo = new MembershipRepository($this->pdo);
+
+        $tenantARows = $repo->listForTenant(self::TENANT_A);
+        $tenantBRows = $repo->listForTenant(self::TENANT_B);
+
+        // Fixture: Tenant A has 1 row (Alice). Tenant B has 2 rows (Bob + Alice
+        // who is also in Tenant B for the findForProfile() cross-tenant test).
+        $this->assertCount(1, $tenantARows, 'Tenant A must see exactly its own membership row.');
+        $this->assertCount(2, $tenantBRows, 'Tenant B must see exactly its own 2 membership rows.');
+        $this->assertSame(self::TENANT_A, $tenantARows[0]['tenant_id']);
+        foreach ($tenantBRows as $row) {
+            $this->assertSame(self::TENANT_B, $row['tenant_id']);
+        }
+    }
+
+    public function testTenantCannotReadForeignMembership(): void
+    {
+        $repo = new MembershipRepository($this->pdo);
+
+        // The fixture seeds membership id=1 for Tenant A and id=2 for Tenant B.
+        $this->assertNotNull($repo->findById(1, self::TENANT_A), 'Tenant A must find its own membership.');
+        $this->assertNull($repo->findById(2, self::TENANT_A), "Tenant B's membership must be invisible to Tenant A.");
+    }
+
+    public function testTenantCannotSuspendForeignMembershipAndItStaysActive(): void
+    {
+        $repo = new MembershipRepository($this->pdo);
+
+        // Tenant A attempts to suspend membership id=2 which belongs to Tenant B.
+        $affected = $repo->suspend(2, self::TENANT_A);
+
+        $this->assertSame(0, $affected, 'A cross-tenant suspend must touch zero rows.');
+        $stmt = $this->pdo->query('SELECT status FROM memberships WHERE id = 2');
+        self::assertNotFalse($stmt);
+        $this->assertSame(MembershipRepository::STATUS_ACTIVE, $stmt->fetchColumn(), "Tenant B's membership must remain active.");
+    }
+
+    public function testTenantCannotDeleteForeignMembershipAndItSurvives(): void
+    {
+        $repo = new MembershipRepository($this->pdo);
+
+        $affected = $repo->delete(2, self::TENANT_A);
+
+        $this->assertSame(0, $affected, 'A cross-tenant delete must touch zero rows.');
+        $stmt = $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE id = 2');
+        self::assertNotFalse($stmt);
+        $this->assertSame(
+            1,
+            (int) $stmt->fetchColumn(),
+            "Tenant B's membership row must survive a cross-tenant delete attempt."
+        );
+    }
+
+    public function testSystemTenantSeesAllMembershipsViaFindForProfile(): void
+    {
+        $repo = new MembershipRepository($this->pdo);
+
+        // Profile 1 (Alice) has active memberships in both tenants in the fixture.
+        // findForProfile is the intentionally-unscoped login-flow query.
+        $rows = $repo->findForProfile(1);
+
+        $tenants = array_column($rows, 'tenant_id');
+        $this->assertContains(self::TENANT_A, $tenants);
+        $this->assertContains(self::TENANT_B, $tenants);
+    }
+
     // ==================== tenant_settings (Website Settings) ====================
 
     public function testTenantSettingsReadIsTenantScoped(): void
@@ -938,6 +1009,29 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (id, tenant_id, grantor_user_id, grantee_type, grantee_id, permission, granted_at) VALUES
                 (1, 1, 10, 'user', 11, 'users:read', datetime('now')),
                 (2, 2, 20, 'user', 21, 'users:read', datetime('now'))
+        ");
+
+        // Profiles (global, migration 028) — one per person, tenant-independent.
+        // Profile 1 (Alice) has memberships in BOTH tenants so findForProfile()
+        // cross-tenant scan can be verified; Profile 2 (Bob) is Tenant B only.
+        $pdo->exec("
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
+                (1, 'Alice', '\$2y\$10\$fakehash1', 0, 0, 0, datetime('now'), datetime('now')),
+                (2, 'Bob',   '\$2y\$10\$fakehash2', 0, 0, 0, datetime('now'), datetime('now'))
+        ");
+
+        // Memberships (tenant-scoped, migration 030): disjoint by tenant_id so
+        // cross-tenant read/write rejection can be proven per row.
+        $pdo->exec("
+            INSERT INTO memberships (id, profile_id, tenant_id, role_id, ou_id, status, created_at) VALUES
+                (1, 1, 1, 1, NULL, 'active', datetime('now')),
+                (2, 2, 2, 1, NULL, 'active', datetime('now'))
+        ");
+        // Alice also has a membership in Tenant B for the findForProfile() cross-tenant test.
+        $pdo->exec("
+            INSERT INTO memberships (id, profile_id, tenant_id, role_id, ou_id, status, created_at) VALUES
+                (3, 1, 2, 2, NULL, 'active', datetime('now'))
         ");
 
         // Website Settings per-tenant overrides (tenant_settings, migration 025):

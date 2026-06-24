@@ -62,6 +62,12 @@ final class TenantOwnedTables
         'persons' => '018_create_persons.php',
         'relations' => '020_create_relations.php',
         'tenant_settings' => '025_create_tenant_settings.php',
+
+        // ADR 0005 (Phase B) — explicit profile-to-tenant binding (migration 030).
+        // Replaces the implicit `users.tenant_id` FK with a lifecycle-managed row
+        // (status: active | invited | suspended). Tenant-scoped so the predicate
+        // guard must police every SELECT/UPDATE/DELETE against it.
+        'memberships' => '030_create_memberships.php',
     ];
 
     /**
