@@ -52,6 +52,12 @@ final class SanctionedGlobalTables
         // `tenant_settings` table); a row here is unique platform-wide and
         // carries no tenant_id, so a tenant predicate would be meaningless.
         'app_settings' => 'Platform-wide website-settings defaults; no tenant column (per-tenant overrides live in tenant_settings).',
+
+        // ADR 0005 (Phase B) — global identity anchor (migration 028). A profile
+        // holds a person's credentials and 2FA state once, regardless of how many
+        // tenants they belong to. No tenant_id column; membership is tracked via
+        // the tenant-scoped `memberships` table (migration 029).
+        'profiles' => 'Global identity anchor (ADR 0005); credentials belong to a person, not an org — no tenant_id column.',
     ];
 
     /**
