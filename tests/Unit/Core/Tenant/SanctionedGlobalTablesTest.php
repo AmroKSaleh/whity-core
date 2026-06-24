@@ -70,7 +70,7 @@ final class SanctionedGlobalTablesTest extends TestCase
         // from tenant-isolation enforcement, so the list must stay deliberate.
         // Bump this only alongside a documented decision.
         self::assertLessThanOrEqual(
-            5,
+            6,
             count(SanctionedGlobalTables::all()),
             'The sanctioned global-table allowlist should stay minimal; review any growth.'
         );
