@@ -722,8 +722,6 @@ class AuthHandler
         $claims = $this->tokenValidator->validateRefreshToken();
 
         if ($claims === null) {
-            // WC-0abcc29f: invalid/missing refresh token counts as an IP failure.
-            $this->loginThrottle?->recordFailure(null, $ip);
             return Response::error('Unauthorized', 401);
         }
 

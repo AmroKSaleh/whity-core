@@ -116,17 +116,30 @@ final class AuthBruteForceTest extends TestCase
         self::assertSame(200, $r->getStatusCode());
     }
 
-    // ── per-IP throttle on POST /api/auth/refresh ─────────────────────────────
+    // ── refresh endpoint throttle behaviour ──────────────────────────────────
 
-    public function testRefreshReturns429AfterIpThreshold(): void
+    public function testRefreshFailuresDoNotFillIpCounter(): void
     {
-        // 20 invalid-refresh attempts from the same IP
+        // 20 invalid-refresh attempts should NOT count toward the IP throttle.
+        // Expired/missing cookies are normal UX noise, not attack signals.
         for ($i = 0; $i < 20; $i++) {
             $r = $this->refreshAttempt(self::TEST_IP);
             self::assertSame(401, $r->getStatusCode(), "Refresh attempt {$i} should be 401");
         }
 
-        // 21st attempt should be throttled
+        // Valid login from the same IP must still succeed (counter was not incremented).
+        $r = $this->loginAttempt(self::VALID_PASSWORD, self::TEST_IP);
+        self::assertSame(200, $r->getStatusCode(), 'Refresh failures must not fill the IP throttle counter');
+    }
+
+    public function testRefreshBlockedWhenIpAlreadyThrottledByLoginFailures(): void
+    {
+        // Fill the IP throttle via login failures (not refresh failures).
+        for ($i = 0; $i < 20; $i++) {
+            $this->loginAttemptEmail("ghost{$i}@nowhere.test", self::WRONG_PASSWORD, self::TEST_IP);
+        }
+
+        // Refresh from the same throttled IP should also be blocked.
         $r = $this->refreshAttempt(self::TEST_IP);
         self::assertSame(429, $r->getStatusCode());
     }
