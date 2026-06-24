@@ -120,9 +120,7 @@ final class MembershipRepository
      */
     public function findForProfile(int $profileId): array
     {
-        // @tenant-guard-ignore: login flow resolves memberships across all tenants
-        // for a single profile (ADR 0005 §6); called only from the auth handler
-        // before any tenant context is established.
+        // @tenant-guard-ignore: login flow — enumerates all tenant memberships for one profile (ADR 0005 §6)
         $stmt = $this->db->prepare(
             'SELECT * FROM memberships WHERE profile_id = :profile_id ORDER BY created_at ASC'
         );
