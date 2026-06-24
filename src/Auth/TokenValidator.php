@@ -233,6 +233,8 @@ class TokenValidator
     private function isMcpTokenRegistered(string $jti): bool
     {
         try {
+            // @tenant-guard-ignore: jti is a platform-wide unique handle (like revoked_tokens.jti);
+            // querying by jti alone cannot pull a different tenant's row.
             $stmt = $this->db->prepare('SELECT 1 FROM mcp_tokens WHERE jti = ? LIMIT 1');
             $stmt->execute([$jti]);
             return (bool) $stmt->fetchColumn();
