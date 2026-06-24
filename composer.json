@@ -41,6 +41,7 @@
       "Whity\\Commands\\": "src/Commands/",
       "Whity\\OpenAPI\\": "src/OpenAPI/",
       "Whity\\Storage\\": "src/Storage/",
+      "Whity\\Mcp\\": "src/Mcp/",
       "Whity\\Plugins\\": "plugins/"
     }
   },

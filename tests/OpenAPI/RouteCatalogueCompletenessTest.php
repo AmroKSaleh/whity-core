@@ -50,6 +50,10 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'DELETE /api/email-domains/{id}',
         'GET /api/email-domains',
         'POST /api/email-domains',
+        // WC-d279a9b3: MCP Streamable-HTTP endpoints — OpenAPI schema not
+        // applicable (MCP uses its own JSON-RPC discovery surface, not OpenAPI).
+        'GET /mcp',
+        'POST /mcp',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

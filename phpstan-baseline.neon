@@ -1314,3 +1314,13 @@ parameters:
 			message: "#^Method Tests\\\\Unit\\\\Sdk\\\\Tenant\\\\TenantPredicateScannerTest\\:\\:scan\\(\\) return type has no value type specified in iterable type array\\.$#"
 			count: 1
 			path: tests/Unit/Sdk/Tenant/TenantPredicateScannerTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Mcp\\\\Transport\\\\McpRequestHandlerInterface\\:\\:expects\\(\\)\\.$#"
+			count: 5
+			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php
+
+		-
+			message: "#^Call to an undefined method Whity\\\\Mcp\\\\Transport\\\\McpRequestHandlerInterface\\:\\:method\\(\\)\\.$#"
+			count: 6
+			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php
