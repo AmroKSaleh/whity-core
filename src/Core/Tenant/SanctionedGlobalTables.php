@@ -64,6 +64,13 @@ final class SanctionedGlobalTables
         // issue #181: the same email cannot belong to two profiles, so login-by-email
         // is always unambiguous. No tenant_id column; rows join only to profiles.
         'profile_emails' => 'Globally-unique email addresses per profile (ADR 0005); UNIQUE(email) fixes #181 — no tenant_id column.',
+
+        // WC-91f2 (Phase F) — cross-worker atomic counter store (migration 032).
+        // Keys are platform-wide identifiers (e.g. "login:fail:user:42",
+        // "login:fail:ip:1.2.3.4") with no inherent tenant scope; the same counter
+        // must be visible to all FrankenPHP workers regardless of which tenant's
+        // request they are serving. No tenant_id column.
+        'shared_store' => 'Cross-worker atomic counter store (WC-91f2); keys are platform-wide (rate-limit windows, brute-force counters) — no tenant_id column.',
     ];
 
     /**
