@@ -51,6 +51,7 @@ final class MigrationSchemaTest extends TestCase
         'relationship_types',
         'relations',
         'profiles',
+        'profile_emails',
     ];
 
     private static string $migrationDir;

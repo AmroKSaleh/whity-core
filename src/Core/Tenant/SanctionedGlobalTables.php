@@ -58,6 +58,12 @@ final class SanctionedGlobalTables
         // tenants they belong to. No tenant_id column; membership is tracked via
         // the tenant-scoped `memberships` table (migration 029).
         'profiles' => 'Global identity anchor (ADR 0005); credentials belong to a person, not an org — no tenant_id column.',
+
+        // ADR 0005 (Phase B) — globally-unique email registry (migration 029).
+        // A UNIQUE(email) constraint across this table is the structural fix for
+        // issue #181: the same email cannot belong to two profiles, so login-by-email
+        // is always unambiguous. No tenant_id column; rows join only to profiles.
+        'profile_emails' => 'Globally-unique email addresses per profile (ADR 0005); UNIQUE(email) fixes #181 — no tenant_id column.',
     ];
 
     /**
