@@ -74,6 +74,13 @@ class AuthHandler
     private ?AuditLogger $auditLogger;
 
     /**
+     * Optional brute-force throttle (WC-0abcc29f). When set, failed login
+     * attempts are counted per-user and per-IP; exceeding either threshold
+     * returns 429. Null in tests that do not exercise throttling.
+     */
+    private ?LoginThrottleService $loginThrottle;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
@@ -88,6 +95,8 @@ class AuthHandler
      *     (self-service profile updates, WC-64). Defaults to a NullLogger when omitted.
      * @param AuditLogger|null $auditLogger Optional security audit-trail writer (WC-34). When
      *     omitted, login/2FA events are not audited (keeps existing tests untouched).
+     * @param LoginThrottleService|null $loginThrottle Optional brute-force throttle (WC-0abcc29f).
+     *     When omitted, throttling is disabled (keeps existing tests untouched).
      */
     public function __construct(
         PDO $db,
@@ -96,7 +105,8 @@ class AuthHandler
         ?object $databaseWrapper = null,
         ?TotpService $totpService = null,
         ?LoggerInterface $logger = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?LoginThrottleService $loginThrottle = null
     ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
@@ -105,6 +115,7 @@ class AuthHandler
         $this->totpService = $totpService;
         $this->logger = $logger ?? new NullLogger();
         $this->auditLogger = $auditLogger;
+        $this->loginThrottle = $loginThrottle;
     }
 
     /**
@@ -191,6 +202,13 @@ class AuthHandler
 
         $email = $body['email'];
         $password = $body['password'];
+        $ip = $this->clientIp($request);
+
+        // WC-0abcc29f: check IP throttle before touching the DB — a heavily
+        // throttled IP must not learn whether an email is registered.
+        if ($this->loginThrottle !== null && $this->loginThrottle->isThrottled(null, $ip)) {
+            return Response::error('Too many attempts', 429);
+        }
 
         // Query user by email with 2FA fields (globally unique). token_epoch is
         // selected so issued tokens carry the user's CURRENT epoch (WC-185).
@@ -211,15 +229,26 @@ class AuthHandler
                 'email' => is_string($email) ? $email : null,
                 'reason' => 'user_not_found',
             ]);
+            // WC-0abcc29f: record IP failure only (no user ID to key on).
+            $this->loginThrottle?->recordFailure(null, $ip);
             return Response::error('Invalid credentials', 401);
+        }
+
+        $userId = (int) $user['id'];
+
+        // WC-0abcc29f: now that we have a user ID, check the per-account counter.
+        if ($this->loginThrottle !== null && $this->loginThrottle->isThrottled($userId, null)) {
+            return Response::error('Too many attempts', 429);
         }
 
         // Verify password
         if (!password_verify($password, $user['password'])) {
-            $this->audit('auth.login.failure', $request, (int) $user['tenant_id'], (int) $user['id'], [
+            $this->audit('auth.login.failure', $request, (int) $user['tenant_id'], $userId, [
                 'email' => is_string($email) ? $email : null,
                 'reason' => 'invalid_password',
             ]);
+            // WC-0abcc29f: record failure against both the account and the IP.
+            $this->loginThrottle?->recordFailure($userId, $ip);
             return Response::error('Invalid credentials', 401);
         }
 
@@ -286,8 +315,11 @@ class AuthHandler
         CookieManager::setAccessToken($accessToken, 900);
         CookieManager::setRefreshToken($refreshToken, 604800);
 
+        // WC-0abcc29f: successful login resets per-account failure counter.
+        $this->loginThrottle?->clearUser($userId);
+
         // Successful single-factor login.
-        $this->audit('auth.login.success', $request, (int) $user['tenant_id'], (int) $user['id']);
+        $this->audit('auth.login.success', $request, (int) $user['tenant_id'], $userId);
 
         // Return success response with user data only (no token in body)
         return Response::json([
@@ -679,6 +711,13 @@ class AuthHandler
      */
     public function handleRefresh(Request $request, array $params = []): Response
     {
+        $ip = $this->clientIp($request);
+
+        // WC-0abcc29f: check IP throttle before touching the token.
+        if ($this->loginThrottle !== null && $this->loginThrottle->isThrottled(null, $ip)) {
+            return Response::error('Too many attempts', 429);
+        }
+
         // Validate refresh token
         $claims = $this->tokenValidator->validateRefreshToken();
 
@@ -801,6 +840,12 @@ class AuthHandler
         // WC-191: tenant claim from the temp token scopes the second-factor re-fetch.
         $tenantId = $claims['tenant_id'] ?? null;
 
+        // WC-0abcc29f: throttle check before accepting any 2FA attempt.
+        $ip = $this->clientIp($request);
+        if ($this->loginThrottle !== null && $this->loginThrottle->isThrottled((int) $userId, $ip)) {
+            return Response::error('Too many attempts', 429);
+        }
+
         // Parse request body to get 2FA code (envelope validated upstream, WC-189).
         $body = JsonBody::parsed($request);
 
@@ -871,10 +916,14 @@ class AuthHandler
                 (int) $userId,
                 ['reason' => 'invalid_2fa_code']
             );
+            // WC-0abcc29f: record 2FA failure against both account and IP.
+            $this->loginThrottle?->recordFailure((int) $userId, $ip ?? null);
             return Response::error('Invalid 2FA code', 401);
         }
 
         // Second factor verified — full login completes.
+        // WC-0abcc29f: clear per-account failure counter on success.
+        $this->loginThrottle?->clearUser((int) $userId);
         $this->audit(
             'auth.2fa.verify_success',
             $request,

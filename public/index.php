@@ -145,6 +145,8 @@ use Whity\Core\Tenant\TenantContext;
 use Whity\Auth\TotpService;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
+use Whity\Auth\LoginThrottleService;
+use Whity\Core\Store\DatabaseSharedStore;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -432,7 +434,9 @@ $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage
 // 10. Register authentication handler
 // Inject the shared $totpService (built at step 3b) so the login-path 2FA validation uses the
 // SAME encryption key as the setup/confirm path (WC-95).
-$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger);
+// WC-0abcc29f: brute-force throttle uses the shared DatabaseSharedStore.
+$loginThrottle = new LoginThrottleService(new DatabaseSharedStore($db->getPdo()));
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 $router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
