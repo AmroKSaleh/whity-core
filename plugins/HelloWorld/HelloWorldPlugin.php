@@ -11,6 +11,7 @@ use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
 
@@ -45,7 +46,7 @@ use Whity\Sdk\PluginRolesInterface;
  * time (see {@see self::resolvePdo()}), analogous to the migration runner
  * injecting a PDO into plugin migrations.
  */
-final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface
 {
     /**
      * @inheritDoc
@@ -525,5 +526,21 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
         $data['hello_world_greeted'] = true;
 
         return $data;
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function getMcpPrompts(): array
+    {
+        return [
+            [
+                'name'        => 'hello-world-greet',
+                'description' => 'Generate a friendly greeting message via the HelloWorld plugin.',
+                'arguments'   => [
+                    ['name' => 'name', 'description' => 'The name to greet.', 'required' => false],
+                ],
+            ],
+        ];
     }
 }

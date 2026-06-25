@@ -767,6 +767,7 @@ $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']
 // method+path registrations (first wins), so core routes can never be
 // shadowed by a plugin claiming the same path.
 $pluginLoader->load();
+$pluginLoader->collectMcpPrompts($promptRegistry);
 
 // Descriptor-derived navigation (WC-169): every validated plugin frontend
 // feature gets a menu entry pointing at the dynamic screen route /admin/x/{id}.

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.8).
+ * SDK identity (v1.9).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -36,13 +36,14 @@ namespace Whity\Sdk;
  * `textArea`, `numberInput`, `select`, `checkbox`, `slider`, `dateInput`,
  * `fileInput`, `colorInput` — plus `submitButton` and `actionButton`; new
  * `inputName`/`selectOptions`/`submitSpec` prop-rule kinds; form-ancestor
- * enforcement and per-form duplicate-name detection in the validator, WC-233).
+ * enforcement and per-form duplicate-name detection in the validator, WC-233) →
+ * 1.9 (MCP prompt contribution point: {@see PluginMcpInterface}, WC-7abb732f).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.8.0';
+    public const VERSION = '1.9.0';
 
     /**
      * Static identity only — never instantiated.
