@@ -3,6 +3,7 @@
 namespace Whity\Auth;
 
 use PDO;
+use Whity\Mcp\Auth\McpPrincipal;
 
 /**
  * Token Validator for validating JWT access and refresh tokens
@@ -130,6 +131,72 @@ class TokenValidator
     }
 
     /**
+     * Validate an MCP bearer token passed from the Authorization header.
+     *
+     * Checks: signature + expiry (via JwtParser), type='mcp', aud='mcp',
+     * jti not in revoked_tokens, jti exists in mcp_tokens (must have been
+     * issued via the issuance endpoint — guards against hand-crafted tokens).
+     * Epoch checking is intentionally skipped for MCP tokens; revocation is
+     * explicit via DELETE /api/mcp/tokens/{jti}.
+     *
+     * @param string $token Raw bearer token string.
+     * @return McpPrincipal|null Validated principal, or null on any failure.
+     */
+    public function validateMcpToken(string $token): ?McpPrincipal
+    {
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null) {
+            return null;
+        }
+
+        if (($claims['type'] ?? null) !== 'mcp') {
+            return null;
+        }
+
+        if (($claims['aud'] ?? null) !== 'mcp') {
+            return null;
+        }
+
+        $jti = $claims['jti'] ?? null;
+        if (!is_string($jti) || $jti === '') {
+            return null;
+        }
+
+        if ($this->isTokenRevoked($jti)) {
+            return null;
+        }
+
+        if (!$this->isMcpTokenRegistered($jti)) {
+            return null;
+        }
+
+        $userId        = $claims['user_id'] ?? null;
+        $tenantId      = $claims['tenant_id'] ?? null;
+        $principalKind = $claims['principal_kind'] ?? 'user';
+        $scope         = $claims['scope'] ?? [];
+
+        if (!is_int($userId) || !is_int($tenantId)) {
+            return null;
+        }
+
+        if (!is_string($principalKind)) {
+            return null;
+        }
+
+        if (!is_array($scope)) {
+            return null;
+        }
+
+        return new McpPrincipal(
+            userId: $userId,
+            tenantId: $tenantId,
+            principalKind: $principalKind,
+            scope: $scope,
+            jti: $jti,
+        );
+    }
+
+    /**
      * Check if a token has been revoked
      *
      * Queries the revoked_tokens table to check if the given jti (token ID)
@@ -154,6 +221,25 @@ class TokenValidator
         } catch (\Exception) {
             // If database query fails, err on the side of caution and reject the token
             return true;
+        }
+    }
+
+    /**
+     * Check if a JTI has been registered in mcp_tokens.
+     *
+     * Guards against hand-crafted tokens with valid signatures — the token
+     * must have been issued via the issuance endpoint to appear here.
+     */
+    private function isMcpTokenRegistered(string $jti): bool
+    {
+        try {
+            // @tenant-guard-ignore: jti is a platform-wide unique handle (like revoked_tokens.jti);
+            // querying by jti alone cannot pull a different tenant's row.
+            $stmt = $this->db->prepare('SELECT 1 FROM mcp_tokens WHERE jti = ? LIMIT 1');
+            $stmt->execute([$jti]);
+            return (bool) $stmt->fetchColumn();
+        } catch (\Exception) {
+            return false;
         }
     }
 
