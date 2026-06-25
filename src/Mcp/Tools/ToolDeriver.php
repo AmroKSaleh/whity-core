@@ -86,6 +86,26 @@ final class ToolDeriver
     }
 
     /**
+     * Return the JSON-Schema inputSchema for the named tool, or null if the
+     * tool is not found.
+     *
+     * The schema is derived the same way as for tools/list — so the validation
+     * spec the AI client sees is identical to the spec used for server-side
+     * argument validation (WC-b570dccd).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getToolInputSchema(string $toolName): ?array
+    {
+        $decl = $this->findDeclarationByName($toolName);
+        if ($decl === null) {
+            return null;
+        }
+        ['parameters' => $pathParams] = $this->sanitizePath((string) ($decl['path'] ?? ''));
+        return $this->buildInputSchema($pathParams, (array) ($decl['schema'] ?? []));
+    }
+
+    /**
      * Find the route declaration whose derived tool name matches $toolName.
      *
      * Searches static declarations first, then router routes (if a Router was

@@ -285,6 +285,52 @@ final class ToolsCallHandlerTest extends TestCase
         self::assertSame(self::USER_ID, $userVars['user_id']);
     }
 
+    // ── Argument schema validation (WC-b570dccd) ─────────────────────────────
+
+    public function testInvoke_throwsInvalidParams_whenRequiredArgMissing(): void
+    {
+        // POST /api/things declares 'name' as required in its request schema
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::INVALID_PARAMS);
+
+        ($this->handler)(['name' => 'post_api_things', 'arguments' => []], self::BEARER);
+    }
+
+    public function testInvoke_throwsInvalidParams_whenIntegerPathArgIsNonNumericString(): void
+    {
+        // PATCH /api/things/{id:\d+} declares 'id' as type integer (from path constraint)
+        $this->roleChecker->method('hasPermission')->willReturn(true);
+
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::INVALID_PARAMS);
+
+        ($this->handler)(['name' => 'patch_api_things_id', 'arguments' => ['id' => 'not-a-number']], self::BEARER);
+    }
+
+    public function testInvoke_coercesDigitString_toIntegerForPathParam(): void
+    {
+        // "42" as a string should be coerced to int 42 before path substitution
+        $this->roleChecker->method('hasPermission')->willReturn(true);
+
+        $result = ($this->handler)([
+            'name'      => 'patch_api_things_id',
+            'arguments' => ['id' => '42'],
+        ], self::BEARER);
+
+        self::assertFalse($result['isError']);
+        self::assertNotNull($this->lastRequest);
+        self::assertStringContainsString('/42', $this->lastRequest->getPath());
+    }
+
+    public function testInvoke_throwsInvalidParams_whenArrayPassedForScalarField(): void
+    {
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::INVALID_PARAMS);
+
+        // POST /api/things: 'name' is type string — passing an array is invalid
+        ($this->handler)(['name' => 'post_api_things', 'arguments' => ['name' => ['evil']]], self::BEARER);
+    }
+
     // ── Error result wrapping ─────────────────────────────────────────────────
 
     public function testInvoke_returnsIsErrorTrue_whenHandlerReturnsErrorResponse(): void
