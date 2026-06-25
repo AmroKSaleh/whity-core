@@ -15,29 +15,33 @@ use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Sdk\Http\Request;
 
 /**
- * MCP tools/call handler (WC-2e6944d5).
+ * MCP tools/call handler (WC-2e6944d5, WC-b570dccd).
  *
  * Executes one MCP tool per JSON-RPC call:
  *   1. Validates the bearer token to obtain the AI principal (userId/tenantId).
  *   2. Resolves the tool name back to a route declaration via ToolDeriver.
- *   3. Synthesizes a versioned HTTP Request from the tool arguments.
- *   4. Resolves the live handler + access controls via Router::match().
- *   5. Enforces requiredPermission / requiredRole through RoleChecker —
+ *   3. Validates and coerces arguments against the derived inputSchema so the
+ *      server-side validation spec is always identical to what the AI client
+ *      received from tools/list (WC-b570dccd).
+ *   4. Synthesizes a versioned HTTP Request from the tool arguments.
+ *   5. Resolves the live handler + access controls via Router::match().
+ *   6. Enforces requiredPermission / requiredRole through RoleChecker —
  *      the same component HTTP uses, so MCP can never diverge from HTTP authz.
- *   6. Invokes the route handler and wraps its Response in the MCP result shape.
+ *   7. Invokes the route handler and wraps its Response in the MCP result shape.
  *
- * Protocol errors (unknown tool, forbidden) are thrown as McpException so the
- * Dispatcher can convert them to the correct JSON-RPC error codes.
+ * Protocol errors (unknown tool, forbidden, invalid params) are thrown as
+ * McpException so the Dispatcher returns the correct JSON-RPC error codes.
  * Application errors (4xx/5xx from the handler) are returned as isError:true
  * content per the MCP specification.
  */
 final class ToolsCallHandler implements MethodHandler
 {
     public function __construct(
-        private readonly ToolDeriver   $toolDeriver,
-        private readonly Router        $router,
-        private readonly RoleChecker   $roleChecker,
-        private readonly TokenValidator $tokenValidator,
+        private readonly ToolDeriver          $toolDeriver,
+        private readonly Router               $router,
+        private readonly RoleChecker          $roleChecker,
+        private readonly TokenValidator       $tokenValidator,
+        private readonly InputSchemaValidator $schemaValidator = new InputSchemaValidator(),
     ) {}
 
     /**
@@ -69,6 +73,14 @@ final class ToolsCallHandler implements MethodHandler
         $declaration = $this->toolDeriver->findDeclarationByName($toolName);
         if ($declaration === null) {
             throw new McpException(ErrorCode::METHOD_NOT_FOUND, "Unknown tool: {$toolName}");
+        }
+
+        // 3b. Validate and coerce arguments against the derived inputSchema.
+        //     The same schema the AI client received from tools/list is used here,
+        //     so validation can never diverge from the advertised spec.
+        $inputSchema = $this->toolDeriver->getToolInputSchema($toolName);
+        if (is_array($inputSchema)) {
+            $this->schemaValidator->validate($inputSchema, $arguments);
         }
 
         $method  = strtoupper((string) ($declaration['method'] ?? 'GET'));
