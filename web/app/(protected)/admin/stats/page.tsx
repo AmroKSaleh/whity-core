@@ -236,8 +236,8 @@ export default function AdminStats() {
         {/* Database Info */}
         <Card>
           <CardHeader className="flex flex-row items-center gap-4">
-            <div className="p-2 bg-blue-100 rounded-lg dark:bg-blue-900">
-              <IconDatabase className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <div className="p-2 bg-info/15 rounded-lg">
+              <IconDatabase className="h-5 w-5 text-info" />
             </div>
             <div>
               <CardTitle>Database</CardTitle>
@@ -280,8 +280,8 @@ export default function AdminStats() {
         {/* System Resources */}
         <Card>
           <CardHeader className="flex flex-row items-center gap-4">
-            <div className="p-2 bg-green-100 rounded-lg dark:bg-green-900">
-              <IconCpu className="h-5 w-5 text-green-600 dark:text-green-400" />
+            <div className="p-2 bg-success/15 rounded-lg">
+              <IconCpu className="h-5 w-5 text-success" />
             </div>
             <div>
               <CardTitle>System</CardTitle>
@@ -313,8 +313,8 @@ export default function AdminStats() {
         {/* Environment Info */}
         <Card>
           <CardHeader className="flex flex-row items-center gap-4">
-            <div className="p-2 bg-orange-100 rounded-lg dark:bg-orange-900">
-              <IconServer className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+            <div className="p-2 bg-warning/15 rounded-lg">
+              <IconServer className="h-5 w-5 text-warning" />
             </div>
             <div>
               <CardTitle>Environment</CardTitle>

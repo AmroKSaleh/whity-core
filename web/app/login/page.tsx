@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -213,7 +214,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           {branding.logoWideUrl ? (
-            <img src={branding.logoWideUrl} alt={branding.siteName} className="h-10 w-auto max-w-[220px] object-contain mx-auto mb-2" />
+            <Image src={branding.logoWideUrl} alt={branding.siteName} width={220} height={40} className="h-10 w-auto max-w-[220px] object-contain mx-auto mb-2" />
           ) : null}
           <CardTitle className="text-2xl">{`Welcome to ${branding.siteName}`}</CardTitle>
           <CardDescription>

@@ -393,19 +393,19 @@ export default function PluginsPage() {
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Active</CardDescription>
-            <CardTitle className="text-3xl font-bold font-heading text-emerald-600">{activeCount}</CardTitle>
+            <CardTitle className="text-3xl font-bold font-heading text-success">{activeCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Disabled</CardDescription>
-            <CardTitle className="text-3xl font-bold font-heading text-amber-600">{disabledCount}</CardTitle>
+            <CardTitle className="text-3xl font-bold font-heading text-warning">{disabledCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">Failed</CardDescription>
-            <CardTitle className="text-3xl font-bold font-heading text-rose-600">{failedCount}</CardTitle>
+            <CardTitle className="text-3xl font-bold font-heading text-error">{failedCount}</CardTitle>
           </CardHeader>
         </Card>
       </div>
