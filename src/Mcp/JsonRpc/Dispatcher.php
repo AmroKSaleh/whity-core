@@ -133,6 +133,8 @@ final class Dispatcher implements McpRequestHandlerInterface
 
         try {
             $result = ($this->handlers[$method])($params, $bearerToken);
+        } catch (McpException $e) {
+            return $isNotification ? null : $this->makeError($id, $e->errorCode, $e->getMessage());
         } catch (\Throwable) {
             return $isNotification ? null : $this->makeError($id, ErrorCode::INTERNAL_ERROR, 'Internal error');
         }

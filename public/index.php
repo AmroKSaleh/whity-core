@@ -154,6 +154,7 @@ use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
 use Whity\Mcp\Tools\ToolDeriver;
+use Whity\Mcp\Tools\ToolsCallHandler;
 use Whity\Mcp\Tools\ToolsListHandler;
 use Whity\Mcp\Transport\McpTransportHandler;
 use Whity\OpenAPI\CoreApiSchemas;
@@ -740,6 +741,7 @@ $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'ping'                    => new PingHandler(),
     'notifications/cancelled' => new CancelledNotificationHandler(),
     'tools/list'              => new ToolsListHandler($toolDeriver),
+    'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator),
 ], $tokenValidator));
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
