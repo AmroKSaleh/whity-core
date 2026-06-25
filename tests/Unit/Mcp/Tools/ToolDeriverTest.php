@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Mcp\Tools;
 
 use PHPUnit\Framework\TestCase;
+use Whity\Core\Router;
 use Whity\Mcp\Tools\ToolDeriver;
 
 /**
@@ -328,19 +329,119 @@ final class ToolDeriverTest extends TestCase
         self::assertCount(2, $tools);
     }
 
-    // ── ToolsListHandler ─────────────────────────────────────────────────────
+    // ── ToolsListHandler (smoke) ──────────────────────────────────────────────
 
     public function testToolsListHandler_returnsToolsWrappedInList(): void
     {
         $deriver = new ToolDeriver([
-            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['summary' => 'List users']],
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['summary' => 'List users'], 'requiredRole' => null, 'requiredPermission' => null],
         ]);
+        $roleChecker    = $this->createMock(\Whity\Auth\RoleChecker::class);
+        $tokenValidator = $this->createMock(\Whity\Auth\TokenValidator::class);
+        $tokenValidator->method('validateMcpToken')->willReturn(null);
 
-        $handler = new \Whity\Mcp\Tools\ToolsListHandler($deriver);
-        $result = $handler(null, null);
+        $handler = new \Whity\Mcp\Tools\ToolsListHandler($deriver, $roleChecker, $tokenValidator);
+        $result  = $handler(null, null);
 
         self::assertIsArray($result);
         self::assertArrayHasKey('tools', $result);
         self::assertCount(1, $result['tools']);
+    }
+
+    // ── buildAccessMap() ──────────────────────────────────────────────────────
+
+    public function testBuildAccessMap_returnsEmptyMap_whenNoDeclarations(): void
+    {
+        $deriver = new ToolDeriver([]);
+
+        self::assertSame([], $deriver->buildAccessMap());
+    }
+
+    public function testBuildAccessMap_skipsDeclarationsWithoutSchema(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => null, 'requiredRole' => null, 'requiredPermission' => null],
+        ]);
+
+        self::assertSame([], $deriver->buildAccessMap());
+    }
+
+    public function testBuildAccessMap_mapsOpenTool_toNullPermissions(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['summary' => 'List things'], 'requiredRole' => null, 'requiredPermission' => null],
+        ]);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertArrayHasKey('get_api_things', $map);
+        self::assertNull($map['get_api_things']['requiredRole']);
+        self::assertNull($map['get_api_things']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_mapsPermissionProtectedTool_toPermission(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['summary' => 'List things'], 'requiredRole' => null, 'requiredPermission' => 'things:read'],
+        ]);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertSame('things:read', $map['get_api_things']['requiredPermission']);
+        self::assertNull($map['get_api_things']['requiredRole']);
+    }
+
+    public function testBuildAccessMap_mapsRoleProtectedTool_toRole(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['summary' => 'List things'], 'requiredRole' => 'admin', 'requiredPermission' => null],
+        ]);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertSame('admin', $map['get_api_things']['requiredRole']);
+        self::assertNull($map['get_api_things']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_usesOperationId_asKey_whenPresent(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['operationId' => 'list_things', 'summary' => 'List things'], 'requiredRole' => null, 'requiredPermission' => 'things:read'],
+        ]);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertArrayHasKey('list_things', $map);
+        self::assertSame('things:read', $map['list_things']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_includesRouterNativeRoutes(): void
+    {
+        $router = new Router('');
+        $router->registerUnversioned('GET', '/api/widgets', fn () => null, null, null, 'widgets:read', ['summary' => 'List widgets']);
+
+        $deriver = new ToolDeriver([], [], $router);
+        $map     = $deriver->buildAccessMap();
+
+        self::assertArrayHasKey('get_api_widgets', $map);
+        self::assertSame('widgets:read', $map['get_api_widgets']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_mapKeysMatchToolNames_fromDeriveTools(): void
+    {
+        $decls = [
+            ['method' => 'GET',    'path' => '/api/things',           'schema' => ['summary' => 'List'],   'requiredRole' => null,    'requiredPermission' => null],
+            ['method' => 'POST',   'path' => '/api/things',           'schema' => ['summary' => 'Create'], 'requiredRole' => 'admin',  'requiredPermission' => null],
+            ['method' => 'DELETE', 'path' => '/api/things/{id:\d+}',  'schema' => ['summary' => 'Delete'], 'requiredRole' => null,     'requiredPermission' => 'things:delete'],
+        ];
+        $deriver = new ToolDeriver($decls);
+
+        $tools   = $deriver->deriveTools();
+        $map     = $deriver->buildAccessMap();
+        $toolNames = array_column($tools, 'name');
+
+        foreach ($toolNames as $name) {
+            self::assertArrayHasKey($name, $map, "Tool '{$name}' missing from access map");
+        }
     }
 }

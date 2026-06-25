@@ -86,6 +86,60 @@ final class ResourceDeriver
         return ['resources' => $resources, 'resourceTemplates' => $resourceTemplates];
     }
 
+    /**
+     * Build a map of resource URI → access requirements.
+     *
+     * Keys are the whity-api:// URIs (or uriTemplates) produced by deriveResources().
+     * Values carry the requiredRole and requiredPermission from the declaration or
+     * router route — both null means the resource is open (no RBAC required).
+     *
+     * @return array<string, array{requiredRole: ?string, requiredPermission: ?string}>
+     */
+    public function buildAccessMap(): array
+    {
+        $accessMap     = [];
+        $versionPrefix = $this->router !== null ? $this->router->getVersionPrefix() : '';
+
+        // Static declarations: unversioned paths — apply version prefix.
+        foreach ($this->staticDeclarations as $decl) {
+            if (strtoupper((string) ($decl['method'] ?? '')) !== 'GET') {
+                continue;
+            }
+            $schema = $decl['schema'] ?? null;
+            if (!is_array($schema) || $schema === []) {
+                continue;
+            }
+            $path = $this->applyVersionPrefix((string) ($decl['path'] ?? ''), $versionPrefix);
+            $uri  = self::URI_SCHEME . $this->cleanPathConstraints($path);
+
+            $accessMap[$uri] = [
+                'requiredRole'       => is_string($decl['requiredRole'] ?? null) ? $decl['requiredRole'] : null,
+                'requiredPermission' => is_string($decl['requiredPermission'] ?? null) ? $decl['requiredPermission'] : null,
+            ];
+        }
+
+        // Router-native routes: paths already versioned by Router::register().
+        if ($this->router !== null) {
+            foreach ($this->router->getRoutes() as $route) {
+                if (strtoupper($route['method']) !== 'GET') {
+                    continue;
+                }
+                $schema = $route['schema'] ?? null;
+                if (!is_array($schema) || $schema === []) {
+                    continue;
+                }
+                $uri = self::URI_SCHEME . $this->cleanPathConstraints($route['path']);
+
+                $accessMap[$uri] = [
+                    'requiredRole'       => is_string($route['requiredRole'] ?? null) ? $route['requiredRole'] : null,
+                    'requiredPermission' => is_string($route['requiredPermission'] ?? null) ? $route['requiredPermission'] : null,
+                ];
+            }
+        }
+
+        return $accessMap;
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /**
