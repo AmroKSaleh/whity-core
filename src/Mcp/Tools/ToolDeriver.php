@@ -86,6 +86,50 @@ final class ToolDeriver
     }
 
     /**
+     * Find the route declaration whose derived tool name matches $toolName.
+     *
+     * Searches static declarations first, then router routes (if a Router was
+     * provided). Returns the raw declaration array — which includes 'method',
+     * 'path', and 'schema' — or null when no match is found.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findDeclarationByName(string $toolName): ?array
+    {
+        foreach ($this->staticDeclarations as $decl) {
+            $schema = $decl['schema'] ?? null;
+            if (!is_array($schema) || $schema === []) {
+                continue;
+            }
+            ['path' => $cleanPath] = $this->sanitizePath((string) ($decl['path'] ?? ''));
+            $name = is_string($schema['operationId'] ?? null)
+                ? $schema['operationId']
+                : $this->operationId((string) ($decl['method'] ?? ''), $cleanPath);
+            if ($name === $toolName) {
+                return $decl;
+            }
+        }
+
+        if ($this->router !== null) {
+            foreach ($this->router->getRoutes() as $route) {
+                $schema = $route['schema'] ?? null;
+                if (!is_array($schema) || $schema === []) {
+                    continue;
+                }
+                ['path' => $cleanPath] = $this->sanitizePath($route['path']);
+                $name = is_string($schema['operationId'] ?? null)
+                    ? $schema['operationId']
+                    : $this->operationId($route['method'], $cleanPath);
+                if ($name === $toolName) {
+                    return $route;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Convert one route declaration into an MCP tool definition.
      *
      * @param array<string, mixed> $schema Route schema declaration.
