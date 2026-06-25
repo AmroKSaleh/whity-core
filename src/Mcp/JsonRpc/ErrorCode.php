@@ -14,7 +14,8 @@ final class ErrorCode
     public const int INTERNAL_ERROR  = -32603;
 
     // MCP-specific application error codes (ADR-0007)
-    public const int RATE_LIMITED    = -32000;
-    public const int UNAUTHENTICATED = -32001;
-    public const int FORBIDDEN       = -32003;
+    public const int RATE_LIMITED      = -32000;
+    public const int UNAUTHENTICATED   = -32001;
+    public const int RESOURCE_NOT_FOUND = -32002;
+    public const int FORBIDDEN         = -32003;
 }
