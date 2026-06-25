@@ -244,4 +244,103 @@ final class ResourceDeriverTest extends TestCase
 
         self::assertSame('whity-api:///api/things', $result['resources'][0]['uri']);
     }
+
+    // ── buildAccessMap() ──────────────────────────────────────────────────────
+
+    public function testBuildAccessMap_returnsEmptyMap_whenNoDeclarations(): void
+    {
+        $deriver = new ResourceDeriver([]);
+
+        self::assertSame([], $deriver->buildAccessMap());
+    }
+
+    public function testBuildAccessMap_mapsOpenResource_toNullPermissions(): void
+    {
+        $deriver = new ResourceDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['summary' => 'List things'], 'requiredRole' => null, 'requiredPermission' => null],
+        ]);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertArrayHasKey('whity-api:///api/things', $map);
+        self::assertNull($map['whity-api:///api/things']['requiredRole']);
+        self::assertNull($map['whity-api:///api/things']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_mapsPermissionProtectedResource_toPermission(): void
+    {
+        $deriver = new ResourceDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['summary' => 'List things'], 'requiredRole' => null, 'requiredPermission' => 'things:read'],
+        ]);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertSame('things:read', $map['whity-api:///api/things']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_mapsRoleProtectedResource_toRole(): void
+    {
+        $deriver = new ResourceDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['summary' => 'List things'], 'requiredRole' => 'admin', 'requiredPermission' => null],
+        ]);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertSame('admin', $map['whity-api:///api/things']['requiredRole']);
+    }
+
+    public function testBuildAccessMap_skipsNonGetDeclarations(): void
+    {
+        $deriver = new ResourceDeriver([
+            ['method' => 'POST', 'path' => '/api/things', 'schema' => ['summary' => 'Create things'], 'requiredRole' => null, 'requiredPermission' => null],
+        ]);
+
+        self::assertSame([], $deriver->buildAccessMap());
+    }
+
+    public function testBuildAccessMap_appliesVersionPrefix_forStaticDeclarations(): void
+    {
+        $router  = new Router('/v1');
+        $deriver = new ResourceDeriver([
+            ['method' => 'GET', 'path' => '/api/things', 'schema' => ['summary' => 'List things'], 'requiredRole' => null, 'requiredPermission' => 'things:read'],
+        ], $router);
+
+        $map = $deriver->buildAccessMap();
+
+        self::assertArrayHasKey('whity-api:///api/v1/things', $map);
+        self::assertSame('things:read', $map['whity-api:///api/v1/things']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_includesRouterNativeRoutes(): void
+    {
+        $router = new Router('');
+        $router->registerUnversioned('GET', '/api/widgets', fn () => null, null, null, 'widgets:read', ['summary' => 'List widgets']);
+
+        $deriver = new ResourceDeriver([], $router);
+        $map     = $deriver->buildAccessMap();
+
+        self::assertArrayHasKey('whity-api:///api/widgets', $map);
+        self::assertSame('widgets:read', $map['whity-api:///api/widgets']['requiredPermission']);
+    }
+
+    public function testBuildAccessMap_mapKeysMatchUris_fromDeriveResources(): void
+    {
+        $router = new Router('');
+        $router->registerUnversioned('GET', '/api/items',        fn () => null, null,    null, null,        ['summary' => 'List items']);
+        $router->registerUnversioned('GET', '/api/items/{id:\d+}', fn () => null, 'admin', null, null,      ['summary' => 'Get item']);
+        $router->registerUnversioned('GET', '/api/secure',       fn () => null, null,    null, 'sec:read',  ['summary' => 'Secure list']);
+
+        $deriver   = new ResourceDeriver([], $router);
+        $resources = $deriver->deriveResources();
+        $map       = $deriver->buildAccessMap();
+
+        foreach ($resources['resources'] as $resource) {
+            $uri = $resource['uri'];
+            self::assertArrayHasKey($uri, $map, "Resource URI '{$uri}' missing from access map");
+        }
+        foreach ($resources['resourceTemplates'] as $template) {
+            $uri = $template['uriTemplate'];
+            self::assertArrayHasKey($uri, $map, "Template URI '{$uri}' missing from access map");
+        }
+    }
 }

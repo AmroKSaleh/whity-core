@@ -86,6 +86,48 @@ final class ToolDeriver
     }
 
     /**
+     * Build a map of tool name → access requirements.
+     *
+     * Keys are the same operationId / derived names produced by deriveTools().
+     * Values carry the requiredRole and requiredPermission read from the route
+     * declaration or router route — both null means the tool is open (no RBAC).
+     *
+     * @return array<string, array{requiredRole: ?string, requiredPermission: ?string}>
+     */
+    public function buildAccessMap(): array
+    {
+        $declarations = $this->staticDeclarations;
+
+        if ($this->router !== null) {
+            foreach ($this->router->getRoutes() as $route) {
+                $schema = $route['schema'] ?? null;
+                if (is_array($schema) && $schema !== []) {
+                    $declarations[] = $route;
+                }
+            }
+        }
+
+        $accessMap = [];
+        foreach ($declarations as $decl) {
+            $schema = $decl['schema'] ?? null;
+            if (!is_array($schema) || $schema === []) {
+                continue;
+            }
+            ['path' => $cleanPath] = $this->sanitizePath((string) ($decl['path'] ?? ''));
+            $name = is_string($schema['operationId'] ?? null)
+                ? $schema['operationId']
+                : $this->operationId((string) ($decl['method'] ?? ''), $cleanPath);
+
+            $accessMap[$name] = [
+                'requiredRole'       => is_string($decl['requiredRole'] ?? null) ? $decl['requiredRole'] : null,
+                'requiredPermission' => is_string($decl['requiredPermission'] ?? null) ? $decl['requiredPermission'] : null,
+            ];
+        }
+
+        return $accessMap;
+    }
+
+    /**
      * Return the JSON-Schema inputSchema for the named tool, or null if the
      * tool is not found.
      *
