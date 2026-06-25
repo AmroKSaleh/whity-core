@@ -727,7 +727,7 @@ $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'initialize'              => new InitializeHandler(),
     'ping'                    => new PingHandler(),
     'notifications/cancelled' => new CancelledNotificationHandler(),
-]));
+], $tokenValidator));
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
 
