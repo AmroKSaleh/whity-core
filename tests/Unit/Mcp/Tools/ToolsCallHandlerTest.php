@@ -281,7 +281,8 @@ final class ToolsCallHandlerTest extends TestCase
 
         self::assertNotNull($this->lastRequest);
         self::assertNotNull($this->lastRequest->user);
-        self::assertSame(self::USER_ID, $this->lastRequest->user->user_id);
+        $userVars = get_object_vars($this->lastRequest->user);
+        self::assertSame(self::USER_ID, $userVars['user_id']);
     }
 
     // ── Error result wrapping ─────────────────────────────────────────────────
