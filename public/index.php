@@ -153,6 +153,9 @@ use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
+use Whity\Mcp\Resources\ResourceDeriver;
+use Whity\Mcp\Resources\ResourcesListHandler;
+use Whity\Mcp\Resources\ResourcesReadHandler;
 use Whity\Mcp\Tools\ToolDeriver;
 use Whity\Mcp\Tools\ToolsCallHandler;
 use Whity\Mcp\Tools\ToolsListHandler;
@@ -736,12 +739,18 @@ $toolDeriver = new ToolDeriver(
     CoreApiSchemas::components(),
     $router,
 );
+$resourceDeriver = new ResourceDeriver(
+    CoreApiSchemas::routes(),
+    $router,
+);
 $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'initialize'              => new InitializeHandler(),
     'ping'                    => new PingHandler(),
     'notifications/cancelled' => new CancelledNotificationHandler(),
     'tools/list'              => new ToolsListHandler($toolDeriver),
     'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator),
+    'resources/list'          => new ResourcesListHandler($resourceDeriver),
+    'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator),
 ], $tokenValidator));
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
