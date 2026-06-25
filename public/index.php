@@ -153,7 +153,10 @@ use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
+use Whity\Mcp\Tools\ToolDeriver;
+use Whity\Mcp\Tools\ToolsListHandler;
 use Whity\Mcp\Transport\McpTransportHandler;
+use Whity\OpenAPI\CoreApiSchemas;
 
 // Load environment variables from .env file (skip if already set)
 $envFile = dirname(__DIR__) . '/.env';
@@ -723,10 +726,20 @@ $router->register('DELETE', '/api/mcp/tokens/{jti}', [$mcpTokenHandler, 'revoke'
 // path is exactly /mcp (not /api/v1/mcp). No requiredRole/requiredPermission —
 // the transport delegates auth to the dispatcher (ADR-0006 per-call contract).
 // Bypasses tenant isolation middleware (see EnforceTenantIsolation::PUBLIC_ROUTES).
+//
+// WC-001754c6: ToolDeriver is built with the Router reference so plugin routes
+// (schema-bearing, loaded after this point via $pluginLoader->load()) are read
+// lazily at tools/list call time instead of at construction time.
+$toolDeriver = new ToolDeriver(
+    CoreApiSchemas::routes(),
+    CoreApiSchemas::components(),
+    $router,
+);
 $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'initialize'              => new InitializeHandler(),
     'ping'                    => new PingHandler(),
     'notifications/cancelled' => new CancelledNotificationHandler(),
+    'tools/list'              => new ToolsListHandler($toolDeriver),
 ], $tokenValidator));
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
