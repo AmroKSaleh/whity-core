@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Mcp\JsonRpc;
 
+use Whity\Auth\TokenValidator;
+use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 
 /**
@@ -16,30 +18,60 @@ use Whity\Mcp\Transport\McpRequestHandlerInterface;
  * JSON array of the non-notification responses (empty string if all are
  * notifications). Exception messages from handlers are never forwarded to the
  * caller — INTERNAL_ERROR is returned with a fixed generic message.
+ *
+ * When a TokenValidator is provided, every call must carry a valid MCP bearer
+ * token (WC-06a7133c). Auth is checked before JSON parsing so unauthenticated
+ * callers learn nothing about the request shape. TenantContext is set to the
+ * principal's tenant ID and reset in a finally block, guaranteeing no tenant
+ * bleed across FrankenPHP persistent-worker requests.
  */
 final class Dispatcher implements McpRequestHandlerInterface
 {
-    /** @param array<string, MethodHandler> $handlers Keyed by method name. */
-    public function __construct(private readonly array $handlers) {}
+    /**
+     * @param array<string, MethodHandler> $handlers       Keyed by method name.
+     * @param TokenValidator|null          $tokenValidator When provided, every request must carry
+     *                                                      a valid MCP bearer token; null disables
+     *                                                      auth (internal / test use only).
+     */
+    public function __construct(
+        private readonly array $handlers,
+        private readonly ?TokenValidator $tokenValidator = null,
+    ) {}
 
     public function handle(string $rawBody, ?string $bearerToken): string
     {
+        // Auth + tenant binding: validated before JSON parsing so that an
+        // unauthenticated caller learns nothing about the request shape.
+        if ($this->tokenValidator !== null) {
+            $principal = $bearerToken !== null
+                ? $this->tokenValidator->validateMcpToken($bearerToken)
+                : null;
+            if ($principal === null) {
+                return $this->encode($this->makeError(null, ErrorCode::UNAUTHENTICATED, 'Unauthenticated'));
+            }
+            TenantContext::setTenantId($principal->tenantId);
+        }
+
         try {
-            $decoded = json_decode($rawBody, false, 512, JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return $this->encode($this->makeError(null, ErrorCode::PARSE_ERROR, 'Parse error'));
-        }
+            try {
+                $decoded = json_decode($rawBody, false, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                return $this->encode($this->makeError(null, ErrorCode::PARSE_ERROR, 'Parse error'));
+            }
 
-        if (is_array($decoded)) {
-            return $this->handleBatch($decoded, $bearerToken);
-        }
+            if (is_array($decoded)) {
+                return $this->handleBatch($decoded, $bearerToken);
+            }
 
-        if (!$decoded instanceof \stdClass) {
-            return $this->encode($this->makeError(null, ErrorCode::INVALID_REQUEST, 'Invalid Request'));
-        }
+            if (!$decoded instanceof \stdClass) {
+                return $this->encode($this->makeError(null, ErrorCode::INVALID_REQUEST, 'Invalid Request'));
+            }
 
-        $response = $this->dispatch((array) $decoded, $bearerToken);
-        return $response !== null ? $this->encode($response) : '';
+            $response = $this->dispatch((array) $decoded, $bearerToken);
+            return $response !== null ? $this->encode($response) : '';
+        } finally {
+            TenantContext::reset();
+        }
     }
 
     // ── Batch ─────────────────────────────────────────────────────────────────
