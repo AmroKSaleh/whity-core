@@ -29,6 +29,9 @@ use Whity\Core\Router;
  */
 final class ToolDeriver
 {
+    /** @var \Closure(string): void */
+    private readonly \Closure $warn;
+
     /**
      * @param list<array<string, mixed>> $staticDeclarations
      *   Core (or any pre-built) route declarations. Each entry must contain at
@@ -42,12 +45,19 @@ final class ToolDeriver
      *   deriveTools() time and merged with $staticDeclarations. This allows
      *   plugin-contributed routes (loaded after construction) to appear as
      *   tools without requiring a rebuild of the ToolDeriver.
+     * @param \Closure(string): void|null $warn
+     *   Called with a diagnostic message when a mutation route (POST/PUT/PATCH)
+     *   has no resolvable request-body schema. Defaults to error_log().
+     *   Inject a capturing closure in tests to assert warning content.
      */
     public function __construct(
         private readonly array $staticDeclarations,
         private readonly array $components = [],
         private readonly ?Router $router = null,
-    ) {}
+        ?\Closure $warn = null,
+    ) {
+        $this->warn = $warn ?? static function (string $msg): void { error_log($msg); };
+    }
 
     /**
      * Derive MCP tool definitions for all schema-bearing route declarations.
@@ -209,11 +219,64 @@ final class ToolDeriver
             ? $schema['summary']
             : $this->generateSummary($method, $path);
 
+        $inputSchema = $this->buildInputSchema($pathParams, $schema);
+        $this->lintMutationSchema($method, $path, $schema, $inputSchema);
+
         return [
             'name'        => $name,
             'description' => $description,
-            'inputSchema' => $this->buildInputSchema($pathParams, $schema),
+            'inputSchema' => $inputSchema,
         ];
+    }
+
+    /**
+     * Emit a lint warning when a mutation route has no resolvable request body.
+     *
+     * A POST/PUT/PATCH route with an unresolvable component reference (or no
+     * request key at all) will produce a schema-less MCP tool — the AI client
+     * receives no parameter guidance. This is almost never intentional, so we
+     * warn at derivation time rather than silently producing an empty inputSchema.
+     *
+     * @param array<string, mixed> $schema Route schema declaration.
+     * @param array<string, mixed> $inputSchema The derived inputSchema.
+     */
+    private function lintMutationSchema(string $method, string $path, array $schema, array $inputSchema): void
+    {
+        $isMutation = in_array(strtoupper($method), ['POST', 'PUT', 'PATCH'], true);
+        if (!$isMutation) {
+            return;
+        }
+
+        $request = $schema['request'] ?? null;
+
+        if ($request === null) {
+            ($this->warn)(
+                "MCP lint: {$method} {$path} has no schema['request'] — "
+                . 'the derived MCP tool will have no body parameters. '
+                . "Add a 'request' key (component name or inline schema) to describe the request body."
+            );
+            return;
+        }
+
+        // Inline array request bodies are always considered resolved.
+        if (is_array($request)) {
+            return;
+        }
+
+        // String component reference: warn if it could not be resolved.
+        if (is_string($request) && $request !== '') {
+            $hasBodyProps = isset($inputSchema['properties']) &&
+                is_array($inputSchema['properties']) &&
+                $inputSchema['properties'] !== [];
+
+            if (!$hasBodyProps) {
+                ($this->warn)(
+                    "MCP lint: {$method} {$path} references component '{$request}' "
+                    . "in schema['request'] but it could not be resolved from global or route-scoped components. "
+                    . "Add it to schema['components'] on the route declaration or to the global components map."
+                );
+            }
+        }
     }
 
     /**
@@ -274,7 +337,9 @@ final class ToolDeriver
         $bodySchema = null;
 
         if (is_string($request) && $request !== '') {
-            $bodySchema = $this->components[$request] ?? null;
+            // Global components take priority; route-scoped as fallback.
+            $routeComponents = is_array($schema['components'] ?? null) ? $schema['components'] : [];
+            $bodySchema = $this->components[$request] ?? $routeComponents[$request] ?? null;
             $bodySchema = is_array($bodySchema) ? $bodySchema : null;
         } elseif (is_array($request) && $request !== []) {
             // Skip multipart/custom bodies (have a 'content' key) — they are
