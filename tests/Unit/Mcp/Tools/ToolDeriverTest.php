@@ -1,0 +1,346 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Mcp\Tools;
+
+use PHPUnit\Framework\TestCase;
+use Whity\Mcp\Tools\ToolDeriver;
+
+/**
+ * TDD tests for ToolDeriver (WC-001754c6).
+ *
+ * Verifies that route declarations (method + path + schema) are converted into
+ * valid MCP tool definitions with correct name, description, and inputSchema.
+ */
+final class ToolDeriverTest extends TestCase
+{
+    // ── Filtering ─────────────────────────────────────────────────────────────
+
+    public function testDeriveTools_skipsRoutes_withoutSchema(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => null],
+            ['method' => 'POST', 'path' => '/api/users', 'schema' => []],
+        ]);
+
+        self::assertSame([], $deriver->deriveTools());
+    }
+
+    // ── Tool name (operationId) ───────────────────────────────────────────────
+
+    public function testDeriveTools_usesExplicitOperationId(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => [
+                'operationId' => 'list_users',
+                'summary' => 'List users',
+            ]],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        self::assertCount(1, $tools);
+        self::assertSame('list_users', $tools[0]['name']);
+    }
+
+    public function testDeriveTools_derivesOperationId_fromMethodAndPath(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['summary' => 'List users']],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        self::assertSame('get_api_users', $tools[0]['name']);
+    }
+
+    public function testDeriveTools_derivesOperationId_forPathWithId(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'PATCH', 'path' => '/api/users/{id:\d+}', 'schema' => ['summary' => 'Update user']],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        self::assertSame('patch_api_users_id', $tools[0]['name']);
+    }
+
+    public function testDeriveTools_derivesOperationId_forDeleteWithNestedPath(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'DELETE', 'path' => '/api/roles/{id:\d+}', 'schema' => ['summary' => 'Delete role']],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        self::assertSame('delete_api_roles_id', $tools[0]['name']);
+    }
+
+    // ── Description ──────────────────────────────────────────────────────────
+
+    public function testDeriveTools_usesSummaryAsDescription(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => [
+                'summary' => 'List the tenant\'s users',
+            ]],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        self::assertSame('List the tenant\'s users', $tools[0]['description']);
+    }
+
+    public function testDeriveTools_fallsBackToGeneratedSummary_whenMissing(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['operationId' => 'list_users']],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        self::assertStringContainsString('Get', $tools[0]['description']);
+    }
+
+    // ── inputSchema: path parameters ─────────────────────────────────────────
+
+    public function testDeriveTools_inputSchema_includesPathParams_asRequired(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users/{id:\d+}', 'schema' => ['summary' => 'Get user']],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        self::assertSame('object', $input['type']);
+        self::assertArrayHasKey('id', $input['properties']);
+        self::assertSame('integer', $input['properties']['id']['type']);
+        self::assertContains('id', $input['required']);
+    }
+
+    public function testDeriveTools_inputSchema_stringPathParam_forUnconstrainedSegment(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/mcp/tokens/{jti}', 'schema' => ['summary' => 'Get token']],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        self::assertSame('string', $input['properties']['jti']['type']);
+        self::assertContains('jti', $input['required']);
+    }
+
+    public function testDeriveTools_inputSchema_noRequiredOrProperties_forSimpleRoute(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['summary' => 'List users']],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        self::assertSame('object', $input['type']);
+        self::assertArrayNotHasKey('properties', $input);
+        self::assertArrayNotHasKey('required', $input);
+    }
+
+    // ── inputSchema: query parameters ─────────────────────────────────────────
+
+    public function testDeriveTools_inputSchema_includesQueryParams(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => [
+                'summary' => 'List users',
+                'parameters' => [
+                    ['name' => 'search', 'in' => 'query', 'schema' => ['type' => 'string'], 'description' => 'Search term'],
+                    ['name' => 'page', 'in' => 'query', 'required' => true, 'schema' => ['type' => 'integer']],
+                ],
+            ]],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        self::assertArrayHasKey('search', $input['properties']);
+        self::assertSame('string', $input['properties']['search']['type']);
+        self::assertSame('Search term', $input['properties']['search']['description']);
+
+        self::assertArrayHasKey('page', $input['properties']);
+        self::assertContains('page', $input['required']);
+        self::assertNotContains('search', $input['required']);
+    }
+
+    public function testDeriveTools_inputSchema_skipsNonQueryParams(): void
+    {
+        // Header params should be skipped (MCP sends args, not raw HTTP headers)
+        $deriver = new ToolDeriver([
+            ['method' => 'POST', 'path' => '/api/test', 'schema' => [
+                'summary' => 'Test',
+                'parameters' => [
+                    ['name' => 'X-Custom-Header', 'in' => 'header', 'schema' => ['type' => 'string']],
+                ],
+            ]],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        self::assertArrayNotHasKey('X-Custom-Header', $input['properties'] ?? []);
+    }
+
+    // ── inputSchema: request body (component reference) ───────────────────────
+
+    public function testDeriveTools_inputSchema_mergesComponentProperties(): void
+    {
+        $components = [
+            'UserCreateRequest' => [
+                'type' => 'object',
+                'required' => ['email', 'role_id'],
+                'properties' => [
+                    'email'   => ['type' => 'string', 'format' => 'email'],
+                    'role_id' => ['type' => 'integer'],
+                    'name'    => ['type' => 'string'],
+                ],
+            ],
+        ];
+
+        $deriver = new ToolDeriver([
+            ['method' => 'POST', 'path' => '/api/users', 'schema' => [
+                'summary' => 'Create user',
+                'request' => 'UserCreateRequest',
+            ]],
+        ], $components);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        self::assertArrayHasKey('email', $input['properties']);
+        self::assertArrayHasKey('role_id', $input['properties']);
+        self::assertArrayHasKey('name', $input['properties']);
+        self::assertSame('string', $input['properties']['email']['type']);
+        self::assertContains('email', $input['required']);
+        self::assertContains('role_id', $input['required']);
+        self::assertNotContains('name', $input['required']);
+    }
+
+    public function testDeriveTools_inputSchema_handlesUnknownComponentGracefully(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'POST', 'path' => '/api/items', 'schema' => [
+                'summary' => 'Create item',
+                'request' => 'NonExistentComponent',
+            ]],
+        ], []);
+
+        $tools = $deriver->deriveTools();
+        // Should not throw; inputSchema is still a valid (empty) object schema
+        self::assertSame('object', $tools[0]['inputSchema']['type']);
+    }
+
+    // ── inputSchema: request body (inline schema) ─────────────────────────────
+
+    public function testDeriveTools_inputSchema_mergesInlineRequestBody(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'POST', 'path' => '/api/tokens', 'schema' => [
+                'summary' => 'Create token',
+                'request' => [
+                    'type' => 'object',
+                    'required' => ['name'],
+                    'properties' => [
+                        'name'  => ['type' => 'string'],
+                        'scope' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    ],
+                ],
+            ]],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        self::assertArrayHasKey('name', $input['properties']);
+        self::assertArrayHasKey('scope', $input['properties']);
+        self::assertContains('name', $input['required']);
+    }
+
+    public function testDeriveTools_inputSchema_skipsMultipartRequestBody(): void
+    {
+        // Multipart request bodies have a 'content' key — skip body properties
+        $deriver = new ToolDeriver([
+            ['method' => 'POST', 'path' => '/api/upload', 'schema' => [
+                'summary' => 'Upload',
+                'request' => [
+                    'content' => ['multipart/form-data' => ['schema' => ['type' => 'object']]],
+                ],
+            ]],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        // Properties from multipart body should NOT be merged
+        self::assertArrayNotHasKey('properties', $input);
+    }
+
+    // ── Combined path + body ──────────────────────────────────────────────────
+
+    public function testDeriveTools_inputSchema_combinesPathAndBodyParams(): void
+    {
+        $components = [
+            'UserUpdateRequest' => [
+                'type' => 'object',
+                'required' => ['name'],
+                'properties' => [
+                    'name'  => ['type' => 'string'],
+                    'email' => ['type' => 'string'],
+                ],
+            ],
+        ];
+
+        $deriver = new ToolDeriver([
+            ['method' => 'PATCH', 'path' => '/api/users/{id:\d+}', 'schema' => [
+                'summary' => 'Update user',
+                'request' => 'UserUpdateRequest',
+            ]],
+        ], $components);
+
+        $tools = $deriver->deriveTools();
+        $input = $tools[0]['inputSchema'];
+
+        // id from path
+        self::assertArrayHasKey('id', $input['properties']);
+        self::assertContains('id', $input['required']);
+
+        // name, email from body
+        self::assertArrayHasKey('name', $input['properties']);
+        self::assertArrayHasKey('email', $input['properties']);
+        self::assertContains('name', $input['required']);
+    }
+
+    // ── Multiple routes ───────────────────────────────────────────────────────
+
+    public function testDeriveTools_returnsOneToolPerDeclarationWithSchema(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET',    'path' => '/api/users', 'schema' => ['summary' => 'List users']],
+            ['method' => 'POST',   'path' => '/api/users', 'schema' => ['summary' => 'Create user']],
+            ['method' => 'DELETE', 'path' => '/api/logs',  'schema' => null],
+        ]);
+
+        $tools = $deriver->deriveTools();
+        self::assertCount(2, $tools);
+    }
+
+    // ── ToolsListHandler ─────────────────────────────────────────────────────
+
+    public function testToolsListHandler_returnsToolsWrappedInList(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['summary' => 'List users']],
+        ]);
+
+        $handler = new \Whity\Mcp\Tools\ToolsListHandler($deriver);
+        $result = $handler(null, null);
+
+        self::assertIsArray($result);
+        self::assertArrayHasKey('tools', $result);
+        self::assertCount(1, $result['tools']);
+    }
+}
