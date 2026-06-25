@@ -153,6 +153,10 @@ use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
+use Whity\Mcp\Prompts\CorePrompts;
+use Whity\Mcp\Prompts\PromptRegistry;
+use Whity\Mcp\Prompts\PromptsGetHandler;
+use Whity\Mcp\Prompts\PromptsListHandler;
 use Whity\Mcp\Resources\ResourceDeriver;
 use Whity\Mcp\Resources\ResourcesListHandler;
 use Whity\Mcp\Resources\ResourcesReadHandler;
@@ -743,6 +747,8 @@ $resourceDeriver = new ResourceDeriver(
     CoreApiSchemas::routes(),
     $router,
 );
+$promptRegistry = new PromptRegistry();
+CorePrompts::register($promptRegistry);
 $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'initialize'              => new InitializeHandler(),
     'ping'                    => new PingHandler(),
@@ -751,6 +757,8 @@ $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator),
     'resources/list'          => new ResourcesListHandler($resourceDeriver),
     'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator),
+    'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
+    'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
 ], $tokenValidator));
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
