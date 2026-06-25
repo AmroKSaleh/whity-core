@@ -16,8 +16,11 @@ use Composer\Semver\Semver;
 use Whity\Sdk\Frontend\Blocks\BlockValidator;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Mcp\Prompts\Prompt;
+use Whity\Mcp\Prompts\PromptRegistry;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
+use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
 use Whity\Sdk\Sdk;
@@ -973,6 +976,65 @@ class PluginLoader
     public function getPlugins(): array
     {
         return $this->plugins;
+    }
+
+    /**
+     * Register MCP prompts contributed by plugins (WC-7abb732f).
+     *
+     * Iterates every loaded plugin; those that implement {@see PluginMcpInterface}
+     * have their descriptors collected and registered into $registry.
+     *
+     * Rules:
+     * - First registration wins: a plugin prompt whose name is already taken
+     *   (by a core prompt or an earlier plugin) is dropped with a warning.
+     * - A descriptor with a missing or empty `name` is dropped with a warning.
+     * - A getMcpPrompts() call that throws is caught, logged, and treated as
+     *   if the plugin contributed nothing; remaining plugins still run.
+     */
+    public function collectMcpPrompts(PromptRegistry $registry): void
+    {
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            $plugin = $info['plugin'];
+            if (!$plugin instanceof PluginMcpInterface) {
+                continue;
+            }
+            try {
+                $descriptors = $plugin->getMcpPrompts();
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getMcpPrompts');
+                continue;
+            }
+            foreach ($descriptors as $descriptor) {
+                $this->registerMcpPrompt($registry, $descriptor, $pluginKey);
+            }
+        }
+    }
+
+    private function registerMcpPrompt(PromptRegistry $registry, mixed $descriptor, string $pluginKey): void
+    {
+        if (!is_array($descriptor)) {
+            $this->logWarning("[Plugin:{$pluginKey}] getMcpPrompts() returned a non-array descriptor — skipped.");
+            return;
+        }
+        $name = $descriptor['name'] ?? null;
+        if (!is_string($name) || $name === '') {
+            $this->logWarning("[Plugin:{$pluginKey}] getMcpPrompts() descriptor missing or empty 'name' — skipped.");
+            return;
+        }
+        if ($registry->find($name) !== null) {
+            $this->logWarning("[Plugin:{$pluginKey}] getMcpPrompts() prompt '{$name}' already registered — skipped (first-registration-wins).");
+            return;
+        }
+        $description        = is_string($descriptor['description'] ?? null) ? $descriptor['description'] : '';
+        $requiredRole       = is_string($descriptor['requiredRole'] ?? null) ? $descriptor['requiredRole'] : null;
+        $requiredPermission = is_string($descriptor['requiredPermission'] ?? null) ? $descriptor['requiredPermission'] : null;
+
+        $registry->register(new Prompt(
+            name:               $name,
+            description:        $description,
+            requiredRole:       $requiredRole,
+            requiredPermission: $requiredPermission,
+        ));
     }
 
     /**

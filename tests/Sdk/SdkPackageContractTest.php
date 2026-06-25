@@ -166,11 +166,27 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.8.0',
+            '1.9.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.8 adds interactive block types (form, inputs, submitButton, actionButton) '
+            'SDK 1.9 adds the MCP prompt contribution point (PluginMcpInterface, WC-7abb732f); '
+            . '1.8 added interactive block types (form, inputs, submitButton, actionButton) '
             . 'and the inputName/selectOptions/submitSpec prop-rule kinds (WC-233)'
         );
+    }
+
+    public function testPluginMcpInterface_existsWithGetMcpPromptsMethod(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\PluginMcpInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\PluginMcpInterface::class))->getMethods()
+        );
+        $this->assertSame(['getMcpPrompts'], $methods);
+
+        $return = (new \ReflectionMethod(\Whity\Sdk\PluginMcpInterface::class, 'getMcpPrompts'))
+            ->getReturnType();
+        $this->assertSame('array', (string) $return);
     }
 
     /**
