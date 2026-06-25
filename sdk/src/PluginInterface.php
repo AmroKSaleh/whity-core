@@ -56,7 +56,17 @@ interface PluginInterface
      *   'request' (component name or inline JSON-Schema array),
      *   'responses' (map of status => component name | inline array |
      *   {description: ...} object), and 'components' (map of component name =>
-     *   JSON-Schema definition contributed to components.schemas)
+     *   JSON-Schema definition contributed to components.schemas).
+     *
+     *   **MCP typed contracts (WC-d93f7ea2)**: For a POST/PUT/PATCH route to
+     *   appear as a fully typed MCP tool, the `schema['request']` key MUST be
+     *   provided. When `schema['request']` is a component name (string), the
+     *   corresponding schema MUST be resolvable — either through the global
+     *   components map or, preferably, through a `schema['components']` entry
+     *   on the same route. A missing or unresolvable request schema causes
+     *   the host to emit a derivation-time lint warning and produces an MCP
+     *   tool with no body parameters, which gives AI clients no guidance on
+     *   the expected request shape. Inline schemas (array) are always resolved.
      *
      * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string, requiredPermission?: ?string, schema?: array<string, mixed>}>
      */
