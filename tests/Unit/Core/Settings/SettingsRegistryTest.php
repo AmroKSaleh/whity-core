@@ -16,11 +16,12 @@ use Whity\Core\Settings\SettingsRegistry;
  */
 final class SettingsRegistryTest extends TestCase
 {
-    public function testKnownKeysAreExactlyTheSevenDesignedFields(): void
+    public function testKnownKeysAreExactlyTheDesignedFields(): void
     {
         self::assertSame(
             ['site_name', 'timezone', 'locale', 'support_email',
-             'branding_logo_wide', 'branding_logo_square', 'branding_favicon'],
+             'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
+             'mcp.enabled'],
             SettingsRegistry::keys()
         );
     }
@@ -140,10 +141,30 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(7, $describe);
+        self::assertCount(8, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
         );
+    }
+
+    // ---- mcp.enabled (WC-149b2fc9) ----
+
+    public function testMcpEnabledDefaultIsFalse(): void
+    {
+        self::assertSame('false', SettingsRegistry::defaultFor('mcp.enabled'));
+    }
+
+    public function testMcpEnabledAcceptsTrueAndFalseStrings(): void
+    {
+        self::assertNull(SettingsRegistry::validate('mcp.enabled', 'true'));
+        self::assertNull(SettingsRegistry::validate('mcp.enabled', 'false'));
+    }
+
+    public function testMcpEnabledRejectsOtherValues(): void
+    {
+        self::assertNotNull(SettingsRegistry::validate('mcp.enabled', '1'));
+        self::assertNotNull(SettingsRegistry::validate('mcp.enabled', 'yes'));
+        self::assertNotNull(SettingsRegistry::validate('mcp.enabled', ''));
     }
 }

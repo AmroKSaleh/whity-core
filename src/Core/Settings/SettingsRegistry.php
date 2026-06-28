@@ -40,6 +40,10 @@ final class SettingsRegistry
     public const BRANDING_LOGO_SQUARE = 'branding_logo_square';
     public const BRANDING_FAVICON = 'branding_favicon';
 
+    // MCP feature flag (WC-149b2fc9). Value is the literal string 'true' or
+    // 'false'; an admin sets it per-tenant to enable the MCP endpoint.
+    public const MCP_ENABLED = 'mcp.enabled';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -71,6 +75,7 @@ final class SettingsRegistry
         self::BRANDING_LOGO_WIDE => '',
         self::BRANDING_LOGO_SQUARE => '',
         self::BRANDING_FAVICON => '',
+        self::MCP_ENABLED => 'false',
     ];
 
     /**
@@ -229,6 +234,7 @@ final class SettingsRegistry
             self::TIMEZONE => self::validateTimezone($value),
             self::LOCALE => self::validateLocale($value),
             self::SUPPORT_EMAIL => self::validateSupportEmail($value),
+            self::MCP_ENABLED => self::validateMcpEnabled($value),
             default => "Unknown setting key: {$key}",
         };
     }
@@ -296,6 +302,15 @@ final class SettingsRegistry
         }
         if (filter_var($value, FILTER_VALIDATE_EMAIL) === false) {
             return 'support_email must be a valid email address (or empty).';
+        }
+
+        return null;
+    }
+
+    private static function validateMcpEnabled(string $value): ?string
+    {
+        if ($value !== 'true' && $value !== 'false') {
+            return "mcp.enabled must be 'true' or 'false'.";
         }
 
         return null;

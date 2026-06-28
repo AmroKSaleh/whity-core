@@ -81,7 +81,7 @@ final class SettingsApiRealEngineTest extends TestCase
         $data = $this->decode($response)['data'];
         self::assertSame('Whity', $data['effective']['site_name']);
         self::assertSame('UTC', $data['effective']['timezone']);
-        self::assertCount(4, $data['registry']);
+        self::assertCount(5, $data['registry']);
         self::assertSame([], $data['overridden']);
     }
 

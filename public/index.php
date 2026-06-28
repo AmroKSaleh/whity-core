@@ -147,10 +147,12 @@ use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\LoginThrottleService;
 use Whity\Core\Store\DatabaseSharedStore;
+use Whity\Core\Settings\SettingsRegistry;
 use Whity\Mcp\Auth\McpTokenHandler;
 use Whity\Mcp\Auth\McpTokenService;
 use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
+use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
@@ -723,13 +725,12 @@ $router->register('POST', '/api/relations', [$relationsHandler, 'create'], null,
 $router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
 
 // WC-2686308f: MCP token management endpoints (issue / list / revoke).
-// Require a valid access-token cookie — these are human-initiated management
-// actions. Tenant isolation applies via the cookie claims; no explicit
-// requiredRole since every authenticated user can manage their own MCP tokens.
+// WC-149b2fc9: create and revoke are gated by mcp:tokens:manage so an admin
+// controls who may mint AI credentials. List is read-only and ungated.
 $mcpTokenHandler = new McpTokenHandler($tokenValidator, new McpTokenService($db->getPdo(), $jwtParser));
-$router->register('POST',   '/api/mcp/tokens',       [$mcpTokenHandler, 'create']);
+$router->register('POST',   '/api/mcp/tokens',       [$mcpTokenHandler, 'create'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 $router->register('GET',    '/api/mcp/tokens',       [$mcpTokenHandler, 'list']);
-$router->register('DELETE', '/api/mcp/tokens/{jti}', [$mcpTokenHandler, 'revoke']);
+$router->register('DELETE', '/api/mcp/tokens/{jti}', [$mcpTokenHandler, 'revoke'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 
 // WC-c10b292e: MCP Streamable-HTTP endpoint. Registered UNVERSIONED so the
 // path is exactly /mcp (not /api/v1/mcp). No requiredRole/requiredPermission —
@@ -757,17 +758,26 @@ $mcpRateLimiter = new McpRateLimiter(
     tenantLimit:    (int) ($_ENV['MCP_RATE_TENANT_LIMIT']    ?? 300),
     principalLimit: (int) ($_ENV['MCP_RATE_PRINCIPAL_LIMIT'] ?? 60),
 );
-$mcpTransportHandler = new McpTransportHandler(new Dispatcher([
-    'initialize'              => new InitializeHandler(),
-    'ping'                    => new PingHandler(),
-    'notifications/cancelled' => new CancelledNotificationHandler(),
-    'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator),
-    'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
-    'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
-    'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
-    'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
-    'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
-], $tokenValidator, $mcpRateLimiter));
+// WC-149b2fc9: per-tenant MCP opt-in — read mcp.enabled from settings. Default
+// off so new tenants must explicitly enable the endpoint.
+$tenantMcpEnabled = static function (int $tenantId) use ($settingsService): bool {
+    $settings = $settingsService->effective($tenantId);
+    return ($settings[SettingsRegistry::MCP_ENABLED] ?? 'false') === 'true';
+};
+$mcpTransportHandler = new McpTransportHandler(
+    new Dispatcher([
+        'initialize'              => new InitializeHandler(),
+        'ping'                    => new PingHandler(),
+        'notifications/cancelled' => new CancelledNotificationHandler(),
+        'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator),
+        'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
+        'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
+        'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
+        'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
+        'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
+    ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled),
+    enabled: (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN),
+);
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
 

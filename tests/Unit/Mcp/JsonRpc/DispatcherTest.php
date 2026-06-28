@@ -14,6 +14,7 @@ use Whity\Mcp\JsonRpc\ErrorCode;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
+use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimitException;
 use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
@@ -300,6 +301,67 @@ final class DispatcherTest extends TestCase
         }
 
         self::assertNull(TenantContext::getTenantId(), 'TenantContext must be reset after rate-limit exception');
+    }
+
+    // ── Per-tenant MCP opt-in (WC-149b2fc9) ─────────────────────────────────
+
+    public function testHandle_throwsMcpFeatureDisabledException_whenTenantMcpDisabled(): void
+    {
+        $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-fe');
+
+        $tokenValidator = $this->createMock(TokenValidator::class);
+        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+
+        $dispatcher = new Dispatcher(
+            ['ping' => new PingHandler()],
+            $tokenValidator,
+            null,
+            static fn(int $tenantId): bool => false,
+        );
+
+        $this->expectException(McpFeatureDisabledException::class);
+        $dispatcher->handle('{"jsonrpc":"2.0","method":"ping","id":1}', 'bearer-tok');
+    }
+
+    public function testHandle_resetsTenantContext_whenMcpFeatureDisabledExceptionThrown(): void
+    {
+        $principal = new McpPrincipal(7, 3, 'user', [], 'jti-fe2');
+
+        $tokenValidator = $this->createMock(TokenValidator::class);
+        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+
+        $dispatcher = new Dispatcher(
+            [],
+            $tokenValidator,
+            null,
+            static fn(int $tenantId): bool => false,
+        );
+
+        try {
+            $dispatcher->handle('{"jsonrpc":"2.0","method":"ping","id":1}', 'bearer-tok');
+        } catch (McpFeatureDisabledException) {
+            // Expected — verify TenantContext was cleaned up.
+        }
+
+        self::assertNull(TenantContext::getTenantId(), 'TenantContext must be reset after McpFeatureDisabledException');
+    }
+
+    public function testHandle_doesNotThrow_whenTenantMcpEnabled(): void
+    {
+        $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-fe3');
+
+        $tokenValidator = $this->createMock(TokenValidator::class);
+        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+
+        $dispatcher = new Dispatcher(
+            ['ping' => new PingHandler()],
+            $tokenValidator,
+            null,
+            static fn(int $tenantId): bool => true,
+        );
+
+        $r = json_decode($dispatcher->handle('{"jsonrpc":"2.0","method":"ping","id":1}', 'bearer-tok'), true);
+        self::assertArrayHasKey('result', $r);
     }
 
     // ── ErrorCode constants ───────────────────────────────────────────────────
