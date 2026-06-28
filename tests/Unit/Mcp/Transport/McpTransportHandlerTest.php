@@ -6,6 +6,7 @@ namespace Tests\Unit\Mcp\Transport;
 
 use PHPUnit\Framework\TestCase;
 use Whity\Core\Request;
+use Whity\Mcp\RateLimit\McpRateLimitException;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 use Whity\Mcp\Transport\McpTransportHandler;
 
@@ -172,6 +173,58 @@ final class McpTransportHandlerTest extends TestCase
         $headers  = $response->getHeaders();
 
         self::assertArrayNotHasKey('x-accel-buffering', $headers);
+    }
+
+    // ── POST /mcp rate limiting (WC-a89ece0d) ────────────────────────────────
+
+    public function testPostReturns429_whenDispatcherThrowsMcpRateLimitException(): void
+    {
+        $this->dispatcher->method('handle')
+            ->willThrowException(new McpRateLimitException(60));
+
+        $request  = new Request('POST', '/mcp', ['Content-Type' => 'application/json'], '{}');
+        $response = $this->handler->handlePost($request);
+
+        self::assertSame(429, $response->getStatusCode());
+    }
+
+    public function testPostSetsRetryAfterHeader_whenRateLimited(): void
+    {
+        $this->dispatcher->method('handle')
+            ->willThrowException(new McpRateLimitException(60));
+
+        $request  = new Request('POST', '/mcp', ['Content-Type' => 'application/json'], '{}');
+        $response = $this->handler->handlePost($request);
+
+        $headers = $response->getHeaders();
+        // Header name may be stored lowercase depending on Response implementation.
+        $retryAfter = $headers['Retry-After'] ?? $headers['retry-after'] ?? null;
+        self::assertSame('60', $retryAfter);
+    }
+
+    public function testPostReturnsEmptyBody_whenRateLimited(): void
+    {
+        $this->dispatcher->method('handle')
+            ->willThrowException(new McpRateLimitException(60));
+
+        $request  = new Request('POST', '/mcp', ['Content-Type' => 'application/json'], '{}');
+        $response = $this->handler->handlePost($request);
+
+        self::assertSame('', $response->getBody());
+    }
+
+    public function testPostDoesNotReturnJsonContentType_whenRateLimited(): void
+    {
+        $this->dispatcher->method('handle')
+            ->willThrowException(new McpRateLimitException(60));
+
+        $request  = new Request('POST', '/mcp', ['Content-Type' => 'application/json'], '{}');
+        $response = $this->handler->handlePost($request);
+
+        $headers     = $response->getHeaders();
+        $contentType = $headers['content-type'] ?? $headers['Content-Type'] ?? '';
+        // A 429 with no body should not claim application/json
+        self::assertStringNotContainsString('application/json', $contentType);
     }
 
     // ── GET /mcp SSE stub ────────────────────────────────────────────────────

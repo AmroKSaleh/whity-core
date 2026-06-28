@@ -6,6 +6,7 @@ namespace Whity\Mcp\JsonRpc;
 
 use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 
 /**
@@ -32,16 +33,21 @@ final class Dispatcher implements McpRequestHandlerInterface
      * @param TokenValidator|null          $tokenValidator When provided, every request must carry
      *                                                      a valid MCP bearer token; null disables
      *                                                      auth (internal / test use only).
+     * @param McpRateLimiter|null          $rateLimiter    When provided, per-tenant and per-principal
+     *                                                      call budgets are enforced after auth; null
+     *                                                      disables rate limiting (dev / test use).
      */
     public function __construct(
         private readonly array $handlers,
         private readonly ?TokenValidator $tokenValidator = null,
+        private readonly ?McpRateLimiter $rateLimiter    = null,
     ) {}
 
     public function handle(string $rawBody, ?string $bearerToken): string
     {
-        // Auth + tenant binding: validated before JSON parsing so that an
-        // unauthenticated caller learns nothing about the request shape.
+        // Auth check: validated before JSON parsing so that an unauthenticated
+        // caller learns nothing about the request shape.
+        $principal = null;
         if ($this->tokenValidator !== null) {
             $principal = $bearerToken !== null
                 ? $this->tokenValidator->validateMcpToken($bearerToken)
@@ -49,10 +55,18 @@ final class Dispatcher implements McpRequestHandlerInterface
             if ($principal === null) {
                 return $this->encode($this->makeError(null, ErrorCode::UNAUTHENTICATED, 'Unauthenticated'));
             }
-            TenantContext::setTenantId($principal->tenantId);
         }
 
+        // TenantContext is set INSIDE the try block so TenantContext::reset()
+        // in the finally fires even when McpRateLimitException propagates out.
         try {
+            if ($principal !== null) {
+                TenantContext::setTenantId($principal->tenantId);
+                // Rate limit check after auth. McpRateLimitException is NOT caught
+                // here — it propagates to McpTransportHandler which returns HTTP 429.
+                $this->rateLimiter?->checkAndRecord($principal->tenantId, $principal->userId);
+            }
+
             try {
                 $decoded = json_decode($rawBody, false, 512, JSON_THROW_ON_ERROR);
             } catch (\JsonException) {

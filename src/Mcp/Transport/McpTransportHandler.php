@@ -6,6 +6,7 @@ namespace Whity\Mcp\Transport;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Mcp\RateLimit\McpRateLimitException;
 
 /**
  * HTTP transport handler for the MCP Streamable-HTTP endpoint (ADR-0006).
@@ -37,9 +38,14 @@ final class McpTransportHandler
             return Response::error('Content-Type must be application/json', 415);
         }
 
-        $bearer      = $this->extractBearer($request);
-        $rawBody     = $request->getBody();
-        $rawResponse = $this->dispatcher->handle($rawBody, $bearer);
+        $bearer  = $this->extractBearer($request);
+        $rawBody = $request->getBody();
+
+        try {
+            $rawResponse = $this->dispatcher->handle($rawBody, $bearer);
+        } catch (McpRateLimitException $e) {
+            return new Response(429, '', ['Retry-After' => (string) $e->getRetryAfterSeconds()]);
+        }
 
         $headers = ['Content-Type' => 'application/json'];
 
