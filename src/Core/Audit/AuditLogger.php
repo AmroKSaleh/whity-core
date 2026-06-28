@@ -43,7 +43,7 @@ use Whity\Core\Tenant\TenantContext;
  * (PDO, logger), never per-request state — the request-specific actor/IP live in
  * the reset-between-requests {@see AuditContext}.
  */
-final class AuditLogger
+final class AuditLogger implements AuditLoggerInterface
 {
     /**
      * The system tenant id, used as the owning tenant for pre-auth / system

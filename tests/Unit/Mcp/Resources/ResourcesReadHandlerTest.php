@@ -8,6 +8,8 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Whity\Auth\RoleChecker;
 use Whity\Auth\TokenValidator;
+use Whity\Core\Audit\AuditContext;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
@@ -261,5 +263,76 @@ final class ResourcesReadHandlerTest extends TestCase
         self::assertArrayHasKey('contents', $result);
         self::assertCount(1, $result['contents']);
         self::assertSame($uri, $result['contents'][0]['uri']);
+    }
+
+    // ── Audit logging (WC-94526f65) ───────────────────────────────────────────
+
+    public function testSuccessfulRead_recordsAuditLog(): void
+    {
+        $uri = ResourceDeriver::URI_SCHEME . '/api/things';
+
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects($this->once())
+            ->method('record')
+            ->with(
+                'mcp.resources.read',
+                $this->callback(function (array $opts) use ($uri): bool {
+                    return ($opts['tenant_id'] ?? null) === self::TENANT_ID
+                        && ($opts['actor_user_id'] ?? null) === self::USER_ID
+                        && ($opts['target_type'] ?? null) === 'resource'
+                        && ($opts['metadata']['uri'] ?? null) === $uri;
+                }),
+            );
+
+        $handler = new ResourcesReadHandler($this->router, $this->roleChecker, $this->tokenValidator, auditLogger: $audit);
+        ($handler)(['uri' => $uri], self::BEARER);
+    }
+
+    public function testAuditContext_setsActorUserId_afterTokenValidation(): void
+    {
+        AuditContext::reset();
+
+        $capturedUserId = null;
+        $this->router->registerUnversioned('GET', '/api/audit-rr', function () use (&$capturedUserId): Response {
+            $capturedUserId = AuditContext::getActorUserId();
+            return Response::json(['ok' => true]);
+        });
+
+        $handler = new ResourcesReadHandler($this->router, $this->roleChecker, $this->tokenValidator);
+        ($handler)(['uri' => ResourceDeriver::URI_SCHEME . '/api/audit-rr'], self::BEARER);
+
+        self::assertSame(self::USER_ID, $capturedUserId);
+
+        AuditContext::reset();
+    }
+
+    public function testHandlerThrows_stillRecordsAuditLog(): void
+    {
+        $this->router->registerUnversioned('GET', '/api/throws-rr', static function (): never {
+            throw new \RuntimeException('Boom');
+        });
+
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects($this->once())->method('record');
+
+        $handler = new ResourcesReadHandler($this->router, $this->roleChecker, $this->tokenValidator, auditLogger: $audit);
+        $result  = ($handler)(['uri' => ResourceDeriver::URI_SCHEME . '/api/throws-rr'], self::BEARER);
+
+        self::assertArrayHasKey('contents', $result);
+    }
+
+    public function testUnknownResource_doesNotRecordAuditLog(): void
+    {
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects($this->never())->method('record');
+
+        $handler = new ResourcesReadHandler($this->router, $this->roleChecker, $this->tokenValidator, auditLogger: $audit);
+
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::RESOURCE_NOT_FOUND);
+        ($handler)(['uri' => ResourceDeriver::URI_SCHEME . '/api/no-such-resource'], self::BEARER);
     }
 }

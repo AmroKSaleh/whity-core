@@ -6,6 +6,8 @@ namespace Whity\Mcp\Tools;
 
 use Whity\Auth\RoleChecker;
 use Whity\Auth\TokenValidator;
+use Whity\Core\Audit\AuditContext;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
@@ -37,11 +39,12 @@ use Whity\Sdk\Http\Request;
 final class ToolsCallHandler implements MethodHandler
 {
     public function __construct(
-        private readonly ToolDeriver          $toolDeriver,
-        private readonly Router               $router,
-        private readonly RoleChecker          $roleChecker,
-        private readonly TokenValidator       $tokenValidator,
-        private readonly InputSchemaValidator $schemaValidator = new InputSchemaValidator(),
+        private readonly ToolDeriver            $toolDeriver,
+        private readonly Router                 $router,
+        private readonly RoleChecker            $roleChecker,
+        private readonly TokenValidator         $tokenValidator,
+        private readonly InputSchemaValidator   $schemaValidator = new InputSchemaValidator(),
+        private readonly ?AuditLoggerInterface  $auditLogger = null,
     ) {}
 
     /**
@@ -69,12 +72,73 @@ final class ToolsCallHandler implements MethodHandler
             throw new McpException(ErrorCode::UNAUTHENTICATED, 'Unauthenticated');
         }
 
+        // Route the AI principal into AuditContext so that any hook-fired audit
+        // entries (e.g. user.created by a mutation tool) also capture the MCP
+        // actor rather than null.
+        AuditContext::set($principal->userId, null);
+
         // 3. Resolve tool name → route declaration.
         $declaration = $this->toolDeriver->findDeclarationByName($toolName);
         if ($declaration === null) {
             throw new McpException(ErrorCode::METHOD_NOT_FOUND, "Unknown tool: {$toolName}");
         }
 
+        // From here the tool is known — audit the invocation regardless of
+        // outcome (RBAC denial, handler error, or success).
+        try {
+            return $this->executeResolved($toolName, $arguments, $declaration, $principal);
+        } finally {
+            $this->auditLogger?->record('mcp.tools.call', [
+                'tenant_id'    => $principal->tenantId,
+                'actor_user_id' => $principal->userId,
+                'target_type'  => 'tool',
+                // Pre-strip at the call site (defense-in-depth). AuditLogger
+                // also sanitizes metadata before the INSERT, but future
+                // AuditLoggerInterface implementations may not.
+                'metadata'     => ['tool' => $toolName, 'args' => $this->redactArgs($arguments)],
+            ]);
+        }
+    }
+
+    /**
+     * Strip keys whose names contain sensitive substrings from a flat argument
+     * map before the map is passed to the audit trail. Matches the same set of
+     * forbidden substrings as {@see \Whity\Core\Audit\AuditLogger}.
+     *
+     * @param array<string, mixed> $args
+     * @return array<string, mixed>
+     */
+    private function redactArgs(array $args): array
+    {
+        $forbidden = ['password', 'secret', 'token', 'code', 'hash', 'backup_code', 'two_factor_secret'];
+        $clean = [];
+        foreach ($args as $key => $value) {
+            $lower = strtolower((string) $key);
+            foreach ($forbidden as $needle) {
+                if (str_contains($lower, $needle)) {
+                    continue 2;
+                }
+            }
+            $clean[$key] = is_array($value) ? $this->redactArgs($value) : $value;
+        }
+        return $clean;
+    }
+
+    /**
+     * Execute a resolved tool call (steps 3b–9). Separated so the audit
+     * finally block in {@see self::__invoke()} wraps the entire execution.
+     *
+     * @param array<string, mixed> $arguments
+     * @param array<string, mixed> $declaration
+     * @throws McpException On RBAC failure or unresolvable route.
+     * @return array<string, mixed>
+     */
+    private function executeResolved(
+        string $toolName,
+        array $arguments,
+        array $declaration,
+        McpPrincipal $principal,
+    ): array {
         // 3b. Validate and coerce arguments against the derived inputSchema.
         //     The same schema the AI client received from tools/list is used here,
         //     so validation can never diverge from the advertised spec.

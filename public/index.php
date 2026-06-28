@@ -754,9 +754,9 @@ $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'ping'                    => new PingHandler(),
     'notifications/cancelled' => new CancelledNotificationHandler(),
     'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator),
-    'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator),
+    'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
     'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
-    'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator),
+    'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
     'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
     'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
 ], $tokenValidator));

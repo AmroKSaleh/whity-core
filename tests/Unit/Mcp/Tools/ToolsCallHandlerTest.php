@@ -8,6 +8,8 @@ use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Whity\Auth\RoleChecker;
 use Whity\Auth\TokenValidator;
+use Whity\Core\Audit\AuditContext;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
@@ -347,5 +349,140 @@ final class ToolsCallHandlerTest extends TestCase
         $result = ($this->handler)(['name' => 'get_api_things', 'arguments' => []], self::BEARER);
 
         self::assertFalse($result['isError']);
+    }
+
+    // ── Audit logging (WC-94526f65) ───────────────────────────────────────────
+
+    public function testSuccessfulCall_recordsAuditLog(): void
+    {
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects($this->once())
+            ->method('record')
+            ->with(
+                'mcp.tools.call',
+                $this->callback(function (array $opts): bool {
+                    return ($opts['tenant_id'] ?? null) === self::TENANT_ID
+                        && ($opts['actor_user_id'] ?? null) === self::USER_ID
+                        && ($opts['target_type'] ?? null) === 'tool'
+                        && ($opts['metadata']['tool'] ?? null) === 'get_api_things';
+                }),
+            );
+
+        $handler = new ToolsCallHandler(
+            $this->toolDeriver,
+            $this->router,
+            $this->roleChecker,
+            $this->tokenValidator,
+            auditLogger: $audit,
+        );
+
+        ($handler)(['name' => 'get_api_things', 'arguments' => []], self::BEARER);
+    }
+
+    public function testAuditLog_stripsForbiddenKeys_fromArgsSummary(): void
+    {
+        $recorded = [];
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->method('record')->willReturnCallback(
+            function (string $action, array $opts) use (&$recorded): void {
+                $recorded[] = ['action' => $action, 'opts' => $opts];
+            }
+        );
+
+        $handler = new ToolsCallHandler(
+            $this->toolDeriver,
+            $this->router,
+            $this->roleChecker,
+            $this->tokenValidator,
+            auditLogger: $audit,
+        );
+
+        ($handler)(['name' => 'post_api_things', 'arguments' => ['name' => 'Widget', 'password' => 'secret123']], self::BEARER);
+
+        self::assertCount(1, $recorded);
+        $args = $recorded[0]['opts']['metadata']['args'] ?? [];
+        self::assertArrayNotHasKey('password', $args);
+        self::assertArrayHasKey('name', $args);
+    }
+
+    public function testAuditContext_setsActorUserId_afterTokenValidation(): void
+    {
+        AuditContext::reset();
+
+        $capturedUserId = null;
+        $this->router->registerUnversioned('GET', '/api/audit-check', function () use (&$capturedUserId): Response {
+            $capturedUserId = AuditContext::getActorUserId();
+            return Response::json(['ok' => true]);
+        });
+
+        $declarations = [['method' => 'GET', 'path' => '/api/audit-check', 'schema' => ['summary' => 'Audit check']]];
+        $deriver = new ToolDeriver($declarations);
+
+        $handler = new ToolsCallHandler($deriver, $this->router, $this->roleChecker, $this->tokenValidator);
+        ($handler)(['name' => 'get_api_audit_check', 'arguments' => []], self::BEARER);
+
+        self::assertSame(self::USER_ID, $capturedUserId);
+
+        AuditContext::reset();
+    }
+
+    public function testHandlerThrows_stillRecordsAuditLog(): void
+    {
+        $this->router->registerUnversioned('GET', '/api/throws', static function (): never {
+            throw new \RuntimeException('Boom');
+        });
+        $declarations = [['method' => 'GET', 'path' => '/api/throws', 'schema' => ['summary' => 'Throws']]];
+        $deriver = new ToolDeriver($declarations);
+
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects($this->once())->method('record');
+
+        $handler = new ToolsCallHandler($deriver, $this->router, $this->roleChecker, $this->tokenValidator, auditLogger: $audit);
+        $result  = ($handler)(['name' => 'get_api_throws', 'arguments' => []], self::BEARER);
+
+        self::assertTrue($result['isError']);
+    }
+
+    public function testUnknownTool_doesNotRecordAuditLog(): void
+    {
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects($this->never())->method('record');
+
+        $handler = new ToolsCallHandler(
+            $this->toolDeriver,
+            $this->router,
+            $this->roleChecker,
+            $this->tokenValidator,
+            auditLogger: $audit,
+        );
+
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::METHOD_NOT_FOUND);
+        ($handler)(['name' => 'nonexistent_tool', 'arguments' => []], self::BEARER);
+    }
+
+    public function testRbacDenied_stillRecordsAuditLog(): void
+    {
+        $this->roleChecker->method('hasPermission')->willReturn(false);
+
+        /** @var MockObject&AuditLoggerInterface $audit */
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->expects($this->once())->method('record')->with('mcp.tools.call', $this->anything());
+
+        $handler = new ToolsCallHandler(
+            $this->toolDeriver,
+            $this->router,
+            $this->roleChecker,
+            $this->tokenValidator,
+            auditLogger: $audit,
+        );
+
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::FORBIDDEN);
+        ($handler)(['name' => 'patch_api_things_id', 'arguments' => ['id' => 1]], self::BEARER);
     }
 }
