@@ -1,15 +1,15 @@
-'use client';
+﻿'use client';
 
 import { useState, type KeyboardEvent } from 'react';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
+import { Button } from '@whity/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@whity/ui/dropdown-menu';
 import {
   IconChevronRight,
   IconDotsVertical,

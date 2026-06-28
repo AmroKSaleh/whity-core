@@ -1,0 +1,31 @@
+{
+  "name": "@whity/ui",
+  "version": "0.1.0",
+  "description": "Shared UI primitives for Whity products",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "@radix-ui/react-label": ">=2",
+    "@radix-ui/react-slot": ">=1",
+    "@tabler/icons-react": ">=3",
+    "katex": ">=0.16",
+    "radix-ui": ">=1",
+    "react": ">=19",
+    "react-dom": ">=19",
+    "react-hook-form": ">=7"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

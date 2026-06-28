@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { AdminHeader } from "@/components/admin/admin-header";
@@ -8,7 +8,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@whity/ui/card";
 import { useAuth } from "@/lib/auth-context";
 import {
   IconUsers,
@@ -21,7 +21,7 @@ import {
 } from "@tabler/icons-react";
 
 import { StatsChart } from "@/components/admin/stats-chart";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@whity/ui/tabs";
 
 interface StatsData {
   totals: {

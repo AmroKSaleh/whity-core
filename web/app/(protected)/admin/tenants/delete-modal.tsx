@@ -10,8 +10,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+} from '@whity/ui/dialog';
+import { Button } from '@whity/ui/button';
 import { IconAlertCircle } from '@tabler/icons-react';
 import type { Tenant } from './page';
 

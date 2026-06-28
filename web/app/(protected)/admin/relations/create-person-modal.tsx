@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -9,10 +9,10 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+} from '@whity/ui/dialog';
+import { Button } from '@whity/ui/button';
+import { Input } from '@whity/ui/input';
+import { Textarea } from '@whity/ui/textarea';
 
 interface CreatePersonModalProps {
   isOpen: boolean;

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ jest.mock('@/lib/toast-context', () => ({
   useToast: () => ({ addToast }),
 }));
 
-jest.mock('@/components/ui/dialog', () => ({
+jest.mock('@whity/ui/dialog', () => ({
   Dialog: ({ children, open }: React.PropsWithChildren<{ open?: boolean }>) =>
     open ? <div data-testid="dialog">{children}</div> : null,
   DialogContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -30,7 +30,7 @@ jest.mock('@/components/ui/dialog', () => ({
   DialogFooter: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 
-jest.mock('@/components/ui/button', () => ({
+jest.mock('@whity/ui/button', () => ({
   Button: ({
     children,
     variant,
@@ -43,7 +43,7 @@ jest.mock('@/components/ui/button', () => ({
   },
 }));
 
-jest.mock('@/components/ui/input', () => ({
+jest.mock('@whity/ui/input', () => ({
   Input: (props: React.ComponentProps<'input'>) => <input {...props} />,
 }));
 
@@ -105,7 +105,7 @@ function MockSelectItem({
   return null;
 }
 
-jest.mock('@/components/ui/select', () => ({
+jest.mock('@whity/ui/select', () => ({
   Select: MockSelect,
   SelectTrigger: ({ children }: React.PropsWithChildren) => <>{children}</>,
   SelectValue: ({ placeholder }: { placeholder?: string }) => <span>{placeholder}</span>,

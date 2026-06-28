@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 /**
  * Branding section for the admin settings page (WC-233 Slice 5).
@@ -25,9 +25,9 @@ import {
   setBrandingHost,
   type Branding,
 } from '@/lib/api/branding-upload';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
+import { Button } from '@whity/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity/ui/card';
+import { Input } from '@whity/ui/input';
 import {
   IconDeviceFloppy,
   IconInfoCircle,

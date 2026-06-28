@@ -11,7 +11,7 @@ import { CrudScreen } from '@/components/plugin/crud-screen';
 import { ActionScreen } from '@/components/plugin/action-screen';
 import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Skeleton } from '@whity/ui/skeleton';
 import { IconPuzzle, IconShieldLock } from '@tabler/icons-react';
 
 /**

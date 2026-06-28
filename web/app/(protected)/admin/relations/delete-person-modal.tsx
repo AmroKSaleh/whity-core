@@ -9,8 +9,8 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+} from '@whity/ui/dialog';
+import { Button } from '@whity/ui/button';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import type { Person } from './types';
 

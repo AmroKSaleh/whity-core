@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api/client';
@@ -11,10 +11,10 @@ import { useNavigation } from '@/lib/navigation-context';
 import { usePluginFeatures } from '@/lib/plugin-features-context';
 import { classifyPluginVersion, type PluginVersionTier } from '@/lib/plugin-version-badge';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@whity/ui/button';
+import { Badge } from '@whity/ui/badge';
 import { PermissionButton } from '@/components/rbac/permission-button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@whity/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -22,7 +22,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@whity/ui/dialog';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -31,7 +31,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+} from '@whity/ui/alert-dialog';
 import {
   IconPlug,
   IconReload,

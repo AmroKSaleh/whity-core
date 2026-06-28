@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
@@ -8,13 +8,13 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { ROLES_WRITE, ROLES_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
-import { Button } from '@/components/ui/button';
+import { Button } from '@whity/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '@whity/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { CreateRoleModal } from './create-modal';
 import { EditRoleModal } from './edit-modal';

@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@whity/ui": ["../packages/ui/src/index.ts"],
+      "@whity/ui/*": ["../packages/ui/src/*"]
     }
   },
   "include": [
