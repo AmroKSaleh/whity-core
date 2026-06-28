@@ -1,4 +1,4 @@
-name: Publish @whity/ui
+name: Publish @amroksaleh/ui
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://npm.pkg.github.com"
-          scope: "@whity"
+          scope: "@amroksaleh"
 
       - name: Install dependencies
         working-directory: packages/ui
