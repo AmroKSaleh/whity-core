@@ -5,7 +5,23 @@
   "license": "UNLICENSED",
   "exports": {
     ".": "./src/index.ts",
-    "./*": "./src/*"
+    "./alert-dialog": "./src/alert-dialog.tsx",
+    "./alert": "./src/alert.tsx",
+    "./badge": "./src/badge.tsx",
+    "./button": "./src/button.tsx",
+    "./card": "./src/card.tsx",
+    "./dialog": "./src/dialog.tsx",
+    "./dropdown-menu": "./src/dropdown-menu.tsx",
+    "./form": "./src/form.tsx",
+    "./input": "./src/input.tsx",
+    "./math-text": "./src/math-text.tsx",
+    "./select": "./src/select.tsx",
+    "./sheet": "./src/sheet.tsx",
+    "./skeleton": "./src/skeleton.tsx",
+    "./tabs": "./src/tabs.tsx",
+    "./textarea": "./src/textarea.tsx",
+    "./utils": "./src/utils.ts",
+    "./globals.css": "./src/globals.css"
   },
   "files": [
     "src"
