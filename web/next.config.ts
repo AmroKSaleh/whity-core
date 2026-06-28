@@ -52,17 +52,18 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@whity/ui"],
   // Turbopack follows symlinks to real disk paths, so packages/ui/src/* imports
   // are resolved starting from packages/ui/ — outside web/node_modules. Pin the
-  // eight peer-deps that Turbopack can't find back to web/node_modules.
+  // peer-deps that Turbopack can't find back to web/node_modules using
+  // project-relative paths (the format turbopack.resolveAlias expects).
   turbopack: {
     resolveAlias: {
-      "radix-ui": path.resolve(__dirname, "node_modules/radix-ui"),
-      "@radix-ui/react-label": path.resolve(__dirname, "node_modules/@radix-ui/react-label"),
-      "@radix-ui/react-slot": path.resolve(__dirname, "node_modules/@radix-ui/react-slot"),
-      "@tabler/icons-react": path.resolve(__dirname, "node_modules/@tabler/icons-react"),
-      "class-variance-authority": path.resolve(__dirname, "node_modules/class-variance-authority"),
-      "clsx": path.resolve(__dirname, "node_modules/clsx"),
-      "tailwind-merge": path.resolve(__dirname, "node_modules/tailwind-merge"),
-      "react-hook-form": path.resolve(__dirname, "node_modules/react-hook-form"),
+      "radix-ui": "./node_modules/radix-ui",
+      "@radix-ui/react-label": "./node_modules/@radix-ui/react-label",
+      "@radix-ui/react-slot": "./node_modules/@radix-ui/react-slot",
+      "@tabler/icons-react": "./node_modules/@tabler/icons-react",
+      "class-variance-authority": "./node_modules/class-variance-authority",
+      "clsx": "./node_modules/clsx",
+      "tailwind-merge": "./node_modules/tailwind-merge",
+      "react-hook-form": "./node_modules/react-hook-form",
     },
   },
   async headers() {
