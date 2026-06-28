@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 /**
  * Security response headers for the Next.js FRONTEND (WC-187).
@@ -45,6 +46,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Extend Turbopack's filesystem boundary to the monorepo root so that
+  // symlinks in node_modules that point to ../packages/ui are allowed.
+  outputFileTracingRoot: path.join(__dirname, ".."),
   transpilePackages: ["@whity/ui"],
   async headers() {
     return [
