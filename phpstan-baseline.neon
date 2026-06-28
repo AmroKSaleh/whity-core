@@ -1322,5 +1322,5 @@ parameters:
 
 		-
 			message: "#^Call to an undefined method Whity\\\\Mcp\\\\Transport\\\\McpRequestHandlerInterface\\:\\:method\\(\\)\\.$#"
-			count: 6
+			count: 10
 			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php

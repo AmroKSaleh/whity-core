@@ -5,11 +5,17 @@ declare(strict_types=1);
 namespace Tests\Unit\Mcp\JsonRpc;
 
 use PHPUnit\Framework\TestCase;
+use Whity\Auth\TokenValidator;
+use Whity\Core\Store\ArraySharedStore;
+use Whity\Core\Tenant\TenantContext;
+use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\JsonRpc\ErrorCode;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
+use Whity\Mcp\RateLimit\McpRateLimitException;
+use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 
 final class DispatcherTest extends TestCase
@@ -256,6 +262,44 @@ final class DispatcherTest extends TestCase
         self::assertArrayHasKey('tools', $result['capabilities']);
         self::assertArrayHasKey('serverInfo', $result);
         self::assertSame('whity-core', $result['serverInfo']['name']);
+    }
+
+    // ── Rate limiting (WC-a89ece0d) ───────────────────────────────────────────
+
+    public function testHandle_throwsMcpRateLimitException_whenRateLimiterExhausted(): void
+    {
+        $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-rl');
+
+        $tokenValidator = $this->createMock(TokenValidator::class);
+        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+
+        // tenantLimit = 0 → increment() returns 1, 1 > 0 → throws immediately.
+        $rateLimiter = new McpRateLimiter(new ArraySharedStore(), tenantLimit: 0, principalLimit: 100);
+
+        $dispatcher = new Dispatcher(['ping' => new PingHandler()], $tokenValidator, $rateLimiter);
+
+        $this->expectException(McpRateLimitException::class);
+        $dispatcher->handle('{"jsonrpc":"2.0","method":"ping","id":1}', 'bearer-tok');
+    }
+
+    public function testHandle_resetsTenantContext_whenRateLimitExceptionThrown(): void
+    {
+        $principal = new McpPrincipal(7, 3, 'user', [], 'jti-rl2');
+
+        $tokenValidator = $this->createMock(TokenValidator::class);
+        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+
+        $rateLimiter = new McpRateLimiter(new ArraySharedStore(), tenantLimit: 0, principalLimit: 100);
+
+        $dispatcher = new Dispatcher([], $tokenValidator, $rateLimiter);
+
+        try {
+            $dispatcher->handle('{"jsonrpc":"2.0","method":"ping","id":1}', 'bearer-tok');
+        } catch (McpRateLimitException) {
+            // Expected — verify TenantContext was cleaned up by the finally block.
+        }
+
+        self::assertNull(TenantContext::getTenantId(), 'TenantContext must be reset after rate-limit exception');
     }
 
     // ── ErrorCode constants ───────────────────────────────────────────────────

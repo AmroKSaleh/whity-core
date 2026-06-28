@@ -151,6 +151,7 @@ use Whity\Mcp\Auth\McpTokenHandler;
 use Whity\Mcp\Auth\McpTokenService;
 use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
+use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Lifecycle\InitializeHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
 use Whity\Mcp\Prompts\CorePrompts;
@@ -749,6 +750,13 @@ $resourceDeriver = new ResourceDeriver(
 );
 $promptRegistry = new PromptRegistry();
 CorePrompts::register($promptRegistry);
+// WC-a89ece0d: per-tenant and per-principal call budgets. Limits are tunable
+// via env vars so operators can adjust without a code deploy.
+$mcpRateLimiter = new McpRateLimiter(
+    new DatabaseSharedStore($db->getPdo()),
+    tenantLimit:    (int) ($_ENV['MCP_RATE_TENANT_LIMIT']    ?? 300),
+    principalLimit: (int) ($_ENV['MCP_RATE_PRINCIPAL_LIMIT'] ?? 60),
+);
 $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'initialize'              => new InitializeHandler(),
     'ping'                    => new PingHandler(),
@@ -759,7 +767,7 @@ $mcpTransportHandler = new McpTransportHandler(new Dispatcher([
     'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
     'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
     'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
-], $tokenValidator));
+], $tokenValidator, $mcpRateLimiter));
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
 
