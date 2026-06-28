@@ -6,6 +6,7 @@ namespace Whity\Mcp\Transport;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimitException;
 
 /**
@@ -24,7 +25,10 @@ use Whity\Mcp\RateLimit\McpRateLimitException;
  */
 final class McpTransportHandler
 {
-    public function __construct(private readonly McpRequestHandlerInterface $dispatcher) {}
+    public function __construct(
+        private readonly McpRequestHandlerInterface $dispatcher,
+        private readonly bool $enabled = true,
+    ) {}
 
     /**
      * Handle POST /mcp — JSON-RPC requests, notifications, and batch arrays.
@@ -33,6 +37,10 @@ final class McpTransportHandler
      */
     public function handlePost(Request $request, array $params = []): Response
     {
+        if (!$this->enabled) {
+            return new Response(503, '', []);
+        }
+
         $contentType = $request->getHeader('Content-Type') ?? '';
         if (!str_contains($contentType, 'application/json')) {
             return Response::error('Content-Type must be application/json', 415);
@@ -45,6 +53,8 @@ final class McpTransportHandler
             $rawResponse = $this->dispatcher->handle($rawBody, $bearer);
         } catch (McpRateLimitException $e) {
             return new Response(429, '', ['Retry-After' => (string) $e->getRetryAfterSeconds()]);
+        } catch (McpFeatureDisabledException) {
+            return new Response(403, '', []);
         }
 
         $headers = ['Content-Type' => 'application/json'];
@@ -68,6 +78,10 @@ final class McpTransportHandler
      */
     public function handleGet(Request $request, array $params = []): Response
     {
+        if (!$this->enabled) {
+            return new Response(503, '', []);
+        }
+
         return Response::error('SSE stream not yet implemented', 501);
     }
 

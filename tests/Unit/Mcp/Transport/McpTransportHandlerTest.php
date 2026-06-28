@@ -6,6 +6,7 @@ namespace Tests\Unit\Mcp\Transport;
 
 use PHPUnit\Framework\TestCase;
 use Whity\Core\Request;
+use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimitException;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 use Whity\Mcp\Transport\McpTransportHandler;
@@ -243,5 +244,40 @@ final class McpTransportHandlerTest extends TestCase
 
         $request = new Request('GET', '/mcp', [], '');
         $this->handler->handleGet($request);
+    }
+
+    // ── Global MCP_ENABLED flag (WC-149b2fc9) ────────────────────────────────
+
+    public function testHandlePost_returns503_whenGloballyDisabled(): void
+    {
+        $this->dispatcher->expects(self::never())->method('handle');
+
+        $handler  = new McpTransportHandler($this->dispatcher, enabled: false);
+        $request  = new Request('POST', '/mcp', ['Content-Type' => 'application/json'], '{}');
+        $response = $handler->handlePost($request);
+
+        self::assertSame(503, $response->getStatusCode());
+    }
+
+    public function testHandleGet_returns503_whenGloballyDisabled(): void
+    {
+        $handler  = new McpTransportHandler($this->dispatcher, enabled: false);
+        $request  = new Request('GET', '/mcp', [], '');
+        $response = $handler->handleGet($request);
+
+        self::assertSame(503, $response->getStatusCode());
+    }
+
+    // ── Per-tenant MCP opt-in (WC-149b2fc9) ─────────────────────────────────
+
+    public function testHandlePost_returns403_whenTenantMcpDisabled(): void
+    {
+        $this->dispatcher->method('handle')
+            ->willThrowException(new McpFeatureDisabledException());
+
+        $request  = new Request('POST', '/mcp', ['Content-Type' => 'application/json'], '{}');
+        $response = $this->handler->handlePost($request);
+
+        self::assertSame(403, $response->getStatusCode());
     }
 }

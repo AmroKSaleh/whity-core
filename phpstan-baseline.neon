@@ -1317,10 +1317,10 @@ parameters:
 
 		-
 			message: "#^Call to an undefined method Whity\\\\Mcp\\\\Transport\\\\McpRequestHandlerInterface\\:\\:expects\\(\\)\\.$#"
-			count: 5
+			count: 6
 			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php
 
 		-
 			message: "#^Call to an undefined method Whity\\\\Mcp\\\\Transport\\\\McpRequestHandlerInterface\\:\\:method\\(\\)\\.$#"
-			count: 10
+			count: 12
 			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php

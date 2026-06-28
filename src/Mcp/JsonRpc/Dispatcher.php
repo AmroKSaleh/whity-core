@@ -6,6 +6,7 @@ namespace Whity\Mcp\JsonRpc;
 
 use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 
@@ -29,18 +30,23 @@ use Whity\Mcp\Transport\McpRequestHandlerInterface;
 final class Dispatcher implements McpRequestHandlerInterface
 {
     /**
-     * @param array<string, MethodHandler> $handlers       Keyed by method name.
-     * @param TokenValidator|null          $tokenValidator When provided, every request must carry
-     *                                                      a valid MCP bearer token; null disables
-     *                                                      auth (internal / test use only).
-     * @param McpRateLimiter|null          $rateLimiter    When provided, per-tenant and per-principal
-     *                                                      call budgets are enforced after auth; null
-     *                                                      disables rate limiting (dev / test use).
+     * @param array<string, MethodHandler>    $handlers          Keyed by method name.
+     * @param TokenValidator|null             $tokenValidator    When provided, every request must carry
+     *                                                            a valid MCP bearer token; null disables
+     *                                                            auth (internal / test use only).
+     * @param McpRateLimiter|null             $rateLimiter       When provided, per-tenant and per-principal
+     *                                                            call budgets are enforced after auth; null
+     *                                                            disables rate limiting (dev / test use).
+     * @param (\Closure(int): bool)|null      $tenantMcpEnabled  When provided, called with the tenant id
+     *                                                            after auth; a false return throws
+     *                                                            McpFeatureDisabledException (HTTP 403).
+     *                                                            Null disables the per-tenant check.
      */
     public function __construct(
         private readonly array $handlers,
-        private readonly ?TokenValidator $tokenValidator = null,
-        private readonly ?McpRateLimiter $rateLimiter    = null,
+        private readonly ?TokenValidator $tokenValidator    = null,
+        private readonly ?McpRateLimiter $rateLimiter       = null,
+        private readonly ?\Closure $tenantMcpEnabled        = null,
     ) {}
 
     public function handle(string $rawBody, ?string $bearerToken): string
@@ -62,6 +68,11 @@ final class Dispatcher implements McpRequestHandlerInterface
         try {
             if ($principal !== null) {
                 TenantContext::setTenantId($principal->tenantId);
+                // Per-tenant MCP opt-in check. McpFeatureDisabledException propagates
+                // to McpTransportHandler which returns HTTP 403.
+                if ($this->tenantMcpEnabled !== null && !($this->tenantMcpEnabled)($principal->tenantId)) {
+                    throw new McpFeatureDisabledException();
+                }
                 // Rate limit check after auth. McpRateLimitException is NOT caught
                 // here — it propagates to McpTransportHandler which returns HTTP 429.
                 $this->rateLimiter?->checkAndRecord($principal->tenantId, $principal->userId);

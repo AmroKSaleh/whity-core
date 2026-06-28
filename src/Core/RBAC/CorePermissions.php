@@ -90,6 +90,11 @@ final class CorePermissions
     public const SETTINGS_WRITE = 'settings:write';
     public const SETTINGS_MANAGE = 'settings:manage';
 
+    // MCP token management (WC-149b2fc9). Gates the mint and revoke operations
+    // for MCP credentials so an admin can control which users are allowed to
+    // authenticate AI clients to the MCP endpoint.
+    public const MCP_TOKENS_MANAGE = 'mcp:tokens:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -126,6 +131,7 @@ final class CorePermissions
             self::SETTINGS_READ,
             self::SETTINGS_WRITE,
             self::SETTINGS_MANAGE,
+            self::MCP_TOKENS_MANAGE,
         ];
     }
 }
