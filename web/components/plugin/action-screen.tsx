@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
@@ -10,9 +10,9 @@ import {
 } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@whity/ui/button';
+import { Input } from '@whity/ui/input';
+import { Textarea } from '@whity/ui/textarea';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
 /**

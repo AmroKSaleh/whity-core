@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { api } from '@/lib/api/client';
@@ -10,8 +10,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+} from '@whity/ui/dialog';
+import { Button } from '@whity/ui/button';
 import type { User } from './page';
 
 interface DeleteUserModalProps {

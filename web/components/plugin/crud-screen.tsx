@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
@@ -13,7 +13,7 @@ import type { PluginFeature } from '@/lib/plugin-features';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
-import { Button } from '@/components/ui/button';
+import { Button } from '@whity/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -21,23 +21,23 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from '@whity/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
+} from '@whity/ui/dropdown-menu';
+import { Input } from '@whity/ui/input';
+import { Textarea } from '@whity/ui/textarea';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
+} from '@whity/ui/select';
+import { Skeleton } from '@whity/ui/skeleton';
 import {
   IconAlertTriangle,
   IconMenu2,

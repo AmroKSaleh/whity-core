@@ -1,10 +1,10 @@
-/**
+﻿/**
  * Example usage and test data for DataTable component
  * This demonstrates how to use the reusable data table component
  */
 
 import { DataTable, Column } from './data-table';
-import { Button } from '@/components/ui/button';
+import { Button } from '@whity/ui/button';
 
 // Example 1: User Management Table
 interface User {

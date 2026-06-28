@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { api } from '@/lib/api/client';
@@ -10,9 +10,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+} from '@whity/ui/dialog';
+import { Button } from '@whity/ui/button';
+import { Alert, AlertDescription } from '@whity/ui/alert';
 import { IconAlertCircle } from '@tabler/icons-react';
 import type { Delegation } from './types';
 

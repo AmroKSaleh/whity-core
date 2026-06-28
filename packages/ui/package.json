@@ -1,0 +1,47 @@
+{
+  "name": "@whity/ui",
+  "version": "0.1.0",
+  "description": "Shared UI primitives for Whity products",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.ts",
+    "./alert-dialog": "./src/alert-dialog.tsx",
+    "./alert": "./src/alert.tsx",
+    "./badge": "./src/badge.tsx",
+    "./button": "./src/button.tsx",
+    "./card": "./src/card.tsx",
+    "./dialog": "./src/dialog.tsx",
+    "./dropdown-menu": "./src/dropdown-menu.tsx",
+    "./form": "./src/form.tsx",
+    "./input": "./src/input.tsx",
+    "./math-text": "./src/math-text.tsx",
+    "./select": "./src/select.tsx",
+    "./sheet": "./src/sheet.tsx",
+    "./skeleton": "./src/skeleton.tsx",
+    "./tabs": "./src/tabs.tsx",
+    "./textarea": "./src/textarea.tsx",
+    "./utils": "./src/utils.ts",
+    "./globals.css": "./src/globals.css"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "@radix-ui/react-label": ">=2",
+    "@radix-ui/react-slot": ">=1",
+    "@tabler/icons-react": ">=3",
+    "katex": ">=0.16",
+    "radix-ui": ">=1",
+    "react": ">=19",
+    "react-dom": ">=19",
+    "react-hook-form": ">=7"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^3.6.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

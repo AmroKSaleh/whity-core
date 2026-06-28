@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button } from '@whity/ui/button';
+import { Input } from '@whity/ui/input';
 import { IconChevronLeft, IconChevronRight, IconRefresh } from '@tabler/icons-react';
 import type {
   AuditLogEntry,

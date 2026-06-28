@@ -1,11 +1,11 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
-import { Button } from '@/components/ui/button';
+import { Button } from '@whity/ui/button';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,

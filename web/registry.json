@@ -9,7 +9,7 @@
       "title": "Alert",
       "description": "Callout for user attention with variant styles.",
       "dependencies": ["class-variance-authority"],
-      "files": [{ "path": "components/ui/alert.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/alert.tsx", "type": "registry:ui" }]
     },
     {
       "name": "badge",
@@ -17,7 +17,7 @@
       "title": "Badge",
       "description": "Small status descriptor with variant styles.",
       "dependencies": ["class-variance-authority", "radix-ui"],
-      "files": [{ "path": "components/ui/badge.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/badge.tsx", "type": "registry:ui" }]
     },
     {
       "name": "button",
@@ -25,14 +25,14 @@
       "title": "Button",
       "description": "Button with variants, sizes and icon support.",
       "dependencies": ["class-variance-authority", "radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "components/ui/button.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/button.tsx", "type": "registry:ui" }]
     },
     {
       "name": "card",
       "type": "registry:ui",
       "title": "Card",
       "description": "Container with header, content and footer sections.",
-      "files": [{ "path": "components/ui/card.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/card.tsx", "type": "registry:ui" }]
     },
     {
       "name": "dialog",
@@ -41,7 +41,7 @@
       "description": "Modal dialog over the page content.",
       "dependencies": ["radix-ui", "@tabler/icons-react"],
       "registryDependencies": ["@whity/button"],
-      "files": [{ "path": "components/ui/dialog.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/dialog.tsx", "type": "registry:ui" }]
     },
     {
       "name": "dropdown-menu",
@@ -49,7 +49,7 @@
       "title": "Dropdown Menu",
       "description": "Menu of actions opened from a trigger.",
       "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "components/ui/dropdown-menu.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/dropdown-menu.tsx", "type": "registry:ui" }]
     },
     {
       "name": "form",
@@ -57,14 +57,14 @@
       "title": "Form",
       "description": "react-hook-form wiring with accessible field primitives.",
       "dependencies": ["@radix-ui/react-label", "@radix-ui/react-slot", "react-hook-form"],
-      "files": [{ "path": "components/ui/form.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/form.tsx", "type": "registry:ui" }]
     },
     {
       "name": "input",
       "type": "registry:ui",
       "title": "Input",
       "description": "Styled text input.",
-      "files": [{ "path": "components/ui/input.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/input.tsx", "type": "registry:ui" }]
     },
     {
       "name": "select",
@@ -72,7 +72,7 @@
       "title": "Select",
       "description": "Listbox-style select with keyboard navigation.",
       "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "components/ui/select.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/select.tsx", "type": "registry:ui" }]
     },
     {
       "name": "sheet",
@@ -81,14 +81,14 @@
       "description": "Slide-in panel anchored to a screen edge.",
       "dependencies": ["radix-ui", "@tabler/icons-react"],
       "registryDependencies": ["@whity/button"],
-      "files": [{ "path": "components/ui/sheet.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/sheet.tsx", "type": "registry:ui" }]
     },
     {
       "name": "skeleton",
       "type": "registry:ui",
       "title": "Skeleton",
       "description": "Loading placeholder block.",
-      "files": [{ "path": "components/ui/skeleton.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/skeleton.tsx", "type": "registry:ui" }]
     },
     {
       "name": "tabs",
@@ -96,14 +96,14 @@
       "title": "Tabs",
       "description": "Tabbed sections with variant styles.",
       "dependencies": ["class-variance-authority", "radix-ui"],
-      "files": [{ "path": "components/ui/tabs.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/tabs.tsx", "type": "registry:ui" }]
     },
     {
       "name": "textarea",
       "type": "registry:ui",
       "title": "Textarea",
       "description": "Styled multi-line text input.",
-      "files": [{ "path": "components/ui/textarea.tsx", "type": "registry:ui" }]
+      "files": [{ "path": "../packages/ui/src/textarea.tsx", "type": "registry:ui" }]
     },
     {
       "name": "toast",

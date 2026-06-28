@@ -18,8 +18,11 @@
         "name": "next"
       }
     ],
+    "preserveSymlinks": true,
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@whity/ui": ["./node_modules/@whity/ui/src/index.ts"],
+      "@whity/ui/*": ["./node_modules/@whity/ui/src/*"]
     }
   },
   "include": [

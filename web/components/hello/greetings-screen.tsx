@@ -1,13 +1,13 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 import type { PluginFeature } from '@/lib/plugin-features';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@whity/ui/button';
+import { Input } from '@whity/ui/input';
+import { Skeleton } from '@whity/ui/skeleton';
 import {
   IconAlertTriangle,
   IconMessageCircle,

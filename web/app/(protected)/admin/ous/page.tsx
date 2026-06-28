@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -8,8 +8,8 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { OUS_WRITE, OUS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@whity/ui/button';
+import { Skeleton } from '@whity/ui/skeleton';
 import { IconBinaryTree2, IconList, IconPlus } from '@tabler/icons-react';
 import { CreateOuModal } from './create-modal';
 import { EditOuModal } from './edit-modal';

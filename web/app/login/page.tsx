@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
@@ -6,10 +6,10 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useBranding } from '@/lib/branding-context';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@whity/ui/button';
+import { Input } from '@whity/ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity/ui/card';
+import { Alert, AlertDescription } from '@whity/ui/alert';
 
 /**
  * Backup/recovery codes are issued by BackupCodesService in the exact form

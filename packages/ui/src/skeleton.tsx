@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils"
+import { cn } from "./utils"
 
 /**
  * Loading placeholder for structured content. Preserves layout while data is
