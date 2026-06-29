@@ -39,7 +39,7 @@ $data = $hookManager->dispatch('role.creating', [
 // Listeners may adjust $data before the role is written.
 ```
 
-**Asynchronous (`dispatchAsync`)** — injects context under `_context` and pushes the payload onto the `whity-core-async-hooks` queue (`Whity\Core\Queue\Queue::push(...)`), returning immediately. Use for emails, webhooks, and slow/non-critical side effects.
+**Asynchronous (`dispatchAsync`)** — injects context under `_context` and pushes the payload onto the `whity-core-async-hooks` queue (`Whity\Core\Queue\Queue::push(...)`), returning immediately. Use for slow or non-critical side effects; a queue worker (not `dispatchAsync` itself) is responsible for consuming the queue and performing any downstream work such as sending notifications or calling external endpoints.
 
 ```php
 $hookManager->dispatchAsync('role.created.async', ['id' => 12, 'tenant_id' => 7]);
