@@ -23,12 +23,41 @@ use Whity\Core\Router;
  * routes registered after the ToolDeriver is built are naturally included.
  * Core route declarations are passed as the static $staticDeclarations list.
  *
- * Worker-safe: stateless — all computation is per-call on the stack. Callers
- * that want to avoid re-deriving on every tools/list call should cache the
- * result at worker boot (see WC-951d99d3).
+ * Worker-safe: the merged declarations list, derived tools, and access map are
+ * cached in static properties after the first call and reused for the lifetime
+ * of the worker (WC-951d99d3). Call {@see self::clearCache()} after registering
+ * new plugin routes so that the next request picks up the updated tool list.
  */
 final class ToolDeriver
 {
+    /**
+     * Worker-boot cache of the merged (static + router) declarations list.
+     * Shared by deriveTools(), buildAccessMap(), and findDeclarationByName()
+     * so the Router is queried at most once per worker lifetime (WC-951d99d3).
+     *
+     * @var list<array<string, mixed>>|null
+     */
+    private static ?array $declarationsCache = null;
+
+    /** @var list<array<string, mixed>>|null */
+    private static ?array $toolsCache = null;
+
+    /** @var array<string, array{requiredRole: ?string, requiredPermission: ?string}>|null */
+    private static ?array $accessMapCache = null;
+
+    /**
+     * Clear the worker-boot caches.
+     *
+     * Call this after registering new plugin routes so that the next
+     * tools/list or tools/call picks up the freshly registered tools.
+     */
+    public static function clearCache(): void
+    {
+        self::$declarationsCache = null;
+        self::$toolsCache        = null;
+        self::$accessMapCache    = null;
+    }
+
     /** @var \Closure(string): void */
     private readonly \Closure $warn;
 
@@ -64,24 +93,19 @@ final class ToolDeriver
      *
      * Merges static declarations with any schema-bearing routes currently in
      * the router (for plugin routes, which are loaded after construction).
+     * Result is cached in a static property for the lifetime of the worker
+     * (WC-951d99d3); call {@see self::clearCache()} after adding plugin routes.
      *
      * @return list<array<string, mixed>> MCP tool objects ready for tools/list.
      */
     public function deriveTools(): array
     {
-        $declarations = $this->staticDeclarations;
-
-        if ($this->router !== null) {
-            foreach ($this->router->getRoutes() as $route) {
-                $schema = $route['schema'] ?? null;
-                if (is_array($schema) && $schema !== []) {
-                    $declarations[] = $route;
-                }
-            }
+        if (self::$toolsCache !== null) {
+            return self::$toolsCache;
         }
 
         $tools = [];
-        foreach ($declarations as $route) {
+        foreach ($this->mergedDeclarations() as $route) {
             $schema = $route['schema'] ?? null;
             if (!is_array($schema) || $schema === []) {
                 continue;
@@ -92,7 +116,8 @@ final class ToolDeriver
                 $schema,
             );
         }
-        return $tools;
+
+        return self::$toolsCache = $tools;
     }
 
     /**
@@ -106,19 +131,12 @@ final class ToolDeriver
      */
     public function buildAccessMap(): array
     {
-        $declarations = $this->staticDeclarations;
-
-        if ($this->router !== null) {
-            foreach ($this->router->getRoutes() as $route) {
-                $schema = $route['schema'] ?? null;
-                if (is_array($schema) && $schema !== []) {
-                    $declarations[] = $route;
-                }
-            }
+        if (self::$accessMapCache !== null) {
+            return self::$accessMapCache;
         }
 
         $accessMap = [];
-        foreach ($declarations as $decl) {
+        foreach ($this->mergedDeclarations() as $decl) {
             $schema = $decl['schema'] ?? null;
             if (!is_array($schema) || $schema === []) {
                 continue;
@@ -134,7 +152,7 @@ final class ToolDeriver
             ];
         }
 
-        return $accessMap;
+        return self::$accessMapCache = $accessMap;
     }
 
     /**
@@ -168,7 +186,7 @@ final class ToolDeriver
      */
     public function findDeclarationByName(string $toolName): ?array
     {
-        foreach ($this->staticDeclarations as $decl) {
+        foreach ($this->mergedDeclarations() as $decl) {
             $schema = $decl['schema'] ?? null;
             if (!is_array($schema) || $schema === []) {
                 continue;
@@ -182,23 +200,36 @@ final class ToolDeriver
             }
         }
 
+        return null;
+    }
+
+    /**
+     * Return the merged list of schema-bearing declarations (static + router).
+     *
+     * Result is stored in {@see self::$declarationsCache} so the Router is
+     * queried at most once per worker lifetime. All public methods that need
+     * the declarations list call this rather than rebuilding it themselves.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function mergedDeclarations(): array
+    {
+        if (self::$declarationsCache !== null) {
+            return self::$declarationsCache;
+        }
+
+        $declarations = $this->staticDeclarations;
+
         if ($this->router !== null) {
             foreach ($this->router->getRoutes() as $route) {
                 $schema = $route['schema'] ?? null;
-                if (!is_array($schema) || $schema === []) {
-                    continue;
-                }
-                ['path' => $cleanPath] = $this->sanitizePath($route['path']);
-                $name = is_string($schema['operationId'] ?? null)
-                    ? $schema['operationId']
-                    : $this->operationId($route['method'], $cleanPath);
-                if ($name === $toolName) {
-                    return $route;
+                if (is_array($schema) && $schema !== []) {
+                    $declarations[] = $route;
                 }
             }
         }
 
-        return null;
+        return self::$declarationsCache = $declarations;
     }
 
     /**

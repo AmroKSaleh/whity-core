@@ -16,6 +16,16 @@ use Whity\Mcp\Tools\ToolDeriver;
  */
 final class ToolDeriverTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        ToolDeriver::clearCache();
+    }
+
+    protected function tearDown(): void
+    {
+        ToolDeriver::clearCache();
+    }
+
     // ── Filtering ─────────────────────────────────────────────────────────────
 
     public function testDeriveTools_skipsRoutes_withoutSchema(): void
@@ -678,5 +688,96 @@ final class ToolDeriverTest extends TestCase
         $deriver->deriveTools();
 
         self::assertSame([], $warnings);
+    }
+
+    // ── Worker-boot cache (WC-951d99d3) ──────────────────────────────────────
+
+    public function testDeriveTools_queriesRouterOnlyOnFirstCall(): void
+    {
+        $router  = new SpyRouter();
+        $deriver = new ToolDeriver([], [], $router);
+
+        $deriver->deriveTools();
+        $deriver->deriveTools();
+
+        self::assertSame(1, $router->callCount, 'router must be queried exactly once');
+    }
+
+    public function testBuildAccessMap_queriesRouterOnlyOnFirstCall(): void
+    {
+        $router  = new SpyRouter();
+        $deriver = new ToolDeriver([], [], $router);
+
+        $deriver->buildAccessMap();
+        $deriver->buildAccessMap();
+
+        self::assertSame(1, $router->callCount, 'router must be queried exactly once');
+    }
+
+    public function testDeclarationsCache_isSharedBetween_deriveToolsAndBuildAccessMap(): void
+    {
+        $router  = new SpyRouter();
+        $deriver = new ToolDeriver([], [], $router);
+
+        $deriver->deriveTools();    // populates declarations cache
+        $deriver->buildAccessMap(); // hits declarations cache — no second query
+
+        self::assertSame(1, $router->callCount, 'shared declarations cache means one router query total');
+    }
+
+    public function testFindDeclarationByName_usesDeclarationsCache(): void
+    {
+        $declarations = [[
+            'method' => 'GET',
+            'path'   => '/users',
+            'schema' => ['operationId' => 'users_list', 'summary' => 'List users'],
+        ]];
+        $router  = new SpyRouter();
+        $deriver = new ToolDeriver($declarations, [], $router);
+
+        $deriver->deriveTools();                        // warms cache
+        $deriver->findDeclarationByName('users_list'); // hits cache
+
+        self::assertSame(1, $router->callCount, 'findDeclarationByName must not query router after cache is warm');
+    }
+
+    public function testClearCache_forcesRederivation(): void
+    {
+        $router  = new SpyRouter();
+        $deriver = new ToolDeriver([], [], $router);
+
+        $deriver->deriveTools();
+        ToolDeriver::clearCache();
+        $deriver->deriveTools();
+
+        self::assertSame(2, $router->callCount, 'router must be re-queried after clearCache');
+    }
+
+    public function testClearCache_forcesRebuildOfAccessMap(): void
+    {
+        $router  = new SpyRouter();
+        $deriver = new ToolDeriver([], [], $router);
+
+        $deriver->buildAccessMap();
+        ToolDeriver::clearCache();
+        $deriver->buildAccessMap();
+
+        self::assertSame(2, $router->callCount, 'router must be re-queried after clearCache');
+    }
+}
+
+// ── SpyRouter ─────────────────────────────────────────────────────────────────
+
+/**
+ * Counts Router::getRoutes() invocations to verify the worker-boot cache (WC-951d99d3).
+ */
+final class SpyRouter extends Router
+{
+    public int $callCount = 0;
+
+    public function getRoutes(): array
+    {
+        $this->callCount++;
+        return parent::getRoutes();
     }
 }
