@@ -43,6 +43,8 @@ final class ToolsCallHandlerTest extends TestCase
 
     protected function setUp(): void
     {
+        ToolDeriver::clearCache();
+
         $this->router = new Router(''); // no version prefix in unit tests
 
         // Handlers capture the last synthesized request for assertion
@@ -102,6 +104,7 @@ final class ToolsCallHandlerTest extends TestCase
     protected function tearDown(): void
     {
         TenantContext::reset();
+        ToolDeriver::clearCache();
     }
 
     // ── Param validation ──────────────────────────────────────────────────────

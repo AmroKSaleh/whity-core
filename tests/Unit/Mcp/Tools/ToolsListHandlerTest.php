@@ -36,6 +36,8 @@ final class ToolsListHandlerTest extends TestCase
 
     protected function setUp(): void
     {
+        ToolDeriver::clearCache();
+
         $router = new Router('');
 
         $router->registerUnversioned('GET', '/api/open',   fn () => null, null, null, null,          ['summary' => 'Open tool']);
@@ -61,6 +63,7 @@ final class ToolsListHandlerTest extends TestCase
     protected function tearDown(): void
     {
         TenantContext::reset();
+        ToolDeriver::clearCache();
     }
 
     // ── Response structure ────────────────────────────────────────────────────
