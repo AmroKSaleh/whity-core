@@ -651,6 +651,146 @@ dropped with a logged warning and the plugin still loads):
 The full working reference is the HelloWorld plugin: greetings CRUD routes with
 typed schemas, the descriptor above, and both migrations.
 
+---
+
+## Step 9 — Expose plugin routes as MCP tools
+
+Plugin routes become MCP tools automatically. No extra interface needs to be
+implemented.
+
+[`ToolDeriver`](../../src/Mcp/Tools/ToolDeriver.php) reads the live `Router`
+at `tools/list` call time (not at construction), so any route your plugin
+registers in `getRoutes()` is picked up without any additional work on your
+part. The only requirement is that the route carries a non-empty `schema` array
+— routes without a `schema` are silently skipped.
+
+### Tool names (operationId)
+
+The tool name presented to AI clients is taken from `schema['operationId']`
+when that key is a non-empty string. When it is absent, a name is derived
+automatically:
+
+```text
+toolName = strtolower(method) . '_' . slug(path)
+```
+
+where `slug` replaces non-alphanumeric characters with underscores. Set an
+explicit `operationId` to give AI clients a stable, human-readable name:
+
+```php
+public function getRoutes(): array
+{
+    return [
+        [
+            'method'  => 'GET',
+            'path'    => '/api/hello/greetings',
+            'handler' => [$this, 'listGreetings'],
+            'schema'  => [
+                'operationId' => 'listGreetings',         // stable tool name
+                'summary'     => 'List greetings',        // tool description
+                'parameters'  => [
+                    [
+                        'name'        => 'page',
+                        'in'          => 'query',
+                        'required'    => false,
+                        'description' => 'Page number',
+                        'schema'      => ['type' => 'integer'],
+                    ],
+                ],
+            ],
+        ],
+        [
+            'method'  => 'POST',
+            'path'    => '/api/hello/greetings',
+            'handler' => [$this, 'createGreeting'],
+            'schema'  => [
+                'operationId' => 'createGreeting',
+                'summary'     => 'Create a greeting',
+                'request'     => 'GreetingCreateRequest',  // component name
+                'components'  => [
+                    'GreetingCreateRequest' => [
+                        'type'       => 'object',
+                        'properties' => [
+                            'message' => ['type' => 'string', 'description' => 'Greeting text'],
+                        ],
+                        'required'   => ['message'],
+                    ],
+                ],
+            ],
+        ],
+    ];
+}
+```
+
+### inputSchema construction
+
+`ToolDeriver` builds the `inputSchema` that AI clients receive by merging:
+
+1. **Path parameters** — extracted automatically from `{name}` or
+   `{name:constraint}` segments. Always required.
+2. **Query parameters** — declared in `schema['parameters']` with
+   `in: query`. Include `required`, `description`, and `schema` on each entry.
+3. **Request body** — declared in `schema['request']` as either a component
+   name (string, resolved from `schema['components']` on the route or from
+   the global components map) or an inline schema array.
+
+For `POST`, `PUT`, and `PATCH` routes, `ToolDeriver` emits a lint warning via
+`error_log()` when no request body schema can be resolved. The tool is still
+derived, but AI clients receive no parameter guidance for body fields.
+
+### RBAC on MCP tools
+
+`requiredRole` and `requiredPermission` on your route declaration flow through
+to MCP automatically:
+
+- **`tools/list` filtering** — protected tools are hidden from callers who
+  lack the required grant.
+- **`tools/call` enforcement** — `ToolsCallHandler` re-checks the grant via
+  `RoleChecker` before invoking the handler, using the same component as the
+  HTTP `RbacMiddleware`. MCP and HTTP authorization are always in sync.
+
+```php
+[
+    'method'              => 'DELETE',
+    'path'                => '/api/hello/greetings/{id:\d+}',
+    'handler'             => [$this, 'deleteGreeting'],
+    'requiredPermission'  => 'hello:manage',
+    'schema'              => [
+        'operationId' => 'deleteGreeting',
+        'summary'     => 'Delete a greeting',
+    ],
+],
+```
+
+An AI client without `hello:manage` will not see `deleteGreeting` in
+`tools/list` and will receive a `FORBIDDEN` error if it tries to call it
+directly.
+
+### Clearing the worker-boot cache
+
+`ToolDeriver` caches the merged declarations list, tool list, and access map
+in static properties for the lifetime of the FrankenPHP worker process
+(WC-951d99d3). If your plugin registers routes **after** the cache has already
+been populated (for example, during a hot reload), call
+`ToolDeriver::clearCache()` to ensure the next `tools/list` or `tools/call`
+request picks up the fresh tool list:
+
+```php
+use Whity\Mcp\Tools\ToolDeriver;
+
+// After registering plugin routes:
+ToolDeriver::clearCache();
+```
+
+`PluginLoader` calls this for you during `load()` and `reload()`, so most
+plugins never need to call it directly. It is relevant when you register routes
+programmatically outside the normal plugin lifecycle.
+
+For the full MCP server architecture, authentication flow, and operator
+guidance see [MCP-Server.md](./MCP-Server.md).
+
+---
+
 ## Checklist
 
 - [ ] Directory `plugins/HelloWorld/` with namespace prefix `HelloWorld\`.
@@ -664,6 +804,9 @@ typed schemas, the descriptor above, and both migrations.
 - [ ] A test under `tests/` exercises the plugin; full suite + PHPStan are green.
 - [ ] (Optional) Frontend feature descriptors validate: own permission, own
       registered GET `basePath`, matching route permission (Step 8).
+- [ ] (Optional) MCP-exposed routes carry `operationId`, `summary`, and a
+      resolved request schema so AI clients receive full parameter guidance
+      (Step 9).
 
 See [Architecture.md](./Architecture.md) for how this all fits together.
 
