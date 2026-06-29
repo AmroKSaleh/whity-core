@@ -66,7 +66,7 @@ final class ToolsCallHandler implements MethodHandler
         //    re-validation here is cheap (cached path) and provides userId for
         //    the per-call permission check without global/static state.
         $principal = $bearerToken !== null
-            ? $this->tokenValidator->validateMcpToken($bearerToken)
+            ? $this->tokenValidator->validateBearerForMcp($bearerToken)
             : null;
         if ($principal === null) {
             throw new McpException(ErrorCode::UNAUTHENTICATED, 'Unauthenticated');

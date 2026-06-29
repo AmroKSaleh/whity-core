@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Whity\Auth\CookieManager;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
+use Whity\Mcp\Auth\McpPrincipal;
 
 /**
  * Tests for TokenValidator class
@@ -469,5 +470,164 @@ class TokenValidatorTest extends TestCase
         $this->assertSame('user123', $result['sub']);
         $this->assertSame(['user', 'admin'], $result['roles']);
         $this->assertSame('John', $result['metadata']['firstName']);
+    }
+
+    // ── validateSessionBearerForMcp ───────────────────────────────────────────
+
+    private function makeSessionMockDb(bool $revoked = false, int $storedEpoch = 0): PDO
+    {
+        $notRevokedStmt = $this->createMock(PDOStatement::class);
+        $notRevokedStmt->method('execute')->willReturn(true);
+        $notRevokedStmt->method('fetchColumn')->willReturn($revoked ? '1' : false);
+
+        $epochStmt = $this->createMock(PDOStatement::class);
+        $epochStmt->method('execute')->willReturn(true);
+        $epochStmt->method('fetchColumn')->willReturn((string) $storedEpoch);
+
+        $db = $this->createMock(PDO::class);
+        $db->method('prepare')->willReturnCallback(
+            function (string $sql) use ($notRevokedStmt, $epochStmt): PDOStatement {
+                return str_contains($sql, 'revoked_tokens') ? $notRevokedStmt : $epochStmt;
+            }
+        );
+
+        return $db;
+    }
+
+    public function testValidateSessionBearerForMcp_returnsPrincipal_onValidAccessToken(): void
+    {
+        $db        = $this->makeSessionMockDb(revoked: false, storedEpoch: 0);
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'token_epoch' => 0], 3600, 'access');
+
+        $result = $validator->validateSessionBearerForMcp($token);
+
+        $this->assertInstanceOf(McpPrincipal::class, $result);
+        $this->assertSame(42, $result->userId);
+        $this->assertSame(7, $result->tenantId);
+        $this->assertSame('session', $result->principalKind);
+        $this->assertSame(['tools:list', 'tools:call', 'resources:read', 'prompts:list'], $result->scope);
+        $this->assertNotEmpty($result->jti);
+    }
+
+    public function testValidateSessionBearerForMcp_returnsNull_onMcpTokenType(): void
+    {
+        $db        = $this->makeSessionMockDb();
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        // type='mcp' must be rejected (wrong type for session path)
+        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'aud' => 'mcp'], 3600, 'mcp');
+
+        $this->assertNull($validator->validateSessionBearerForMcp($token));
+    }
+
+    public function testValidateSessionBearerForMcp_returnsNull_onRefreshToken(): void
+    {
+        $db        = $this->makeSessionMockDb();
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7], 3600, 'refresh');
+
+        $this->assertNull($validator->validateSessionBearerForMcp($token));
+    }
+
+    public function testValidateSessionBearerForMcp_returnsNull_onRevokedToken(): void
+    {
+        $db        = $this->makeSessionMockDb(revoked: true);
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'token_epoch' => 0], 3600, 'access');
+
+        $this->assertNull($validator->validateSessionBearerForMcp($token));
+    }
+
+    public function testValidateSessionBearerForMcp_returnsNull_onStaleEpoch(): void
+    {
+        // Stored epoch (1) is greater than token epoch (0) — password was changed.
+        $db        = $this->makeSessionMockDb(revoked: false, storedEpoch: 1);
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'token_epoch' => 0], 3600, 'access');
+
+        $this->assertNull($validator->validateSessionBearerForMcp($token));
+    }
+
+    public function testValidateSessionBearerForMcp_returnsNull_onMissingUserId(): void
+    {
+        $db        = $this->makeSessionMockDb();
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        // No user_id or tenant_id in payload
+        $token = $this->jwtParser->create(['sub' => 'anon'], 3600, 'access');
+
+        $this->assertNull($validator->validateSessionBearerForMcp($token));
+    }
+
+    public function testValidateSessionBearerForMcp_returnsNull_onExpiredToken(): void
+    {
+        $db        = $this->makeSessionMockDb();
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7], -3600, 'access');
+
+        $this->assertNull($validator->validateSessionBearerForMcp($token));
+    }
+
+    // ── validateBearerForMcp ──────────────────────────────────────────────────
+
+    public function testValidateBearerForMcp_acceptsMcpTokenOnFirstPath(): void
+    {
+        // An MCP token must be accepted via the validateMcpToken path.
+        // revoked_tokens returns false (not revoked); mcp_tokens returns '1' (registered).
+        $notRevokedStmt = $this->createMock(PDOStatement::class);
+        $notRevokedStmt->method('execute')->willReturn(true);
+        $notRevokedStmt->method('fetchColumn')->willReturn(false);
+
+        $registeredStmt = $this->createMock(PDOStatement::class);
+        $registeredStmt->method('execute')->willReturn(true);
+        $registeredStmt->method('fetchColumn')->willReturn('1');
+
+        $db = $this->createMock(PDO::class);
+        $db->method('prepare')->willReturnCallback(
+            function (string $sql) use ($notRevokedStmt, $registeredStmt): PDOStatement {
+                return str_contains($sql, 'revoked_tokens') ? $notRevokedStmt : $registeredStmt;
+            }
+        );
+
+        $validator = new TokenValidator($this->jwtParser, $db);
+        $token     = $this->jwtParser->create(
+            ['user_id' => 1, 'tenant_id' => 1, 'principal_kind' => 'user', 'scope' => [], 'aud' => 'mcp'],
+            3600,
+            'mcp'
+        );
+
+        $result = $validator->validateBearerForMcp($token);
+
+        $this->assertInstanceOf(McpPrincipal::class, $result);
+        $this->assertSame('user', $result->principalKind);
+    }
+
+    public function testValidateBearerForMcp_fallsBackToSessionToken(): void
+    {
+        // A regular access token must be accepted on the fallback path.
+        $db        = $this->makeSessionMockDb(revoked: false, storedEpoch: 0);
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        $token = $this->jwtParser->create(['user_id' => 5, 'tenant_id' => 2, 'token_epoch' => 0], 3600, 'access');
+
+        $result = $validator->validateBearerForMcp($token);
+
+        $this->assertInstanceOf(McpPrincipal::class, $result);
+        $this->assertSame('session', $result->principalKind);
+        $this->assertSame(5, $result->userId);
+    }
+
+    public function testValidateBearerForMcp_returnsNull_onInvalidToken(): void
+    {
+        $db        = $this->makeSessionMockDb();
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        $this->assertNull($validator->validateBearerForMcp('not.a.jwt'));
     }
 }

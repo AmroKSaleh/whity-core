@@ -70,10 +70,25 @@ final class DispatcherTenantBindingTest extends TestCase
         self::assertSame(ErrorCode::UNAUTHENTICATED, $r['error']['code']);
     }
 
-    public function testHandle_returnsUnauthenticated_whenAccessTokenProvided(): void
+    public function testHandle_acceptsSessionAccessToken_whenUserAndEpochValid(): void
     {
         $accessToken = $this->jwtParser->create(
-            ['user_id' => self::USER_ID, 'tenant_id' => self::TENANT_ID],
+            ['user_id' => self::USER_ID, 'tenant_id' => self::TENANT_ID, 'token_epoch' => 0],
+            900,
+            'access'
+        );
+        $dispatcher = new Dispatcher(['ping' => new PingHandler()], $this->validator);
+        $r = $this->decode($dispatcher->handle('{"jsonrpc":"2.0","method":"ping","id":1}', $accessToken));
+
+        self::assertArrayHasKey('result', $r, 'Session access token must be accepted for MCP');
+        self::assertSame(1, $r['id']);
+    }
+
+    public function testHandle_returnsUnauthenticated_whenAccessTokenUserNotInDb(): void
+    {
+        // User 9999 does not exist in the fixture DB — epoch check fails closed.
+        $accessToken = $this->jwtParser->create(
+            ['user_id' => 9999, 'tenant_id' => self::TENANT_ID, 'token_epoch' => 0],
             900,
             'access'
         );
