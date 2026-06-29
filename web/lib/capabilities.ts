@@ -33,6 +33,9 @@ export const OUS_DELETE = 'ous:delete';
 export const TENANTS_WRITE = 'tenants:write';
 export const TENANTS_DELETE = 'tenants:delete';
 
+/** Permission for AI principal (MCP credential) management (WC-0208ce4d). */
+export const MCP_TOKENS_MANAGE = 'mcp:tokens:manage';
+
 /**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.
  *
