@@ -133,7 +133,9 @@ use Whity\Core\Relations\RelationResolver;
 use Whity\Api\PersonsApiHandler;
 use Whity\Api\RelationsApiHandler;
 use Whity\Api\TwoFactorHandler;
+use Whity\Api\AiPrincipalsApiHandler;
 use Whity\Api\AuditLogApiHandler;
+use Whity\Api\McpToolsAdminHandler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Hooks\HookManager;
@@ -389,6 +391,30 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // RBAC-protected API (a 403 renders the access-denied state), matching
         // the plugins pattern.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_READ,
+    ];
+    $items[] = [
+        'id' => 'ai-principals',
+        'label' => 'AI Principals',
+        'href' => '/admin/ai-principals',
+        'icon' => 'robot',
+        'group' => 'admin',
+        'order' => 10,
+        // WC-0208ce4d: mirrors GET /api/v1/admin/mcp/tokens, gated on the
+        // mcp:tokens:manage permission. Nav item carries the same requirement so
+        // permission-aware clients can hide it; the page enforces it server-side.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::MCP_TOKENS_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'mcp-tools',
+        'label' => 'MCP Tools',
+        'href' => '/admin/mcp-tools',
+        'icon' => 'tools',
+        'group' => 'admin',
+        'order' => 11,
+        // WC-0208ce4d: read-only view of MCP tools available in this tenant.
+        // Gated on mcp:tokens:manage so only admins who manage AI credentials
+        // can see which tools those credentials expose.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::MCP_TOKENS_MANAGE,
     ];
     $items[] = [
         'id' => 'settings',
@@ -732,19 +758,37 @@ $router->register('POST',   '/api/mcp/tokens',       [$mcpTokenHandler, 'create'
 $router->register('GET',    '/api/mcp/tokens',       [$mcpTokenHandler, 'list']);
 $router->register('DELETE', '/api/mcp/tokens/{jti}', [$mcpTokenHandler, 'revoke'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 
-// WC-c10b292e: MCP Streamable-HTTP endpoint. Registered UNVERSIONED so the
-// path is exactly /mcp (not /api/v1/mcp). No requiredRole/requiredPermission —
-// the transport delegates auth to the dispatcher (ADR-0006 per-call contract).
-// Bypasses tenant isolation middleware (see EnforceTenantIsolation::PUBLIC_ROUTES).
-//
-// WC-001754c6: ToolDeriver is built with the Router reference so plugin routes
-// (schema-bearing, loaded after this point via $pluginLoader->load()) are read
-// lazily at tools/list call time instead of at construction time.
+// WC-0208ce4d: AI-principal admin endpoints (tenant-scoped, admin surface).
+// Gated by mcp:tokens:manage so only admins who hold the credential-management
+// permission can list or revoke any token in their tenant. Mirrors the per-user
+// McpTokenHandler routes but operates across the whole tenant rather than a
+// single user's issued tokens.
+$aiPrincipalsHandler = new AiPrincipalsApiHandler($db->getPdo(), $roleChecker);
+$router->register('GET',    '/api/admin/mcp/tokens',       [$aiPrincipalsHandler, 'list'],   null, null, CorePermissions::MCP_TOKENS_MANAGE);
+$router->register('DELETE', '/api/admin/mcp/tokens/{jti}', [$aiPrincipalsHandler, 'revoke'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
+
+// WC-c10b292e / WC-001754c6: build the ToolDeriver here, before both the
+// admin tool-catalogue endpoint and the MCP transport, so both share the
+// SAME instance (and its static cache). The Router reference enables lazy
+// inclusion of plugin routes: they are read at tools/list call time rather
+// than at construction, so plugins loaded below are naturally included.
 $toolDeriver = new ToolDeriver(
     CoreApiSchemas::routes(),
     CoreApiSchemas::components(),
     $router,
 );
+
+// WC-0208ce4d: admin read-only view of available MCP tools + access
+// requirements. Uses the same ToolDeriver instance as the MCP transport so
+// the admin sees exactly what an MCP client would receive from tools/list,
+// without per-caller RBAC filtering (the page is for audit/planning).
+$mcpToolsAdminHandler = new McpToolsAdminHandler($toolDeriver, $roleChecker);
+$router->register('GET', '/api/admin/mcp/tools', [$mcpToolsAdminHandler, 'list'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
+
+// WC-c10b292e: MCP Streamable-HTTP endpoint. Registered UNVERSIONED so the
+// path is exactly /mcp (not /api/v1/mcp). No requiredRole/requiredPermission —
+// the transport delegates auth to the dispatcher (ADR-0006 per-call contract).
+// Bypasses tenant isolation middleware (see EnforceTenantIsolation::PUBLIC_ROUTES).
 $resourceDeriver = new ResourceDeriver(
     CoreApiSchemas::routes(),
     $router,

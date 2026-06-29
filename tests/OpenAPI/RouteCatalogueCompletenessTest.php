@@ -58,6 +58,11 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'DELETE /api/mcp/tokens/{jti}',
         'GET /api/mcp/tokens',
         'POST /api/mcp/tokens',
+        // WC-0208ce4d: MCP admin endpoints — OpenAPI schema to follow once
+        // the generate:openapi snapshot is regenerated in a dedicated task.
+        'DELETE /api/admin/mcp/tokens/{jti}',
+        'GET /api/admin/mcp/tokens',
+        'GET /api/admin/mcp/tools',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void
