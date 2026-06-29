@@ -56,7 +56,7 @@ final class Dispatcher implements McpRequestHandlerInterface
         $principal = null;
         if ($this->tokenValidator !== null) {
             $principal = $bearerToken !== null
-                ? $this->tokenValidator->validateMcpToken($bearerToken)
+                ? $this->tokenValidator->validateBearerForMcp($bearerToken)
                 : null;
             if ($principal === null) {
                 return $this->encode($this->makeError(null, ErrorCode::UNAUTHENTICATED, 'Unauthenticated'));

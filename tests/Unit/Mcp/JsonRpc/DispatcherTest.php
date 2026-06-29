@@ -272,7 +272,7 @@ final class DispatcherTest extends TestCase
         $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-rl');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
-        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+        $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         // tenantLimit = 0 → increment() returns 1, 1 > 0 → throws immediately.
         $rateLimiter = new McpRateLimiter(new ArraySharedStore(), tenantLimit: 0, principalLimit: 100);
@@ -288,7 +288,7 @@ final class DispatcherTest extends TestCase
         $principal = new McpPrincipal(7, 3, 'user', [], 'jti-rl2');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
-        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+        $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         $rateLimiter = new McpRateLimiter(new ArraySharedStore(), tenantLimit: 0, principalLimit: 100);
 
@@ -310,7 +310,7 @@ final class DispatcherTest extends TestCase
         $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-fe');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
-        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+        $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         $dispatcher = new Dispatcher(
             ['ping' => new PingHandler()],
@@ -328,7 +328,7 @@ final class DispatcherTest extends TestCase
         $principal = new McpPrincipal(7, 3, 'user', [], 'jti-fe2');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
-        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+        $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         $dispatcher = new Dispatcher(
             [],
@@ -351,7 +351,7 @@ final class DispatcherTest extends TestCase
         $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-fe3');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
-        $tokenValidator->method('validateMcpToken')->willReturn($principal);
+        $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         $dispatcher = new Dispatcher(
             ['ping' => new PingHandler()],

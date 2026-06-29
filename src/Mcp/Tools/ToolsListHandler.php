@@ -34,7 +34,7 @@ final class ToolsListHandler implements MethodHandler
     public function __invoke(?array $params, ?string $bearerToken): mixed
     {
         $principal = $bearerToken !== null
-            ? $this->tokenValidator->validateMcpToken($bearerToken)
+            ? $this->tokenValidator->validateBearerForMcp($bearerToken)
             : null;
         $tenantId = TenantContext::getTenantId();
 

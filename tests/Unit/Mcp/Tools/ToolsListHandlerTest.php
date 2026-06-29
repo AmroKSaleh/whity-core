@@ -49,7 +49,7 @@ final class ToolsListHandlerTest extends TestCase
         $this->tokenValidator = $this->createMock(TokenValidator::class);
 
         $principal = new McpPrincipal(self::USER_ID, self::TENANT_ID, 'user', ['tools:list'], 'jti-tools');
-        $this->tokenValidator->method('validateMcpToken')->willReturn($principal);
+        $this->tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         $this->handler = new ToolsListHandler(
             $this->toolDeriver,
@@ -98,7 +98,7 @@ final class ToolsListHandlerTest extends TestCase
     public function testInvoke_includesOpenTool_whenBearerTokenInvalid(): void
     {
         $this->tokenValidator = $this->createMock(TokenValidator::class);
-        $this->tokenValidator->method('validateMcpToken')->willReturn(null);
+        $this->tokenValidator->method('validateBearerForMcp')->willReturn(null);
         $this->handler = new ToolsListHandler($this->toolDeriver, $this->roleChecker, $this->tokenValidator);
 
         $result = ($this->handler)(null, 'invalid-token');

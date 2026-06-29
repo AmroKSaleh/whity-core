@@ -197,6 +197,74 @@ class TokenValidator
     }
 
     /**
+     * Validate a regular session access JWT passed as a Bearer token.
+     *
+     * Accepts the same tokens issued by the standard login flow, allowing native
+     * clients to call the MCP server without a separate token-issuance step.
+     * Checks: signature + expiry (via JwtParser), type='access', jti not in
+     * revoked_tokens, token epoch current (password change invalidates all sessions).
+     * Returns a McpPrincipal with principalKind='session' and full MCP scope;
+     * actual tool access is still gated per-call by RoleChecker.
+     *
+     * @param string $token Raw bearer token string.
+     * @return McpPrincipal|null Validated principal, or null on any failure.
+     */
+    public function validateSessionBearerForMcp(string $token): ?McpPrincipal
+    {
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null) {
+            return null;
+        }
+
+        if (($claims['type'] ?? null) !== 'access') {
+            return null;
+        }
+
+        $jti = $claims['jti'] ?? null;
+        if (!is_string($jti) || $jti === '') {
+            return null;
+        }
+
+        if ($this->isTokenRevoked($jti)) {
+            return null;
+        }
+
+        if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
+        $userId   = $claims['user_id'] ?? null;
+        $tenantId = $claims['tenant_id'] ?? null;
+
+        if (!is_int($userId) || !is_int($tenantId)) {
+            return null;
+        }
+
+        return new McpPrincipal(
+            userId: $userId,
+            tenantId: $tenantId,
+            principalKind: 'session',
+            scope: ['tools:list', 'tools:call', 'resources:read', 'prompts:list'],
+            jti: $jti,
+        );
+    }
+
+    /**
+     * Validate any bearer token for MCP access.
+     *
+     * Tries the dedicated MCP token path first (type='mcp'), then falls back to a
+     * regular session access token (type='access'). Returns the first successful
+     * principal, or null if both fail.
+     *
+     * @param string $token Raw bearer token string.
+     * @return McpPrincipal|null Validated principal, or null on any failure.
+     */
+    public function validateBearerForMcp(string $token): ?McpPrincipal
+    {
+        return $this->validateMcpToken($token) ?? $this->validateSessionBearerForMcp($token);
+    }
+
+    /**
      * Check if a token has been revoked
      *
      * Queries the revoked_tokens table to check if the given jti (token ID)
