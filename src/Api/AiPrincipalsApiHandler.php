@@ -85,10 +85,10 @@ final class AiPrincipalsApiHandler
             $conditions[] = 't.expires_at > NOW()';
             $conditions[] = 'NOT EXISTS (SELECT 1 FROM revoked_tokens r WHERE r.jti = t.jti)';
 
+            // @tenant-guard-ignore: tenant_id predicate appended above for non-system tenants; system tenant (id 0) intentionally reads all rows
             $where = 'WHERE ' . implode(' AND ', $conditions);
 
             // Total for pagination.
-            // @tenant-guard-ignore: tenant_id predicate appended above for non-system tenants; system tenant (id 0) intentionally reads all rows
             $countSql  = 'SELECT COUNT(*) AS cnt FROM mcp_tokens t ' . $where;
             $countStmt = $this->db->prepare($countSql);
             $countStmt->execute($bindParams);
@@ -99,7 +99,6 @@ final class AiPrincipalsApiHandler
             $query = $this->parseQueryString($request);
             $p     = PaginationParams::fromQuery($query);
 
-            // @tenant-guard-ignore: tenant_id predicate appended above for non-system tenants; system tenant (id 0) intentionally reads all rows
             $listSql  = 'SELECT t.id, t.jti, t.user_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
                  FROM   mcp_tokens t
                  ' . $where . '
