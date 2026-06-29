@@ -89,9 +89,8 @@ final class AiPrincipalsApiHandler
 
             // Total for pagination.
             // @tenant-guard-ignore: tenant_id predicate appended above for non-system tenants; system tenant (id 0) intentionally reads all rows
-            $countStmt = $this->db->prepare(
-                'SELECT COUNT(*) AS cnt FROM mcp_tokens t ' . $where
-            );
+            $countSql  = 'SELECT COUNT(*) AS cnt FROM mcp_tokens t ' . $where;
+            $countStmt = $this->db->prepare($countSql);
             $countStmt->execute($bindParams);
             $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
             $total    = $countRow !== false ? (int) ($countRow['cnt'] ?? 0) : 0;
@@ -101,13 +100,12 @@ final class AiPrincipalsApiHandler
             $p     = PaginationParams::fromQuery($query);
 
             // @tenant-guard-ignore: tenant_id predicate appended above for non-system tenants; system tenant (id 0) intentionally reads all rows
-            $listStmt = $this->db->prepare(
-                'SELECT t.id, t.jti, t.user_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
+            $listSql  = 'SELECT t.id, t.jti, t.user_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
                  FROM   mcp_tokens t
                  ' . $where . '
                  ORDER BY t.created_at DESC
-                 LIMIT :limit OFFSET :offset'
-            );
+                 LIMIT :limit OFFSET :offset';
+            $listStmt = $this->db->prepare($listSql);
             foreach ($bindParams as $key => $value) {
                 $listStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
             }
