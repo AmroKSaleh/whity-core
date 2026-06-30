@@ -40,7 +40,15 @@ final class RateLimitRuleTest extends TestCase
         self::assertSame(100, $rule->limit);
         self::assertSame(60, $rule->window);
         self::assertSame('203.0.113.7', ($rule->resolve)(new Request('GET', '/x', ['X-Forwarded-For' => '203.0.113.7'])));
-        self::assertNull(($rule->resolve)(new Request('GET', '/x')));
+    }
+
+    public function testIpRuleFailsClosedWhenNoClientIp(): void
+    {
+        // No forwarding headers must NOT skip the dimension — it buckets into a
+        // shared sentinel so a flood of header-less requests is still bounded.
+        $rule = RateLimitRule::ip(100, 60);
+
+        self::assertSame(RateLimitRule::IP_UNKNOWN, ($rule->resolve)(new Request('GET', '/x')));
     }
 
     public function testTenantRuleResolvesTenantContext(): void

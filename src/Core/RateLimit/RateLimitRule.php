@@ -44,12 +44,35 @@ final class RateLimitRule
     }
 
     /**
+     * Sentinel bucket for requests that arrive without a usable client IP.
+     *
+     * Mapping the no-IP case to a shared key (rather than skipping the rule)
+     * keeps the per-IP limiter FAIL-CLOSED: a flood of header-less requests is
+     * still bounded, instead of slipping through uncounted.
+     */
+    public const IP_UNKNOWN = 'unknown';
+
+    /**
      * Per-IP rule — keyed on the forwarding-header client IP. Suitable for the
      * pre-auth pipeline position, where no principal/tenant is known yet.
+     *
+     * TRUST BOUNDARY: the client IP is derived from forwarding headers
+     * ({@see ClientIp}), which are only as trustworthy as the front proxy's
+     * configuration. Without a trusted-proxy setup that strips client-supplied
+     * `X-Forwarded-For`, this header is spoofable, so the per-IP limiter is a
+     * BEST-EFFORT, defense-in-depth control for the unauthenticated surface. The
+     * authoritative, spoof-proof limits are the per-tenant / per-principal rules
+     * ({@see self::tenant()}, {@see self::principal()}), keyed on the validated
+     * JWT identity. Hardening client-IP determination (Caddy `trusted_proxies` +
+     * a validated client-IP source) is tracked as platform infra follow-up and
+     * also fixes the pre-existing audit-IP exposure.
+     *
+     * When no IP can be derived the rule keys on {@see self::IP_UNKNOWN} so the
+     * dimension is never silently skipped (fail-closed).
      */
     public static function ip(int $limit, int $window): self
     {
-        return new self('ip', static fn (Request $r): ?string => ClientIp::fromRequest($r), $limit, $window);
+        return new self('ip', static fn (Request $r): string => ClientIp::fromRequest($r) ?? self::IP_UNKNOWN, $limit, $window);
     }
 
     /**
