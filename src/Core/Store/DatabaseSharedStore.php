@@ -71,6 +71,28 @@ final class DatabaseSharedStore implements SharedStoreInterface
         return $row === false ? 0 : (int) $row[0];
     }
 
+    public function ttl(string $key): int
+    {
+        $stmt = $this->pdo->prepare('SELECT expires_at FROM shared_store WHERE store_key = :key');
+        $stmt->execute([':key' => $key]);
+
+        $row = $stmt->fetch(PDO::FETCH_NUM);
+        if ($row === false || $row[0] === null) {
+            return 0;
+        }
+
+        // Compute remaining against PHP's clock — the same basis increment() used
+        // to write expires_at (date('Y-m-d H:i:s', time() + ttl)) — so the result
+        // is independent of any DB-session timezone offset.
+        $expiresAt = strtotime((string) $row[0]);
+        if ($expiresAt === false) {
+            return 0;
+        }
+
+        $remaining = $expiresAt - time();
+        return $remaining > 0 ? $remaining : 0;
+    }
+
     public function delete(string $key): void
     {
         $stmt = $this->pdo->prepare('DELETE FROM shared_store WHERE store_key = :key');

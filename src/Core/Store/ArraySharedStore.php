@@ -46,6 +46,18 @@ final class ArraySharedStore implements SharedStoreInterface
         return $entry['counter'];
     }
 
+    public function ttl(string $key): int
+    {
+        $now   = microtime(true);
+        $entry = $this->entries[$key] ?? null;
+
+        if ($entry === null || $entry['expires_at'] === null || $entry['expires_at'] <= $now) {
+            return 0;
+        }
+
+        return (int) ceil($entry['expires_at'] - $now);
+    }
+
     public function delete(string $key): void
     {
         unset($this->entries[$key]);

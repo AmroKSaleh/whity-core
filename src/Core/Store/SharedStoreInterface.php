@@ -49,6 +49,19 @@ interface SharedStoreInterface
     public function count(string $key): int;
 
     /**
+     * Return the whole seconds remaining until $key's current window expires.
+     *
+     * Returns 0 when the key is missing, has already expired, or never expires
+     * (a NULL TTL). For an active fixed-window key the value is the ceiling of
+     * the time left, so it is always ≥ 1 while the window is live — exactly what
+     * a rate limiter needs to emit an accurate `Retry-After` header. Does NOT
+     * modify the stored counter or expiry.
+     *
+     * @return int Seconds until reset (≥ 1 while active, 0 otherwise).
+     */
+    public function ttl(string $key): int;
+
+    /**
      * Immediately evict $key regardless of its TTL.
      *
      * No-op if the key does not exist.
