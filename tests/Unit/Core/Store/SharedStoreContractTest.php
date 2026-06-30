@@ -90,6 +90,36 @@ final class SharedStoreContractTest extends TestCase
         self::assertSame(1, $this->store->count('k1'));
     }
 
+    // ── ttl ──────────────────────────────────────────────────────────────────
+
+    public function testTtlReturnsZeroForMissingKey(): void
+    {
+        self::assertSame(0, $this->store->ttl('missing'));
+    }
+
+    public function testTtlReflectsRemainingWindowAfterIncrement(): void
+    {
+        $this->store->increment('k1', 60);
+        $ttl = $this->store->ttl('k1');
+
+        self::assertGreaterThanOrEqual(1, $ttl);
+        self::assertLessThanOrEqual(60, $ttl);
+    }
+
+    public function testTtlReturnsZeroForExpiredKey(): void
+    {
+        $this->store->increment('k1', -1); // already expired
+        self::assertSame(0, $this->store->ttl('k1'));
+    }
+
+    public function testTtlDoesNotModifyTheCounter(): void
+    {
+        $this->store->increment('k1', 60);
+        $this->store->ttl('k1');
+        $this->store->ttl('k1');
+        self::assertSame(1, $this->store->count('k1'));
+    }
+
     // ── delete ───────────────────────────────────────────────────────────────
 
     public function testDeleteEvictsKey(): void
