@@ -149,6 +149,9 @@ use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\LoginThrottleService;
 use Whity\Core\Store\DatabaseSharedStore;
+use Whity\Core\RateLimit\SharedStoreRateLimitStore;
+use Whity\Core\RateLimit\RateLimitMiddleware;
+use Whity\Core\RateLimit\RateLimitRule;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Mcp\Auth\McpTokenHandler;
 use Whity\Mcp\Auth\McpTokenService;
@@ -455,9 +458,55 @@ $kernel = new HttpKernel($router, $rbacMiddleware);
 // stashed on the request for handlers (read via \Whity\Http\JsonBody::parsed()).
 // Then the CSRF guard (cheap header check on the state-changing auth POSTs,
 // WC-160), then tenant isolation BEFORE RBAC.
+// Kernel rate limiting (WC-c0fb3700). One fixed-window engine over the shared
+// store, split into two pipeline positions: a pre-auth per-IP limiter that sheds
+// flood load before any auth/DB work, and a post-auth per-tenant/per-principal
+// limiter that caps an authenticated caller's throughput (its rules read the
+// TenantContext/AuditContext that EnforceTenantIsolation populates, and no-op on
+// public/unauthenticated requests). Limits are env-tunable; RATE_LIMIT_ENABLED=0
+// disables the whole layer. Defaults are generous so normal usage (and the e2e
+// suite) is never throttled — operators tighten them per deployment.
+$rateLimitEnabled    = (($_ENV['RATE_LIMIT_ENABLED'] ?? '1') !== '0');
+$rateLimitStore      = new SharedStoreRateLimitStore(new DatabaseSharedStore($db->getPdo()));
+$rateLimitExemptPaths = ['/api/health', '/api/version', '/api/openapi.json'];
+
+$preAuthRateLimiter = new RateLimitMiddleware(
+    $rateLimitStore,
+    [
+        RateLimitRule::ip(
+            (int) ($_ENV['RATE_LIMIT_IP_LIMIT']  ?? 2000),
+            (int) ($_ENV['RATE_LIMIT_IP_WINDOW'] ?? 60),
+        ),
+    ],
+    enabled: $rateLimitEnabled,
+    exemptPaths: $rateLimitExemptPaths,
+    logger: $logger,
+);
+
+$postAuthRateLimiter = new RateLimitMiddleware(
+    $rateLimitStore,
+    [
+        RateLimitRule::tenant(
+            (int) ($_ENV['RATE_LIMIT_TENANT_LIMIT']  ?? 10000),
+            (int) ($_ENV['RATE_LIMIT_TENANT_WINDOW'] ?? 60),
+        ),
+        RateLimitRule::principal(
+            (int) ($_ENV['RATE_LIMIT_PRINCIPAL_LIMIT']  ?? 2000),
+            (int) ($_ENV['RATE_LIMIT_PRINCIPAL_WINDOW'] ?? 60),
+        ),
+    ],
+    enabled: $rateLimitEnabled,
+    exemptPaths: $rateLimitExemptPaths,
+    logger: $logger,
+);
+
+// Pre-auth IP limiter runs FIRST so a flood is shed before body/CSRF/tenant work.
+$kernel->use($preAuthRateLimiter);
 $kernel->use(new RequestBodyValidator());
 $kernel->use(new CsrfGuard());
 $kernel->use($tenantIsolationMiddleware);
+// Post-auth limiter runs AFTER tenant/principal are resolved, before route dispatch.
+$kernel->use($postAuthRateLimiter);
 
 // 9. Initialize plugin loader and load plugins
 // Wire the permission registry, hook manager, and logger (WC-9/WC-13) so plugin
