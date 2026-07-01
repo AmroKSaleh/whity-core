@@ -228,7 +228,7 @@ final class MembershipsSchemaMigrationRealEngineTest extends TestCase
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('Alice', '\$2y\$10\$hash', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('Alice', '\$2y\$10\$hash', false, 0, 0, datetime('now'), datetime('now'))"
         );
     }
 

@@ -28,15 +28,17 @@ final class ProfileEmailRepositoryTest extends TestCase
         $this->repo = new ProfileEmailRepository($this->pdo);
 
         // Seed two profiles for use across tests.
+        // Use false for the BOOLEAN two_factor_enabled column so the INSERT is
+        // accepted by both PostgreSQL (strict boolean) and SQLite (stores as 0).
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('Alice', '\$2y\$10\$hash1', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('Alice', '\$2y\$10\$hash1', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('Bob', '\$2y\$10\$hash2', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('Bob', '\$2y\$10\$hash2', false, 0, 0, datetime('now'), datetime('now'))"
         );
     }
 

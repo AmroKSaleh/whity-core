@@ -194,7 +194,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
 
         $this->assertSame(
             1,
-            (int) $this->pdo->query('SELECT two_factor_enabled FROM users WHERE id = 20')->fetchColumn(),
+            $this->fetchBool('SELECT two_factor_enabled FROM users WHERE id = 20'),
             "Tenant B's 2FA must remain ENABLED after a Tenant-A-scoped disable cannot reach the foreign row"
         );
     }
@@ -265,7 +265,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode(), "Tenant A's own 2FA disable must succeed");
         $this->assertSame(
             0,
-            (int) $this->pdo->query('SELECT two_factor_enabled FROM users WHERE id = 10')->fetchColumn(),
+            $this->fetchBool('SELECT two_factor_enabled FROM users WHERE id = 10'),
             "Tenant A's own 2FA must be disabled by the legitimate same-tenant write"
         );
     }
@@ -310,7 +310,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             );
             $this->assertSame(
                 1,
-                (int) $this->pdo->query('SELECT two_factor_enabled FROM users WHERE id = 20')->fetchColumn(),
+                $this->fetchBool('SELECT two_factor_enabled FROM users WHERE id = 20'),
                 "Tenant B's row must be untouched by a cross-tenant 2FA-login lookup"
             );
         } finally {
@@ -839,6 +839,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
 
     // ==================== helpers ====================
 
+    /**
+     * Fetch a boolean column value as a PHP int (0 or 1).
+     *
+     * PDO returns BOOLEAN columns differently per driver:
+     *  - PostgreSQL pdo_pgsql returns "t" or "f" (not "1"/"0")
+     *  - SQLite returns "1" or "0"
+     *
+     * Normalising here keeps the test assertions engine-agnostic without
+     * touching the assertion call-sites themselves.
+     */
+    private function fetchBool(string $sql): int
+    {
+        $raw = $this->pdo->query($sql)->fetchColumn();
+        return ($raw === true || $raw === 't' || $raw === '1' || $raw === 1) ? 1 : 0;
+    }
+
     private function usersHandler(): UsersApiHandler
     {
         return new UsersApiHandler($this->pdo, $this->hooks());
@@ -999,21 +1015,26 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (100, 1, datetime('now')),
                 (200, 1, datetime('now'))
         ");
-        $pdo->exec("
-            INSERT INTO user_roles (user_id, role_id, tenant_id, created_at) VALUES
-                (11, 100, 1, datetime('now')),
-                (21, 200, 2, datetime('now'))
-        ");
 
         // Tenant A user 10 and Tenant B user 20 both have 2FA ENABLED at version
         // 1, so a cross-tenant 2FA read/write can be proven to leave the foreign
         // row's 2FA state byte-for-byte intact (WC-191).
+        // Users must be inserted BEFORE user_roles to satisfy the FK constraint
+        // on PostgreSQL (which enforces FK; SQLite does not by default).
+        // Use true/false for BOOLEAN columns so the INSERT is accepted by both
+        // PostgreSQL (strict boolean typing) and SQLite (stores as 1/0).
         $pdo->exec("
             INSERT INTO users (id, tenant_id, email, password, role_id, two_factor_secret, two_factor_enabled, two_factor_backup_codes_version, created_at) VALUES
-                (10, 1, 'a1@t1.example', 'x', 1, 'a-secret', 1, 1, datetime('now')),
-                (11, 1, 'a2@t1.example', 'x', 2, NULL,       0, 0, datetime('now')),
-                (20, 2, 'b1@t2.example', 'x', 1, 'b-secret', 1, 1, datetime('now')),
-                (21, 2, 'b2@t2.example', 'x', 2, NULL,       0, 0, datetime('now'))
+                (10, 1, 'a1@t1.example', 'x', 1, 'a-secret', true, 1, datetime('now')),
+                (11, 1, 'a2@t1.example', 'x', 2, NULL,       false, 0, datetime('now')),
+                (20, 2, 'b1@t2.example', 'x', 1, 'b-secret', true, 1, datetime('now')),
+                (21, 2, 'b2@t2.example', 'x', 2, NULL,       false, 0, datetime('now'))
+        ");
+
+        $pdo->exec("
+            INSERT INTO user_roles (user_id, role_id, tenant_id, created_at) VALUES
+                (11, 100, 1, datetime('now')),
+                (21, 200, 2, datetime('now'))
         ");
 
         $pdo->exec("
@@ -1056,8 +1077,8 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $pdo->exec("
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
-                (1, 'Alice', '\$2y\$10\$fakehash1', 0, 0, 0, datetime('now'), datetime('now')),
-                (2, 'Bob',   '\$2y\$10\$fakehash2', 0, 0, 0, datetime('now'), datetime('now'))
+                (1, 'Alice', '\$2y\$10\$fakehash1', false, 0, 0, datetime('now'), datetime('now')),
+                (2, 'Bob',   '\$2y\$10\$fakehash2', false, 0, 0, datetime('now'), datetime('now'))
         ");
 
         // Memberships (tenant-scoped, migration 030): disjoint by tenant_id so
@@ -1077,8 +1098,8 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         // disjoint domains per tenant so cross-tenant read/delete rejection can be proven.
         $pdo->exec("
             INSERT INTO tenant_email_domains (id, tenant_id, domain, default_role_id, auto_provision, created_at) VALUES
-                (1, 1, 'acme.com',    1, 1, datetime('now')),
-                (2, 2, 'example.org', 1, 1, datetime('now'))
+                (1, 1, 'acme.com',    1, true, datetime('now')),
+                (2, 2, 'example.org', 1, true, datetime('now'))
         ");
 
         // Website Settings per-tenant overrides (tenant_settings, migration 025):

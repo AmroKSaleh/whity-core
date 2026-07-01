@@ -48,7 +48,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
         $this->pdo->exec(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (1, 'Alice', '\$2y\$10\$fakehash', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (1, 'Alice', '\$2y\$10\$fakehash', false, 0, 0, datetime('now'), datetime('now'))"
         );
     }
 
@@ -150,7 +150,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
         $this->pdo->exec(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (2, 'Bob', '\$2y\$10\$fakehashb', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (2, 'Bob', '\$2y\$10\$fakehashb', false, 0, 0, datetime('now'), datetime('now'))"
         );
 
         $this->domains->insert(self::TENANT_A, 'shared.com', 1, true);

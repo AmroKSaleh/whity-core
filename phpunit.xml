@@ -13,5 +13,11 @@
         <testsuite name="default">
             <directory>tests</directory>
         </testsuite>
+        <testsuite name="Integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+        <testsuite name="Security">
+            <directory>tests/Security</directory>
+        </testsuite>
     </testsuites>
 </phpunit>

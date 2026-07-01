@@ -175,23 +175,23 @@ final class ProfileEmailsSchemaMigrationRealEngineTest extends TestCase
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('Alice', '\$2y\$10\$hash1', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('Alice', '\$2y\$10\$hash1', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('Bob', '\$2y\$10\$hash2', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('Bob', '\$2y\$10\$hash2', false, 0, 0, datetime('now'), datetime('now'))"
         );
 
         $this->pdo->exec(
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (1, 'alice@corp.com', 1, 1, datetime('now'))"
+             VALUES (1, 'alice@corp.com', true, true, datetime('now'))"
         );
 
         $this->expectException(\PDOException::class);
         $this->pdo->exec(
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (2, 'alice@corp.com', 0, 0, datetime('now'))"
+             VALUES (2, 'alice@corp.com', false, false, datetime('now'))"
         );
     }
 
@@ -200,15 +200,15 @@ final class ProfileEmailsSchemaMigrationRealEngineTest extends TestCase
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('Alice', '\$2y\$10\$hash1', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('Alice', '\$2y\$10\$hash1', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $this->pdo->exec(
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (1, 'alice@work.com', 1, 1, datetime('now'))"
+             VALUES (1, 'alice@work.com', true, true, datetime('now'))"
         );
         $this->pdo->exec(
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (1, 'alice@home.com', 0, 0, datetime('now'))"
+             VALUES (1, 'alice@home.com', false, false, datetime('now'))"
         );
 
         $stmt = $this->pdo->query('SELECT COUNT(*) FROM profile_emails WHERE profile_id = 1');
