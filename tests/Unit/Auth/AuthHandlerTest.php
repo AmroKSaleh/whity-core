@@ -32,6 +32,66 @@ class AuthHandlerTest extends TestCase
         $this->authHandler = new AuthHandler($this->mockDb, $this->jwtParser, $this->mockTokenValidator);
     }
 
+    // ── helpers for the new profile-based login mock sequence ────────────────────
+
+    /**
+     * Build a PDOStatement mock that returns the given value from fetch() / fetchAll().
+     *
+     * @param mixed $fetchReturn  Value returned by fetch().
+     * @param mixed $fetchAllReturn Value returned by fetchAll() (default empty array).
+     */
+    private function makeStmt(mixed $fetchReturn, mixed $fetchAllReturn = []): PDOStatement
+    {
+        $stmt = $this->createMock(PDOStatement::class);
+        $stmt->method('fetch')->willReturn($fetchReturn);
+        $stmt->method('fetchAll')->willReturn($fetchAllReturn);
+        $stmt->method('execute')->willReturn(true);
+        return $stmt;
+    }
+
+    /**
+     * Wire the mock PDO to return, in order:
+     *   1. profile_emails row  → {profile_id, verified}
+     *   2. profiles row        → {id, password_hash, two_factor_enabled, …}
+     *   3. memberships rows    → fetchAll returns [{tenant_id}]
+     *   4. legacy users row    → {id, email, role_id, tenant_id, token_epoch}
+     *   5. roles row           → {name}
+     *
+     * @param array<string, mixed>|false $profileEmailRow
+     * @param array<string, mixed>|false $profileRow
+     * @param list<array<string, mixed>> $membershipRows
+     * @param array<string, mixed>|null  $legacyUserRow   null = no users row (post-cutover)
+     * @param array<string, mixed>|false $roleRow
+     */
+    private function mockNewLoginSequence(
+        mixed $profileEmailRow,
+        mixed $profileRow,
+        array $membershipRows,
+        ?array $legacyUserRow,
+        mixed $roleRow
+    ): void {
+        $stmts = [
+            $this->makeStmt($profileEmailRow),                        // profile_emails
+            $this->makeStmt($profileRow),                             // profiles
+        ];
+
+        // memberships SELECT … LIMIT 2 uses fetchAll
+        $membStmt = $this->createMock(PDOStatement::class);
+        $membStmt->method('execute')->willReturn(true);
+        $membStmt->method('fetchAll')->willReturn($membershipRows);
+        $stmts[] = $membStmt;
+
+        if ($legacyUserRow !== null) {
+            $stmts[] = $this->makeStmt($legacyUserRow);               // users (legacy)
+            $stmts[] = $this->makeStmt($roleRow);                     // roles
+        }
+
+        $this->mockDb->method('prepare')
+            ->willReturnOnConsecutiveCalls(...$stmts);
+    }
+
+    // ── login tests (rewritten for the profile-based flow) ───────────────────────
+
     /**
      * Test login with valid credentials returns 200 with user data
      */
@@ -39,29 +99,16 @@ class AuthHandlerTest extends TestCase
     {
         $hashedPassword = password_hash('password', PASSWORD_BCRYPT);
 
-        // Mock the user query statement
-        $mockUserStatement = $this->createMock(PDOStatement::class);
-        $mockUserStatement->method('fetch')->willReturn([
-            'id' => 1,
-            'tenant_id' => 1,
-            'email' => 'admin@whity.local',
-            'password' => $hashedPassword,
-            'role_id' => 1
-        ]);
+        $this->mockNewLoginSequence(
+            ['profile_id' => 1, 'verified' => true],
+            ['id' => 1, 'password_hash' => $hashedPassword, 'two_factor_enabled' => false,
+             'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
+            [['tenant_id' => 1]],
+            ['id' => 1, 'email' => 'admin@whity.local', 'role_id' => 1, 'tenant_id' => 1, 'token_epoch' => 0],
+            ['name' => 'admin'],
+        );
 
-        // Mock the role query statement
-        $mockRoleStatement = $this->createMock(PDOStatement::class);
-        $mockRoleStatement->method('fetch')->willReturn(['name' => 'admin']);
-
-        // Setup prepare to return different statements based on query
-        $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockUserStatement, $mockRoleStatement);
-
-        $requestBody = json_encode([
-            'email' => 'admin@whity.local',
-            'password' => 'password'
-        ]);
-
+        $requestBody = json_encode(['email' => 'admin@whity.local', 'password' => 'password']);
         $request = new Request('POST', '/auth/login', [], $requestBody);
         $response = $this->authHandler->handle($request);
 
@@ -72,7 +119,6 @@ class AuthHandlerTest extends TestCase
         $this->assertArrayHasKey('user', $responseData);
         $this->assertArrayNotHasKey('token', $responseData);
 
-        // Verify user data in response
         $user = $responseData['user'];
         $this->assertSame(1, $user['id']);
         $this->assertSame('admin@whity.local', $user['email']);
@@ -86,37 +132,19 @@ class AuthHandlerTest extends TestCase
     {
         $hashedPassword = password_hash('password', PASSWORD_BCRYPT);
 
-        // Mock the user query statement
-        $mockUserStatement = $this->createMock(PDOStatement::class);
-        $mockUserStatement->method('fetch')->willReturn([
-            'id' => 1,
-            'tenant_id' => 1,
-            'email' => 'user@test.com',
-            'password' => $hashedPassword,
-            'role_id' => 2
-        ]);
+        $this->mockNewLoginSequence(
+            ['profile_id' => 1, 'verified' => true],
+            ['id' => 1, 'password_hash' => $hashedPassword, 'two_factor_enabled' => false,
+             'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
+            [['tenant_id' => 1]],
+            ['id' => 1, 'email' => 'user@test.com', 'role_id' => 2, 'tenant_id' => 1, 'token_epoch' => 0],
+            ['name' => 'user'],
+        );
 
-        // Mock the role query statement
-        $mockRoleStatement = $this->createMock(PDOStatement::class);
-        $mockRoleStatement->method('fetch')->willReturn(['name' => 'user']);
-
-        // Setup prepare to return different statements based on query
-        $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockUserStatement, $mockRoleStatement);
-
-        $requestBody = json_encode([
-            'email' => 'user@test.com',
-            'password' => 'password'
-        ]);
-
+        $requestBody = json_encode(['email' => 'user@test.com', 'password' => 'password']);
         $request = new Request('POST', '/auth/login', [], $requestBody);
-
-        // Capture headers to verify cookies were set
-        $headersFired = [];
-        $originalHeader = function_exists('header') ? 'header' : null;
-
-        // We can't really capture headers in unit test, so we just verify the response
         $response = $this->authHandler->handle($request);
+
         $this->assertSame(200, $response->getStatusCode());
     }
 
@@ -125,25 +153,18 @@ class AuthHandlerTest extends TestCase
      */
     public function testLoginWithInvalidCredentials(): void
     {
-        $hashedPassword = password_hash('password', PASSWORD_BCRYPT);
+        $correctHash = password_hash('password', PASSWORD_BCRYPT);
 
-        // Mock the prepared statement returning a user
-        $mockStatement = $this->createMock(PDOStatement::class);
-        $mockStatement->method('fetch')->willReturn([
-            'id' => 1,
-            'tenant_id' => 1,
-            'email' => 'admin@whity.local',
-            'password' => $hashedPassword,
-            'role_id' => 1
-        ]);
+        $this->mockNewLoginSequence(
+            ['profile_id' => 1, 'verified' => true],
+            ['id' => 1, 'password_hash' => $correctHash, 'two_factor_enabled' => false,
+             'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
+            [],   // memberships — not reached since password check fails first
+            null, // legacy row — not reached
+            false,
+        );
 
-        $this->mockDb->method('prepare')->willReturn($mockStatement);
-
-        $requestBody = json_encode([
-            'email' => 'admin@whity.local',
-            'password' => 'wrongpassword'
-        ]);
-
+        $requestBody = json_encode(['email' => 'admin@whity.local', 'password' => 'wrongpassword']);
         $request = new Request('POST', '/auth/login', [], $requestBody);
         $response = $this->authHandler->handle($request);
 
@@ -159,17 +180,14 @@ class AuthHandlerTest extends TestCase
      */
     public function testLoginWithNonexistentUser(): void
     {
-        // Mock the prepared statement returning false (no user found)
+        // profile_emails query returns false — email not registered
         $mockStatement = $this->createMock(PDOStatement::class);
         $mockStatement->method('fetch')->willReturn(false);
+        $mockStatement->method('execute')->willReturn(true);
 
         $this->mockDb->method('prepare')->willReturn($mockStatement);
 
-        $requestBody = json_encode([
-            'email' => 'nonexistent@whity.local',
-            'password' => 'password'
-        ]);
-
+        $requestBody = json_encode(['email' => 'nonexistent@whity.local', 'password' => 'password']);
         $request = new Request('POST', '/auth/login', [], $requestBody);
         $response = $this->authHandler->handle($request);
 
@@ -407,36 +425,26 @@ class AuthHandlerTest extends TestCase
     {
         $hashedPassword = password_hash('password', PASSWORD_BCRYPT);
 
-        // Mock the user query statement with 2FA enabled
-        $mockUserStatement = $this->createMock(PDOStatement::class);
-        $mockUserStatement->method('fetch')->willReturn([
-            'id' => 2,
-            'tenant_id' => 1,
-            'email' => 'user2fa@whity.local',
-            'password' => $hashedPassword,
-            'role_id' => 2,
-            'two_factor_enabled' => true,
-            'two_factor_secret' => 'encrypted-secret-data',
-            'two_factor_backup_codes_version' => 1
-        ]);
+        // 2FA: profile_emails → profiles (2FA enabled) → memberships → (legacy users row for temp token)
+        $membStmt = $this->createMock(PDOStatement::class);
+        $membStmt->method('execute')->willReturn(true);
+        $membStmt->method('fetchAll')->willReturn([['tenant_id' => 1]]);
 
-        // Mock the role query statement
-        $mockRoleStatement = $this->createMock(PDOStatement::class);
-        $mockRoleStatement->method('fetch')->willReturn(['name' => 'user']);
-
-        // Setup prepare to return different statements based on query
         $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockUserStatement, $mockRoleStatement);
+            ->willReturnOnConsecutiveCalls(
+                $this->makeStmt(['profile_id' => 2, 'verified' => true]),            // profile_emails
+                $this->makeStmt(['id' => 2, 'password_hash' => $hashedPassword,      // profiles
+                    'two_factor_enabled' => true, 'two_factor_secret' => 'enc-sec',
+                    'two_factor_backup_codes_version' => 1, 'token_epoch' => 0]),
+                $membStmt,                                                            // memberships
+                $this->makeStmt(['id' => 2, 'email' => 'user2fa@whity.local',        // legacy users
+                    'role_id' => 2, 'tenant_id' => 1, 'token_epoch' => 0]),
+            );
 
-        $requestBody = json_encode([
-            'email' => 'user2fa@whity.local',
-            'password' => 'password'
-        ]);
-
+        $requestBody = json_encode(['email' => 'user2fa@whity.local', 'password' => 'password']);
         $request = new Request('POST', '/auth/login', [], $requestBody);
         $response = $this->authHandler->handle($request);
 
-        // Should return 202 Accepted
         $this->assertSame(202, $response->getStatusCode());
 
         $responseData = json_decode($response->getBody(), true);
@@ -454,36 +462,19 @@ class AuthHandlerTest extends TestCase
     {
         $hashedPassword = password_hash('password', PASSWORD_BCRYPT);
 
-        // Mock the user query statement with 2FA disabled
-        $mockUserStatement = $this->createMock(PDOStatement::class);
-        $mockUserStatement->method('fetch')->willReturn([
-            'id' => 3,
-            'tenant_id' => 1,
-            'email' => 'user-no2fa@whity.local',
-            'password' => $hashedPassword,
-            'role_id' => 2,
-            'two_factor_enabled' => false,
-            'two_factor_secret' => null,
-            'two_factor_backup_codes_version' => 0
-        ]);
+        $this->mockNewLoginSequence(
+            ['profile_id' => 3, 'verified' => true],
+            ['id' => 3, 'password_hash' => $hashedPassword, 'two_factor_enabled' => false,
+             'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
+            [['tenant_id' => 1]],
+            ['id' => 3, 'email' => 'user-no2fa@whity.local', 'role_id' => 2, 'tenant_id' => 1, 'token_epoch' => 0],
+            ['name' => 'user'],
+        );
 
-        // Mock the role query statement
-        $mockRoleStatement = $this->createMock(PDOStatement::class);
-        $mockRoleStatement->method('fetch')->willReturn(['name' => 'user']);
-
-        // Setup prepare to return different statements based on query
-        $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls($mockUserStatement, $mockRoleStatement);
-
-        $requestBody = json_encode([
-            'email' => 'user-no2fa@whity.local',
-            'password' => 'password'
-        ]);
-
+        $requestBody = json_encode(['email' => 'user-no2fa@whity.local', 'password' => 'password']);
         $request = new Request('POST', '/auth/login', [], $requestBody);
         $response = $this->authHandler->handle($request);
 
-        // Should return 200 OK
         $this->assertSame(200, $response->getStatusCode());
 
         $responseData = json_decode($response->getBody(), true);
@@ -491,7 +482,6 @@ class AuthHandlerTest extends TestCase
         $this->assertArrayHasKey('user', $responseData);
         $this->assertArrayNotHasKey('requires_2fa', $responseData);
 
-        // Verify user data in response
         $user = $responseData['user'];
         $this->assertSame(3, $user['id']);
         $this->assertSame('user-no2fa@whity.local', $user['email']);
