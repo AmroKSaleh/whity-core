@@ -121,17 +121,14 @@ final class SchemaFromMigrations
         $bootstrap->exec("SET search_path TO {$schemaName}, public");
 
         // Run the production migrations inside the fresh schema.
+        //
+        // NOTE: nothing beyond the migrations is seeded here — the Postgres path
+        // must expose exactly the same starting state as the SQLite path (only
+        // migration-seeded rows, e.g. the system tenant id=0 from migration 010).
+        // Tests that need tenants 1/2 must seed them themselves, exactly as they
+        // would (or already do) for SQLite.  Pre-seeding here collides with tests
+        // that plain-INSERT tenant id=1 (duplicate key on tenants_pkey).
         self::runMigrationsOnPg($bootstrap);
-
-        // Seed the two canonical test tenants (id=1, id=2) that most integration
-        // tests assume exist when they insert users or other tenant-scoped rows.
-        // Migration 010 seeds the system tenant (id=0); these are test-only.
-        // INSERT … ON CONFLICT DO NOTHING is idempotent so re-calling make() in
-        // the same schema is safe (e.g. from wrapSqlite() after makeSchema()).
-        $bootstrap->exec(
-            "INSERT INTO tenants (id, name) VALUES (1, 'test-tenant-1'), (2, 'test-tenant-2')"
-            . " ON CONFLICT DO NOTHING"
-        );
 
         // Close the bootstrap connection; the wrapper opens its own.
         unset($bootstrap);
@@ -195,7 +192,7 @@ final class SchemaFromMigrations
                 string $dsn,
                 string $user,
                 string $password,
-                private string $schemaName,
+                string $schemaName,
             ) {
                 parent::__construct($dsn, $user, $password, [
                     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -217,6 +214,13 @@ final class SchemaFromMigrations
                     $table = $m[1];
                     return "SELECT column_name AS name FROM information_schema.columns "
                          . "WHERE table_schema = current_schema() AND table_name = " . "'{$table}'";
+                }
+
+                // Any other PRAGMA (e.g. PRAGMA foreign_keys = ON) is a SQLite-only
+                // knob with no Postgres equivalent needed: Postgres always enforces
+                // FKs, so translate to a harmless no-op statement.
+                if (preg_match('/^\s*PRAGMA\b/i', $sql)) {
+                    return 'SELECT 1';
                 }
 
                 // SELECT ... FROM sqlite_master WHERE ... name = 'table'

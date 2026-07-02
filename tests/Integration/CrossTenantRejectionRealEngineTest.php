@@ -852,7 +852,11 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     private function fetchBool(string $sql): int
     {
         $raw = $this->pdo->query($sql)->fetchColumn();
-        return ($raw === true || $raw === 't' || $raw === '1' || $raw === 1) ? 1 : 0;
+        // Normalise via string cast: pdo_pgsql may return native bool true
+        // (casts to '1') or 't'; pdo_sqlite returns '1'/1 (casts to '1').
+        // false/null/'f'/'0' all normalise to 0.
+        $s = (string) $raw;
+        return ($s === 't' || $s === '1') ? 1 : 0;
     }
 
     private function usersHandler(): UsersApiHandler

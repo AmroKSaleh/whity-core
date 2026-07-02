@@ -254,6 +254,10 @@ final class PluginUploadApiRbacTest extends TestCase
     {
         $pdo = SchemaFromMigrations::make();
 
+        // Tenant 1 hosts every fixture; seed it so users.tenant_id FK is
+        // satisfied on PostgreSQL (SQLite does not enforce FKs by default).
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a')");
+
         $pdo->prepare('INSERT INTO roles (name, created_at) VALUES (?, NOW())')->execute(['role_' . $userId]);
         $roleId = (int) $pdo->lastInsertId();
         foreach ($grantedPermissions as $permission) {
