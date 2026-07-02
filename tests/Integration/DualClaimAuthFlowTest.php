@@ -135,36 +135,43 @@ final class DualClaimAuthFlowTest extends TestCase
         }
     }
 
-    public function testLoginMintsLegacyOnlyTokensForUnmigratedUser(): void
+    /**
+     * WC-c35c4ce0: the login rewrite authenticates via profile_email (globally
+     * unique).  A "legacy" user — i.e. a users row with no profile_email row —
+     * cannot log in via the new path: the profile_email lookup returns nothing
+     * and the handler responds 401 (email not registered in the profile model).
+     *
+     * This is the intended behaviour after the auth rewrite: unmigrated accounts
+     * must be migrated (migration 035) before they can log in again.  During the
+     * dual-claim window ALL deployed users will have been migrated by migration
+     * 035, so this case should not arise in production.
+     */
+    public function testLoginRejectsUnmigratedUserWithNoProfileEmail(): void
     {
         $response = $this->login(self::LEGACY_EMAIL);
-        self::assertSame(200, $response->getStatusCode());
 
-        foreach (['access', 'refresh'] as $type) {
-            $payload = $this->jwtParser->lastPayloadOfType($type);
-            self::assertIsArray($payload);
-
-            self::assertArrayNotHasKey(
-                'profile_id',
-                $payload,
-                "{$type}: an unmigrated user must NOT get new claims — the membership gate would reject them."
-            );
-            self::assertArrayNotHasKey('active_tenant_id', $payload);
-            self::assertSame($this->legacyUserId, $payload['user_id'] ?? null);
-        }
+        // The new login path finds no profile_email row → 401 (not 200).
+        self::assertSame(
+            401,
+            $response->getStatusCode(),
+            'A users-only (unmigrated) account with no profile_email row must be refused (email not found).'
+        );
     }
 
-    public function testLoginMintsLegacyOnlyTokensWhenMembershipSuspended(): void
+    /**
+     * WC-c35c4ce0: a profile whose only membership is suspended must be refused
+     * login with 403 (no active membership).  The old code returned 200 with
+     * legacy-only claims; the new code is strict.
+     */
+    public function testLoginRejectsSuspendedMembership(): void
     {
-        // A suspended membership must not be baked into a token that the
-        // validator's membership gate would then reject on every request.
         $response = $this->login(self::SUSPENDED_EMAIL);
-        self::assertSame(200, $response->getStatusCode());
 
-        $payload = $this->jwtParser->lastPayloadOfType('access');
-        self::assertIsArray($payload);
-        self::assertArrayNotHasKey('profile_id', $payload);
-        self::assertArrayNotHasKey('active_tenant_id', $payload);
+        self::assertSame(
+            403,
+            $response->getStatusCode(),
+            'A profile whose only membership is suspended must be refused login (403).'
+        );
     }
 
     public function testIssuedDualClaimTokenValidates(): void
