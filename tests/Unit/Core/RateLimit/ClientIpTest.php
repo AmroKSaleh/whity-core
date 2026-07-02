@@ -9,58 +9,68 @@ use Whity\Core\RateLimit\ClientIp;
 use Whity\Sdk\Http\Request;
 
 /**
- * WC-c0fb3700: client-IP extraction for rate-limit keys.
+ * WC-b19ff21a: trusted client-IP extraction.
  *
- * Mirrors the forwarding-header logic already used for audit (X-Forwarded-For
- * first hop, then X-Real-IP), centralised so the limiter and other consumers
- * derive the IP identically.
+ * The client IP is read ONLY from the internal {@see ClientIp::HEADER}, which the
+ * trusted front proxy (the Next.js API proxy) sets from its own ingress and
+ * which it strips from inbound client requests. Raw client-supplied
+ * `X-Forwarded-For` / `X-Real-IP` are NO LONGER trusted — they are attacker-
+ * controllable through the proxy, so honouring them let a caller spoof the
+ * rate-limit key and poison audit IPs.
  */
 final class ClientIpTest extends TestCase
 {
-    public function testPrefersFirstForwardedForHop(): void
+    public function testReadsTrustedHeader(): void
     {
-        $request = new Request('GET', '/api/x', ['X-Forwarded-For' => '203.0.113.7, 10.0.0.1, 10.0.0.2']);
+        $request = new Request('GET', '/api/x', [ClientIp::HEADER => '203.0.113.7']);
         self::assertSame('203.0.113.7', ClientIp::fromRequest($request));
     }
 
-    public function testFallsBackToRealIp(): void
+    public function testIgnoresClientSuppliedXForwardedFor(): void
     {
-        $request = new Request('GET', '/api/x', ['X-Real-IP' => '198.51.100.9']);
-        self::assertSame('198.51.100.9', ClientIp::fromRequest($request));
+        // A spoof attempt: only the untrusted forwarding header is present.
+        $request = new Request('GET', '/api/x', ['X-Forwarded-For' => '1.2.3.4']);
+        self::assertNull(ClientIp::fromRequest($request), 'raw X-Forwarded-For must not be trusted');
     }
 
-    public function testForwardedForTakesPriorityOverRealIp(): void
+    public function testIgnoresClientSuppliedXRealIp(): void
+    {
+        $request = new Request('GET', '/api/x', ['X-Real-IP' => '1.2.3.4']);
+        self::assertNull(ClientIp::fromRequest($request), 'raw X-Real-IP must not be trusted');
+    }
+
+    public function testTrustedHeaderWinsOverSpoofedForwardingHeaders(): void
     {
         $request = new Request('GET', '/api/x', [
-            'X-Forwarded-For' => '203.0.113.7',
-            'X-Real-IP'       => '198.51.100.9',
+            ClientIp::HEADER  => '203.0.113.7',
+            'X-Forwarded-For' => '6.6.6.6',
+            'X-Real-IP'       => '7.7.7.7',
         ]);
         self::assertSame('203.0.113.7', ClientIp::fromRequest($request));
     }
 
-    public function testReturnsNullWhenNoForwardingHeaders(): void
+    public function testReturnsNullWhenTrustedHeaderAbsent(): void
     {
         self::assertNull(ClientIp::fromRequest(new Request('GET', '/api/x')));
     }
 
     public function testTrimsWhitespace(): void
     {
-        $request = new Request('GET', '/api/x', ['X-Forwarded-For' => '  203.0.113.7  , 10.0.0.1']);
+        $request = new Request('GET', '/api/x', [ClientIp::HEADER => '  203.0.113.7  ']);
         self::assertSame('203.0.113.7', ClientIp::fromRequest($request));
+    }
+
+    public function testReturnsNullForWhitespaceOnlyHeader(): void
+    {
+        $request = new Request('GET', '/api/x', [ClientIp::HEADER => '   ']);
+        self::assertNull(ClientIp::fromRequest($request));
     }
 
     public function testCapsAtIpv6MaxLength(): void
     {
-        $long = str_repeat('a', 100);
-        $request = new Request('GET', '/api/x', ['X-Real-IP' => $long]);
+        $request = new Request('GET', '/api/x', [ClientIp::HEADER => str_repeat('a', 100)]);
         $ip = ClientIp::fromRequest($request);
         self::assertNotNull($ip);
         self::assertSame(45, strlen($ip));
-    }
-
-    public function testReturnsNullForEmptyForwardedForHeader(): void
-    {
-        $request = new Request('GET', '/api/x', ['X-Forwarded-For' => '   ']);
-        self::assertNull(ClientIp::fromRequest($request));
     }
 }

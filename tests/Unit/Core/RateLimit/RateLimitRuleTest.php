@@ -39,7 +39,7 @@ final class RateLimitRuleTest extends TestCase
         self::assertSame('ip', $rule->name);
         self::assertSame(100, $rule->limit);
         self::assertSame(60, $rule->window);
-        self::assertSame('203.0.113.7', ($rule->resolve)(new Request('GET', '/x', ['X-Forwarded-For' => '203.0.113.7'])));
+        self::assertSame('203.0.113.7', ($rule->resolve)(new Request('GET', '/x', [\Whity\Core\RateLimit\ClientIp::HEADER => '203.0.113.7'])));
     }
 
     public function testIpRuleFailsClosedWhenNoClientIp(): void
