@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Migrations;
 
+use PDO;
 use Whity\Database\Database;
 
 /**
@@ -18,12 +19,17 @@ use Whity\Database\Database;
  * ─────────────────────────────────────────────────────────────────────────────
  * When the same email address appears in the `users` table under multiple
  * `tenant_id` values (the multi-tenant scenario), all rows collapse to ONE
- * profile record keyed on the normalised (lowercased) email.  The profile
- * receives the credential columns (password_hash, two_factor_* columns,
+ * profile record keyed on the normalised (lowercased, trimmed) email.  The
+ * profile receives the credential columns (password_hash, two_factor_* columns,
  * token_epoch) from the EARLIEST-CREATED user row (lowest `id`).  Each user
  * row produces exactly one membership(profile_id, tenant_id, role_id, ou_id,
  * status='active').  The primary profile_email is created once per unique
  * normalised email (verified=true, is_primary=true).
+ *
+ * Note: users has UNIQUE(tenant_id, email), so within a single tenant duplicate
+ * emails cannot exist.  The memberships ON CONFLICT DO NOTHING guard relies on
+ * UNIQUE(profile_id, tenant_id) on the memberships table — that constraint
+ * ensures a second up() run cannot silently create duplicate memberships.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Credential-collision audit log
@@ -47,6 +53,13 @@ use Whity\Database\Database;
  * running up() twice is safe: no duplicate rows are created.
  *
  * ─────────────────────────────────────────────────────────────────────────────
+ * Atomicity
+ * ─────────────────────────────────────────────────────────────────────────────
+ * up() wraps the entire migration in a database transaction.  A crash mid-loop
+ * rolls back all partial rows, leaving the database in a clean pre-migration
+ * state so the operator can retry from scratch.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
  * Reversibility (down)
  * ─────────────────────────────────────────────────────────────────────────────
  * down() removes only the rows this migration created, identified via the
@@ -65,6 +78,21 @@ use Whity\Database\Database;
 class MigrateUsersToProfiles
 {
     public static function up(Database $db): void
+    {
+        $pdo    = $db->getPdo();
+        $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+
+        $pdo->beginTransaction();
+        try {
+            self::runUp($db, $driver);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    private static function runUp(Database $db, string $driver): void
     {
         // ── 0. Tracking / audit tables ────────────────────────────────────────
         // migration_035_collision_log: audit trail for emails where multiple users
@@ -100,7 +128,7 @@ class MigrateUsersToProfiles
             SELECT
                 u.id,
                 u.tenant_id,
-                LOWER(u.email)                         AS norm_email,
+                LOWER(TRIM(u.email))                   AS norm_email,
                 u.email                                AS raw_email,
                 u.password,
                 u.role_id,
@@ -139,30 +167,64 @@ class MigrateUsersToProfiles
                     // Profile already exists — record it for membership creation.
                     $profileId = (int) $existingRow['profile_id'];
                 } else {
-                    // INSERT a new profile row.
+                    // INSERT a new profile row and capture its id.
+                    // On PostgreSQL we use RETURNING id (reliable, no sequence
+                    // ambiguity); on SQLite we fall back to lastInsertId() which
+                    // is the established codebase idiom on that driver.
                     $createdAt = (string) ($user['created_at'] ?? date('Y-m-d H:i:s'));
-                    $db->query(
-                        "INSERT INTO profiles
-                             (display_name, password_hash, two_factor_enabled,
-                              two_factor_secret, two_factor_backup_codes_version,
-                              token_epoch, created_at, updated_at)
-                         VALUES
-                             (:display_name, :password_hash, :two_factor_enabled,
-                              :two_factor_secret, :two_factor_backup_codes_version,
-                              :token_epoch, :created_at, :updated_at)",
-                        [
-                            ':display_name'                    => self::localPart((string) $user['raw_email']),
-                            ':password_hash'                   => (string) $user['password'],
-                            ':two_factor_enabled'              => (int) $user['two_factor_enabled'],
-                            ':two_factor_secret'               => $user['two_factor_secret'] ?? null,
-                            ':two_factor_backup_codes_version' => (int) ($user['two_factor_backup_codes_version'] ?? 0),
-                            ':token_epoch'                     => (int) ($user['token_epoch'] ?? 0),
-                            ':created_at'                      => $createdAt,
-                            ':updated_at'                      => $createdAt,
-                        ]
-                    );
 
-                    $profileId = (int) $db->getPdo()->lastInsertId();
+                    // Normalise the two_factor_enabled value for both drivers.
+                    // PostgreSQL returns "t"/"f" strings for BOOLEAN columns;
+                    // PHP's (bool) cast on "f" would incorrectly return true.
+                    // We therefore canonicalise to a plain int (0/1) which both
+                    // drivers accept, casting via the string value from PG.
+                    $tfEnabled = (int) ($user['two_factor_enabled'] === 't'
+                        || $user['two_factor_enabled'] === true
+                        || $user['two_factor_enabled'] === 1
+                        || $user['two_factor_enabled'] === '1');
+
+                    $profileParams = [
+                        ':display_name'                    => self::localPart((string) $user['raw_email']),
+                        ':password_hash'                   => (string) $user['password'],
+                        ':two_factor_enabled'              => $tfEnabled,
+                        ':two_factor_secret'               => $user['two_factor_secret'] ?? null,
+                        ':two_factor_backup_codes_version' => (int) ($user['two_factor_backup_codes_version'] ?? 0),
+                        ':token_epoch'                     => (int) ($user['token_epoch'] ?? 0),
+                        ':created_at'                      => $createdAt,
+                        ':updated_at'                      => $createdAt,
+                    ];
+
+                    if ($driver === 'pgsql') {
+                        // Use RETURNING id on PostgreSQL — reliable, no sequence ambiguity.
+                        $insertStmt = $db->query(
+                            "INSERT INTO profiles
+                                 (display_name, password_hash, two_factor_enabled,
+                                  two_factor_secret, two_factor_backup_codes_version,
+                                  token_epoch, created_at, updated_at)
+                             VALUES
+                                 (:display_name, :password_hash, :two_factor_enabled,
+                                  :two_factor_secret, :two_factor_backup_codes_version,
+                                  :token_epoch, :created_at, :updated_at)
+                             RETURNING id",
+                            $profileParams
+                        );
+                        $idRow = $insertStmt->fetch(\PDO::FETCH_ASSOC);
+                        $profileId = (int) ($idRow !== false ? $idRow['id'] : 0);
+                    } else {
+                        // SQLite: lastInsertId() is the established codebase idiom.
+                        $db->query(
+                            "INSERT INTO profiles
+                                 (display_name, password_hash, two_factor_enabled,
+                                  two_factor_secret, two_factor_backup_codes_version,
+                                  token_epoch, created_at, updated_at)
+                             VALUES
+                                 (:display_name, :password_hash, :two_factor_enabled,
+                                  :two_factor_secret, :two_factor_backup_codes_version,
+                                  :token_epoch, :created_at, :updated_at)",
+                            $profileParams
+                        );
+                        $profileId = (int) $db->getPdo()->lastInsertId();
+                    }
 
                     // INSERT the primary verified profile_email (idempotent via
                     // the UNIQUE(email) constraint on profile_emails — first call
@@ -287,13 +349,29 @@ class MigrateUsersToProfiles
     {
         // Guard: if the tracking table does not exist (migration never ran or was
         // partially reversed), drop any remnants and exit cleanly.
-        // sqlite_master is translated to information_schema.tables by
-        // SchemaFromMigrations on the PostgreSQL path.
-        $tableCheck = $db->query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name = 'migration_035_profile_ids'"
-        )->fetch(\PDO::FETCH_ASSOC);
+        //
+        // Driver-aware existence check: sqlite_master is SQLite-only and is NOT
+        // translated on the production `migrate run` path (only tests use
+        // SchemaFromMigrations which translates it).  We therefore probe using
+        // the appropriate catalogue view for each driver.
+        $pdo    = $db->getPdo();
+        $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
-        if ($tableCheck === false) {
+        if ($driver === 'pgsql') {
+            // to_regclass returns NULL when the relation does not exist; non-NULL
+            // means the table is present in the current search_path.
+            $row = $pdo->query(
+                "SELECT to_regclass('migration_035_profile_ids') AS name"
+            )->fetch(\PDO::FETCH_ASSOC);
+            $tableExists = $row !== false && $row['name'] !== null;
+        } else {
+            $row = $pdo->query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name = 'migration_035_profile_ids'"
+            )->fetch(\PDO::FETCH_ASSOC);
+            $tableExists = $row !== false;
+        }
+
+        if (!$tableExists) {
             $db->exec('DROP TABLE IF EXISTS migration_035_collision_log');
             return;
         }

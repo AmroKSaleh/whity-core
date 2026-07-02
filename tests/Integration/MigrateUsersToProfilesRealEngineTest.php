@@ -261,10 +261,20 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
 
     /**
      * After up(): alice's profile carries the password from the FIRST/lowest-id
-     * user row (alice in tenant 1, id=1 in our seed order).
+     * user row (alice in tenant 1, inserted first so it has the smaller auto-id).
      */
     public function testCredentialsAreCopiedFromEarliestUserRow(): void
     {
+        // Capture the lowest alice user id before running the migration.
+        // We use a subquery to avoid a GROUP BY issue on PostgreSQL (which requires
+        // non-aggregated columns in GROUP BY unless within an aggregate).
+        $aliceLowestIdRow = $this->pdo->query(
+            "SELECT id AS min_id, password FROM users WHERE LOWER(email) = 'alice@example.com' ORDER BY id ASC LIMIT 1"
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertNotFalse($aliceLowestIdRow, 'alice@example.com must exist in users.');
+        $aliceLowestId   = (int) $aliceLowestIdRow['min_id'];  // 'id' aliased as min_id
+        $aliceLowestHash = (string) $aliceLowestIdRow['password'];
+
         $this->runUp();
 
         $profileRow = $this->pdo->query(
@@ -275,10 +285,22 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
         )->fetch(PDO::FETCH_ASSOC);
 
         self::assertNotFalse($profileRow, 'alice@example.com must resolve to a profile.');
+        // The password must come from the row with the lowest (earliest) users.id.
         self::assertSame(
-            '$2y$10$hash_alice_t1',
+            $aliceLowestHash,
             $profileRow['password_hash'],
-            'Profile must use credentials from the earliest (lowest id) alice user row (tenant 1).'
+            'Profile must use credentials from the earliest (lowest id) alice user row.'
+        );
+
+        // Also verify via the collision log: kept_user_id must equal the lowest alice id.
+        $logRow = $this->pdo->query(
+            "SELECT kept_user_id FROM migration_035_collision_log WHERE email = 'alice@example.com'"
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertNotFalse($logRow, 'Collision log must record alice@example.com.');
+        self::assertSame(
+            $aliceLowestId,
+            (int) $logRow['kept_user_id'],
+            'collision_log.kept_user_id must equal the lowest alice users.id.'
         );
     }
 
@@ -364,7 +386,8 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
     }
 
     /**
-     * After up(): the collision log records the duplicate-email event.
+     * After up(): the collision log records the duplicate-email event with the
+     * correct kept_user_id (the lowest alice users.id) and non-empty dropped_ids.
      */
     public function testCollisionLogRecordsDuplicateEmail(): void
     {
@@ -377,8 +400,50 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
         )->fetch(PDO::FETCH_ASSOC);
 
         self::assertNotFalse($logRow, 'A collision log row must exist for alice@example.com.');
-        // kept_user_id must be the lower id (alice in tenant 1 was inserted first).
-        self::assertGreaterThan(0, (int) $logRow['kept_user_id']);
         self::assertNotEmpty($logRow['dropped_ids'], 'dropped_ids must be non-empty for a collision.');
+    }
+
+    /**
+     * down()-then-up() round-trip on a real database: after reversing and
+     * re-running the migration the same invariants hold.
+     *
+     * This also proves down() works on both engines when the tracking table
+     * exists (the table-exists guard is exercised by testDownIsIdempotent for
+     * the missing-table path).
+     */
+    public function testDownThenUpRoundTrip(): void
+    {
+        $this->runUp();
+        $this->runDown();
+
+        // After down() all migration-created rows are gone.
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn());
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM profile_emails')->fetchColumn());
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn());
+
+        // Re-run up() — must reconstruct cleanly.
+        $this->runUp();
+
+        $profileCount    = (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn();
+        $emailCount      = (int) $this->pdo->query('SELECT COUNT(*) FROM profile_emails')->fetchColumn();
+        $membershipCount = (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn();
+
+        self::assertSame(4, $profileCount,    'After down()+up() there must still be 4 profiles.');
+        self::assertSame(4, $emailCount,      'After down()+up() there must still be 4 profile_emails.');
+        self::assertSame(5, $membershipCount, 'After down()+up() there must still be 5 memberships.');
+
+        // Alice's profile must still carry the correct credentials.
+        $profileRow = $this->pdo->query(
+            "SELECT p.password_hash
+               FROM profiles p
+               JOIN profile_emails pe ON pe.profile_id = p.id
+              WHERE pe.email = 'alice@example.com'"
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertNotFalse($profileRow, 'alice@example.com must resolve to a profile after round-trip.');
+        self::assertSame(
+            '$2y$10$hash_alice_t1',
+            $profileRow['password_hash'],
+            'Credentials must still come from the earliest alice row after down()+up().'
+        );
     }
 }

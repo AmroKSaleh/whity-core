@@ -1327,7 +1327,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 18
+			count: 24
 			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
 
 		-
@@ -1337,5 +1337,5 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
-			count: 4
+			count: 7
 			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
