@@ -43,6 +43,10 @@ final class SeederRealEngineTest extends TestCase
         'INITIAL_SUPERUSER_PASSWORD',
         'INITIAL_ADMIN_PASSWORD',
         'INITIAL_USER_PASSWORD',
+        // WC-10522424: the seeder now also seeds the system admin profile, which
+        // reads INITIAL_SYSTEM_ADMIN_PASSWORD; set it so no generated-password
+        // operator notice is printed to STDOUT (PHPUnit flags that as risky).
+        'INITIAL_SYSTEM_ADMIN_PASSWORD',
     ];
 
     protected function setUp(): void
