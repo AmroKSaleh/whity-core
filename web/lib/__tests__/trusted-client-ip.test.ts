@@ -1,4 +1,28 @@
-import { CLIENT_IP_HEADER, trustedClientIp, trustedProxyHops } from '@/lib/trusted-client-ip';
+import { CLIENT_IP_HEADER, stripClientIpHeaders, trustedClientIp, trustedProxyHops } from '@/lib/trusted-client-ip';
+
+/**
+ * Minimal Headers-like backing the stripClientIpHeaders tests, so they do not
+ * depend on a global Headers in the jsdom environment. Names are lowercased,
+ * matching the real Headers API (which is what stripClientIpHeaders iterates).
+ */
+class FakeHeaders {
+  private map = new Map<string, string>();
+  constructor(init: Record<string, string> = {}) {
+    for (const [k, v] of Object.entries(init)) this.map.set(k.toLowerCase(), v);
+  }
+  keys(): IterableIterator<string> {
+    return this.map.keys();
+  }
+  delete(name: string): void {
+    this.map.delete(name.toLowerCase());
+  }
+  has(name: string): boolean {
+    return this.map.has(name.toLowerCase());
+  }
+  get(name: string): string | null {
+    return this.map.get(name.toLowerCase()) ?? null;
+  }
+}
 
 /**
  * WC-b19ff21a: trusted client-IP derivation for the API proxy.
@@ -87,6 +111,51 @@ describe('trustedProxyHops', () => {
     expect(trustedProxyHops()).toBe(0);
     process.env.TRUSTED_PROXY_HOPS = '-3';
     expect(trustedProxyHops()).toBe(0);
+  });
+});
+
+describe('stripClientIpHeaders', () => {
+  it('removes the raw forwarding headers and any inbound internal header', () => {
+    const h = new FakeHeaders({
+      'x-whity-client-ip': '6.6.6.6',
+      'x-forwarded-for': '1.2.3.4',
+      'x-real-ip': '5.5.5.5',
+      forwarded: 'for=1.2.3.4',
+    });
+    stripClientIpHeaders(h as unknown as Headers);
+    expect(h.has('x-whity-client-ip')).toBe(false);
+    expect(h.has('x-forwarded-for')).toBe(false);
+    expect(h.has('x-real-ip')).toBe(false);
+    expect(h.has('forwarded')).toBe(false);
+  });
+
+  it('removes underscore-variant smuggling headers (PHP folds _ onto -)', () => {
+    // The blocker: X_Whity_Client_Ip collides with X-Whity-Client-Ip in $_SERVER.
+    const h = new FakeHeaders({
+      x_whity_client_ip: '6.6.6.6',
+      x_forwarded_for: '1.2.3.4',
+      x_real_ip: '5.5.5.5',
+    });
+    stripClientIpHeaders(h as unknown as Headers);
+    expect(h.has('x_whity_client_ip')).toBe(false);
+    expect(h.has('x_forwarded_for')).toBe(false);
+    expect(h.has('x_real_ip')).toBe(false);
+  });
+
+  it('is case-insensitive for the hyphenated names', () => {
+    const h = new FakeHeaders({ 'X-Forwarded-For': '1.2.3.4' });
+    stripClientIpHeaders(h as unknown as Headers);
+    expect(h.has('x-forwarded-for')).toBe(false);
+  });
+
+  it('leaves unrelated headers intact', () => {
+    const h = new FakeHeaders({
+      authorization: 'Bearer t',
+      'content-type': 'application/json',
+    });
+    stripClientIpHeaders(h as unknown as Headers);
+    expect(h.get('authorization')).toBe('Bearer t');
+    expect(h.get('content-type')).toBe('application/json');
   });
 });
 

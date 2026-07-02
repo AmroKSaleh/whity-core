@@ -60,6 +60,32 @@ export function trustedProxyHops(): number {
  * @param request The incoming request to the Next.js proxy.
  * @param hops    Trusted proxy hop count; defaults to {@link trustedProxyHops}.
  */
+/**
+ * Strip every client-suppliable client-IP header from a to-be-forwarded header
+ * set, so the backend sees ONLY the trusted {@link CLIENT_IP_HEADER} the proxy
+ * sets itself.
+ *
+ * Removes the raw forwarding headers (`X-Forwarded-For`, `X-Real-IP`,
+ * `Forwarded`), any inbound copy of the internal header, AND — critically — any
+ * header whose name contains an underscore. PHP/FrankenPHP folds `-` and `_`
+ * onto the SAME `$_SERVER['HTTP_*']` key, so a client-supplied
+ * `X_Whity_Client_Ip` would otherwise collide with the trusted
+ * `X-Whity-Client-Ip` and re-open spoofing regardless of the runtime's
+ * patch level (the header-smuggling CVE class). Standard HTTP headers use
+ * hyphens, so dropping underscore-named headers is safe defense-in-depth.
+ */
+export function stripClientIpHeaders(headers: Headers): void {
+  for (const name of [...headers.keys()]) {
+    if (name.includes('_')) {
+      headers.delete(name);
+    }
+  }
+  headers.delete(CLIENT_IP_HEADER);
+  headers.delete('x-forwarded-for');
+  headers.delete('x-real-ip');
+  headers.delete('forwarded');
+}
+
 export function trustedClientIp(request: Request, hops: number = trustedProxyHops()): string | null {
   if (hops < 1) {
     return null;

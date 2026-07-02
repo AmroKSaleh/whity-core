@@ -165,7 +165,7 @@ forged by the client):
 
 | Value | Topology |
 | ----- | -------- |
-| `0` (default) | Fail-safe: trust nothing from `X-Forwarded-For`. No client IP is propagated — per-IP rate limiting and audit IPs are absent. Use until you have confirmed the topology below. |
+| `0` (default) | Fail-safe: trust nothing from `X-Forwarded-For`. No client IP is propagated, so **per-IP rate limiting, audit-log IPs, AND the per-IP login brute-force backstop are all inactive** (see note below). Use until you have confirmed the topology below. |
 | `1` | One reverse proxy / ingress / cloud LB in front of Next.js (the common case). |
 | `2` | Two trusted hops, e.g. CDN → LB → Next.js. |
 
@@ -183,3 +183,13 @@ internet-facing with nothing in front, leave it at `0` — there is no upstream
 > `X-Forwarded-For` (nginx `proxy_add_x_forwarded_for`, AWS ALB, etc.) — that
 > appended rightmost hop is the one an attacker cannot forge. With no such proxy,
 > keep `0`; setting `1` there would trust the attacker's own header.
+
+**Login brute-force note.** With `TRUSTED_PROXY_HOPS=0` no client IP is known, so
+the **per-IP** login backstop (20 failed logins / 15 min / IP) is inactive — a
+distributed attempt spreading a few tries across many accounts from one source is
+not IP-throttled. The **per-account** cap (10 failed logins / 15 min / user)
+still applies regardless and protects individual accounts. This per-IP control is
+deliberately NOT failed-closed onto a shared bucket when the IP is unknown:
+collapsing all IP-less failures into one counter would let modest failed-login
+volume trip a single global limit and lock out *every* user (an availability
+DoS). Set `TRUSTED_PROXY_HOPS` correctly to activate the per-IP backstop.
