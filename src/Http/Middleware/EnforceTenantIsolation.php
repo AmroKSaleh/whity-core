@@ -8,6 +8,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Auth\JwtParser;
 use Whity\Core\Audit\AuditContext;
+use Whity\Core\RateLimit\ClientIp;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Core\Tenant\TenantContext;
@@ -458,29 +459,18 @@ class EnforceTenantIsolation
     }
 
     /**
-     * Best-effort client IP extraction from forwarding headers (WC-34).
+     * Trusted client-IP extraction for the audit context (WC-34, WC-b19ff21a).
      *
-     * Prefers the first hop in `X-Forwarded-For`, then `X-Real-IP`. Returns null
-     * when neither is present. Capped at 45 chars (IPv6 max) for the audit column.
+     * Delegates to {@see ClientIp}, which reads ONLY the internal proxy-set header
+     * — raw client-supplied `X-Forwarded-For` / `X-Real-IP` are not trusted, so an
+     * attacker can no longer poison audit IPs by sending a forwarding header.
+     * Returns null when absent (capped at 45 chars for the audit column).
      *
      * @param Request $request The incoming request.
      * @return string|null The client IP, or null.
      */
     private function clientIp(Request $request): ?string
     {
-        $forwarded = $request->getHeader('X-Forwarded-For');
-        if (is_string($forwarded) && $forwarded !== '') {
-            $first = trim(explode(',', $forwarded)[0]);
-            if ($first !== '') {
-                return substr($first, 0, 45);
-            }
-        }
-
-        $realIp = $request->getHeader('X-Real-IP');
-        if (is_string($realIp) && $realIp !== '') {
-            return substr(trim($realIp), 0, 45);
-        }
-
-        return null;
+        return ClientIp::fromRequest($request);
     }
 }

@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { backendUrl } from '@/lib/backend-url';
+import { CLIENT_IP_HEADER, trustedClientIp } from '@/lib/trusted-client-ip';
 
 /**
  * HTTP statuses that, per the Fetch spec, MUST NOT carry a response body.
@@ -50,6 +51,23 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
     const headers = new Headers(request.headers);
     headers.delete('host');
     headers.delete('connection');
+
+    // Trusted client-IP propagation (WC-b19ff21a). This proxy is the single
+    // trusted front door: derive the real client IP from the incoming
+    // X-Forwarded-For (honouring TRUSTED_PROXY_HOPS), then STRIP every
+    // client-suppliable IP header — the raw forwarding headers AND any inbound
+    // copy of the internal header — before setting the internal header from the
+    // trusted value. The backend trusts ONLY the internal header, so a browser
+    // can neither spoof its IP nor preset the internal header.
+    const clientIp = trustedClientIp(request);
+    headers.delete(CLIENT_IP_HEADER);
+    headers.delete('x-forwarded-for');
+    headers.delete('x-real-ip');
+    headers.delete('forwarded');
+    if (clientIp) {
+      headers.set(CLIENT_IP_HEADER, clientIp);
+    }
+
     // Force an identity (uncompressed) response on the proxy->backend leg.
     // The browser's Accept-Encoding (br/zstd/gzip) is forwarded by the line
     // above, and Caddy will negotiate zstd — but Node's undici fetch only

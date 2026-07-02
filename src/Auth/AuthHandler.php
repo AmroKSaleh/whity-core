@@ -6,6 +6,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Core\Audit\AuditLogger;
 use Whity\Core\PasswordPolicy;
+use Whity\Core\RateLimit\ClientIp;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Http\JsonBody;
@@ -152,28 +153,16 @@ class AuthHandler
     /**
      * Best-effort client IP extraction from forwarding headers.
      *
-     * Prefers the first hop in `X-Forwarded-For`, then `X-Real-IP`. Returns null
-     * when neither is present (e.g. CLI). Never throws.
+     * Reads the trusted, proxy-set client-IP header via {@see ClientIp} — raw
+     * client-supplied `X-Forwarded-For` / `X-Real-IP` are NOT trusted (WC-b19ff21a).
+     * Returns null when absent (e.g. CLI / no trusted proxy). Never throws.
      *
      * @param Request $request The incoming request.
      * @return string|null The client IP, or null.
      */
     private function clientIp(Request $request): ?string
     {
-        $forwarded = $request->getHeader('X-Forwarded-For');
-        if (is_string($forwarded) && $forwarded !== '') {
-            $first = trim(explode(',', $forwarded)[0]);
-            if ($first !== '') {
-                return substr($first, 0, 45);
-            }
-        }
-
-        $realIp = $request->getHeader('X-Real-IP');
-        if (is_string($realIp) && $realIp !== '') {
-            return substr(trim($realIp), 0, 45);
-        }
-
-        return null;
+        return ClientIp::fromRequest($request);
     }
 
     /**

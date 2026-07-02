@@ -7,36 +7,51 @@ namespace Whity\Core\RateLimit;
 use Whity\Sdk\Http\Request;
 
 /**
- * Best-effort client-IP extraction from forwarding headers (WC-c0fb3700).
+ * Trusted client-IP extraction (WC-b19ff21a).
  *
- * Centralises the logic also used for audit (see EnforceTenantIsolation /
- * AuthHandler): prefer the first hop in `X-Forwarded-For`, then `X-Real-IP`.
- * Returns null when neither header carries a value. The result is capped at the
- * IPv6 textual maximum (45 chars) so it is safe as a bounded counter-key segment.
+ * The client IP is read ONLY from {@see self::HEADER}, an INTERNAL header set by
+ * the platform's single trusted front proxy (the Next.js API proxy). That proxy
+ * derives the real client IP from its own ingress, sets this header on the
+ * request it forwards to the backend, and STRIPS any client-supplied copy of it
+ * (along with raw `X-Forwarded-For` / `X-Real-IP`) so a browser can neither
+ * preset it nor smuggle a spoofed forwarding header through.
  *
- * NOTE: this trusts the reverse proxy to set the forwarding headers. The
- * deployment's Caddy/Next.js front door is the only thing that should be able to
- * reach FrankenPHP, so the first X-Forwarded-For hop is the real client.
+ * Consequently, raw `X-Forwarded-For` / `X-Real-IP` are deliberately NOT trusted
+ * here: before WC-b19ff21a they were, which let a caller spoof the rate-limit key
+ * and poison audit IPs (the Next.js proxy forwards arbitrary client headers
+ * verbatim). The result is capped at the IPv6 textual maximum (45 chars) so it is
+ * safe as a bounded counter-key segment / audit column value.
+ *
+ * TRUST ASSUMPTION: the backend (FrankenPHP) is reachable ONLY through the
+ * trusted proxy (network isolation) — an attacker with direct network access to
+ * the backend port could set this header themselves. That isolation is a
+ * deployment/network-policy guarantee, the same class as "the database is not
+ * internet-exposed". How the proxy itself derives the client IP (and how many
+ * upstream hops it trusts) is configured at the proxy via TRUSTED_PROXY_HOPS.
  */
 final class ClientIp
 {
+    /**
+     * Internal, proxy-set header carrying the trusted client IP.
+     *
+     * Set by the Next.js API proxy; stripped by it from inbound client requests.
+     */
+    public const HEADER = 'X-Whity-Client-Ip';
+
     private const MAX_LENGTH = 45;
 
     public static function fromRequest(Request $request): ?string
     {
-        $forwarded = $request->getHeader('X-Forwarded-For');
-        if (is_string($forwarded) && $forwarded !== '') {
-            $first = trim(explode(',', $forwarded)[0]);
-            if ($first !== '') {
-                return substr($first, 0, self::MAX_LENGTH);
-            }
+        $ip = $request->getHeader(self::HEADER);
+        if (!is_string($ip)) {
+            return null;
         }
 
-        $realIp = $request->getHeader('X-Real-IP');
-        if (is_string($realIp) && trim($realIp) !== '') {
-            return substr(trim($realIp), 0, self::MAX_LENGTH);
+        $ip = trim($ip);
+        if ($ip === '') {
+            return null;
         }
 
-        return null;
+        return substr($ip, 0, self::MAX_LENGTH);
     }
 }

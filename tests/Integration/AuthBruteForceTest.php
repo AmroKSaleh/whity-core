@@ -156,7 +156,7 @@ final class AuthBruteForceTest extends TestCase
         $request = new Request(
             'POST',
             '/api/login',
-            ['X-Forwarded-For' => $ip],
+            [\Whity\Core\RateLimit\ClientIp::HEADER => $ip],
             (string) json_encode(['email' => $email, 'password' => $password])
         );
 
@@ -170,7 +170,7 @@ final class AuthBruteForceTest extends TestCase
         $request = new Request(
             'POST',
             '/api/auth/refresh',
-            ['X-Forwarded-For' => $ip],
+            [\Whity\Core\RateLimit\ClientIp::HEADER => $ip],
             ''
         );
 

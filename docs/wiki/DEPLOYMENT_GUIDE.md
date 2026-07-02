@@ -131,3 +131,55 @@ VUS=10 DURATION=30s ADMIN_PASSWORD='<staging-admin-pw>' ./load-tests/run.sh
 
 See `load-tests/README.md` for full usage and `load-tests/BASELINE.md` for
 committed baseline numbers (throughput, p95 latency, error rate).
+
+## Client IP & trusted proxies (WC-b19ff21a)
+
+The backend derives the client IP (for per-IP rate limiting and audit logs) from
+a single **internal** header, `X-Whity-Client-Ip`, and **ignores** raw
+client-supplied `X-Forwarded-For` / `X-Real-IP`. Those forwarding headers are
+attacker-controllable (the Next.js API proxy forwards arbitrary client headers),
+so trusting them let a caller spoof the rate-limit key and poison audit IPs.
+
+**Trust model.** The Next.js API proxy is the platform's single trusted front
+door. On every proxied request it:
+
+1. derives the real client IP from the `X-Forwarded-For` it received (see
+   `TRUSTED_PROXY_HOPS` below), and
+2. strips any client-supplied `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, and
+   any inbound `X-Whity-Client-Ip`, then sets `X-Whity-Client-Ip` from the
+   derived value.
+
+The backend (`\Whity\Core\RateLimit\ClientIp`) reads only that internal header.
+This holds **only if the backend is reachable exclusively through the proxy** —
+an attacker with direct network access to the FrankenPHP port could set the
+header themselves. Enforce that isolation at the network layer (do not publish
+the backend port to the internet), the same way the database port is private.
+
+### `TRUSTED_PROXY_HOPS` (Next.js app env var)
+
+Set this on the **web (Next.js)** service to the number of trusted proxies
+between the public internet and the Next.js app, so it reads the correct hop from
+`X-Forwarded-For` (the client is the `hops`-th entry counting from the right —
+the rightmost entries are appended by trusted infrastructure and cannot be
+forged by the client):
+
+| Value | Topology |
+| ----- | -------- |
+| `0` (default) | Fail-safe: trust nothing from `X-Forwarded-For`. No client IP is propagated — per-IP rate limiting and audit IPs are absent. Use until you have confirmed the topology below. |
+| `1` | One reverse proxy / ingress / cloud LB in front of Next.js (the common case). |
+| `2` | Two trusted hops, e.g. CDN → LB → Next.js. |
+
+Set it too low and a client-claimed entry could be trusted (spoofable); too high
+and it resolves to null (no IP). Match it to your actual ingress. If Next.js is
+internet-facing with nothing in front, leave it at `0` — there is no upstream
+`X-Forwarded-For` to trust.
+
+> **Important — Next.js does not sanitize `X-Forwarded-For`.** Verified on the
+> real path: the Next.js server forwards a client-supplied `X-Forwarded-For`
+> through to the route handler *unchanged* (it only fills it in with the socket
+> peer when the client sent none). So `TRUSTED_PROXY_HOPS` counts **appending
+> proxies in front of Next.js**, NOT Next.js itself. A value `≥ 1` is safe only
+> when a real proxy/LB in front of Next.js appends the connecting peer to
+> `X-Forwarded-For` (nginx `proxy_add_x_forwarded_for`, AWS ALB, etc.) — that
+> appended rightmost hop is the one an attacker cannot forge. With no such proxy,
+> keep `0`; setting `1` there would trust the attacker's own header.
