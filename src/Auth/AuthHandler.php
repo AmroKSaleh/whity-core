@@ -151,6 +151,99 @@ class AuthHandler
     }
 
     /**
+     * Resolve the NEW identity claims {profile_id, active_tenant_id} for token
+     * issuance during the dual-claim window (WC-d4340daf, ADR 0005 §5).
+     *
+     * DUAL-CLAIM WINDOW & REMOVAL PLAN (identity flow, ADR 0005):
+     *  - NOW (WC-d4340daf): every minted access/refresh token carries the
+     *    legacy {user_id, tenant_id, email, role} claims PLUS — when the login
+     *    identity resolves to a migrated profile — the new
+     *    {profile_id, active_tenant_id} claims. Validators read the new claims
+     *    first and fall back to the legacy ones, so both token shapes coexist.
+     *  - NEXT (users→profiles data migration): backfills profiles /
+     *    profile_emails / memberships for every existing user, after which all
+     *    newly-minted tokens carry both claim sets.
+     *  - THEN (login/auth rewrite, ADR 0005 §6, task #103): login resolves the
+     *    profile FIRST (globally-unique email) and the legacy claims stop being
+     *    read anywhere server-side.
+     *  - FINALLY: after every pre-rewrite refresh token has expired (7-day
+     *    TTL) plus one release of soak, the legacy claims are dropped from
+     *    issuance and the fallback read paths (TokenValidator / TenantContext /
+     *    MCP principal derivation / web auth-context) are deleted.
+     *
+     * The new claims are added ONLY when the email maps to a profile
+     * (profile_emails, globally unique) AND that profile holds an ACTIVE
+     * membership in the token's tenant (or the tenant is the system tenant 0,
+     * which needs no membership by the id-0 convention). Otherwise the token
+     * stays legacy-only: baking new claims into a token whose membership the
+     * validator's gate would refuse (pre-migration users have no membership
+     * rows yet — the data migration is the NEXT task) would brick the session.
+     *
+     * @param string $email    The authenticated user's email.
+     * @param int    $tenantId The tenant the token is being minted for.
+     * @return array{}|array{profile_id: int, active_tenant_id: int}
+     */
+    private function identityClaims(string $email, int $tenantId): array
+    {
+        try {
+            // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); the email is globally unique by schema
+            $stmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
+            $stmt->execute([$email]);
+            $profileId = $stmt->fetchColumn();
+
+            if ($profileId === false) {
+                // Pre-migration user: no profile yet — mint legacy-only claims.
+                return [];
+            }
+
+            $profileId = (int) $profileId;
+
+            // System tenant (id 0) carries cross-tenant authority and needs no
+            // membership row; every other tenant requires an ACTIVE membership.
+            if ($tenantId !== 0) {
+                $membershipStmt = $this->db->prepare(
+                    "SELECT 1 FROM memberships
+                     WHERE profile_id = ? AND tenant_id = ? AND status = 'active'
+                     LIMIT 1"
+                );
+                $membershipStmt->execute([$profileId, $tenantId]);
+                if (!$membershipStmt->fetchColumn()) {
+                    return [];
+                }
+            }
+
+            return ['profile_id' => $profileId, 'active_tenant_id' => $tenantId];
+        } catch (\Exception) {
+            // Fail open to LEGACY-ONLY claims (never to new claims): a broken
+            // identity lookup must not block logins during the dual window.
+            return [];
+        }
+    }
+
+    /**
+     * Carry the new identity claims from an already-validated token's claims.
+     *
+     * Used on re-mint paths (refresh, self-service cookie re-issue) so the new
+     * claim pair survives re-minting without a fresh identity lookup. Returns
+     * the pair only when BOTH claims are present and integer-valued (partial
+     * sets are never issued and must not be propagated).
+     *
+     * @param array<string, mixed> $claims Validated source-token claims.
+     * @return array{}|array{profile_id: int, active_tenant_id: int}
+     */
+    private function carriedIdentityClaims(array $claims): array
+    {
+        $profileId = $claims['profile_id'] ?? null;
+        $activeTenantId = $claims['active_tenant_id'] ?? null;
+
+        if (is_int($profileId) && is_int($activeTenantId)) {
+            return ['profile_id' => $profileId, 'active_tenant_id' => $activeTenantId];
+        }
+
+        return [];
+    }
+
+    /**
      * Best-effort client IP extraction from forwarding headers.
      *
      * Reads the trusted, proxy-set client-IP header via {@see ClientIp} — raw
@@ -282,6 +375,11 @@ class AuthHandler
         // later epoch bump invalidates them (missing column ⇒ 0). (WC-185)
         $tokenEpoch = (int) ($user['token_epoch'] ?? 0);
 
+        // Dual-claim window (WC-d4340daf): add {profile_id, active_tenant_id}
+        // when the identity is migrated; see identityClaims() for the removal
+        // plan of the legacy claims.
+        $identityClaims = $this->identityClaims((string) $user['email'], (int) $user['tenant_id']);
+
         // Create access token (15 minutes)
         $accessToken = $this->jwtParser->create([
             'user_id' => $user['id'],
@@ -289,7 +387,7 @@ class AuthHandler
             'email' => $user['email'],
             'role' => $roleName,
             'token_epoch' => $tokenEpoch
-        ], 900, 'access'); // 15 minutes
+        ] + $identityClaims, 900, 'access'); // 15 minutes
 
         // Create refresh token (7 days)
         $refreshToken = $this->jwtParser->create([
@@ -298,7 +396,7 @@ class AuthHandler
             'email' => $user['email'],
             'role' => $roleName,
             'token_epoch' => $tokenEpoch
-        ], 604800, 'refresh'); // 7 days
+        ] + $identityClaims, 604800, 'refresh'); // 7 days
 
         // Set cookies
         CookieManager::setAccessToken($accessToken, 900);
@@ -506,7 +604,17 @@ class AuthHandler
         // the bump). The role is unchanged.
         $role = isset($claims['role']) ? (string) $claims['role'] : '';
         $currentEpoch = $this->currentTokenEpoch((int) $userId, (int) $tenantId);
-        $this->reissueAuthCookies((int) $userId, (int) $tenantId, $newEmail, $role, $currentEpoch);
+        // Dual-claim window (WC-d4340daf): carry the new identity claims from
+        // the validated token (the profile identity is unchanged by an email/
+        // password edit) so the re-issued cookies keep the same claim model.
+        $this->reissueAuthCookies(
+            (int) $userId,
+            (int) $tenantId,
+            $newEmail,
+            $role,
+            $currentEpoch,
+            $this->carriedIdentityClaims($claims)
+        );
 
         $this->logProfileUpdate((int) $tenantId, (int) $userId, $emailProvided, $passwordChanged);
 
@@ -556,17 +664,26 @@ class AuthHandler
      * @param string $role       The user's role name (unchanged by this endpoint).
      * @param int    $tokenEpoch The user's CURRENT token epoch, embedded so the
      *                           re-issued tokens survive a same-request epoch bump (WC-185).
+     * @param array{}|array{profile_id: int, active_tenant_id: int} $identityClaims
+     *                           New identity claims carried from the validated
+     *                           source token (WC-d4340daf dual-claim window).
      * @return void
      */
-    private function reissueAuthCookies(int $userId, int $tenantId, string $email, string $role, int $tokenEpoch): void
-    {
+    private function reissueAuthCookies(
+        int $userId,
+        int $tenantId,
+        string $email,
+        string $role,
+        int $tokenEpoch,
+        array $identityClaims = []
+    ): void {
         $accessToken = $this->jwtParser->create([
             'user_id' => $userId,
             'tenant_id' => $tenantId,
             'email' => $email,
             'role' => $role,
             'token_epoch' => $tokenEpoch,
-        ], 900, 'access');
+        ] + $identityClaims, 900, 'access');
 
         $refreshToken = $this->jwtParser->create([
             'user_id' => $userId,
@@ -574,7 +691,7 @@ class AuthHandler
             'email' => $email,
             'role' => $role,
             'token_epoch' => $tokenEpoch,
-        ], 604800, 'refresh');
+        ] + $identityClaims, 604800, 'refresh');
 
         CookieManager::setAccessToken($accessToken, 900);
         CookieManager::setRefreshToken($refreshToken, 604800);
@@ -721,6 +838,18 @@ class AuthHandler
         // that outlives the refresh token (WC-185).
         $tokenEpoch = $this->currentTokenEpoch((int) $claims['user_id'], (int) $claims['tenant_id']);
 
+        // Dual-claim re-mint (WC-d4340daf): the new access token carries the
+        // SAME claim model as the refresh token. New claims are carried over
+        // when present (the validated refresh token already passed the
+        // membership gate); a LEGACY refresh token is upgraded in place when
+        // the identity has been migrated since it was minted, so long-lived
+        // (7-day) refresh sessions converge on the new claim shape without a
+        // re-login. Epoch/revocation semantics are unchanged.
+        $identityClaims = $this->carriedIdentityClaims($claims);
+        if ($identityClaims === [] && isset($claims['email']) && is_string($claims['email'])) {
+            $identityClaims = $this->identityClaims($claims['email'], (int) $claims['tenant_id']);
+        }
+
         // Create new access token (15 minutes)
         $accessToken = $this->jwtParser->create([
             'user_id' => $claims['user_id'],
@@ -728,7 +857,7 @@ class AuthHandler
             'email' => $claims['email'],
             'role' => $claims['role'],
             'token_epoch' => $tokenEpoch
-        ], 900, 'access'); // 15 minutes
+        ] + $identityClaims, 900, 'access'); // 15 minutes
 
         // Set new access token cookie
         CookieManager::setAccessToken($accessToken, 900);
@@ -965,6 +1094,10 @@ class AuthHandler
         // tokens carry it, exactly like the single-factor login path (WC-185).
         $tokenEpoch = $this->currentTokenEpoch((int) $userId, (int) $tenantId);
 
+        // Dual-claim window (WC-d4340daf): resolve the new identity claims the
+        // same way the single-factor login path does (see identityClaims()).
+        $identityClaims = $this->identityClaims((string) $email, (int) $tenantId);
+
         // Create access token (15 minutes)
         $accessToken = $this->jwtParser->create([
             'user_id' => $userId,
@@ -972,7 +1105,7 @@ class AuthHandler
             'email' => $email,
             'role' => $roleName,
             'token_epoch' => $tokenEpoch
-        ], 900, 'access'); // 15 minutes
+        ] + $identityClaims, 900, 'access'); // 15 minutes
 
         // Create refresh token (7 days)
         $refreshToken = $this->jwtParser->create([
@@ -981,7 +1114,7 @@ class AuthHandler
             'email' => $email,
             'role' => $roleName,
             'token_epoch' => $tokenEpoch
-        ], 604800, 'refresh'); // 7 days
+        ] + $identityClaims, 604800, 'refresh'); // 7 days
 
         // Set cookies
         CookieManager::setAccessToken($accessToken, 900);
