@@ -65,7 +65,9 @@ final class RelationsSchema
      */
     public static function seedPerson(PDO $pdo, int $tenantId, string $displayName): int
     {
-        $pdo->prepare('INSERT INTO persons (tenant_id, display_name, user_id, deceased, created_at) VALUES (?, ?, NULL, 0, NOW())')
+        // `deceased` is BOOLEAN — use false so the literal is accepted by both
+        // PostgreSQL (strict boolean typing) and SQLite (stores as 0).
+        $pdo->prepare('INSERT INTO persons (tenant_id, display_name, user_id, deceased, created_at) VALUES (?, ?, NULL, false, NOW())')
             ->execute([$tenantId, $displayName]);
 
         return (int) $pdo->lastInsertId();

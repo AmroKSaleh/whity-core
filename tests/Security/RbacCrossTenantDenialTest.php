@@ -245,6 +245,15 @@ class RbacCrossTenantDenialTest extends TestCase
 
     private function makeSchema(): PDO
     {
-        return SchemaFromMigrations::make();
+        $pdo = SchemaFromMigrations::make();
+
+        // Seed the two test tenants so that users.tenant_id FK is satisfied on
+        // both SQLite (no FK enforcement by default) and PostgreSQL (FK enforced).
+        // Migration 010 seeds the system tenant (id=0); only the two test tenants
+        // need inserting here.  INSERT OR IGNORE is translated to ON CONFLICT DO
+        // NOTHING by the PG-path PDO wrapper in SchemaFromMigrations.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+
+        return $pdo;
     }
 }

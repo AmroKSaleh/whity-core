@@ -188,11 +188,15 @@ class DelegationsApiRbacTest extends TestCase
 
         // Someone ELSE delegates users:read directly TO the grantor, so the grantor
         // now "has" users:read ONLY via delegation — never through a role.
+        // Use a real user as the external delegator so that PostgreSQL's FK constraint
+        // on permission_delegations.grantor_user_id is satisfied (SQLite ignores FKs
+        // by default, but Postgres enforces them strictly).
+        $externalDelegatorId = $this->seedPlainUser('external-delegator@example.com');
         $this->pdo->prepare(
             'INSERT INTO permission_delegations
                 (tenant_id, grantor_user_id, grantee_type, grantee_id, permission, ou_id, granted_at)
              VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([self::TENANT, 99999, DelegationRepository::GRANTEE_USER, $grantorId, 'users:read']);
+        )->execute([self::TENANT, $externalDelegatorId, DelegationRepository::GRANTEE_USER, $grantorId, 'users:read']);
         RoleChecker::clearCache();
 
         // The grantor attempts to RE-DELEGATE users:read to the grantee. This drives

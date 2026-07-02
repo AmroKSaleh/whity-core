@@ -331,6 +331,12 @@ class RbacAuthEdgeCaseTest extends TestCase
 
     private function makeSchema(): PDO
     {
-        return SchemaFromMigrations::make();
+        $pdo = SchemaFromMigrations::make();
+
+        // Tenant 1 hosts every fixture; seed it so users.tenant_id FK is
+        // satisfied on PostgreSQL (SQLite does not enforce FKs by default).
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a')");
+
+        return $pdo;
     }
 }

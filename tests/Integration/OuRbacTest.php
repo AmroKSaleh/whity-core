@@ -261,6 +261,11 @@ class OuRbacTest extends TestCase
     {
         $pdo = SchemaFromMigrations::make();
 
+        // Tenant 1 hosts most fixtures; tenant 2 is used by the cross-tenant OU
+        // assignment leak test. Seed both so tenant FKs are satisfied on
+        // PostgreSQL (SQLite does not enforce FKs by default).
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+
         // admin(1) and user(2) come from migrations — INSERT OR IGNORE.
         $pdo->exec("INSERT OR IGNORE INTO roles (id, name, created_at) VALUES
             (1, 'admin', NOW()), (2, 'user', NOW())");

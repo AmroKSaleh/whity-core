@@ -145,13 +145,13 @@ final class TenantEmailDomainsSchemaMigrationRealEngineTest extends TestCase
         $this->seedFixtures();
         $this->pdo->exec(
             "INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
-             VALUES (1, 'acme.com', 1, 1, datetime('now'))"
+             VALUES (1, 'acme.com', 1, true, datetime('now'))"
         );
 
         $this->expectException(\PDOException::class);
         $this->pdo->exec(
             "INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
-             VALUES (1, 'acme.com', 1, 1, datetime('now'))"
+             VALUES (1, 'acme.com', 1, true, datetime('now'))"
         );
     }
 
@@ -160,7 +160,7 @@ final class TenantEmailDomainsSchemaMigrationRealEngineTest extends TestCase
         $this->seedFixtures();
         $this->pdo->exec(
             "INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
-             VALUES (1, 'acme.com', 1, 1, datetime('now'))"
+             VALUES (1, 'acme.com', 1, true, datetime('now'))"
         );
 
         $stmt = $this->pdo->query(
@@ -178,13 +178,13 @@ final class TenantEmailDomainsSchemaMigrationRealEngineTest extends TestCase
         $this->seedFixtures();
         $this->pdo->exec(
             "INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
-             VALUES (1, 'shared.com', 1, 1, datetime('now'))"
+             VALUES (1, 'shared.com', 1, true, datetime('now'))"
         );
 
         // Same domain, different tenant — must not violate UNIQUE(tenant_id, domain).
         $this->pdo->exec(
             "INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
-             VALUES (2, 'shared.com', 1, 1, datetime('now'))"
+             VALUES (2, 'shared.com', 1, true, datetime('now'))"
         );
 
         $stmt = $this->pdo->query("SELECT COUNT(*) FROM tenant_email_domains WHERE domain = 'shared.com'");

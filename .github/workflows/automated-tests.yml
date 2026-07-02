@@ -77,13 +77,19 @@ jobs:
         run: php scripts/ci-plugin-tenant-conformance.php
 
   postgres-integration:
-    name: Migrations + seed on real PostgreSQL
+    name: Migrations + Integration + Security on real PostgreSQL
     runs-on: ubuntu-latest
 
-    # A real PostgreSQL service so migrations/seed run against the actual engine.
-    # This catches Postgres-specific bugs the SQLite test suite cannot — e.g. use
-    # of a reserved keyword as an identifier (WC-65: `symmetric`), which only
-    # fails on PostgreSQL.
+    # A real PostgreSQL service so migrations/seed and the PHPUnit Integration
+    # and Security suites run against the actual engine.  This catches
+    # Postgres-specific bugs the SQLite test suite cannot — e.g. reserved-word
+    # identifiers (WC-65: `symmetric`), rowCount() after SELECT, type coercion
+    # differences — which only surface on a real PG engine.
+    #
+    # SchemaFromMigrations::make() detects PHPUNIT_PG_DSN and creates a fresh
+    # per-test Postgres schema (namespace), runs the production migrations inside
+    # it, and drops the schema at process exit, so the main whity_core database
+    # is left intact after the suite.
     services:
       postgres:
         image: postgres:15-alpine
@@ -141,6 +147,29 @@ jobs:
 
       - name: Re-run migrations (idempotency on PostgreSQL)
         run: php public/index.php migrate run
+
+      # Run the Integration and Security PHPUnit suites against the live
+      # PostgreSQL service.  SchemaFromMigrations::make() detects PHPUNIT_PG_DSN
+      # and provisions a fresh, per-test-class Postgres schema for full isolation.
+      # JWT_SECRET and ENCRYPTION_KEY must match the .env written above so that
+      # any test that bootstraps the app via public/index.php sees the same values.
+      - name: Run Integration suite on real PostgreSQL
+        env:
+          PHPUNIT_PG_DSN: "pgsql:host=localhost;port=5432;dbname=whity_core"
+          PHPUNIT_PG_USER: whity
+          PHPUNIT_PG_PASSWORD: whity_dev
+          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
+        run: vendor/bin/phpunit --testsuite Integration
+
+      - name: Run Security suite on real PostgreSQL
+        env:
+          PHPUNIT_PG_DSN: "pgsql:host=localhost;port=5432;dbname=whity_core"
+          PHPUNIT_PG_USER: whity
+          PHPUNIT_PG_PASSWORD: whity_dev
+          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
+        run: vendor/bin/phpunit --testsuite Security
 
   web:
     name: Frontend types, tests & generated-artifact drift
