@@ -24,8 +24,11 @@
     // Run only the mutation-scope testsuite defined in phpunit.xml, which
     // covers Auth / Tenant / Delegation unit + real-engine tests without
     // requiring a live PostgreSQL service (Integration / Security are excluded).
+    // NOTE: no initialTestsPhpOptions here — pcov is already loaded by
+    // setup-php in CI (coverage: pcov) and by docker-php-ext-enable locally;
+    // forcing `-d extension=pcov.so` double-loads the module and kills the
+    // initial test run on runners where it is preloaded.
     "testFrameworkOptions": "--testsuite=mutation-scope",
-    "initialTestsPhpOptions": "-d extension=pcov.so",
     "logs": {
         "text": "infection-log.txt",
         "summary": "infection-summary.txt"
