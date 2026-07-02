@@ -237,6 +237,10 @@ jobs:
       # threads=max uses all available vCPUs on the runner (GitHub-hosted runners
       # provide 4 vCPUs), keeping the mutation run well under 10 minutes.
       - name: Run Infection mutation testing
+        env:
+          INITIAL_SYSTEM_ADMIN_PASSWORD: ci_initial_admin_password_min_32_chars_cc
+          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
         run: vendor/bin/infection --no-interaction --no-progress --threads=max
 
       - name: Upload Infection log
