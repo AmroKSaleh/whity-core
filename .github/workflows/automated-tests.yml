@@ -198,6 +198,57 @@ jobs:
           ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
         run: vendor/bin/phpunit --testsuite Security
 
+  mutation-testing:
+    # Mutation testing (WC-a29727a5): runs Infection against the Auth / Tenant /
+    # Delegation critical paths only.  The scoped `mutation-scope` PHPUnit suite
+    # (defined in phpunit.xml) covers unit + SQLite real-engine tests and does NOT
+    # require a live PostgreSQL service, keeping this job fast and self-contained.
+    #
+    # Thresholds (derived from baseline run 2026-07-02):
+    #   --min-msi=35           (measured 36%, 1-point safety margin)
+    #   --min-covered-msi=78   (measured 81%, 3-point safety margin)
+    name: Infection mutation testing (Auth/Tenant/Delegation)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite
+          coverage: pcov
+
+      # Distinct cache key prefix so this job never shares a stale vendor/
+      # directory with the main `test` job (different composer.lock hash would
+      # still be caught, but an explicit prefix makes cache provenance obvious).
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-mutation-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-mutation-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # threads=max uses all available vCPUs on the runner (GitHub-hosted runners
+      # provide 4 vCPUs), keeping the mutation run well under 10 minutes.
+      - name: Run Infection mutation testing
+        run: vendor/bin/infection --no-interaction --no-progress --threads=max
+
+      - name: Upload Infection log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infection-log
+          path: |
+            infection-log.txt
+            infection-summary.txt
+          retention-days: 14
+
   web:
     name: Frontend types, tests & generated-artifact drift
     runs-on: ubuntu-latest

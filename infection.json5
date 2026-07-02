@@ -1,0 +1,45 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    // Scoped to Auth / Tenant / Delegation critical paths only.
+    // AuthHandler.php is excluded from mutation source because it contains
+    // DatabaseQueryWrapper (a private helper class) in the same file; Infection's
+    // class-reflection cannot resolve multi-class files as standalone compilation
+    // units.  AuthHandler logic is exercised by the real-engine test suite but
+    // that suite requires a live database and is excluded from the mutation scope.
+    "source": {
+        "directories": [
+            "src/Auth",
+            "src/Core/Tenant",
+            "src/Core/Delegation"
+        ],
+        "excludes": [
+            "Auth/AuthHandler.php"
+        ]
+    },
+    "phpUnit": {
+        "configDir": ".",
+        "customPath": "vendor/bin/phpunit"
+    },
+    "testFramework": "phpunit",
+    // Run only the mutation-scope testsuite defined in phpunit.xml, which
+    // covers Auth / Tenant / Delegation unit + real-engine tests without
+    // requiring a live PostgreSQL service (Integration / Security are excluded).
+    "testFrameworkOptions": "--testsuite=mutation-scope",
+    "initialTestsPhpOptions": "-d extension=pcov.so",
+    "logs": {
+        "text": "infection-log.txt",
+        "summary": "infection-summary.txt"
+    },
+    "mutators": {
+        "@default": true
+    },
+    // Thresholds derived from a measured baseline run (2026-07-02):
+    //   MSI             = 36%  →  floor set at 35  (1-point margin below measured)
+    //   Covered-code MSI = 81% →  floor set at 78  (3-point margin below measured)
+    // The low overall MSI reflects that many Delegation / TenantPredicateGuard
+    // paths are only exercised by the PostgreSQL integration suite (excluded from
+    // this scope for speed); the covered-code gate of 78% is the meaningful
+    // signal and shows the scoped unit tests are high-quality detectors.
+    "minMsi": 35,
+    "minCoveredMsi": 78
+}

@@ -20,6 +20,15 @@
         <testsuite name="Security">
             <directory>tests/Security</directory>
         </testsuite>
+        <!-- Scoped suite for Infection mutation testing: Auth / Tenant / Delegation unit tests only.
+             Excludes Integration and Security suites (require live PostgreSQL) so that
+             Infection's randomised runner stays self-contained and fast. -->
+        <testsuite name="mutation-scope">
+            <directory>tests/Auth</directory>
+            <directory>tests/Unit/Auth</directory>
+            <directory>tests/Unit/Core/Tenant</directory>
+            <directory>tests/Core/Delegation</directory>
+        </testsuite>
     </testsuites>
 
     <source>
