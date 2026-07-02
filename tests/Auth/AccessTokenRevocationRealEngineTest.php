@@ -363,13 +363,51 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
         return (bool) $stmt->fetchColumn();
     }
 
+    /**
+     * Seed a login-capable user in the post-migration (035) shape: the legacy
+     * `users` row PLUS the full profile model that the rewritten login flow
+     * authenticates through — a profile, a verified PRIMARY profile_email, and an
+     * ACTIVE membership binding the profile to the tenant. After the users→profiles
+     * data migration, every login-capable account has this trio; seeding only a
+     * `users` row is an invalid state that the new login (profile_emails → profile
+     * → membership) correctly refuses. The profile is created with id == user id so
+     * the token_epoch stored on the profile mirrors the users row 1:1.
+     *
+     * The `users` row is still seeded (and still carries the tenant-scoped
+     * token_epoch) because the epoch/revocation/logout assertions in this class
+     * read it directly via the dual-claim (legacy) token path.
+     */
     private function seedUser(int $id, int $tenantId, string $email, string $plainPassword, int $roleId, int $epoch): void
     {
+        $passwordHash = password_hash($plainPassword, PASSWORD_BCRYPT);
+
         $stmt = $this->pdo->prepare(
             "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
              VALUES (?, ?, ?, ?, ?, datetime('now'), ?)"
         );
-        $stmt->execute([$id, $tenantId, $email, password_hash($plainPassword, PASSWORD_BCRYPT), $roleId, $epoch]);
+        $stmt->execute([$id, $tenantId, $email, $passwordHash, $roleId, $epoch]);
+
+        // Profile (global identity) — id aligned with the users row for clarity.
+        $profStmt = $this->pdo->prepare(
+            "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, ?, false, 0, ?, datetime('now'), datetime('now'))"
+        );
+        $profStmt->execute([$id, $email, $passwordHash, $epoch]);
+
+        // Verified PRIMARY email — the globally-unique lookup key the login uses.
+        $emailStmt = $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        );
+        $emailStmt->execute([$id, $email]);
+
+        // ACTIVE membership binding the profile to the tenant + role.
+        $memStmt = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        );
+        $memStmt->execute([$id, $tenantId, $roleId]);
     }
 
     /**
