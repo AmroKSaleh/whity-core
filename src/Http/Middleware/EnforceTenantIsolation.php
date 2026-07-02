@@ -193,15 +193,6 @@ class EnforceTenantIsolation
         $payload = $token === null ? null : $this->jwtParser->parse($token);
         $request->setAttribute(Request::ATTR_JWT_CLAIMS, $payload);
 
-        // Delegate token -> tenant extraction and validation to the context. Any
-        // failure (missing/invalid token, missing/invalid tenant claim) collapses
-        // to a generic 401 so internals are never leaked to the client.
-        try {
-            $tenantId = TenantContext::resolve($request, $this->jwtParser);
-        } catch (TenantResolutionException) {
-            return Response::error('Authentication required', 401);
-        }
-
         // Dual-claim membership gate (WC-d4340daf, ADR 0005 §5): when the token
         // carries the new {profile_id, active_tenant_id} claims, the declared
         // active tenant must be backed by a live 'active' membership (or the
@@ -212,15 +203,20 @@ class EnforceTenantIsolation
         // other invalid token. Responses stay generic — the typed detail is
         // logged, never leaked. Legacy tokens (no new claims) skip the gate:
         // pre-migration users have no membership rows yet.
+        //
+        // ORDERING: the gate runs BEFORE TenantContext::resolve() so a refused
+        // tenant is never locked into the request-scoped context — nothing
+        // (audit hooks, observers) can ever read an unapproved tenant id.
         if ($this->membershipGuard !== null && $payload !== null) {
             try {
                 $this->membershipGuard->assert($payload);
             } catch (\Whity\Auth\Exception\InvalidMembershipException $e) {
+                $claimedTenant = $payload['active_tenant_id'] ?? $payload['tenant_id'] ?? null;
                 $this->logger->warning('Tenant isolation: active tenant membership refused', [
                     'event' => 'tenant_isolation.membership_denied',
                     'http_status' => $e->httpStatus,
                     'reason' => $e->getMessage(),
-                    'tenant_id' => $tenantId,
+                    'tenant_id' => is_numeric($claimedTenant) ? (int) $claimedTenant : null,
                     'user_id' => $this->userIdFromPayload($payload),
                     'path' => $path,
                 ]);
@@ -229,6 +225,15 @@ class EnforceTenantIsolation
                     ? Response::error('Authentication required', 401)
                     : Response::error('Access to the requested tenant is forbidden', 403);
             }
+        }
+
+        // Delegate token -> tenant extraction and validation to the context. Any
+        // failure (missing/invalid token, missing/invalid tenant claim) collapses
+        // to a generic 401 so internals are never leaked to the client.
+        try {
+            $tenantId = TenantContext::resolve($request, $this->jwtParser);
+        } catch (TenantResolutionException) {
+            return Response::error('Authentication required', 401);
         }
 
         // Expose the decoded payload to downstream handlers via Request::$user,
@@ -354,12 +359,23 @@ class EnforceTenantIsolation
      * Extract the acting user id from a decoded JWT payload, if present.
      *
      * @param array<string, mixed>|null $payload The decoded JWT payload.
-     * @return int|null The integer user_id claim, or null when absent/non-int.
+     * @return int|null The integer user_id claim (profile_id for post-cutover
+     *                  tokens that carry no legacy user_id), or null when absent.
      */
     private function userIdFromPayload(?array $payload): ?int
     {
-        if ($payload !== null && isset($payload['user_id']) && is_int($payload['user_id'])) {
+        if ($payload === null) {
+            return null;
+        }
+
+        if (isset($payload['user_id']) && is_int($payload['user_id'])) {
             return $payload['user_id'];
+        }
+
+        // Post-cutover tokens (WC-d4340daf) identify the actor by profile_id
+        // only — fall back so audit records never lose the acting identity.
+        if (isset($payload['profile_id']) && is_int($payload['profile_id'])) {
+            return $payload['profile_id'];
         }
 
         return null;

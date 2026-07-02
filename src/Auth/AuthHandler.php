@@ -724,6 +724,38 @@ class AuthHandler
     }
 
     /**
+     * Read a profile's CURRENT token epoch (WC-d4340daf).
+     *
+     * Epoch source for post-cutover tokens that carry {profile_id,
+     * active_tenant_id} but no legacy user_id/tenant_id. `profiles` is a
+     * global identity table (ADR 0005 §1) — no tenant predicate applies.
+     * Returns 0 when the row or the column cannot be read, matching the
+     * validator's missing-claim=0 convention.
+     *
+     * @param int $profileId The profile id (0 when the claim was absent).
+     * @return int The stored token epoch (0 when unavailable).
+     */
+    private function currentProfileTokenEpoch(int $profileId): int
+    {
+        if ($profileId <= 0) {
+            return 0;
+        }
+
+        try {
+            // @tenant-guard-ignore: profiles is a global identity table (ADR 0005 §1), not tenant-owned.
+            $stmt = $this->db->prepare(
+                'SELECT token_epoch FROM profiles WHERE id = ? LIMIT 1'
+            );
+            $stmt->execute([$profileId]);
+            $epoch = $stmt->fetchColumn();
+
+            return $epoch === false ? 0 : (int) $epoch;
+        } catch (\Exception) {
+            return 0;
+        }
+    }
+
+    /**
      * Revoke the caller's CURRENT access and refresh jtis (WC-185).
      *
      * Reads both auth cookies, parses each, and records its jti in the global
@@ -831,12 +863,27 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
-        // Re-read the user's CURRENT epoch (tenant-scoped) rather than copying the
-        // refresh token's claim: if the epoch was bumped after this refresh token
-        // was minted, validateRefreshToken() would already have rejected it — but
-        // re-reading guarantees the new access token never carries a stale epoch
-        // that outlives the refresh token (WC-185).
-        $tokenEpoch = $this->currentTokenEpoch((int) $claims['user_id'], (int) $claims['tenant_id']);
+        // Re-read the CURRENT epoch rather than copying the refresh token's
+        // claim: if the epoch was bumped after this refresh token was minted,
+        // validateRefreshToken() would already have rejected it — but re-reading
+        // guarantees the new access token never carries a stale epoch that
+        // outlives the refresh token (WC-185).
+        //
+        // Epoch source depends on the claim shape (WC-d4340daf): tokens with
+        // legacy ids read users.token_epoch (tenant-scoped); post-cutover tokens
+        // (profile_id only, no user_id) read profiles.token_epoch — falling back
+        // to the users lookup with ids coerced from missing claims would resolve
+        // user 0/tenant 0 and silently mint epoch 0, breaking password-change
+        // revocation for those tokens.
+        $hasLegacyIds = isset($claims['user_id'], $claims['tenant_id'])
+            && is_numeric($claims['user_id']) && is_numeric($claims['tenant_id']);
+        $tokenEpoch = $hasLegacyIds
+            ? $this->currentTokenEpoch((int) $claims['user_id'], (int) $claims['tenant_id'])
+            : $this->currentProfileTokenEpoch(
+                isset($claims['profile_id']) && is_numeric($claims['profile_id'])
+                    ? (int) $claims['profile_id']
+                    : 0
+            );
 
         // Dual-claim re-mint (WC-d4340daf): the new access token carries the
         // SAME claim model as the refresh token. New claims are carried over
@@ -846,18 +893,23 @@ class AuthHandler
         // (7-day) refresh sessions converge on the new claim shape without a
         // re-login. Epoch/revocation semantics are unchanged.
         $identityClaims = $this->carriedIdentityClaims($claims);
-        if ($identityClaims === [] && isset($claims['email']) && is_string($claims['email'])) {
+        if (
+            $identityClaims === [] && $hasLegacyIds
+            && isset($claims['email']) && is_string($claims['email'])
+        ) {
             $identityClaims = $this->identityClaims($claims['email'], (int) $claims['tenant_id']);
         }
 
-        // Create new access token (15 minutes)
-        $accessToken = $this->jwtParser->create([
-            'user_id' => $claims['user_id'],
-            'tenant_id' => $claims['tenant_id'],
-            'email' => $claims['email'],
-            'role' => $claims['role'],
-            'token_epoch' => $tokenEpoch
-        ] + $identityClaims, 900, 'access'); // 15 minutes
+        // Create new access token (15 minutes). Legacy claims are carried only
+        // when the refresh token had them — a post-cutover token must never be
+        // re-minted with null/zero legacy ids (WC-d4340daf).
+        $baseClaims = ['token_epoch' => $tokenEpoch];
+        foreach (['user_id', 'tenant_id', 'email', 'role'] as $carried) {
+            if (array_key_exists($carried, $claims)) {
+                $baseClaims[$carried] = $claims[$carried];
+            }
+        }
+        $accessToken = $this->jwtParser->create($baseClaims + $identityClaims, 900, 'access'); // 15 minutes
 
         // Set new access token cookie
         CookieManager::setAccessToken($accessToken, 900);
