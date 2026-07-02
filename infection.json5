@@ -1,0 +1,55 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    // Scoped to Auth / Tenant / Delegation critical paths only.
+    // AuthHandler.php is excluded from mutation source because it contains
+    // DatabaseQueryWrapper (a private helper class) in the same file; Infection's
+    // class-reflection cannot resolve multi-class files as standalone compilation
+    // units.  AuthHandler logic is exercised by the real-engine test suite but
+    // that suite requires a live database and is excluded from the mutation scope.
+    "source": {
+        "directories": [
+            "src/Auth",
+            "src/Core/Tenant",
+            "src/Core/Delegation"
+        ],
+        "excludes": [
+            "Auth/AuthHandler.php"
+        ]
+    },
+    "phpUnit": {
+        "configDir": ".",
+        "customPath": "vendor/bin/phpunit"
+    },
+    "testFramework": "phpunit",
+    // Run only the mutation-scope testsuite defined in phpunit.xml, which
+    // covers Auth / Tenant / Delegation unit + real-engine tests without
+    // requiring a live PostgreSQL service (Integration / Security are excluded).
+    // NOTE: no initialTestsPhpOptions here — pcov is already loaded by
+    // setup-php in CI (coverage: pcov) and by docker-php-ext-enable locally;
+    // forcing `-d extension=pcov.so` double-loads the module and kills the
+    // initial test run on runners where it is preloaded.
+    "testFrameworkOptions": "--testsuite=mutation-scope",
+    "logs": {
+        "text": "infection-log.txt",
+        "summary": "infection-summary.txt"
+    },
+    "mutators": {
+        "@default": true
+    },
+    // Thresholds anchored to the CI baseline run (2026-07-02, GitHub-hosted
+    // runner, run 28571257171): MSI = 31%, Covered-code MSI = 74%.
+    //   minMsi        = 28  (3-point margin below CI-measured 31)
+    //   minCoveredMsi = 70  (4-point margin below CI-measured 74)
+    // CI is the enforcement environment, so floors are derived from CI numbers,
+    // not local ones: mutants killed only by TIMEOUT on a slow local machine
+    // (42 in the local baseline) survive on faster CI hardware, which measured
+    // ~5 points below the local run (local: MSI 36 / covered 81). The margins
+    // absorb residual timeout flakiness between CI runs.
+    // The low overall MSI reflects that many Delegation / TenantPredicateGuard
+    // paths are only exercised by the PostgreSQL integration suite (excluded
+    // from this scope for speed); the covered-code gate is the meaningful
+    // signal for detector quality. To raise a floor: take the current CI run's
+    // metric and subtract the same margins.
+    "minMsi": 28,
+    "minCoveredMsi": 70
+}
