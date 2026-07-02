@@ -323,6 +323,126 @@ class TenantContextTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
+    // Dual-claim window (WC-d4340daf): active_tenant_id preferred over tenant_id
+    // ---------------------------------------------------------------------
+
+    /**
+     * A new-claims token resolves the tenant from active_tenant_id, even when a
+     * legacy tenant_id claim is also present (dual-claim token). The new claim
+     * is authoritative — it is the one the tenant switcher will re-mint.
+     */
+    public function testResolvePrefersActiveTenantIdOverLegacyTenantId(): void
+    {
+        $parser = $this->createMock(JwtParser::class);
+        $parser->method('parse')->willReturn([
+            'profile_id' => 77,
+            'active_tenant_id' => 9,
+            'user_id' => 1,
+            'tenant_id' => 3,
+            'jti' => 'abc',
+            'type' => 'access',
+        ]);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer x.y.z',
+        ]);
+
+        $resolved = TenantContext::resolve($request, $parser);
+
+        $this->assertSame(9, $resolved);
+        $this->assertSame(9, TenantContext::getTenantId());
+    }
+
+    /**
+     * A legacy token (no active_tenant_id) must keep resolving from tenant_id
+     * exactly as before — the dual-window fallback path.
+     */
+    public function testResolveFallsBackToLegacyTenantIdWhenNoActiveTenantId(): void
+    {
+        $parser = $this->createMock(JwtParser::class);
+        $parser->method('parse')->willReturn([
+            'user_id' => 1,
+            'tenant_id' => 3,
+            'jti' => 'abc',
+            'type' => 'access',
+        ]);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer x.y.z',
+        ]);
+
+        $this->assertSame(3, TenantContext::resolve($request, $parser));
+    }
+
+    /**
+     * A numeric-string active_tenant_id is coerced to int, mirroring the
+     * legacy tenant_id coercion behaviour ("0" = system tenant).
+     */
+    public function testResolveCoercesStringActiveTenantIdToInt(): void
+    {
+        $parser = $this->createMock(JwtParser::class);
+        $parser->method('parse')->willReturn([
+            'profile_id' => 4,
+            'active_tenant_id' => '0',
+            'jti' => 'abc',
+            'type' => 'access',
+        ]);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer x.y.z',
+        ]);
+
+        $this->assertSame(0, TenantContext::resolve($request, $parser));
+        $this->assertSame(0, TenantContext::getTenantId());
+    }
+
+    /**
+     * A non-numeric active_tenant_id must throw (typed), never be coerced to 0
+     * (which would silently grant system-tenant authority) and never fall back
+     * to the legacy tenant_id claim (an attacker could then downgrade-pick).
+     */
+    public function testResolveThrowsWhenActiveTenantIdNotNumeric(): void
+    {
+        $parser = $this->createMock(JwtParser::class);
+        $parser->method('parse')->willReturn([
+            'profile_id' => 4,
+            'active_tenant_id' => 'not-a-number',
+            'tenant_id' => 3,
+            'jti' => 'abc',
+            'type' => 'access',
+        ]);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer x.y.z',
+        ]);
+
+        $this->expectException(TenantResolutionException::class);
+
+        TenantContext::resolve($request, $parser);
+    }
+
+    /**
+     * A new-claims-only token (post-cutover shape, no legacy tenant_id at all)
+     * must resolve from active_tenant_id alone.
+     */
+    public function testResolveWorksWithNewClaimsOnlyToken(): void
+    {
+        $parser = $this->createMock(JwtParser::class);
+        $parser->method('parse')->willReturn([
+            'profile_id' => 4,
+            'active_tenant_id' => 12,
+            'jti' => 'abc',
+            'type' => 'access',
+        ]);
+
+        $request = new Request('GET', '/api/resource', [
+            'Authorization' => 'Bearer x.y.z',
+        ]);
+
+        $this->assertSame(12, TenantContext::resolve($request, $parser));
+    }
+
+    // ---------------------------------------------------------------------
     // System mode bypass + audit logging (AC #3)
     // ---------------------------------------------------------------------
 

@@ -30,6 +30,14 @@ interface JWTPayload {
   exp?: number;
   id?: number;
   user_id?: number;
+  tenant_id?: number;
+  /**
+   * New identity claims (WC-d4340daf, ADR 0005 §5). Preferred over the legacy
+   * user_id / tenant_id pair when present; the legacy claims remain readable
+   * during the dual-claim compatibility window.
+   */
+  profile_id?: number;
+  active_tenant_id?: number;
   email?: string;
   role?: string;
   [key: string]: unknown;
@@ -128,8 +136,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(data.user);
       } else if (typeof data.token === 'string') {
         const payload = decodeJWT(data.token);
-        const userId = payload?.id || payload?.user_id;
-        const tenantId = typeof payload?.tenant_id === 'number' ? payload.tenant_id : 0;
+        // Dual-claim window (WC-d4340daf): prefer the new {profile_id,
+        // active_tenant_id} claims, falling back to the legacy id/user_id and
+        // tenant_id claims for tokens minted before the claim-model change.
+        const userId = payload?.profile_id ?? payload?.id ?? payload?.user_id;
+        const tenantId =
+          typeof payload?.active_tenant_id === 'number'
+            ? payload.active_tenant_id
+            : typeof payload?.tenant_id === 'number'
+              ? payload.tenant_id
+              : 0;
         if (payload && userId && payload.email) {
           setUser({
             id: userId,

@@ -1261,22 +1261,22 @@ parameters:
 			path: tests/Unit/Core/Deployment/DeploymentManagerTest.php
 
 		-
-			message: "#^Method class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:350\\:\\:log\\(\\) has parameter \\$message with no type specified\\.$#"
+			message: "#^Method class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:470\\:\\:log\\(\\) has parameter \\$message with no type specified\\.$#"
 			count: 1
 			path: tests/Unit/Core/Tenant/TenantContextTest.php
 
 		-
-			message: "#^Method class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:384\\:\\:log\\(\\) has parameter \\$message with no type specified\\.$#"
+			message: "#^Method class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:504\\:\\:log\\(\\) has parameter \\$message with no type specified\\.$#"
 			count: 1
 			path: tests/Unit/Core/Tenant/TenantContextTest.php
 
 		-
-			message: "#^Property class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:350\\:\\:\\$records is never read, only written\\.$#"
+			message: "#^Property class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:470\\:\\:\\$records is never read, only written\\.$#"
 			count: 1
 			path: tests/Unit/Core/Tenant/TenantContextTest.php
 
 		-
-			message: "#^Property class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:384\\:\\:\\$records is never read, only written\\.$#"
+			message: "#^Property class@anonymous/tests/Unit/Core/Tenant/TenantContextTest\\.php\\:504\\:\\:\\$records is never read, only written\\.$#"
 			count: 1
 			path: tests/Unit/Core/Tenant/TenantContextTest.php
 

@@ -144,15 +144,35 @@ class TenantContext
     }
 
     /**
-     * Validate the tenant_id claim of a decoded payload and lock it in.
+     * Validate the tenant claim of a decoded payload and lock it in.
+     *
+     * Dual-claim window (WC-d4340daf, ADR 0005 §5): the new `active_tenant_id`
+     * claim is AUTHORITATIVE when present — it is the claim the tenant switcher
+     * re-mints and the one gated against `memberships`. A token without it (a
+     * legacy pre-migration token) falls back to the legacy `tenant_id` claim,
+     * preserving today's behaviour exactly. An invalid `active_tenant_id` is a
+     * typed failure and never falls back to `tenant_id` (a malformed new claim
+     * must not let the caller downgrade-pick its tenant).
      *
      * @param array<string, mixed> $payload The decoded JWT claims.
      * @return int The resolved tenant id (0 = system tenant).
-     * @throws TenantResolutionException If the tenant_id claim is missing/invalid.
+     * @throws TenantResolutionException If the tenant claim is missing/invalid.
      * @throws \RuntimeException If the context is already locked.
      */
     private static function lockTenantFromPayload(array $payload): int
     {
+        if (array_key_exists('active_tenant_id', $payload)) {
+            $claim = $payload['active_tenant_id'];
+            if (!is_int($claim) && !(is_string($claim) && ctype_digit($claim))) {
+                throw TenantResolutionException::invalidTenantClaim('active_tenant_id claim is not a valid integer');
+            }
+
+            $tenantId = (int) $claim;
+            self::setTenantId($tenantId);
+
+            return $tenantId;
+        }
+
         if (!array_key_exists('tenant_id', $payload)) {
             throw TenantResolutionException::invalidTenantClaim('missing tenant_id claim');
         }

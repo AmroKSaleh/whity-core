@@ -368,6 +368,102 @@ describe('AuthContext', () => {
     expect(screen.getByTestId('authenticated')).toHaveTextContent('Not authenticated');
   });
 
+  // ── WC-d4340daf: dual-claim JWT decode (token-fallback login path) ──────────
+
+  /** Build an unsigned JWT-shaped string with the given payload claims. */
+  function fakeJwt(payload: Record<string, unknown>): string {
+    const encode = (obj: Record<string, unknown>) =>
+      Buffer.from(JSON.stringify(obj)).toString('base64');
+    return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(payload)}.signature`;
+  }
+
+  function UserDetails() {
+    const auth = useAuth();
+    return (
+      <div>
+        <div data-testid="user-id">{auth.user ? String(auth.user.id) : 'none'}</div>
+        <div data-testid="tenant-id">{auth.user ? String(auth.user.tenant_id) : 'none'}</div>
+        <button onClick={() => auth.login('test@example.com', 'password')}>Login</button>
+      </div>
+    );
+  }
+
+  async function loginWithTokenOnly(token: string) {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+    });
+
+    render(
+      <AuthProvider>
+        <UserDetails />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user-id')).toHaveTextContent('none');
+    });
+
+    // Login response carries only a token (no user object) so the decode
+    // fallback populates the profile state.
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ token }),
+    });
+
+    screen.getByText('Login').click();
+  }
+
+  test('testTokenDecodePrefersNewClaims', async () => {
+    await loginWithTokenOnly(
+      fakeJwt({
+        profile_id: 42,
+        active_tenant_id: 7,
+        user_id: 5,
+        tenant_id: 3,
+        email: 'test@example.com',
+        role: 'admin',
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user-id')).toHaveTextContent('42');
+      expect(screen.getByTestId('tenant-id')).toHaveTextContent('7');
+    });
+  });
+
+  test('testTokenDecodeFallsBackToLegacyClaims', async () => {
+    await loginWithTokenOnly(
+      fakeJwt({
+        user_id: 5,
+        tenant_id: 3,
+        email: 'test@example.com',
+        role: 'admin',
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user-id')).toHaveTextContent('5');
+      expect(screen.getByTestId('tenant-id')).toHaveTextContent('3');
+    });
+  });
+
+  test('testTokenDecodeNewClaimsOnlyShape', async () => {
+    await loginWithTokenOnly(
+      fakeJwt({
+        profile_id: 42,
+        active_tenant_id: 0,
+        email: 'test@example.com',
+        role: 'admin',
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user-id')).toHaveTextContent('42');
+      expect(screen.getByTestId('tenant-id')).toHaveTextContent('0');
+    });
+  });
+
   // Test 12: Login includes credentials for cookie handling
   test('testLoginIncludesCredentialsForCookies', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({

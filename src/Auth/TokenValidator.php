@@ -3,6 +3,7 @@
 namespace Whity\Auth;
 
 use PDO;
+use Whity\Auth\Exception\InvalidMembershipException;
 use Whity\Mcp\Auth\McpPrincipal;
 
 /**
@@ -26,6 +27,14 @@ class TokenValidator
     private PDO $db;
 
     /**
+     * Membership gate for the new {profile_id, active_tenant_id} claim pair
+     * (WC-d4340daf, ADR 0005 §5). Legacy tokens pass through unchecked; a
+     * new-claims token requires an active membership in its declared tenant
+     * (or system-tenant authority, id 0).
+     */
+    private ActiveTenantMembershipGuard $membershipGuard;
+
+    /**
      * Constructor
      *
      * @param JwtParser $jwtParser The JWT parser instance for token validation
@@ -35,6 +44,7 @@ class TokenValidator
     {
         $this->jwtParser = $jwtParser;
         $this->db = $db;
+        $this->membershipGuard = new ActiveTenantMembershipGuard($db);
     }
 
     /**
@@ -78,6 +88,15 @@ class TokenValidator
 
         // Per-user epoch: reject a token issued under an older epoch.
         if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
+        // Dual-claim window (WC-d4340daf): a token carrying the new
+        // {profile_id, active_tenant_id} claims must be backed by an ACTIVE
+        // membership in that tenant (per-membership suspension, ADR 0005 §5).
+        // Legacy tokens (no new claims) skip this — pre-migration users have
+        // no membership rows yet, and their behaviour must not change.
+        if (!$this->membershipGuard->allows($claims)) {
             return null;
         }
 
@@ -127,6 +146,13 @@ class TokenValidator
             return null;
         }
 
+        // Dual-claim membership gate (WC-d4340daf): refresh tokens carry the
+        // same claim model as access tokens, so a suspended membership stops
+        // the refresh re-mint immediately (ADR 0005 §5).
+        if (!$this->membershipGuard->allows($claims)) {
+            return null;
+        }
+
         return $claims;
     }
 
@@ -170,14 +196,21 @@ class TokenValidator
             return null;
         }
 
-        $userId        = $claims['user_id'] ?? null;
-        $tenantId      = $claims['tenant_id'] ?? null;
-        $principalKind = $claims['principal_kind'] ?? 'user';
-        $scope         = $claims['scope'] ?? [];
-
-        if (!is_int($userId) || !is_int($tenantId)) {
+        // Dual-claim membership gate (WC-d4340daf): an MCP token carrying the
+        // new {profile_id, active_tenant_id} claims is membership-gated like
+        // every other token; legacy-claim MCP tokens are unaffected.
+        if (!$this->membershipGuard->allows($claims)) {
             return null;
         }
+
+        $ids = $this->principalIdsFromClaims($claims);
+        if ($ids === null) {
+            return null;
+        }
+        [$userId, $tenantId] = $ids;
+
+        $principalKind = $claims['principal_kind'] ?? 'user';
+        $scope         = $claims['scope'] ?? [];
 
         if (!is_string($principalKind)) {
             return null;
@@ -187,6 +220,7 @@ class TokenValidator
             return null;
         }
 
+        /** @var string[] $scope */
         return new McpPrincipal(
             userId: $userId,
             tenantId: $tenantId,
@@ -233,12 +267,18 @@ class TokenValidator
             return null;
         }
 
-        $userId   = $claims['user_id'] ?? null;
-        $tenantId = $claims['tenant_id'] ?? null;
-
-        if (!is_int($userId) || !is_int($tenantId)) {
+        // Dual-claim membership gate (WC-d4340daf): session bearers follow the
+        // same rules as the cookie path — new-claims tokens need a live
+        // membership, legacy tokens keep current behaviour.
+        if (!$this->membershipGuard->allows($claims)) {
             return null;
         }
+
+        $ids = $this->principalIdsFromClaims($claims);
+        if ($ids === null) {
+            return null;
+        }
+        [$userId, $tenantId] = $ids;
 
         return new McpPrincipal(
             userId: $userId,
@@ -262,6 +302,33 @@ class TokenValidator
     public function validateBearerForMcp(string $token): ?McpPrincipal
     {
         return $this->validateMcpToken($token) ?? $this->validateSessionBearerForMcp($token);
+    }
+
+    /**
+     * Derive the MCP principal's (userId, tenantId) from either claim shape.
+     *
+     * Dual-claim window (WC-d4340daf): tokens may carry the legacy
+     * {user_id, tenant_id} claims, the new {profile_id, active_tenant_id}
+     * claims, or both. The legacy pair is preferred when present (it matches
+     * the ids the rest of the request pipeline still resolves against); a
+     * new-claims-only token (post-cutover shape) derives the principal from
+     * profile_id / active_tenant_id instead, keeping McpPrincipal working for
+     * both shapes. Non-integer values fail closed.
+     *
+     * @param array<string, mixed> $claims The decoded token claims.
+     * @return array{0: int, 1: int}|null [userId, tenantId], or null when
+     *   neither claim shape yields a valid integer pair.
+     */
+    private function principalIdsFromClaims(array $claims): ?array
+    {
+        $userId   = $claims['user_id'] ?? $claims['profile_id'] ?? null;
+        $tenantId = $claims['tenant_id'] ?? $claims['active_tenant_id'] ?? null;
+
+        if (!is_int($userId) || !is_int($tenantId)) {
+            return null;
+        }
+
+        return [$userId, $tenantId];
     }
 
     /**
@@ -312,36 +379,58 @@ class TokenValidator
     }
 
     /**
-     * Verify the token's epoch is not older than the issuing user's current epoch.
+     * Verify the token's epoch is not older than the issuing identity's current epoch.
      *
-     * The token's `token_epoch` claim is compared against `users.token_epoch` for
-     * the token's (user_id, tenant_id). A token is rejected when its epoch is LESS
-     * than the stored one (it predates a password change). A MISSING claim is
-     * treated as 0, so pre-migration tokens map to the default user epoch (0).
+     * The token's `token_epoch` claim is compared against the stored epoch for
+     * the token's identity. A token is rejected when its epoch is LESS than the
+     * stored one (it predates a password change). A MISSING claim is treated as
+     * 0, so pre-migration tokens map to the default epoch (0).
+     *
+     * DUAL-CLAIM WINDOW (WC-d4340daf) — which table anchors the epoch:
+     *  - Tokens carrying the LEGACY {user_id, tenant_id} pair — including the
+     *    dual-claim tokens minted today — keep checking `users.token_epoch`
+     *    EXACTLY as before. This is deliberate: the password-change path
+     *    (handleUpdateMe) bumps the epoch on the `users` row during the dual
+     *    window, so validating dual tokens against `profiles` instead would
+     *    let a session survive a password change (a revocation regression).
+     *  - NEW-CLAIMS-ONLY tokens (post-cutover shape: profile_id but no
+     *    user_id) are checked against `profiles.token_epoch` (ADR 0005 §5:
+     *    epoch invalidation moves to the profile — one person, all tenants,
+     *    all devices). Once the login rewrite moves the epoch bump to
+     *    `profiles`, the users-table branch is removed with the legacy claims.
+     *  - A token with NEITHER identity carries nothing to scope an epoch to,
+     *    so this control does not apply (signature/exp/type and
+     *    jti-revocation still do) — unchanged legacy behaviour.
      *
      * Tenant isolation: `users` is a tenant-owned table, so the lookup is scoped
      * to BOTH the user id AND the tenant id from the token — one tenant's epoch
      * can never gate another tenant's user (the system tenant uses id 0, which is
-     * a normal value here). When the token carries no `user_id`, there is no user
-     * to scope an epoch to, so this control does not apply (signature/exp/type and
-     * jti-revocation still do). Fail closed on a genuine DB error or a missing
-     * user row (e.g. a deleted account).
+     * a normal value here). `profiles` is a sanctioned GLOBAL identity table
+     * (ADR 0005 §1) keyed by its primary key alone. Fail closed on a genuine DB
+     * error or a missing identity row (e.g. a deleted account).
      *
      * @param array<string, mixed> $claims The decoded token claims.
      * @return bool True when the epoch is current (or not applicable), false to reject.
      */
     private function isTokenEpochCurrent(array $claims): bool
     {
-        $userId = $claims['user_id'] ?? null;
+        $userId   = $claims['user_id'] ?? null;
         $tenantId = $claims['tenant_id'] ?? null;
-
-        // No user/tenant to scope to: the per-user epoch control does not apply.
-        if ($userId === null || $tenantId === null) {
-            return true;
-        }
 
         // Missing claim ⇒ epoch 0 (pre-migration tokens map to the default).
         $tokenEpoch = isset($claims['token_epoch']) ? (int) $claims['token_epoch'] : 0;
+
+        // No legacy user/tenant to scope to: a NEW-CLAIMS-ONLY token
+        // (post-cutover shape) is epoch-checked against profiles.token_epoch;
+        // a token with neither identity is exempt (unchanged behaviour).
+        if ($userId === null || $tenantId === null) {
+            $profileId = $claims['profile_id'] ?? null;
+            if (is_int($profileId)) {
+                return $this->isProfileEpochCurrent($profileId, $tokenEpoch);
+            }
+
+            return true;
+        }
 
         try {
             // Tenant-scoped lookup on the tenant-owned users table.
@@ -361,6 +450,36 @@ class TokenValidator
             return $tokenEpoch >= (int) $stored;
         } catch (\Exception) {
             // Fail closed on any database error.
+            return false;
+        }
+    }
+
+    /**
+     * Epoch check for new-claims-only tokens against profiles.token_epoch.
+     *
+     * `profiles` is a sanctioned GLOBAL identity table (ADR 0005 §1) — it has
+     * no tenant_id column, so the lookup is keyed by primary key alone. Fails
+     * closed on a missing profile row (deleted identity) or any DB error.
+     *
+     * @param int $profileId  The token's profile_id claim.
+     * @param int $tokenEpoch The token's embedded epoch (missing claim ⇒ 0).
+     * @return bool True when the epoch is current, false to reject.
+     */
+    private function isProfileEpochCurrent(int $profileId, int $tokenEpoch): bool
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT token_epoch FROM profiles WHERE id = ? LIMIT 1'
+            );
+            $stmt->execute([$profileId]);
+            $stored = $stmt->fetchColumn();
+
+            if ($stored === false) {
+                return false;
+            }
+
+            return $tokenEpoch >= (int) $stored;
+        } catch (\Exception) {
             return false;
         }
     }

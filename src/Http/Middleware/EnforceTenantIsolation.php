@@ -6,6 +6,7 @@ namespace Whity\Http\Middleware;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Whity\Auth\ActiveTenantMembershipGuard;
 use Whity\Auth\JwtParser;
 use Whity\Core\Audit\AuditContext;
 use Whity\Core\RateLimit\ClientIp;
@@ -142,14 +143,30 @@ class EnforceTenantIsolation
     private LoggerInterface $logger;
 
     /**
-     * @param JwtParser            $jwtParser JWT validator used by TenantContext::resolve().
-     * @param LoggerInterface|null $logger    Optional PSR-3 audit logger. When null,
-     *                                         a {@see NullLogger} is used.
+     * Optional membership gate for the new {profile_id, active_tenant_id}
+     * claims (WC-d4340daf, ADR 0005 §5). When wired, a new-claims token whose
+     * active_tenant_id is not backed by a live membership is refused with a
+     * typed 403 before any handler runs. Legacy tokens (no new claims) are
+     * never gated — the dual-window fallback path. Null (e.g. CLI wiring)
+     * disables the gate entirely, preserving prior behaviour.
      */
-    public function __construct(JwtParser $jwtParser, ?LoggerInterface $logger = null)
-    {
+    private ?ActiveTenantMembershipGuard $membershipGuard;
+
+    /**
+     * @param JwtParser                        $jwtParser        JWT validator used by TenantContext::resolve().
+     * @param LoggerInterface|null             $logger           Optional PSR-3 audit logger. When null,
+     *                                                            a {@see NullLogger} is used.
+     * @param ActiveTenantMembershipGuard|null $membershipGuard  Optional active_tenant_id membership
+     *                                                            gate (WC-d4340daf); null disables it.
+     */
+    public function __construct(
+        JwtParser $jwtParser,
+        ?LoggerInterface $logger = null,
+        ?ActiveTenantMembershipGuard $membershipGuard = null
+    ) {
         $this->jwtParser = $jwtParser;
         $this->logger = $logger ?? new NullLogger();
+        $this->membershipGuard = $membershipGuard;
     }
 
     /**
@@ -175,6 +192,40 @@ class EnforceTenantIsolation
         $token = $this->extractToken($request);
         $payload = $token === null ? null : $this->jwtParser->parse($token);
         $request->setAttribute(Request::ATTR_JWT_CLAIMS, $payload);
+
+        // Dual-claim membership gate (WC-d4340daf, ADR 0005 §5): when the token
+        // carries the new {profile_id, active_tenant_id} claims, the declared
+        // active tenant must be backed by a live 'active' membership (or the
+        // system tenant 0). A suspended/revoked membership is refused here with
+        // a typed 403 — the HTTP layer, before any handler/database work —
+        // without waiting for token expiry; a malformed/partial new-claim set
+        // (a shape this codebase never issues) is refused with 401 like any
+        // other invalid token. Responses stay generic — the typed detail is
+        // logged, never leaked. Legacy tokens (no new claims) skip the gate:
+        // pre-migration users have no membership rows yet.
+        //
+        // ORDERING: the gate runs BEFORE TenantContext::resolve() so a refused
+        // tenant is never locked into the request-scoped context — nothing
+        // (audit hooks, observers) can ever read an unapproved tenant id.
+        if ($this->membershipGuard !== null && $payload !== null) {
+            try {
+                $this->membershipGuard->assert($payload);
+            } catch (\Whity\Auth\Exception\InvalidMembershipException $e) {
+                $claimedTenant = $payload['active_tenant_id'] ?? $payload['tenant_id'] ?? null;
+                $this->logger->warning('Tenant isolation: active tenant membership refused', [
+                    'event' => 'tenant_isolation.membership_denied',
+                    'http_status' => $e->httpStatus,
+                    'reason' => $e->getMessage(),
+                    'tenant_id' => is_numeric($claimedTenant) ? (int) $claimedTenant : null,
+                    'user_id' => $this->userIdFromPayload($payload),
+                    'path' => $path,
+                ]);
+
+                return $e->httpStatus === 401
+                    ? Response::error('Authentication required', 401)
+                    : Response::error('Access to the requested tenant is forbidden', 403);
+            }
+        }
 
         // Delegate token -> tenant extraction and validation to the context. Any
         // failure (missing/invalid token, missing/invalid tenant claim) collapses
@@ -308,12 +359,23 @@ class EnforceTenantIsolation
      * Extract the acting user id from a decoded JWT payload, if present.
      *
      * @param array<string, mixed>|null $payload The decoded JWT payload.
-     * @return int|null The integer user_id claim, or null when absent/non-int.
+     * @return int|null The integer user_id claim (profile_id for post-cutover
+     *                  tokens that carry no legacy user_id), or null when absent.
      */
     private function userIdFromPayload(?array $payload): ?int
     {
-        if ($payload !== null && isset($payload['user_id']) && is_int($payload['user_id'])) {
+        if ($payload === null) {
+            return null;
+        }
+
+        if (isset($payload['user_id']) && is_int($payload['user_id'])) {
             return $payload['user_id'];
+        }
+
+        // Post-cutover tokens (WC-d4340daf) identify the actor by profile_id
+        // only — fall back so audit records never lose the acting identity.
+        if (isset($payload['profile_id']) && is_int($payload['profile_id'])) {
+            return $payload['profile_id'];
         }
 
         return null;

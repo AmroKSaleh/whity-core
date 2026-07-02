@@ -448,7 +448,14 @@ $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
 
 // 7. Initialize tenant isolation middleware
 // Pass the PSR-3 logger (WC-20) so privileged cross-tenant bypasses are audited.
-$tenantIsolationMiddleware = new EnforceTenantIsolation($jwtParser, $logger);
+// The membership guard (WC-d4340daf) gates the new {profile_id, active_tenant_id}
+// JWT claims against live `memberships` rows (typed 403 on a suspended/revoked
+// membership); legacy tokens are unaffected during the dual-claim window.
+$tenantIsolationMiddleware = new EnforceTenantIsolation(
+    $jwtParser,
+    $logger,
+    new \Whity\Auth\ActiveTenantMembershipGuard($db->getPdo())
+);
 
 // 8. Initialize HTTP kernel and register middleware
 $kernel = new HttpKernel($router, $rbacMiddleware);
