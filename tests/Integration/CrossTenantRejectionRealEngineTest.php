@@ -24,6 +24,8 @@ use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Relations\PersonRepository;
+use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
 
@@ -837,6 +839,390 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ==================== ou_role_assignments ====================
+
+    /**
+     * WC-8d0083f5: listing the roles assigned to an OU is tenant-scoped —
+     * reading another tenant's OU reports not-found (404) rather than leaking
+     * that tenant's role assignments.
+     */
+    public function testOuRoleAssignmentsListIsTenantScoped(): void
+    {
+        // Tenant A reads roles for its own OU (id 10) — must see role 100.
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->roles(
+            $this->req('GET', '/api/ous/10/roles'),
+            ['id' => '10']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $ids = array_column($data['data'], 'id');
+        $this->assertContains(100, $ids, "Tenant A's own OU must expose role 100");
+        $this->assertNotContains(200, $ids, "Tenant B's role must never appear in Tenant A's OU");
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A reading role-assignments for Tenant B's OU must
+     * receive a 404 — the OU is invisible across the tenant boundary.
+     */
+    public function testTenantCannotReadForeignOuRoleAssignments(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->roles(
+            $this->req('GET', '/api/ous/20/roles'),
+            ['id' => '20']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign OU roles read must report not-found');
+        $this->assertStringNotContainsString(
+            'tenant-b-private',
+            $response->getBody(),
+            'The refusal must not leak Tenant B role names'
+        );
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A cannot assign a role to Tenant B's OU — the OU
+     * is not found for Tenant A (404) and the assignment row stays absent.
+     */
+    public function testTenantCannotAssignRoleToForeignOuAndRowStaysAbsent(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->assignRole(
+            $this->req('POST', '/api/ous/20/roles', ['role_id' => 100]),
+            ['id' => '20']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign OU role-assign must report not-found');
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query(
+                'SELECT COUNT(*) FROM ou_role_assignments WHERE ou_id = 20 AND role_id = 100'
+            )->fetchColumn(),
+            'No spurious cross-tenant ou_role_assignments row must exist after the rejected assign'
+        );
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A cannot remove a role from Tenant B's OU — the
+     * assignment row for Tenant B's OU survives the rejected attempt.
+     */
+    public function testTenantCannotRemoveRoleFromForeignOuAndRowSurvives(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->removeRole(
+            $this->req('DELETE', '/api/ous/20/roles/200'),
+            ['ouId' => '20', 'roleId' => '200']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign OU role-remove must report not-found');
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query(
+                'SELECT COUNT(*) FROM ou_role_assignments WHERE ou_id = 20 AND role_id = 200'
+            )->fetchColumn(),
+            "Tenant B's ou_role_assignments row must survive a cross-tenant remove attempt"
+        );
+    }
+
+    /**
+     * WC-8d0083f5 (positive control): Tenant A can remove a role from its OWN
+     * OU and the row is gone; Tenant B's assignment row is untouched.
+     */
+    public function testOwnOuRoleRemovalSucceedsAndLeavesForeignRowIntact(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->removeRole(
+            $this->req('DELETE', '/api/ous/10/roles/100'),
+            ['ouId' => '10', 'roleId' => '100']
+        );
+
+        $this->assertSame(204, $response->getStatusCode(), "Tenant A's own OU role removal must succeed");
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query(
+                'SELECT COUNT(*) FROM ou_role_assignments WHERE ou_id = 10 AND role_id = 100'
+            )->fetchColumn(),
+            "Tenant A's own assignment must be gone"
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query(
+                'SELECT COUNT(*) FROM ou_role_assignments WHERE ou_id = 20 AND role_id = 200'
+            )->fetchColumn(),
+            "Tenant B's ou_role_assignments row must be untouched by Tenant A's own-OU removal"
+        );
+    }
+
+    // ==================== user_roles (direct tenant_id scoping) ====================
+
+    /**
+     * WC-8d0083f5: user_roles rows are stamped with tenant_id and must never
+     * be reachable from a foreign tenant's DELETE — tested via the scoped
+     * deleteUserRolesScoped helper that the roles handler uses. A cross-tenant
+     * role id arriving directly at the DELETE must leave Tenant B's row intact.
+     */
+    public function testUserRolesDeleteScopedRejectsForeignTenantRoleId(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        // Invoke the scoped DELETE helper directly, bypassing the upstream guard,
+        // with Tenant B's role id (200) — only Tenant B's tenant_id matches, so
+        // the predicate (role_id = 200 AND tenant_id = TENANT_A) hits zero rows.
+        $handler = new class ($this->pdo, $this->hooks()) extends RolesApiHandler {
+            public function purgeUserRoles(int $roleId, int $tenantId): void
+            {
+                $this->deleteUserRolesScoped($roleId, $tenantId);
+            }
+        };
+        $handler->purgeUserRoles(200, self::TENANT_A);
+
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
+            "Tenant B's user_roles row must survive: the tenant_id predicate on the DELETE rejected the foreign role id"
+        );
+    }
+
+    /**
+     * WC-8d0083f5: the same scoped helper deletes Tenant A's OWN row while
+     * leaving Tenant B's row intact — proves the predicate allows legitimate
+     * same-tenant deletes and does not over-scope.
+     */
+    public function testUserRolesDeleteScopedRemovesOwnRowAndLeavesForeignIntact(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $handler = new class ($this->pdo, $this->hooks()) extends RolesApiHandler {
+            public function purgeUserRoles(int $roleId, int $tenantId): void
+            {
+                $this->deleteUserRolesScoped($roleId, $tenantId);
+            }
+        };
+        $handler->purgeUserRoles(100, self::TENANT_A);
+
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 100')->fetchColumn(),
+            "Tenant A's own user_roles row must be removed by the same-tenant scoped delete"
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
+            "Tenant B's user_roles row must be untouched by Tenant A's same-tenant scoped delete"
+        );
+    }
+
+    // ==================== role_permissions (tenant-scoped via parent role) ====================
+
+    /**
+     * WC-8d0083f5: role_permissions has no own tenant_id — isolation is enforced
+     * by a correlated EXISTS on the parent role's tenant_id. A foreign role id
+     * arriving at the scoped DELETE must leave Tenant B's grants intact.
+     */
+    public function testRolePermissionsDeleteScopedRejectsForeignTenantRoleId(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $handler = new class ($this->pdo, $this->hooks()) extends RolesApiHandler {
+            public function purgeRolePermissions(int $roleId, int $tenantId): void
+            {
+                $this->deleteRolePermissionsScoped($roleId, $tenantId);
+            }
+        };
+        // Role 200 belongs to Tenant B. Acting as Tenant A, the EXISTS subquery
+        // (r.tenant_id = TENANT_A) does not match role 200's tenant_id = 2, so
+        // zero rows are deleted.
+        $handler->purgeRolePermissions(200, self::TENANT_A);
+
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 200')->fetchColumn(),
+            "Tenant B's role_permissions row must survive: the correlated EXISTS on roles.tenant_id rejected the foreign role id"
+        );
+    }
+
+    /**
+     * WC-8d0083f5 (positive control): the scoped DELETE removes Tenant A's OWN
+     * grants while leaving Tenant B's grants untouched.
+     */
+    public function testRolePermissionsDeleteScopedRemovesOwnGrantsAndLeavesForeignIntact(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $handler = new class ($this->pdo, $this->hooks()) extends RolesApiHandler {
+            public function purgeRolePermissions(int $roleId, int $tenantId): void
+            {
+                $this->deleteRolePermissionsScoped($roleId, $tenantId);
+            }
+        };
+        $handler->purgeRolePermissions(100, self::TENANT_A);
+
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 100')->fetchColumn(),
+            "Tenant A's own role_permissions grant must be removed by the same-tenant scoped delete"
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 200')->fetchColumn(),
+            "Tenant B's role_permissions grant must be untouched by Tenant A's same-tenant scoped delete"
+        );
+    }
+
+    // ==================== persons ====================
+
+    /**
+     * WC-8d0083f5: persons are directly tenant-scoped — Tenant A's list must
+     * contain only its own persons and never Tenant B's.
+     */
+    public function testPersonsListIsTenantScoped(): void
+    {
+        $repo = $this->personRepo();
+
+        $rowsA = $repo->list(self::TENANT_A);
+        $rowsB = $repo->list(self::TENANT_B);
+
+        $namesA = array_column($rowsA, 'display_name');
+        $namesB = array_column($rowsB, 'display_name');
+
+        $this->assertContains('Alice-A', $namesA, "Tenant A must see its own person");
+        $this->assertNotContains('Bob-B', $namesA, "Tenant B's person must never appear for Tenant A");
+        $this->assertContains('Bob-B', $namesB, "Tenant B must see its own person");
+        $this->assertNotContains('Alice-A', $namesB, "Tenant A's person must never appear for Tenant B");
+        foreach ($rowsA as $row) {
+            $this->assertSame(self::TENANT_A, $row['tenant_id']);
+        }
+    }
+
+    /**
+     * WC-8d0083f5: the system tenant (id 0) sees persons across all tenants.
+     */
+    public function testSystemTenantSeesPersonsAcrossTenants(): void
+    {
+        $repo = $this->personRepo();
+
+        $rows = $repo->list(self::SYSTEM_TENANT);
+
+        $names = array_column($rows, 'display_name');
+        $this->assertContains('Alice-A', $names);
+        $this->assertContains('Bob-B', $names, 'The system tenant must see all tenants\' persons');
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A cannot read Tenant B's person — findById returns null.
+     */
+    public function testTenantCannotReadForeignPerson(): void
+    {
+        $repo = $this->personRepo();
+
+        $this->assertNotNull(
+            $repo->findById(10, self::TENANT_A),
+            "Tenant A must find its own person"
+        );
+        $this->assertNull(
+            $repo->findById(20, self::TENANT_A),
+            "Tenant B's person must be invisible to Tenant A"
+        );
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A cannot update Tenant B's person — the scoped UPDATE
+     * touches zero rows and the foreign row remains untouched.
+     */
+    public function testTenantCannotUpdateForeignPersonAndRowIsUntouched(): void
+    {
+        $repo = $this->personRepo();
+
+        $affected = $repo->update(20, self::TENANT_A, ['display_name' => 'Hijacked']);
+
+        $this->assertSame(0, $affected, 'A cross-tenant person update must touch zero rows');
+        $this->assertSame(
+            'Bob-B',
+            $this->pdo->query('SELECT display_name FROM persons WHERE id = 20')->fetchColumn(),
+            "Tenant B's person must be byte-for-byte untouched after the rejected update"
+        );
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A cannot delete Tenant B's person — the scoped DELETE
+     * touches zero rows and the foreign row survives.
+     */
+    public function testTenantCannotDeleteForeignPersonAndRowSurvives(): void
+    {
+        $repo = $this->personRepo();
+
+        $affected = $repo->delete(20, self::TENANT_A);
+
+        $this->assertSame(0, $affected, 'A cross-tenant person delete must touch zero rows');
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM persons WHERE id = 20')->fetchColumn(),
+            "Tenant B's person must survive a cross-tenant delete attempt"
+        );
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A reading Tenant B's person through the API handler
+     * receives a 404 — the person is not-found and nothing leaks.
+     */
+    public function testPersonsApiHandlerCannotReadForeignPerson(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->personsHandler()->get(
+            $this->req('GET', '/api/persons/20'),
+            ['id' => '20']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign person read must report not-found');
+        $this->assertStringNotContainsString(
+            'Bob-B',
+            $response->getBody(),
+            'The refusal must not leak Tenant B person names'
+        );
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A cannot update Tenant B's person through the API
+     * handler — 404 returned and the row stays unchanged.
+     */
+    public function testPersonsApiHandlerCannotUpdateForeignPersonAndRowIsUntouched(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->personsHandler()->update(
+            $this->req('PATCH', '/api/persons/20', ['displayName' => 'Hijacked']),
+            ['id' => '20']
+        );
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign person update must report not-found');
+        $this->assertSame(
+            'Bob-B',
+            $this->pdo->query('SELECT display_name FROM persons WHERE id = 20')->fetchColumn(),
+            "Tenant B's person must be byte-for-byte untouched after the rejected API update"
+        );
+    }
+
+    /**
+     * WC-8d0083f5: Tenant A cannot delete Tenant B's person through the API
+     * handler — 404 and the row survives.
+     */
+    public function testPersonsApiHandlerCannotDeleteForeignPersonAndRowSurvives(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->personsHandler()->delete(
+            $this->req('DELETE', '/api/persons/20'),
+            ['id' => '20']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM persons WHERE id = 20')->fetchColumn(),
+            "Tenant B's person must survive a cross-tenant API delete attempt"
+        );
+    }
+
     // ==================== helpers ====================
 
     /**
@@ -948,6 +1334,19 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     private function greetingsHandler(): GreetingsApiHandler
     {
         return new GreetingsApiHandler($this->pdo);
+    }
+
+    private function personRepo(): PersonRepository
+    {
+        return new PersonRepository($this->pdo);
+    }
+
+    private function personsHandler(): \Whity\Api\PersonsApiHandler
+    {
+        return new \Whity\Api\PersonsApiHandler(
+            new PersonRepository($this->pdo),
+            new RelationRepository($this->pdo)
+        );
     }
 
     private function hooks(): HookManager
@@ -1113,6 +1512,25 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             INSERT INTO tenant_settings (tenant_id, setting_key, value, updated_at) VALUES
                 (1, 'site_name',     'Tenant A Co',   datetime('now')),
                 (2, 'support_email', 'b@t2.example',  datetime('now'))
+        ");
+
+        // ou_role_assignments: one row per tenant so cross-tenant read/write
+        // rejection can be proven. OU 10 belongs to Tenant A and holds role 100;
+        // OU 20 belongs to Tenant B and holds role 200. The tenant_id on the
+        // assignment row matches the owning tenant so the predicate is clear.
+        $pdo->exec("
+            INSERT INTO ou_role_assignments (tenant_id, ou_id, role_id, created_at) VALUES
+                (1, 10, 100, datetime('now')),
+                (2, 20, 200, datetime('now'))
+        ");
+
+        // persons: two standalone (non-user-linked) persons, one per tenant, so
+        // cross-tenant read/write/delete rejection can be proven directly against
+        // the PersonRepository. Ids 10/20 mirror the OU/greeting id scheme.
+        $pdo->exec("
+            INSERT INTO persons (id, tenant_id, display_name, user_id, deceased, created_at) VALUES
+                (10, 1, 'Alice-A', NULL, false, datetime('now')),
+                (20, 2, 'Bob-B',   NULL, false, datetime('now'))
         ");
 
         return $pdo;
