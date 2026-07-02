@@ -360,14 +360,18 @@ class MigrateUsersToProfiles
         if ($driver === 'pgsql') {
             // to_regclass returns NULL when the relation does not exist; non-NULL
             // means the table is present in the current search_path.
-            $row = $pdo->query(
+            $stmt = $pdo->query(
                 "SELECT to_regclass('migration_035_profile_ids') AS name"
-            )->fetch(\PDO::FETCH_ASSOC);
+            );
+            $row  = ($stmt !== false) ? $stmt->fetch(\PDO::FETCH_ASSOC) : false;
+            if ($stmt !== false) { $stmt->closeCursor(); }
             $tableExists = $row !== false && $row['name'] !== null;
         } else {
-            $row = $pdo->query(
+            $stmt = $pdo->query(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name = 'migration_035_profile_ids'"
-            )->fetch(\PDO::FETCH_ASSOC);
+            );
+            $row  = ($stmt !== false) ? $stmt->fetch(\PDO::FETCH_ASSOC) : false;
+            if ($stmt !== false) { $stmt->closeCursor(); }
             $tableExists = $row !== false;
         }
 

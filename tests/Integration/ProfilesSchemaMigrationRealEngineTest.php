@@ -164,8 +164,13 @@ final class ProfilesSchemaMigrationRealEngineTest extends TestCase
              VALUES ('Alice', '\$2y\$10\$fakehash', false, 0, 0, datetime('now'), datetime('now'))"
         );
 
-        $stmt = $this->pdo->query('SELECT * FROM profiles WHERE id = 1');
-        self::assertNotFalse($stmt);
+        // Use lastInsertId() to get the actual id — migration 036 may have
+        // already inserted the system admin profile (id=1) before this test runs.
+        $aliceId = (int) $this->pdo->lastInsertId();
+        self::assertGreaterThan(0, $aliceId, 'lastInsertId() must return a positive integer after INSERT.');
+
+        $stmt = $this->pdo->prepare('SELECT * FROM profiles WHERE id = :id');
+        $stmt->execute([':id' => $aliceId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         self::assertIsArray($row);
         self::assertSame('Alice', $row['display_name']);

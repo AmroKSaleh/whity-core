@@ -34,13 +34,19 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
 
     protected function setUp(): void
     {
-        // SchemaFromMigrations::make() runs ALL migrations (001–035).
+        // SchemaFromMigrations::make() runs ALL migrations (001–036).
         // We need the schema from 028–034 only (profiles, profile_emails,
         // memberships), with data NOT yet migrated. So we use a fresh schema and
         // seed users manually, then call the migration under test explicitly.
         //
         // Because make() already ran 035 as part of the full stack, we must
         // reverse it (down) first, seed user rows, then run up() ourselves.
+        //
+        // NOTE: migration 036 (SeedSystemAdminProfile) also ran during make()
+        // and inserted system@whity.local into profiles/profile_emails/memberships.
+        // 035::down() does NOT remove those rows (it only removes rows it tracked),
+        // so throughout this test class there is always 1 pre-existing system admin
+        // row in each of those three tables. All count assertions account for this.
         $this->pdo = SchemaFromMigrations::make();
         $this->reverseMigration();
         $this->seedUsers();
@@ -49,10 +55,15 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
     // ── lifecycle helpers ────────────────────────────────────────────────────
 
     /**
-     * Call 035::down() to remove any rows the initial make() run deposited
-     * (on a fresh DB there are no users rows so make() is a no-op for 035,
+     * Call 035::down() to remove any rows the initial make() run deposited.
+     * On a fresh DB there are no users rows so make() is a no-op for 035,
      * but we call down() for correctness and to establish the tracking tables
-     * are gone).
+     * are gone.
+     *
+     * Note: rows inserted by migration 036 (system admin profile + tenant-0
+     * membership) are NOT removed by this call — 035::down() only deletes rows
+     * it recorded in migration_035_profile_ids. Tests must account for the
+     * 1 profile / 1 profile_email / 1 membership that persist.
      */
     private function reverseMigration(): void
     {
@@ -154,14 +165,19 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
     // ── invariant tests ──────────────────────────────────────────────────────
 
     /**
-     * After up(): exactly 4 profiles (alice, bob, carol, dave — alice collapses).
+     * After up(): exactly 5 profiles total — 4 from migration 035 (alice, bob,
+     * carol, dave — alice collapses) plus 1 pre-existing from migration 036
+     * (system@whity.local, seeded before up() was reversed in setUp).
      */
     public function testProfileCountEqualsUniqueEmailCount(): void
     {
         $this->runUp();
 
         $profileCount = (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn();
-        self::assertSame(4, $profileCount, 'Expected 4 profiles (one per unique normalised email).');
+        // 4 profiles from migration 035 (one per unique user email) +
+        // 1 profile from migration 036 (system@whity.local) that survives
+        // reverseMigration() because 035::down() only removes rows it tracks.
+        self::assertSame(5, $profileCount, 'Expected 5 profiles (4 from user migration + 1 system admin from migration 036).');
     }
 
     /**
@@ -215,16 +231,19 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
     }
 
     /**
-     * After up(): 5 users → 5 membership rows (one per user row, even for the
-     * duplicate-email pair which collapses to one profile but still gets 2
-     * separate memberships for the 2 different tenants).
+     * After up(): 5 users → 5 membership rows from migration 035 (one per user
+     * row, even for the duplicate-email pair which collapses to one profile but
+     * still gets 2 separate memberships for the 2 different tenants), plus 1
+     * pre-existing tenant-0 membership from migration 036 (system@whity.local).
      */
     public function testMembershipCountEqualsUserCount(): void
     {
         $this->runUp();
 
         $membershipCount = (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn();
-        self::assertSame(5, $membershipCount, 'Expected 5 membership rows (one per users row).');
+        // 5 memberships from migration 035 (one per users row) +
+        // 1 membership from migration 036 (system@whity.local in tenant 0).
+        self::assertSame(6, $membershipCount, 'Expected 6 membership rows (5 from user migration + 1 system admin tenant-0 from migration 036).');
     }
 
     /**
@@ -358,12 +377,15 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
 
         $this->runDown();
 
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn(),
-            'down() must remove all profiles created by migration 035.');
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM profile_emails')->fetchColumn(),
-            'down() must remove all profile_emails created by migration 035.');
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn(),
-            'down() must remove all memberships created by migration 035.');
+        // migration 035::down() removes only the rows it tracked; the system admin
+        // profile seeded by migration 036 (system@whity.local, tenant-0 membership)
+        // survives because it is not tracked by migration_035_profile_ids.
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn(),
+            'down() must leave exactly 1 profile — the system admin seeded by migration 036.');
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM profile_emails')->fetchColumn(),
+            'down() must leave exactly 1 profile_email — system@whity.local from migration 036.');
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn(),
+            'down() must leave exactly 1 membership — system admin tenant-0 from migration 036.');
 
         // Users must be untouched.
         $userCountAfter = (int) $this->pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
@@ -382,7 +404,8 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
         // Second down() must not throw.
         $this->runDown();
 
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn());
+        // Only the system admin profile from migration 036 remains after down().
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn());
     }
 
     /**
@@ -416,10 +439,11 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
         $this->runUp();
         $this->runDown();
 
-        // After down() all migration-created rows are gone.
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn());
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM profile_emails')->fetchColumn());
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn());
+        // After down(), migration 035's rows are gone; migration 036's system admin
+        // rows remain (profile, profile_email, tenant-0 membership).
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM profiles')->fetchColumn());
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM profile_emails')->fetchColumn());
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn());
 
         // Re-run up() — must reconstruct cleanly.
         $this->runUp();
@@ -428,9 +452,12 @@ final class MigrateUsersToProfilesRealEngineTest extends TestCase
         $emailCount      = (int) $this->pdo->query('SELECT COUNT(*) FROM profile_emails')->fetchColumn();
         $membershipCount = (int) $this->pdo->query('SELECT COUNT(*) FROM memberships')->fetchColumn();
 
-        self::assertSame(4, $profileCount,    'After down()+up() there must still be 4 profiles.');
-        self::assertSame(4, $emailCount,      'After down()+up() there must still be 4 profile_emails.');
-        self::assertSame(5, $membershipCount, 'After down()+up() there must still be 5 memberships.');
+        // 4 user profiles + 1 system admin (migration 036) = 5
+        // 4 user profile_emails + 1 system@whity.local (migration 036) = 5
+        // 5 user memberships + 1 tenant-0 membership (migration 036) = 6
+        self::assertSame(5, $profileCount,    'After down()+up() there must be 5 profiles (4 user + 1 system admin).');
+        self::assertSame(5, $emailCount,      'After down()+up() there must be 5 profile_emails (4 user + 1 system admin).');
+        self::assertSame(6, $membershipCount, 'After down()+up() there must be 6 memberships (5 user + 1 system admin tenant-0).');
 
         // Alice's profile must still carry the correct credentials.
         $profileRow = $this->pdo->query(
