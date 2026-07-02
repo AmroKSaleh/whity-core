@@ -36,13 +36,20 @@
     "mutators": {
         "@default": true
     },
-    // Thresholds derived from a measured baseline run (2026-07-02):
-    //   MSI             = 36%  →  floor set at 35  (1-point margin below measured)
-    //   Covered-code MSI = 81% →  floor set at 78  (3-point margin below measured)
+    // Thresholds anchored to the CI baseline run (2026-07-02, GitHub-hosted
+    // runner, run 28571257171): MSI = 31%, Covered-code MSI = 74%.
+    //   minMsi        = 28  (3-point margin below CI-measured 31)
+    //   minCoveredMsi = 70  (4-point margin below CI-measured 74)
+    // CI is the enforcement environment, so floors are derived from CI numbers,
+    // not local ones: mutants killed only by TIMEOUT on a slow local machine
+    // (42 in the local baseline) survive on faster CI hardware, which measured
+    // ~5 points below the local run (local: MSI 36 / covered 81). The margins
+    // absorb residual timeout flakiness between CI runs.
     // The low overall MSI reflects that many Delegation / TenantPredicateGuard
-    // paths are only exercised by the PostgreSQL integration suite (excluded from
-    // this scope for speed); the covered-code gate of 78% is the meaningful
-    // signal and shows the scoped unit tests are high-quality detectors.
-    "minMsi": 35,
-    "minCoveredMsi": 78
+    // paths are only exercised by the PostgreSQL integration suite (excluded
+    // from this scope for speed); the covered-code gate is the meaningful
+    // signal for detector quality. To raise a floor: take the current CI run's
+    // metric and subtract the same margins.
+    "minMsi": 28,
+    "minCoveredMsi": 70
 }

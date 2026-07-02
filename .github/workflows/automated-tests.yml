@@ -204,9 +204,8 @@ jobs:
     # (defined in phpunit.xml) covers unit + SQLite real-engine tests and does NOT
     # require a live PostgreSQL service, keeping this job fast and self-contained.
     #
-    # Thresholds (derived from baseline run 2026-07-02):
-    #   --min-msi=35           (measured 36%, 1-point safety margin)
-    #   --min-covered-msi=78   (measured 81%, 3-point safety margin)
+    # Thresholds live in infection.json5 (minMsi / minCoveredMsi), anchored to
+    # the CI baseline run — see the derivation comment there before changing.
     name: Infection mutation testing (Auth/Tenant/Delegation)
     runs-on: ubuntu-latest
 
