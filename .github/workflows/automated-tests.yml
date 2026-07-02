@@ -36,7 +36,7 @@ jobs:
         with:
           php-version: '8.4'
           extensions: mbstring, pdo, pdo_sqlite
-          coverage: none
+          coverage: pcov
 
       - name: Cache Composer dependencies
         uses: actions/cache@v4
@@ -48,8 +48,21 @@ jobs:
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
-      - name: Run PHPUnit
-        run: vendor/bin/phpunit
+      - name: Run PHPUnit with coverage
+        run: vendor/bin/phpunit --coverage-clover coverage.xml --coverage-text
+
+      # Enforce minimum line-coverage floor defined in scripts/coverage-check.php.
+      # The floor value and instructions for updating it live in that file.
+      - name: Enforce coverage floor
+        run: php scripts/coverage-check.php coverage.xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 30
 
       # The committed public/openapi.json must match a fresh generation from
       # the live PHP router — API changes that skip `generate:openapi` would
