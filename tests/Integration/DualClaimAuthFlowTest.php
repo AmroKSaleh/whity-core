@@ -76,7 +76,6 @@ final class DualClaimAuthFlowTest extends TestCase
     private int $migratedUserId;
     private int $migratedProfileId;
     private int $legacyUserId;
-    private int $suspendedUserId;
     private int $suspendedProfileId;
 
     protected function setUp(): void
@@ -104,7 +103,7 @@ final class DualClaimAuthFlowTest extends TestCase
         $this->legacyUserId = $this->seedUser(self::LEGACY_EMAIL);
 
         // A migrated-but-suspended user: profile exists, membership suspended.
-        $this->suspendedUserId = $this->seedUser(self::SUSPENDED_EMAIL);
+        $this->seedUser(self::SUSPENDED_EMAIL);
         $this->suspendedProfileId = $this->seedProfile('Suspended', self::SUSPENDED_EMAIL);
         $suspendedMembershipId = $this->memberships->insert($this->suspendedProfileId, self::TENANT_ID, 1);
         $this->memberships->suspend($suspendedMembershipId, self::TENANT_ID);

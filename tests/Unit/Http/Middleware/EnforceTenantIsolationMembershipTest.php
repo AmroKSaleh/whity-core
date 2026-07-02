@@ -33,7 +33,7 @@ final class EnforceTenantIsolationMembershipTest extends TestCase
     private const TENANT_B = 2;
 
     private PDO $pdo;
-    private JwtParser $jwtParser;
+    private JwtParser&\PHPUnit\Framework\MockObject\MockObject $jwtParser;
     private MembershipRepository $memberships;
     private EnforceTenantIsolation $middleware;
 
