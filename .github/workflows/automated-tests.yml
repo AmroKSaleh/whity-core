@@ -38,6 +38,13 @@ jobs:
           extensions: mbstring, pdo, pdo_sqlite
           coverage: none
 
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-test-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-test-
+
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
@@ -115,6 +122,13 @@ jobs:
           php-version: '8.4'
           extensions: mbstring, pdo, pdo_pgsql, pgsql
           coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-postgres-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-postgres-
 
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
