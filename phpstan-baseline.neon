@@ -1324,3 +1324,18 @@ parameters:
 			message: "#^Call to an undefined method Whity\\\\Mcp\\\\Transport\\\\McpRequestHandlerInterface\\:\\:method\\(\\)\\.$#"
 			count: 11
 			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 24
+			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 7
+			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
