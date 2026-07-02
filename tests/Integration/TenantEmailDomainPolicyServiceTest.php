@@ -26,6 +26,13 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
     private const TENANT_A = 1;
     private const TENANT_B = 2;
 
+    /**
+     * Fixture profile ids: use high values to avoid collisions with the system
+     * admin profile (id=1) seeded by migration 036.
+     */
+    private const ALICE_PROFILE_ID = 101;
+    private const BOB_PROFILE_ID   = 102;
+
     private PDO $pdo;
     private TenantEmailDomainsRepository $domains;
     private MembershipRepository $memberships;
@@ -45,10 +52,12 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
                 (2, 'user',  '', NULL, datetime('now'))"
         );
         // Global identity anchor for the test profile.
+        // Use id=101 to avoid collision with the system admin profile (id=1)
+        // seeded by migration 036.
         $this->pdo->exec(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (1, 'Alice', '\$2y\$10\$fakehash', false, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (" . self::ALICE_PROFILE_ID . ", 'Alice', '\$2y\$10\$fakehash', false, 0, 0, datetime('now'), datetime('now'))"
         );
     }
 
@@ -58,9 +67,9 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
     {
         $this->domains->insert(self::TENANT_A, 'acme.com', 1, true);
 
-        $this->service->applyToVerifiedEmail('alice@acme.com', 1);
+        $this->service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
 
-        $membership = $this->memberships->findByProfile(1, self::TENANT_A);
+        $membership = $this->memberships->findByProfile(self::ALICE_PROFILE_ID, self::TENANT_A);
         self::assertNotNull($membership, 'A membership must be created for the profile.');
         self::assertSame(MembershipRepository::STATUS_ACTIVE, $membership['status']);
         self::assertSame(1, $membership['role_id']);
@@ -70,9 +79,9 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
     {
         $this->domains->insert(self::TENANT_A, 'corp.io', 2, true);  // role 2 (user)
 
-        $this->service->applyToVerifiedEmail('alice@corp.io', 1);
+        $this->service->applyToVerifiedEmail('alice@corp.io', self::ALICE_PROFILE_ID);
 
-        $membership = $this->memberships->findByProfile(1, self::TENANT_A);
+        $membership = $this->memberships->findByProfile(self::ALICE_PROFILE_ID, self::TENANT_A);
         self::assertNotNull($membership);
         self::assertSame(2, $membership['role_id']);
     }
@@ -81,10 +90,10 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
     {
         $this->domains->insert(self::TENANT_A, 'noprovisioning.com', 1, false);
 
-        $this->service->applyToVerifiedEmail('alice@noprovisioning.com', 1);
+        $this->service->applyToVerifiedEmail('alice@noprovisioning.com', self::ALICE_PROFILE_ID);
 
         self::assertNull(
-            $this->memberships->findByProfile(1, self::TENANT_A),
+            $this->memberships->findByProfile(self::ALICE_PROFILE_ID, self::TENANT_A),
             'No membership must be created when auto_provision is false and no invite exists.'
         );
     }
@@ -95,11 +104,11 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
     {
         // Domain registered with auto_provision = false; an invite already exists.
         $this->domains->insert(self::TENANT_A, 'invited.com', 1, false);
-        $this->memberships->invite(1, self::TENANT_A, 1);
+        $this->memberships->invite(self::ALICE_PROFILE_ID, self::TENANT_A, 1);
 
-        $this->service->applyToVerifiedEmail('alice@invited.com', 1);
+        $this->service->applyToVerifiedEmail('alice@invited.com', self::ALICE_PROFILE_ID);
 
-        $membership = $this->memberships->findByProfile(1, self::TENANT_A);
+        $membership = $this->memberships->findByProfile(self::ALICE_PROFILE_ID, self::TENANT_A);
         self::assertNotNull($membership);
         self::assertSame(MembershipRepository::STATUS_ACTIVE, $membership['status']);
     }
@@ -107,11 +116,11 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
     public function testPendingInviteIsAcceptedEvenWhenAutoProvisionIsTrue(): void
     {
         $this->domains->insert(self::TENANT_A, 'acme.com', 1, true);
-        $this->memberships->invite(1, self::TENANT_A, 1);
+        $this->memberships->invite(self::ALICE_PROFILE_ID, self::TENANT_A, 1);
 
-        $this->service->applyToVerifiedEmail('alice@acme.com', 1);
+        $this->service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
 
-        $membership = $this->memberships->findByProfile(1, self::TENANT_A);
+        $membership = $this->memberships->findByProfile(self::ALICE_PROFILE_ID, self::TENANT_A);
         self::assertNotNull($membership);
         self::assertSame(MembershipRepository::STATUS_ACTIVE, $membership['status']);
     }
@@ -121,10 +130,10 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
     public function testNoOpWhenMembershipAlreadyActive(): void
     {
         $this->domains->insert(self::TENANT_A, 'acme.com', 1, true);
-        $this->memberships->insert(1, self::TENANT_A, 1);
+        $this->memberships->insert(self::ALICE_PROFILE_ID, self::TENANT_A, 1);
 
         // Must not throw or create a duplicate.
-        $this->service->applyToVerifiedEmail('alice@acme.com', 1);
+        $this->service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
 
         $rows = $this->memberships->listForTenant(self::TENANT_A);
         self::assertCount(1, $rows, 'Only one membership must exist — no duplicate must be created.');
@@ -134,7 +143,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
 
     public function testNoOpWhenNoTenantClaimsDomain(): void
     {
-        $this->service->applyToVerifiedEmail('alice@unknown.com', 1);
+        $this->service->applyToVerifiedEmail('alice@unknown.com', self::ALICE_PROFILE_ID);
 
         self::assertSame(
             [],
@@ -150,21 +159,21 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
         $this->pdo->exec(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (2, 'Bob', '\$2y\$10\$fakehashb', false, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (" . self::BOB_PROFILE_ID . ", 'Bob', '\$2y\$10\$fakehashb', false, 0, 0, datetime('now'), datetime('now'))"
         );
 
         $this->domains->insert(self::TENANT_A, 'shared.com', 1, true);
         $this->domains->insert(self::TENANT_B, 'shared.com', 2, true);
 
-        $this->service->applyToVerifiedEmail('bob@shared.com', 2);
+        $this->service->applyToVerifiedEmail('bob@shared.com', self::BOB_PROFILE_ID);
 
         self::assertNotNull(
-            $this->memberships->findByProfile(2, self::TENANT_A),
-            'Profile 2 must get a membership in Tenant A.'
+            $this->memberships->findByProfile(self::BOB_PROFILE_ID, self::TENANT_A),
+            'Profile ' . self::BOB_PROFILE_ID . ' must get a membership in Tenant A.'
         );
         self::assertNotNull(
-            $this->memberships->findByProfile(2, self::TENANT_B),
-            'Profile 2 must get a membership in Tenant B.'
+            $this->memberships->findByProfile(self::BOB_PROFILE_ID, self::TENANT_B),
+            'Profile ' . self::BOB_PROFILE_ID . ' must get a membership in Tenant B.'
         );
     }
 }

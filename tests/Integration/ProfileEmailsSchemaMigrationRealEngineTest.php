@@ -202,18 +202,27 @@ final class ProfileEmailsSchemaMigrationRealEngineTest extends TestCase
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
              VALUES ('Alice', '\$2y\$10\$hash1', false, 0, 0, datetime('now'), datetime('now'))"
         );
-        $this->pdo->exec(
-            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (1, 'alice@work.com', true, true, datetime('now'))"
-        );
-        $this->pdo->exec(
-            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (1, 'alice@home.com', false, false, datetime('now'))"
-        );
+        // Use lastInsertId() to get the actual profile id — migration 036 may have
+        // already inserted the system admin profile (id=1) before this test runs.
+        $aliceId = (int) $this->pdo->lastInsertId();
+        self::assertGreaterThan(0, $aliceId);
 
-        $stmt = $this->pdo->query('SELECT COUNT(*) FROM profile_emails WHERE profile_id = 1');
-        self::assertNotFalse($stmt);
-        self::assertSame('2', (string) $stmt->fetchColumn());
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (:pid, 'alice@work.com', true, true, datetime('now'))"
+        );
+        $stmt->execute([':pid' => $aliceId]);
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (:pid, 'alice@home.com', false, false, datetime('now'))"
+        );
+        $stmt->execute([':pid' => $aliceId]);
+
+        $countStmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM profile_emails WHERE profile_id = :pid'
+        );
+        $countStmt->execute([':pid' => $aliceId]);
+        self::assertSame('2', (string) $countStmt->fetchColumn());
     }
 
     // ── reversibility ─────────────────────────────────────────────────────────

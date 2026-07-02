@@ -22,6 +22,11 @@ final class ProfileEmailRepositoryTest extends TestCase
     private PDO $pdo;
     private ProfileEmailRepository $repo;
 
+    /** Profile id for "Alice", resolved in setUp via lastInsertId(). */
+    private int $aliceProfileId;
+    /** Profile id for "Bob", resolved in setUp via lastInsertId(). */
+    private int $bobProfileId;
+
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make();
@@ -30,29 +35,36 @@ final class ProfileEmailRepositoryTest extends TestCase
         // Seed two profiles for use across tests.
         // Use false for the BOOLEAN two_factor_enabled column so the INSERT is
         // accepted by both PostgreSQL (strict boolean) and SQLite (stores as 0).
+        //
+        // Note: migration 036 may have already inserted the system admin profile,
+        // so we cannot assume Alice/Bob are id=1/2.  Capture the actual auto-
+        // assigned ids via lastInsertId() so every test is robust to that.
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
              VALUES ('Alice', '\$2y\$10\$hash1', false, 0, 0, datetime('now'), datetime('now'))"
         );
+        $this->aliceProfileId = (int) $this->pdo->lastInsertId();
+
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
              VALUES ('Bob', '\$2y\$10\$hash2', false, 0, 0, datetime('now'), datetime('now'))"
         );
+        $this->bobProfileId = (int) $this->pdo->lastInsertId();
     }
 
     // ── insert ───────────────────────────────────────────────────────────────
 
     public function testInsertReturnsNewId(): void
     {
-        $id = $this->repo->insert(1, 'alice@corp.com');
+        $id = $this->repo->insert($this->aliceProfileId, 'alice@corp.com');
         self::assertGreaterThan(0, $id);
     }
 
     public function testInsertDefaultsToUnverifiedNonPrimary(): void
     {
-        $id = $this->repo->insert(1, 'alice@corp.com');
+        $id = $this->repo->insert($this->aliceProfileId, 'alice@corp.com');
         $row = $this->repo->findById($id);
         self::assertIsArray($row);
         self::assertFalse($row['verified']);
@@ -61,7 +73,7 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testInsertWithVerifiedAndPrimaryFlags(): void
     {
-        $id = $this->repo->insert(1, 'alice@corp.com', verified: true, isPrimary: true);
+        $id = $this->repo->insert($this->aliceProfileId, 'alice@corp.com', verified: true, isPrimary: true);
         $row = $this->repo->findById($id);
         self::assertIsArray($row);
         self::assertTrue($row['verified']);
@@ -77,11 +89,11 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testFindByIdReturnsCorrectRow(): void
     {
-        $id = $this->repo->insert(1, 'alice@corp.com', verified: true);
+        $id = $this->repo->insert($this->aliceProfileId, 'alice@corp.com', verified: true);
         $row = $this->repo->findById($id);
         self::assertIsArray($row);
         self::assertSame($id, $row['id']);
-        self::assertSame(1, $row['profile_id']);
+        self::assertSame($this->aliceProfileId, $row['profile_id']);
         self::assertSame('alice@corp.com', $row['email']);
         self::assertTrue($row['verified']);
     }
@@ -95,11 +107,11 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testFindByEmailReturnsMatchingRow(): void
     {
-        $id = $this->repo->insert(1, 'alice@corp.com', verified: true);
+        $id = $this->repo->insert($this->aliceProfileId, 'alice@corp.com', verified: true);
         $row = $this->repo->findByEmail('alice@corp.com');
         self::assertIsArray($row);
         self::assertSame($id, $row['id']);
-        self::assertSame(1, $row['profile_id']);
+        self::assertSame($this->aliceProfileId, $row['profile_id']);
         self::assertTrue($row['verified']);
     }
 
@@ -107,16 +119,16 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testFindByProfileIdReturnsEmptyForNoEmails(): void
     {
-        self::assertSame([], $this->repo->findByProfileId(1));
+        self::assertSame([], $this->repo->findByProfileId($this->aliceProfileId));
     }
 
     public function testFindByProfileIdReturnsAllEmailsForProfile(): void
     {
-        $this->repo->insert(1, 'alice@work.com', verified: true, isPrimary: true);
-        $this->repo->insert(1, 'alice@home.com');
-        $this->repo->insert(2, 'bob@corp.com', verified: true);
+        $this->repo->insert($this->aliceProfileId, 'alice@work.com', verified: true, isPrimary: true);
+        $this->repo->insert($this->aliceProfileId, 'alice@home.com');
+        $this->repo->insert($this->bobProfileId, 'bob@corp.com', verified: true);
 
-        $aliceEmails = $this->repo->findByProfileId(1);
+        $aliceEmails = $this->repo->findByProfileId($this->aliceProfileId);
         self::assertCount(2, $aliceEmails);
 
         $emails = array_column($aliceEmails, 'email');
@@ -128,16 +140,16 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testFindPrimaryForProfileReturnsNullWhenNoPrimary(): void
     {
-        $this->repo->insert(1, 'alice@corp.com', verified: true, isPrimary: false);
-        self::assertNull($this->repo->findPrimaryForProfile(1));
+        $this->repo->insert($this->aliceProfileId, 'alice@corp.com', verified: true, isPrimary: false);
+        self::assertNull($this->repo->findPrimaryForProfile($this->aliceProfileId));
     }
 
     public function testFindPrimaryForProfileReturnsPrimaryRow(): void
     {
-        $this->repo->insert(1, 'alice@old.com', verified: true, isPrimary: false);
-        $primaryId = $this->repo->insert(1, 'alice@new.com', verified: true, isPrimary: true);
+        $this->repo->insert($this->aliceProfileId, 'alice@old.com', verified: true, isPrimary: false);
+        $primaryId = $this->repo->insert($this->aliceProfileId, 'alice@new.com', verified: true, isPrimary: true);
 
-        $primary = $this->repo->findPrimaryForProfile(1);
+        $primary = $this->repo->findPrimaryForProfile($this->aliceProfileId);
         self::assertIsArray($primary);
         self::assertSame($primaryId, $primary['id']);
         self::assertSame('alice@new.com', $primary['email']);
@@ -147,7 +159,7 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testSetVerifiedUpdatesVerifiedFlag(): void
     {
-        $id = $this->repo->insert(1, 'alice@corp.com', verified: false);
+        $id = $this->repo->insert($this->aliceProfileId, 'alice@corp.com', verified: false);
         $affected = $this->repo->setVerified($id, true);
         self::assertSame(1, $affected);
 
@@ -166,10 +178,10 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testSetPrimaryClearsOldPrimaryForSameProfile(): void
     {
-        $oldId = $this->repo->insert(1, 'alice@old.com', verified: true, isPrimary: true);
-        $newId = $this->repo->insert(1, 'alice@new.com', verified: true, isPrimary: false);
+        $oldId = $this->repo->insert($this->aliceProfileId, 'alice@old.com', verified: true, isPrimary: true);
+        $newId = $this->repo->insert($this->aliceProfileId, 'alice@new.com', verified: true, isPrimary: false);
 
-        $this->repo->setPrimary(1, $newId);
+        $this->repo->setPrimary($this->aliceProfileId, $newId);
 
         $oldRow = $this->repo->findById($oldId);
         $newRow = $this->repo->findById($newId);
@@ -181,24 +193,24 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testSetPrimaryDoesNotAffectOtherProfilesEmails(): void
     {
-        $aliceId  = $this->repo->insert(1, 'alice@corp.com', verified: true, isPrimary: true);
-        $bobId    = $this->repo->insert(2, 'bob@corp.com',   verified: true, isPrimary: true);
+        $aliceId  = $this->repo->insert($this->aliceProfileId, 'alice@corp.com', verified: true, isPrimary: true);
+        $bobId    = $this->repo->insert($this->bobProfileId,   'bob@corp.com',   verified: true, isPrimary: true);
 
         // Promote Alice's secondary to primary.
-        $alice2Id = $this->repo->insert(1, 'alice@home.com', verified: true, isPrimary: false);
-        $this->repo->setPrimary(1, $alice2Id);
+        $alice2Id = $this->repo->insert($this->aliceProfileId, 'alice@home.com', verified: true, isPrimary: false);
+        $this->repo->setPrimary($this->aliceProfileId, $alice2Id);
 
         // Bob's primary must not be touched.
         $bobRow = $this->repo->findById($bobId);
         self::assertIsArray($bobRow);
-        self::assertTrue($bobRow['is_primary'], "setPrimary on profile 1 must not affect profile 2's emails.");
+        self::assertTrue($bobRow['is_primary'], "setPrimary on Alice's profile must not affect Bob's emails.");
     }
 
     // ── delete ───────────────────────────────────────────────────────────────
 
     public function testDeleteRemovesEmailRow(): void
     {
-        $id = $this->repo->insert(1, 'alice@corp.com');
+        $id = $this->repo->insert($this->aliceProfileId, 'alice@corp.com');
         $affected = $this->repo->delete($id);
         self::assertSame(1, $affected);
         self::assertNull($this->repo->findById($id));
@@ -213,16 +225,16 @@ final class ProfileEmailRepositoryTest extends TestCase
 
     public function testCountForProfileReturnsZeroInitially(): void
     {
-        self::assertSame(0, $this->repo->countForProfile(1));
+        self::assertSame(0, $this->repo->countForProfile($this->aliceProfileId));
     }
 
     public function testCountForProfileReturnsCorrectCount(): void
     {
-        $this->repo->insert(1, 'alice@work.com');
-        $this->repo->insert(1, 'alice@home.com');
-        $this->repo->insert(2, 'bob@corp.com');
+        $this->repo->insert($this->aliceProfileId, 'alice@work.com');
+        $this->repo->insert($this->aliceProfileId, 'alice@home.com');
+        $this->repo->insert($this->bobProfileId, 'bob@corp.com');
 
-        self::assertSame(2, $this->repo->countForProfile(1));
-        self::assertSame(1, $this->repo->countForProfile(2));
+        self::assertSame(2, $this->repo->countForProfile($this->aliceProfileId));
+        self::assertSame(1, $this->repo->countForProfile($this->bobProfileId));
     }
 }
