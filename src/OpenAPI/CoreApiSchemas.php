@@ -79,6 +79,7 @@ final class CoreApiSchemas
     public static function routes(): array
     {
         return array_merge(
+            self::authRoutes(),
             self::userRoutes(),
             self::roleRoutes(),
             self::tenantRoutes(),
@@ -92,6 +93,274 @@ final class CoreApiSchemas
             self::settingsRoutes(),
             self::brandingRoutes()
         );
+    }
+
+    /**
+     * Auth surface route declarations: login, 2FA login-completion,
+     * multi-tenant selection, /me (read + self-service update),
+     * token refresh/logout, and all /api/auth/2fa/* management routes.
+     *
+     * All shapes are derived directly from AuthHandler and TwoFactorHandler
+     * (post-identity-rewrite, WC-388a61e3). No auth gate is declared on the
+     * public login paths (they are unauthenticated); the /me, refresh, logout,
+     * and 2FA management routes are self-authenticated via HTTP-only cookie and
+     * carry no requiredRole/requiredPermission (the handlers validate the
+     * access-token cookie themselves).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function authRoutes(): array
+    {
+        // ── Public login surface ─────────────────────────────────────────────
+
+        // POST /api/login  — AuthHandler::handle()
+        // Returns 200 (session issued), 202 (2FA required), or 200 with
+        // requires_tenant_selection for multi-membership profiles.
+        $loginRoute = [
+            'method' => 'POST',
+            'path' => '/api/login',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Authenticate with email and password',
+                'tags' => ['auth'],
+                'request' => 'LoginRequest',
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'Session issued (single membership) or tenant-selection prompt (multi-membership)',
+                        'LoginResponse'
+                    ),
+                    202 => self::jsonResponse('2FA challenge — temp token set in cookie', 'Login2faRequiredResponse'),
+                    401 => self::errorResponse('Invalid credentials or unverified email'),
+                    429 => self::errorResponse('Too many attempts'),
+                ],
+            ],
+        ];
+
+        // POST /api/login/2fa  — AuthHandler::handle2fa()
+        // Completes the 2FA challenge issued by POST /api/login.
+        // On success may return a session (200) or a tenant-selection prompt.
+        $login2faRoute = [
+            'method' => 'POST',
+            'path' => '/api/login/2fa',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Complete login with a TOTP code or backup code',
+                'tags' => ['auth'],
+                'request' => 'TwoFaLoginRequest',
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'Session issued, or tenant-selection prompt when the profile has multiple memberships',
+                        'LoginResponse'
+                    ),
+                    401 => self::errorResponse('Invalid or expired temp token, or invalid 2FA code'),
+                    429 => self::errorResponse('Too many attempts'),
+                ],
+            ],
+        ];
+
+        // POST /api/auth/select-tenant  — AuthHandler::handleSelectTenant()
+        // ADR 0005 §6: completes a multi-membership login by selecting a tenant.
+        $selectTenantRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/select-tenant',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Select the active tenant after a multi-membership login',
+                'tags' => ['auth'],
+                'request' => 'SelectTenantRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Session issued for the selected tenant', 'SessionUserResponse'),
+                    400 => self::errorResponse('tenant_id missing or not numeric'),
+                    401 => self::errorResponse('No pending selection token, expired/invalid token, or invalid tenant'),
+                ],
+            ],
+        ];
+
+        // ── Authenticated session surface ────────────────────────────────────
+
+        // GET /api/me  — AuthHandler::handleMe()
+        // Returns the caller's session claims (id/email/role/tenant_id).
+        $getMeRoute = [
+            'method' => 'GET',
+            'path' => '/api/me',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Return the current authenticated user from the access-token claims',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('The caller\'s session identity', 'MeResponse'),
+                    401 => self::errorResponse('Missing or invalid access token'),
+                ],
+            ],
+        ];
+
+        // PATCH /api/me  — AuthHandler::handleUpdateMe()
+        // Self-service email/password change; re-issues auth cookies on success.
+        $patchMeRoute = [
+            'method' => 'PATCH',
+            'path' => '/api/me',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Self-service profile update (email and/or password)',
+                'tags' => ['auth'],
+                'request' => 'MeUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Updated self profile; auth cookies re-issued', 'MeResponse'),
+                    400 => self::errorResponse('No changes, invalid email format, or password too short'),
+                    401 => self::errorResponse('Missing/invalid token, or current password incorrect'),
+                    409 => self::errorResponse('Email already exists in the tenant'),
+                ],
+            ],
+        ];
+
+        // POST /api/auth/refresh  — AuthHandler::handleRefresh()
+        // Issues a new access-token cookie from a valid refresh-token cookie.
+        $refreshRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/refresh',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Issue a new access token from the refresh-token cookie',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('New access-token cookie set; body carries status:success', 'RefreshResponse'),
+                    401 => self::errorResponse('Missing, invalid, expired, or revoked refresh token'),
+                    429 => self::errorResponse('Too many attempts'),
+                ],
+            ],
+        ];
+
+        // POST /api/auth/logout  — AuthHandler::handleLogout()
+        // Revokes both jtis and clears auth cookies. Idempotent.
+        $logoutRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/logout',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Logout — revoke both auth tokens and clear cookies',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Always 200; cookies cleared', 'LogoutResponse'),
+                ],
+            ],
+        ];
+
+        // ── 2FA management surface (all require a valid access-token cookie) ─
+
+        // POST /api/auth/2fa/setup  — TwoFactorHandler::setup()
+        $setupRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/2fa/setup',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Generate a TOTP secret and QR-code URL for 2FA enrolment',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('The plaintext TOTP secret and a QR-code URL for the authenticator app', 'TwoFaSetupResponse'),
+                    400 => self::errorResponse('2FA is already enabled'),
+                    401 => self::errorResponse('Missing or invalid access token'),
+                    404 => self::errorResponse('User/profile not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ],
+        ];
+
+        // POST /api/auth/2fa/confirm  — TwoFactorHandler::confirm()
+        $confirmRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/2fa/confirm',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Confirm 2FA setup with a TOTP code — stores the encrypted secret and generates backup codes',
+                'tags' => ['auth'],
+                'request' => 'TwoFaConfirmRequest',
+                'responses' => [
+                    200 => self::jsonResponse('2FA enabled; 15 plaintext backup codes returned (store immediately — not stored in plaintext)', 'TwoFaConfirmResponse'),
+                    400 => self::errorResponse('code or secret missing'),
+                    401 => self::errorResponse('Missing/invalid access token, or invalid TOTP code'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ],
+        ];
+
+        // POST /api/auth/2fa/disable  — TwoFactorHandler::disable()
+        $disableRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/2fa/disable',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Disable 2FA — clears the stored secret and invalidates all backup codes',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('2FA disabled', 'SimpleMessageResponse'),
+                    401 => self::errorResponse('Missing or invalid access token'),
+                    404 => self::errorResponse('User/profile not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ],
+        ];
+
+        // POST /api/auth/2fa/regenerate-codes  — TwoFactorHandler::regenerateCodes()
+        $regenerateCodesRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/2fa/regenerate-codes',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Invalidate existing backup codes and generate 15 new ones',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('15 new plaintext backup codes; old codes are invalidated', 'TwoFaRegenerateCodesResponse'),
+                    400 => self::errorResponse('2FA is not enabled'),
+                    401 => self::errorResponse('Missing or invalid access token'),
+                    404 => self::errorResponse('User/profile not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ],
+        ];
+
+        // GET /api/auth/2fa/status  — TwoFactorHandler::status()
+        $statusRoute = [
+            'method' => 'GET',
+            'path' => '/api/auth/2fa/status',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Return the caller\'s 2FA enabled flag and available backup-code count',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('2FA status and backup-code availability', 'TwoFaStatusResponse'),
+                    401 => self::errorResponse('Missing or invalid access token'),
+                    404 => self::errorResponse('User/profile not found'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ],
+        ];
+
+        return [
+            $loginRoute,
+            $login2faRoute,
+            $selectTenantRoute,
+            $getMeRoute,
+            $patchMeRoute,
+            $refreshRoute,
+            $logoutRoute,
+            $setupRoute,
+            $confirmRoute,
+            $disableRoute,
+            $regenerateCodesRoute,
+            $statusRoute,
+        ];
     }
 
     /**
@@ -1022,12 +1291,137 @@ final class CoreApiSchemas
 
         $permissionRef = ['oneOf' => [self::int(), self::str()]];
 
+        // ---- Auth component schemas (WC-388a61e3) ----
+
+        // The resolved user that appears in login / GET /api/me / PATCH /api/me.
+        // id is the legacy users.id during the dual-claim window (may equal
+        // profile_id for pre-migration accounts); role is the role name string.
+        $sessionUser = self::object([
+            'id' => self::int(),
+            'email' => self::str(),
+            'role' => self::str(),
+            'tenant_id' => self::int(),
+        ], ['id', 'email', 'role', 'tenant_id']);
+
+        // Self-profile (GET /api/me and PATCH /api/me shapeSelf): no tenant_id
+        // — the handler returns id/email/role only from the token claims / users row.
+        $selfUser = self::object([
+            'id' => self::int(),
+            'email' => self::str(),
+            'role' => self::str(),
+        ], ['id', 'email', 'role']);
+
+        // One selectable membership entry returned by the tenant-selection prompt.
+        $membershipEntry = self::object([
+            'tenant_id' => self::int(),
+            'tenant_name' => self::str(),
+            'role' => self::str(),
+        ], ['tenant_id', 'tenant_name', 'role']);
+
         return [
             'Error' => self::object([
                 'error' => self::str(),
                 'details' => ['type' => 'object'],
             ], ['error']),
             'MutationResponse' => self::dataEnvelope($mutationResult),
+
+            // ---- Auth schemas ----
+
+            // POST /api/login — request body
+            'LoginRequest' => self::object([
+                'email' => self::str(),
+                'password' => self::str(),
+            ], ['email', 'password']),
+
+            // POST /api/login — 200 success (single membership → session issued,
+            // OR multi-membership → requires_tenant_selection prompt).
+            // Inferred from AuthHandler::issueSessionForProfile() and
+            // AuthHandler::requireTenantSelection() — both are 200 paths.
+            'LoginResponse' => self::object([
+                // Present when a session is issued directly.
+                'user' => array_merge($sessionUser, ['nullable' => true]),
+                // Present (true) when the profile has multiple active memberships
+                // and a selection token has been set in the cookie.
+                'requires_tenant_selection' => ['type' => 'boolean', 'nullable' => true],
+                // Non-empty only when requires_tenant_selection is true.
+                'memberships' => [
+                    'type' => 'array',
+                    'items' => $membershipEntry,
+                    'nullable' => true,
+                ],
+            ], []),
+
+            // POST /api/login — 202 (2FA required)
+            'Login2faRequiredResponse' => self::object([
+                'requires_2fa' => self::bool(),
+            ], ['requires_2fa']),
+
+            // POST /api/login/2fa — request body
+            'TwoFaLoginRequest' => self::object([
+                'code' => self::str(),
+            ], ['code']),
+
+            // POST /api/auth/select-tenant — request body
+            'SelectTenantRequest' => self::object([
+                'tenant_id' => self::int(),
+            ], ['tenant_id']),
+
+            // POST /api/auth/select-tenant — 200 response (session issued)
+            'SessionUserResponse' => self::object([
+                'user' => $sessionUser,
+            ], ['user']),
+
+            // GET /api/me — 200 response (AuthHandler::handleMe reads from token claims)
+            'MeResponse' => self::object([
+                'user' => $selfUser,
+            ], ['user']),
+
+            // PATCH /api/me — request body
+            'MeUpdateRequest' => self::object([
+                'email' => self::str(),
+                'password' => self::str(),
+                'current_password' => self::str(),
+            ], ['current_password']),
+
+            // POST /api/auth/refresh — 200 response (AuthHandler::handleRefresh)
+            'RefreshResponse' => self::object([
+                'status' => self::str(),
+            ], ['status']),
+
+            // POST /api/auth/logout — 200 response (AuthHandler::handleLogout)
+            'LogoutResponse' => self::object([
+                'status' => self::str(),
+            ], ['status']),
+
+            // POST /api/auth/2fa/setup — 200 response (TwoFactorHandler::setup)
+            'TwoFaSetupResponse' => self::object([
+                'secret' => self::str(),
+                'qrCodeUrl' => self::str(),
+            ], ['secret', 'qrCodeUrl']),
+
+            // POST /api/auth/2fa/confirm — request body (TwoFactorHandler::confirm)
+            'TwoFaConfirmRequest' => self::object([
+                'code' => self::str(),
+                'secret' => self::str(),
+            ], ['code', 'secret']),
+
+            // POST /api/auth/2fa/confirm — 200 response
+            'TwoFaConfirmResponse' => self::object([
+                'backup_codes' => ['type' => 'array', 'items' => self::str()],
+                'message' => self::str(),
+            ], ['backup_codes', 'message']),
+
+            // POST /api/auth/2fa/regenerate-codes — 200 response
+            'TwoFaRegenerateCodesResponse' => self::object([
+                'backup_codes' => ['type' => 'array', 'items' => self::str()],
+                'message' => self::str(),
+            ], ['backup_codes', 'message']),
+
+            // GET /api/auth/2fa/status — 200 response (TwoFactorHandler::status)
+            'TwoFaStatusResponse' => self::object([
+                'enabled' => self::bool(),
+                'backup_codes_available' => self::int(),
+            ], ['enabled', 'backup_codes_available']),
 
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
