@@ -598,18 +598,26 @@ class AuthHandler
      * epoch cutover handoff is deferred to the users-table retirement step; do not
      * change the source-of-truth here without that step.
      *
-     * @param int         $profileId       Authenticated profile.
-     * @param int         $activeTenantId  The resolved (authorised) tenant.
-     * @param string      $email           Normalised email for claims/response.
-     * @param int         $profileEpoch    Fallback epoch when no legacy users row.
-     * @param Request     $request         For audit context.
+     * @param int                  $profileId       Authenticated profile.
+     * @param int                  $activeTenantId  The resolved (authorised) tenant.
+     * @param string               $email           Normalised email for claims/response.
+     * @param int                  $profileEpoch    Fallback epoch when no legacy users row.
+     * @param Request              $request         For audit context.
+     * @param string               $auditAction     Audit event name to emit for this session
+     *                                               issuance. Defaults to the login event; the
+     *                                               tenant-switch path passes a distinct event so
+     *                                               switches are not indistinguishable from logins
+     *                                               in the audit trail (WC-f8164c87).
+     * @param array<string, mixed> $auditMetadata   Extra audit metadata to attach to the event.
      */
     private function issueSessionForProfile(
         int $profileId,
         int $activeTenantId,
         string $email,
         int $profileEpoch,
-        Request $request
+        Request $request,
+        string $auditAction = 'auth.login.success',
+        array $auditMetadata = []
     ): Response {
         // Legacy users row (dual-claim window): carries role_id + legacy epoch.
         $legacyRow = $this->fetchLegacyUserRow($email, $activeTenantId);
@@ -645,7 +653,7 @@ class AuthHandler
         CookieManager::setAccessToken($this->jwtParser->create($allClaims, 900, 'access'), 900);
         CookieManager::setRefreshToken($this->jwtParser->create($allClaims, 604800, 'refresh'), 604800);
 
-        $this->audit('auth.login.success', $request, $activeTenantId, $profileId);
+        $this->audit($auditAction, $request, $activeTenantId, $profileId, $auditMetadata);
 
         $userId = $legacyRow !== null ? (int) $legacyRow['id'] : $profileId;
 
@@ -843,7 +851,9 @@ class AuthHandler
      * Handle GET /api/me - Get current user session
      *
      * Returns the current authenticated user's data by validating the
-     * access token from cookies.
+     * access token from cookies. Also includes the caller's own active
+     * memberships (WC-f8164c87) so the sidenav tenant-switcher can render
+     * the available tenants without a separate round-trip.
      *
      * @param Request $request HTTP request
      * @return Response User data on success (200) or 401 on auth failure
@@ -857,15 +867,124 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
+        // Resolve the profile_id for the memberships lookup (new-claims token
+        // preferred; fall back gracefully so legacy-only tokens still work).
+        $profileId = isset($claims['profile_id']) && is_numeric($claims['profile_id'])
+            ? (int) $claims['profile_id']
+            : null;
+
+        $memberships = $profileId !== null
+            ? $this->listActiveMemberships($profileId)
+            : [];
+
+        // Resolve the active tenant for display. Legacy tokens carry `tenant_id`;
+        // post-cutover (new-claims-only) tokens carry `active_tenant_id` and leave
+        // `tenant_id` NULL. Fall back to `active_tenant_id` so the reported active
+        // tenant is correct for BOTH token shapes (mirrors
+        // TokenValidator::extractPrincipal and the auth-context login path) — a
+        // NULL here made the sidebar TenantSwitcher show "No tenant" and never mark
+        // the active tenant after a switch (WC-f8164c87).
+        $activeTenantId = $claims['tenant_id'] ?? $claims['active_tenant_id'] ?? null;
+
+        // Resolve the identity fields for BOTH token shapes. A post-cutover
+        // (new-claims-only) token carries no legacy `user_id` claim — reading it
+        // directly raised an "Undefined array key" warning, so fall back to
+        // `profile_id` (mirrors TokenValidator::extractPrincipal). `email`/`role`
+        // are always present on session tokens but are coalesced defensively so a
+        // minimal token can never fault this read-only endpoint.
+        $userId = $claims['user_id'] ?? $claims['profile_id'] ?? null;
+        $email  = $claims['email'] ?? null;
+        $role   = $claims['role'] ?? null;
+
         // Return user data from token claims
         return Response::json([
             'user' => [
-                'id' => $claims['user_id'],
-                'email' => $claims['email'],
-                'role' => $claims['role'],
-                'tenant_id' => $claims['tenant_id'],
-            ]
+                'id' => $userId,
+                'email' => $email,
+                'role' => $role,
+                'tenant_id' => $activeTenantId,
+            ],
+            'memberships' => $memberships,
         ], 200);
+    }
+
+    /**
+     * Handle POST /api/auth/switch-tenant — authenticated tenant switch
+     * (WC-f8164c87).
+     *
+     * Lets an ALREADY-LOGGED-IN profile with 2+ active memberships change their
+     * active tenant without re-logging in. Security model:
+     *
+     *  1. Requires a FULL session (access token cookie) — NOT a selection cookie.
+     *  2. Takes {tenant_id} in the request body.
+     *  3. Re-validates that the caller's profile holds an ACTIVE membership in
+     *     the requested tenant (never trust the body alone — 403 otherwise).
+     *  4. Re-mints the session JWT with the new active_tenant_id using the same
+     *     issueSessionForProfile() path as login, so claim semantics, epoch
+     *     handling, and dual-claim invariants are identical.
+     *  5. Returns the new session user shape and re-issues both auth cookies.
+     *
+     * Split-brain invariant: the re-minted token carries ONLY the chosen
+     * active_tenant_id. Any prior active_tenant_id is superseded — no two
+     * valid session cookies can exist for different active tenants at the same
+     * time (both cookies are replaced atomically by CookieManager::set*).
+     *
+     * @param Request              $request HTTP request with { tenant_id } in body.
+     * @param array<string, mixed> $params  Unused route params.
+     * @return Response Session (200), 400, 401, or 403.
+     */
+    public function handleSwitchTenant(Request $request, array $params = []): Response
+    {
+        // Require a full session (validated access token).
+        $claims = $this->tokenValidator->validateAccessToken();
+        if ($claims === null) {
+            return Response::error('Unauthorized', 401);
+        }
+
+        // Resolve the profile from the token — only new-claims tokens carry
+        // profile_id; legacy-only tokens cannot switch tenants.
+        $profileId = isset($claims['profile_id']) && is_numeric($claims['profile_id'])
+            ? (int) $claims['profile_id']
+            : null;
+
+        if ($profileId === null) {
+            return Response::error('Tenant switching requires a current-session token', 401);
+        }
+
+        $body = JsonBody::parsed($request);
+        if (!isset($body['tenant_id']) || !is_numeric($body['tenant_id'])) {
+            return Response::error('tenant_id is required', 400);
+        }
+        $targetTenantId = (int) $body['tenant_id'];
+
+        // Authorization gate: the profile MUST hold an ACTIVE membership in the
+        // target tenant. Never trust the request body alone — this is the
+        // security boundary that prevents escalation to any arbitrary tenant.
+        if (!$this->hasActiveMembershipInTenant($profileId, $targetTenantId)) {
+            return Response::error('Access to the requested tenant is forbidden', 403);
+        }
+
+        // Re-read the email from claims for issueSessionForProfile().
+        $email = isset($claims['email']) && is_string($claims['email'])
+            ? $claims['email']
+            : '';
+
+        // Re-read the current profile epoch so the freshly minted token
+        // reflects any post-login password changes.
+        $profileEpoch = $this->currentProfileTokenEpoch($profileId);
+
+        // Mint a new session for the chosen (profile, tenant) pair using the
+        // same issueSessionForProfile() as the login path — identical claim
+        // model, epoch semantics, dual-claim window behaviour.
+        return $this->issueSessionForProfile(
+            $profileId,
+            $targetTenantId,
+            $email,
+            $profileEpoch,
+            $request,
+            'auth.tenant_switch',
+            ['to_tenant_id' => $targetTenantId]
+        );
     }
 
     // MIN_PASSWORD_LENGTH is now the single PasswordPolicy::MIN_LENGTH constant.

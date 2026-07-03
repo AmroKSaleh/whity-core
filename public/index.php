@@ -551,6 +551,13 @@ $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
 $router->register('PATCH', '/api/me', [$authHandler, 'handleUpdateMe'], null);
 $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);
 $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], null);
+// WC-f8164c87: authenticated tenant switch. Requires a full session (access
+// token cookie), validates active membership in the target tenant, re-mints
+// session JWT with the new active_tenant_id. NOT a public route — unlike
+// select-tenant (which runs pre-session), this runs POST-login with a full
+// access token, so it is NOT in PUBLIC_ROUTES and goes through the same
+// tenant-isolation middleware as refresh/logout.
+$router->register('POST', '/api/auth/switch-tenant', [$authHandler, 'handleSwitchTenant'], null);
 
 // 10b. Register 2FA handler
 // Reuses the single $totpService built at step 3b (WC-95) so setup/confirm and login share one key.
