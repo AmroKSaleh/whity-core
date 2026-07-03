@@ -399,15 +399,18 @@ class OusApiHandler
                 );
             }
 
-            // Check if OU has assigned users
-            $usersStmt = $this->db->prepare('
-                SELECT COUNT(*) FROM users WHERE ou_id = ? AND tenant_id = ?
-            ');
+            // Check if OU has ACTIVE assigned members (ROLE data: ou_id now lives on
+            // memberships — ADR 0005 §3; the tenant predicate is on memberships.tenant_id).
+            // Only active memberships block deletion — an OU whose only members are
+            // invited/suspended has no active occupants and can be deleted.
+            $usersStmt = $this->db->prepare("
+                SELECT COUNT(*) FROM memberships WHERE ou_id = ? AND tenant_id = ? AND status = 'active'
+            ");
             $usersStmt->execute([$id, $tenantId]);
             $userCount = $usersStmt->fetchColumn();
             if ($userCount > 0) {
                 return Response::error(
-                    'Cannot delete organizational unit with ' . $userCount . ' assigned user(s)',
+                    'Cannot delete organizational unit with ' . $userCount . ' assigned member(s)',
                     409
                 );
             }
@@ -637,12 +640,18 @@ class OusApiHandler
     }
 
     /**
-     * GET /api/ous/{id}/members - List the users assigned to an organizational unit.
+     * GET /api/ous/{id}/members - List the members assigned to an organizational unit.
      *
-     * Returns the users whose `ou_id` is this OU, shaped to the public user
-     * contract ({id, name, email, role, tenantId, createdAt}) — the password hash
-     * is never included. Tenant-scoped exactly like {@see self::roles()}: a caller
+     * Returns the members whose `ou_id` is this OU, shaped to the public user
+     * contract ({id, name, email, role, tenantId, createdAt}) — credentials are
+     * never included. Tenant-scoped exactly like {@see self::roles()}: a caller
      * that cannot see the OU receives a 404.
+     *
+     * IDENTITY data (email, display_name) is resolved via profile_emails → profiles
+     * (ADR 0005 §1-2). ROLE/OU data (role_id, ou_id) is resolved via memberships
+     * (ADR 0005 §3). The tenant predicate is on memberships.tenant_id; the OU
+     * visibility guard above already proved the OU belongs to this tenant, so
+     * the ou_id predicate combined with the tenant predicate cannot cross tenants.
      */
     public function members(Request $request, array $params): Response
     {
@@ -658,19 +667,28 @@ class OusApiHandler
                 return Response::error('Organizational unit not found', 404);
             }
 
-            // @tenant-guard-ignore: OU visibility already enforced by ouIsVisible($id,$tenantId) guard above; lookup keyed on the visible ou_id
-            $stmt = $this->db->prepare('
-                SELECT u.id, u.email, u.created_at, u.tenant_id, r.name AS role
-                FROM users u
-                JOIN roles r ON u.role_id = r.id
-                WHERE u.ou_id = ?
-                ORDER BY u.created_at DESC
-            ');
-            $stmt->execute([$id]);
+            // ROLE/IDENTITY data: memberships.ou_id + memberships.tenant_id scope the
+            // set; profile_emails supplies the login email (IDENTITY, ADR 0005 §2);
+            // roles supplies the role name (ROLE, ADR 0005 §3).
+            // The tenant predicate is on memberships.tenant_id — the OU guard above
+            // already enforced that this ou_id belongs to $tenantId.
+            // Only ACTIVE members are listed, matching the active semantics of the
+            // stat/list/delete-guard queries (invited/suspended members are excluded).
+            $stmt = $this->db->prepare("
+                SELECT m.id, pe.email, p.display_name, m.created_at, m.tenant_id,
+                       m.profile_id, r.name AS role
+                FROM memberships m
+                JOIN profiles p ON p.id = m.profile_id
+                JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                JOIN roles r ON r.id = m.role_id
+                WHERE m.ou_id = ? AND m.tenant_id = ? AND m.status = 'active'
+                ORDER BY m.created_at DESC
+            ");
+            $stmt->execute([$id, $tenantId]);
             /** @var array<int, array<string, mixed>> $rows */
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            $data = array_map(fn (array $row): array => $this->toPublicUser($row), $rows);
+            $data = array_map(fn (array $row): array => $this->toPublicMember($row), $rows);
 
             return Response::json(['data' => $data], 200);
         } catch (\Exception $e) {
@@ -742,24 +760,28 @@ class OusApiHandler
     }
 
     /**
-     * Map a raw users row to the public API contract consumed by the web UI.
+     * Map a membership+profile row to the public member API contract.
      *
-     * Mirrors {@see \Whity\Api\UsersApiHandler::toPublicUser()}: the `users`
-     * table has no `name` column, so `name` is derived from the email local-part;
-     * snake_case columns are aliased to the camelCase keys the frontend binds; and
-     * the password hash is never included.
+     * IDENTITY data (email, display_name) comes from profiles/profile_emails
+     * (ADR 0005 §1-2). The legacy `id` field is the membership id rather than
+     * a users.id, and `name` prefers profiles.display_name over the email
+     * local-part when a display name was set.
      *
-     * @param array<string, mixed> $row Raw row from the members SELECT.
+     * @param array<string, mixed> $row Raw row from the memberships SELECT joining profiles/profile_emails/roles.
      * @return array{id: int, name: string, email: string, role: string, tenantId: int, createdAt: string|null}
      */
-    private function toPublicUser(array $row): array
+    private function toPublicMember(array $row): array
     {
         $email = (string)($row['email'] ?? '');
-        $localPart = strstr($email, '@', true);
+        $displayName = (string)($row['display_name'] ?? '');
+        if ($displayName === '') {
+            $localPart = strstr($email, '@', true);
+            $displayName = ($localPart !== false && $localPart !== '') ? $localPart : $email;
+        }
 
         return [
-            'id' => (int)($row['id'] ?? 0),
-            'name' => $localPart !== false && $localPart !== '' ? $localPart : $email,
+            'id' => (int)($row['profile_id'] ?? $row['id'] ?? 0),
+            'name' => $displayName,
             'email' => $email,
             'role' => (string)($row['role'] ?? ''),
             'tenantId' => (int)($row['tenant_id'] ?? 0),

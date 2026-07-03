@@ -148,6 +148,14 @@ final class AdminApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, ?, 'x', ?, datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, "u{$id}@example.com", $roleId]);
+
+        // WC-d88de9fa: stats() now counts memberships (ADR 0005 §3).
+        // Seed a membership so the aggregate counts match the seeded users.
+        $mStmt = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        );
+        $mStmt->execute([$id, $tenantId, $roleId]);
     }
 
     private static function makeSqliteSchema(): PDO
@@ -186,6 +194,9 @@ final class AdminApiHandlerRealEngineTest extends TestCase
                     : parent::query($query, $fetchMode, ...$fetchModeArgs);
             }
 
+            /**
+             * @param array<int|string, mixed> $options
+             */
             public function prepare(string $query, array $options = []): \PDOStatement|false
             {
                 return parent::prepare(self::translate($query), $options);
@@ -235,6 +246,21 @@ final class AdminApiHandlerRealEngineTest extends TestCase
                 email TEXT NOT NULL,
                 password TEXT NOT NULL,
                 role_id INTEGER,
+                created_at TEXT
+            )
+        ');
+
+        // WC-d88de9fa: stats() now counts memberships (ADR 0005 §3).
+        // role_id is NOT NULL to match production migration 030 (avoid masking a
+        // real constraint the handler SQL relies on).
+        $pdo->exec('
+            CREATE TABLE memberships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                tenant_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                ou_id INTEGER,
+                status TEXT NOT NULL DEFAULT \'active\',
                 created_at TEXT
             )
         ');

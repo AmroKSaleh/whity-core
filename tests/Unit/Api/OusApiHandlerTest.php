@@ -491,7 +491,9 @@ class OusApiHandlerTest extends TestCase
         $this->assertSame(409, $response->getStatusCode());
         $responseData = json_decode($response->getBody(), true);
         $this->assertArrayHasKey('error', $responseData);
-        $this->assertStringContainsString('user', strtolower($responseData['error']));
+        // WC-d88de9fa: the guard now checks memberships (ADR 0005 §3); error
+        // message uses "member(s)" instead of "user(s)".
+        $this->assertStringContainsString('member', strtolower($responseData['error']));
     }
 
     // ==================== ROLE ASSIGNMENT TESTS ====================

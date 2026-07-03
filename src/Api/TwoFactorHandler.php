@@ -108,6 +108,71 @@ class TwoFactorHandler
     }
 
     /**
+     * Read 2FA state for a caller from the IDENTITY source (ADR 0005 §1).
+     *
+     * When a profile_id is available in the claims the authoritative IDENTITY
+     * store is `profiles`; otherwise fall back to the legacy `users` row (dual-
+     * window transition). This ensures status/setup/regenerateCodes/disable all
+     * read from the same store that login challenges against (WC-c35c4ce0 rewrote
+     * login to read from profiles, so reading `users` here would cause split-brain).
+     *
+     * Returns an associative array with at least:
+     *   email                         (string)  — from profile_emails (IDENTITY)
+     *   two_factor_enabled            (mixed)   — raw column value (use dbTruthy)
+     *   two_factor_backup_codes_version (int)
+     * or null when neither source resolves the caller.
+     *
+     * @param array<string, mixed> $claims    Validated token claims.
+     * @param int                  $userId    Legacy users.id (for fallback path).
+     * @param int|null             $tenantId  Resolved tenant (null = system/unscoped).
+     * @return array<string, mixed>|null
+     */
+    private function readIdentityRow(array $claims, int $userId, ?int $tenantId): ?array
+    {
+        // Prefer the profile path: resolve profileId, then read from profiles +
+        // profile_emails which is what login reads (ADR 0005 §1-2).
+        $profileId = $this->resolveProfileId($claims, $userId, $tenantId);
+
+        if ($profileId !== null && $profileId > 0) {
+            try {
+                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                $pStmt = $this->db->prepare(
+                    'SELECT p.two_factor_enabled, p.two_factor_backup_codes_version,
+                            pe.email
+                     FROM profiles p
+                     JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
+                     WHERE p.id = ? LIMIT 1'
+                );
+                $pStmt->execute([$profileId]);
+                $row = $pStmt->fetch(PDO::FETCH_ASSOC);
+                if (is_array($row) && $row !== []) {
+                    return $row;
+                }
+            } catch (\Exception) {
+                // Fall through to the legacy path if the profile query fails.
+            }
+        }
+
+        // Legacy fallback: read from the users row (dual-window transition).
+        if ($tenantId === null) {
+            // @tenant-guard-ignore: self-scoped by the caller's own token-derived user id
+            $uStmt = $this->db->prepare(
+                'SELECT email, two_factor_enabled, two_factor_backup_codes_version
+                 FROM users WHERE id = ? LIMIT 1'
+            );
+            $uStmt->execute([$userId]);
+        } else {
+            $uStmt = $this->db->prepare(
+                'SELECT email, two_factor_enabled, two_factor_backup_codes_version
+                 FROM users WHERE id = ? AND tenant_id = ? LIMIT 1'
+            );
+            $uStmt->execute([$userId, $tenantId]);
+        }
+        $row = $uStmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? $row : null;
+    }
+
+    /**
      * Resolve the caller's profile_id so 2FA state can be mirrored onto the
      * PROFILE model (ADR 0005). After the WC-c35c4ce0 login rewrite, login reads
      * two_factor_enabled/secret/backup_codes_version from `profiles`, so a 2FA
@@ -135,7 +200,7 @@ class TwoFactorHandler
                 $uStmt->execute([$userId, $tenantId]);
             }
             $email = $uStmt->fetchColumn();
-            if ($email === false) {
+            if (!is_string($email) || $email === '') {
                 return null;
             }
 
@@ -144,7 +209,9 @@ class TwoFactorHandler
             $peStmt->execute([$email]);
             $profileId = $peStmt->fetchColumn();
 
-            return $profileId !== false ? (int) $profileId : null;
+            return (is_int($profileId) || is_string($profileId)) && (int) $profileId > 0
+                ? (int) $profileId
+                : null;
         } catch (\Exception) {
             return null;
         }
@@ -242,18 +309,13 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
-            // Get user email for QR code
-            // WC-191: pin the self read to the caller's tenant (system stays unscoped).
+            // Get user email for QR code.
+            // IDENTITY data: email and 2FA state are now read from profiles/profile_emails
+            // (ADR 0005 §1-2) via readIdentityRow(), which prefers the profile path
+            // when a profile_id claim is present and falls back to users for dual-window.
+            // WC-191: tenant scoping preserved via scopeTenantId().
             $tenantId = $this->scopeTenantId();
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
-                $stmt = $this->db->prepare('SELECT email, two_factor_enabled FROM users WHERE id = ?');
-                $stmt->execute([$userId]);
-            } else {
-                $stmt = $this->db->prepare('SELECT email, two_factor_enabled FROM users WHERE id = ? AND tenant_id = ?');
-                $stmt->execute([$userId, $tenantId]);
-            }
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
 
             if (!$user) {
                 return Response::error('User not found', 404);
@@ -406,24 +468,11 @@ class TwoFactorHandler
             // WC-191: pin the self read/write to the caller's tenant (system stays unscoped).
             $tenantId = $this->scopeTenantId();
 
-            // Get current version before disabling
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
-                $stmt = $this->db->prepare('
-                    SELECT two_factor_backup_codes_version
-                    FROM users
-                    WHERE id = ?
-                ');
-                $stmt->execute([$userId]);
-            } else {
-                $stmt = $this->db->prepare('
-                    SELECT two_factor_backup_codes_version
-                    FROM users
-                    WHERE id = ? AND tenant_id = ?
-                ');
-                $stmt->execute([$userId, $tenantId]);
-            }
-            $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+            // Get current version before disabling.
+            // IDENTITY data: backup_codes_version is read from profiles (ADR 0005 §1)
+            // via readIdentityRow(), which prefers the profile path and falls back to
+            // users for the dual-window transition.
+            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
 
             if ($user && (int) $user['two_factor_backup_codes_version'] > 0) {
                 // Invalidate all backup codes for this version. Cast both args to
@@ -503,24 +552,11 @@ class TwoFactorHandler
             // WC-191: pin the self read/write to the caller's tenant (system stays unscoped).
             $tenantId = $this->scopeTenantId();
 
-            // Get user and check if 2FA is enabled
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
-                $stmt = $this->db->prepare('
-                    SELECT two_factor_enabled, two_factor_backup_codes_version
-                    FROM users
-                    WHERE id = ?
-                ');
-                $stmt->execute([$userId]);
-            } else {
-                $stmt = $this->db->prepare('
-                    SELECT two_factor_enabled, two_factor_backup_codes_version
-                    FROM users
-                    WHERE id = ? AND tenant_id = ?
-                ');
-                $stmt->execute([$userId, $tenantId]);
-            }
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            // Get user and check if 2FA is enabled.
+            // IDENTITY data: 2FA state is read from profiles (ADR 0005 §1) via
+            // readIdentityRow(), which prefers the profile path when profile_id
+            // is in the claims and falls back to users for dual-window.
+            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
 
             if (!$user) {
                 return Response::error('User not found', 404);
@@ -623,26 +659,12 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
-            // Get user's 2FA status and backup codes version
-            // WC-191: pin the self read to the caller's tenant (system stays unscoped).
+            // Get user's 2FA status and backup codes version.
+            // IDENTITY data: 2FA state is now read from profiles (ADR 0005 §1) via
+            // readIdentityRow(), which prefers the profile path and falls back to
+            // users for the dual-window transition. WC-191 tenant scoping preserved.
             $tenantId = $this->scopeTenantId();
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
-                $stmt = $this->db->prepare('
-                    SELECT two_factor_enabled, two_factor_backup_codes_version
-                    FROM users
-                    WHERE id = ?
-                ');
-                $stmt->execute([$userId]);
-            } else {
-                $stmt = $this->db->prepare('
-                    SELECT two_factor_enabled, two_factor_backup_codes_version
-                    FROM users
-                    WHERE id = ? AND tenant_id = ?
-                ');
-                $stmt->execute([$userId, $tenantId]);
-            }
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
 
             if (!$user) {
                 return Response::error('User not found', 404);

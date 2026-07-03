@@ -200,7 +200,74 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
         );
     }
 
+    // ============ WC-d88de9fa: delete guard counts only ACTIVE members ============
+
+    /**
+     * The delete guard counts only ACTIVE memberships. A system user deleting a
+     * tenant whose ONLY membership is suspended must succeed — the 409
+     * "has N member(s)" block must not fire for a non-active occupant.
+     */
+    public function testDeleteSucceedsWhenOnlyMemberIsSuspended(): void
+    {
+        // Tenant 2 has exactly one membership, and it is suspended.
+        $this->seedMembershipWithStatus(701, 2, 'suspended');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->delete(new Request('DELETE', '/api/tenants/2', []), ['id' => 2]);
+
+        $this->assertSame(
+            200,
+            $response->getStatusCode(),
+            'A tenant whose only membership is suspended must be deletable (active count is 0).'
+        );
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM tenants WHERE id = 2')->fetchColumn(),
+            'The tenant must be deleted.'
+        );
+    }
+
+    /**
+     * Conversely, an ACTIVE membership still blocks the delete with a 409 so the
+     * guard is not simply disabled.
+     */
+    public function testDeleteBlockedWhenMemberIsActive(): void
+    {
+        $this->seedMembershipWithStatus(702, 2, 'active');
+
+        MockRequestFactory::setTestTenant(0);
+        $response = $this->handler()->delete(new Request('DELETE', '/api/tenants/2', []), ['id' => 2]);
+
+        $this->assertSame(409, $response->getStatusCode(), 'An active member must block tenant deletion.');
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM tenants WHERE id = 2')->fetchColumn(),
+            'The tenant must survive a blocked delete.'
+        );
+    }
+
     // ==================== Helpers ====================
+
+    /**
+     * Seed a single membership (with its own profile) at the given status so the
+     * delete guard's active-only filter can be exercised.
+     */
+    private function seedMembershipWithStatus(int $id, int $tenantId, string $status): void
+    {
+        $pStmt = $this->pdo->prepare(
+            "INSERT INTO profiles
+                (id, display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, datetime('now'), datetime('now'))"
+        );
+        $pStmt->execute([$id, "p{$id}"]);
+
+        $mStmt = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, 2, ?, datetime('now'))"
+        );
+        $mStmt->execute([$id, $tenantId, $status]);
+    }
 
     private function handler(): TenantsApiHandler
     {
@@ -218,6 +285,22 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, 2, ?, 'x', datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, $email]);
+
+        // WC-d88de9fa: the tenants list now counts memberships (ADR 0005 §3).
+        // Seed a profile and membership so userCount reflects the seeded data.
+        $pStmt = $this->pdo->prepare(
+            "INSERT INTO profiles
+                (id, display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, datetime('now'), datetime('now'))"
+        );
+        $pStmt->execute([$id, $email]);
+
+        $mStmt = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, 2, 'active', datetime('now'))"
+        );
+        $mStmt->execute([$id, $tenantId]);
     }
 
     /**

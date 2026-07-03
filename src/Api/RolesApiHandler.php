@@ -802,22 +802,28 @@ class RolesApiHandler
     private function roleHasActiveUsers(int $roleId, ?int $tenantId): bool
     {
         if ($tenantId === 0 || $tenantId === null) {
-            // @tenant-guard-ignore: system-tenant (id 0) counts references across all tenants; scoped else-branch binds tenant_id in both subqueries
+            // ROLE data: memberships.role_id is the authoritative role assignment
+            // (ADR 0005 §3). Also check the legacy users.role_id column and the
+            // user_roles junction during the transition so roles actively in use via
+            // either the old or new path are both protected.
+            // @tenant-guard-ignore: system-tenant (id 0) counts references across all tenants; scoped else-branch binds tenant_id in all subqueries
             $stmt = $this->db->prepare('
                 SELECT (
-                    (SELECT COUNT(*) FROM users WHERE role_id = ?)
+                    (SELECT COUNT(*) FROM memberships WHERE role_id = ?)
+                    + (SELECT COUNT(*) FROM users WHERE role_id = ?)
                     + (SELECT COUNT(*) FROM user_roles WHERE role_id = ?)
                 ) AS cnt
             ');
-            $stmt->execute([$roleId, $roleId]);
+            $stmt->execute([$roleId, $roleId, $roleId]);
         } else {
             $stmt = $this->db->prepare('
                 SELECT (
-                    (SELECT COUNT(*) FROM users WHERE role_id = ? AND tenant_id = ?)
+                    (SELECT COUNT(*) FROM memberships WHERE role_id = ? AND tenant_id = ?)
+                    + (SELECT COUNT(*) FROM users WHERE role_id = ? AND tenant_id = ?)
                     + (SELECT COUNT(*) FROM user_roles WHERE role_id = ? AND tenant_id = ?)
                 ) AS cnt
             ');
-            $stmt->execute([$roleId, $tenantId, $roleId, $tenantId]);
+            $stmt->execute([$roleId, $tenantId, $roleId, $tenantId, $roleId, $tenantId]);
         }
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

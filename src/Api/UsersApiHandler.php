@@ -91,6 +91,14 @@ class UsersApiHandler
             $tenantId = TenantContext::getTenantId();
             $p = PaginationParams::fromPath($request->getPath());
 
+            // DEFERRAL (WC-d88de9fa → WC-f3660e68): this listing (and its count)
+            // intentionally still reads `FROM users`, NOT active memberships. The
+            // users→profiles/memberships migration of this full-CRUD handler is its
+            // own step (WC-f3660e68), so the count basis here (a users row count)
+            // deliberately differs from AdminApiHandler::stats() (which now counts
+            // active memberships). The divergence between /api/users and
+            // /api/admin/stats is documented and expected until WC-f3660e68 lands;
+            // do not migrate it here (mirrors DelegationsApiHandler::granteeVisible).
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) lists users across all tenants; scoped else-branch binds u.tenant_id = ?
                 $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM users u');
