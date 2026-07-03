@@ -28,7 +28,16 @@
     // so the nightly runner stays self-contained like the scoped job. Integration
     // and Security suites (real-PG) are intentionally out of scope here — their
     // coverage contribution is a separate concern from mutation-detector quality.
-    "testFrameworkOptions": "--testsuite=default",
+    //
+    // --order-by=depends,defects pins the initial test run to the SAME order the
+    // green `test` CI job uses (phpunit.xml executionOrder). Infection otherwise
+    // runs the suite in RANDOM order for its initial pass, which exposed an
+    // order-dependent test in the full `default` suite ("relation \"users\" does
+    // not exist") and aborted before any mutation. The scoped profile
+    // (infection.json5) never hit this — its `mutation-scope` suite is small and
+    // self-contained. The underlying order-coupling in the default suite is a
+    // separate test-hygiene follow-up; this deep scan is informational only.
+    "testFrameworkOptions": "--testsuite=default --order-by=depends,defects",
     // Match the scoped profile's 60s per-mutant timeout so slow covered mutants
     // run to completion rather than being counted as false timeouts.
     "timeout": 60,
