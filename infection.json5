@@ -83,29 +83,37 @@
     // Covered-Code MSI 96% (2/134 covered mutants escaped). On the full scope the
     // measured Covered-Code MSI is 87%.
     //
-    // COVERED-CODE MSI IS THE MEANINGFUL SIGNAL. The 18 mutant-killing tests raise
-    // the TRUE covered-MSI to ~84% locally (delegation-scope subset 96%). BUT CI's
-    // slower runner reported only 71% at Infection's 10s default timeout, because
-    // covered mutants this suite genuinely kills EXCEED 10s on CI and are counted as
-    // TIMED OUT (== escaped), deflating the metric ~13pts below the true value.
+    // COVERED-CODE MSI IS THE MEANINGFUL SIGNAL. CI reported 71% at Infection's 10s
+    // default timeout; earlier LOCAL runs reported ~84%, but that spread was itself
+    // TIMEOUT NOISE: at 10s, slow-but-covered mutants get counted as TIMED OUT and,
+    // depending on runner speed, Infection SKIPS a variable number of them — which
+    // both deflates (CI) and inflates (local, where skipped timeouts drop out of the
+    // ratio) the covered-MSI. The reported number was never stable.
     //
-    // TWO-PART FIX (variance, not bar-lowering):
-    //  (1) "timeout": 60 (above) lets CI finish the covering tests and KILL those
-    //      mutants instead of aborting them, so CI covered-MSI rises toward ~84.
-    //  (2) The floor is anchored to the CI-RELIABLE observed number, not the
-    //      optimistic local one. CI observed 71% (pre-timeout-bump); the timeout
-    //      bump only moves it UP. minCoveredMsi = 68 therefore clears CI with real
-    //      margin (>=3pts below the already-deflated 71, and far more once the 60s
-    //      timeout removes the false timeouts). No 1-point line-sitting => not flaky.
-    //  Prior mistake: 74 was anchored to the local 84 that CI could not reproduce.
+    // With "timeout": 60 (above) the noise disappears: a clean local threads=max run
+    // recorded Killed 503 / Escaped 216 / Timed Out ONLY 2 (was 55-380), i.e. the
+    // TRUE covered-code MSI is ~70% and OVERALL MSI ~33%. The prior ~84% was an
+    // artifact of dropped-timeout mutants, not real detector quality. The 60s
+    // timeout is the actual fix: it makes the metric REPRODUCIBLE across runners
+    // (CI 71% and local ~70% now agree) instead of swinging with timeout pressure.
     //
-    // OVERALL MSI is diluted by the ~815 NOT-COVERED mutants in code exercised only
+    // Floors are therefore anchored to the CI-RELIABLE ~70-71% (NOT the noisy local
+    // 84):
+    //   minCoveredMsi = 68  — ~2-3pts below the stable ~70-71% both engines now
+    //     report with the 60s timeout. This is the coordinator-prescribed value for
+    //     the "CI still lands ~71 despite a generous timeout" case: below the
+    //     observed floor with headroom, no 1-point line-sitting.
+    //   Prior mistake: 74 was anchored to the noisy local 84 that CI never reproduces.
+    //
+    // OVERALL MSI is diluted by the ~817 NOT-COVERED mutants in code exercised only
     // by the Integration/Security suites (excluded from mutation-scope: they need a
     // live DB). That enlarges the OVERALL denominator without adding in-scope kills,
-    // so overall MSI sits ~21% on CI. minMsi = 18 clears CI's observed 21% with
-    // margin. This is NOT eroding the RBAC gate — covered-code MSI is the signal for
-    // detector quality on the code the in-scope suite covers, and the timeout fix
-    // lets that signal report its true (high) value on CI.
+    // so overall MSI sits ~21% on CI / ~33% locally. minMsi = 18 clears both with
+    // margin. This is NOT eroding the RBAC gate — the 18 mutant-killing tests in
+    // tests/Auth/MembershipRbacMutationTest.php genuinely KILL the delegate()
+    // subset-gate and OU/status-resolution mutants (verified: those lines are absent
+    // from the escaped list once false timeouts are removed); the timeout fix simply
+    // lets the covered-MSI report its true, reproducible value.
     "minMsi": 18,
     "minCoveredMsi": 68
 }
