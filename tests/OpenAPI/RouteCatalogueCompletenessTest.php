@@ -28,23 +28,7 @@ final class RouteCatalogueCompletenessTest extends TestCase
      * @var list<string>
      */
     private const KNOWN_UNDOCUMENTED = [
-        // Auth surface — to be declared once the auth/2FA schema task lands.
-        // WC-206: paths are now versioned; the regex extraction normalises them
-        // to the path-as-written in index.php (no prefix applied by the extractor).
-        'POST /api/login',
-        'POST /api/login/2fa',
-        // WC-c35c4ce0: ADR 0005 §6 multi-membership tenant selection. Part of the
-        // auth surface — declared once the auth/2FA OpenAPI schema task lands.
-        'POST /api/auth/select-tenant',
-        'GET /api/me',
-        'PATCH /api/me',
-        'POST /api/auth/refresh',
-        'POST /api/auth/logout',
-        'POST /api/auth/2fa/setup',
-        'POST /api/auth/2fa/confirm',
-        'POST /api/auth/2fa/disable',
-        'POST /api/auth/2fa/regenerate-codes',
-        'GET /api/auth/2fa/status',
+        // WC-388a61e3: auth + 2FA routes are now declared in CoreApiSchemas::authRoutes().
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.
         'GET /api/version',
