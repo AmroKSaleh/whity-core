@@ -83,6 +83,31 @@ class TwoFactorHandler
     }
 
     /**
+     * Coerce a DB boolean column to a real bool across drivers.
+     *
+     * CRITICAL: this codebase's pdo_pgsql returns the STRING "f" for a false
+     * boolean, and PHP's (bool) cast treats the non-empty string "f" as TRUE.
+     * A naive (bool)$row['two_factor_enabled'] therefore reports EVERY user as
+     * 2FA-enabled on PostgreSQL — inverting setup()/status()/regenerateCodes()
+     * false-branches. Mirrors AuthHandler::dbTruthy() and RelationRepository::toBool():
+     * SQLite yields 0/1 (int), Postgres 't'/'f' (string), in-process seeds a bool.
+     *
+     * @param mixed $value Raw column value from a boolean field.
+     */
+    private static function dbTruthy(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return $value !== 0;
+        }
+        $normalised = strtolower(trim((string) $value));
+
+        return !in_array($normalised, ['', '0', 'f', 'false', 'no'], true);
+    }
+
+    /**
      * Resolve the caller's profile_id so 2FA state can be mirrored onto the
      * PROFILE model (ADR 0005). After the WC-c35c4ce0 login rewrite, login reads
      * two_factor_enabled/secret/backup_codes_version from `profiles`, so a 2FA
@@ -234,8 +259,11 @@ class TwoFactorHandler
                 return Response::error('User not found', 404);
             }
 
-            // Check if user already has 2FA enabled
-            if ($user['two_factor_enabled']) {
+            // Check if user already has 2FA enabled. dbTruthy(), NOT a raw bool
+            // cast: on PG two_factor_enabled comes back as "f"/"t" and (bool)"f"
+            // is TRUE, which would wrongly 400 ("already enabled") a user who has
+            // 2FA DISABLED and block them from ever enabling it.
+            if (self::dbTruthy($user['two_factor_enabled'])) {
                 return Response::error('2FA is already enabled for this user', 400);
             }
 
@@ -498,7 +526,9 @@ class TwoFactorHandler
                 return Response::error('User not found', 404);
             }
 
-            if (!$user['two_factor_enabled']) {
+            // dbTruthy(), NOT a raw cast: on PG "f" is truthy, which would BYPASS
+            // this guard and let a user WITHOUT 2FA regenerate/insert backup codes.
+            if (!self::dbTruthy($user['two_factor_enabled'])) {
                 return Response::error('2FA is not enabled for this user', 400);
             }
 
@@ -629,7 +659,9 @@ class TwoFactorHandler
                 : 0;
 
             return Response::json([
-                'enabled' => (bool) $user['two_factor_enabled'],
+                // dbTruthy(), NOT (bool): on PG (bool)"f" === true would report
+                // enabled=true for EVERY user (including those with 2FA disabled).
+                'enabled' => self::dbTruthy($user['two_factor_enabled']),
                 'backup_codes_available' => $codeCount
             ], 200);
         } catch (\Exception $e) {

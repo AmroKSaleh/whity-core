@@ -53,6 +53,18 @@ class DatabaseQueryWrapper
  */
 class AuthHandler
 {
+    /**
+     * A fixed, VALID bcrypt hash used ONLY to burn a constant amount of CPU on
+     * the unknown-email login path so it cannot be timed apart from a
+     * known-email/wrong-password attempt (email-enumeration side-channel). It is
+     * a real cost-12 hash of a random throwaway string — no real password
+     * verifies against it, and because it is well-formed, password_verify() does
+     * the full bcrypt work (a malformed hash would early-return and defeat this).
+     * Cost 12 matches PASSWORD_BCRYPT's default in this runtime, so the dummy
+     * verify takes the same ~time as a genuine credential check.
+     */
+    private const DUMMY_PASSWORD_HASH = '$2y$12$Msv8wMU6LrRUtycJ5F93f.ljsdMU8FOM9dIP1xaHLYgpDuyKS5eVe';
+
     private PDO $db;
     private JwtParser $jwtParser;
     private TokenValidator $tokenValidator;
@@ -327,6 +339,15 @@ class AuthHandler
 
         if ($profileEmailRow === false) {
             // No profile_email row: email is not registered in the profile model.
+            //
+            // TIMING GUARD (email enumeration): this path returns BEFORE the real
+            // password_verify() below. Without compensation, an unknown email
+            // responds in ~0ms while a known email + wrong password takes the full
+            // bcrypt time (~tens of ms), letting an attacker enumerate registered
+            // emails by response latency despite the identical 401 body. Burn one
+            // bcrypt verify against a fixed dummy hash so both paths cost the same.
+            password_verify(is_string($password) ? $password : '', self::DUMMY_PASSWORD_HASH);
+
             $this->audit('auth.login.failure', $request, null, null, [
                 'email'  => $email,
                 'reason' => 'profile_not_found',
@@ -352,6 +373,11 @@ class AuthHandler
         // keyed on the resolved profileId (the email IS registered) so repeated
         // probes of a known-but-unverified account are rate-limited per profile.
         if (!self::dbTruthy($profileEmailRow['verified'])) {
+            // Same timing guard as the unknown-email path: this also returns
+            // before the real password_verify(), so burn one dummy bcrypt to keep
+            // the unverified-email response indistinguishable by latency.
+            password_verify(is_string($password) ? $password : '', self::DUMMY_PASSWORD_HASH);
+
             $this->audit('auth.login.failure', $request, null, $profileId, [
                 'email'  => $email,
                 'reason' => 'email_not_verified',
@@ -470,10 +496,18 @@ class AuthHandler
      * The login step returns { requires_tenant_selection: true, memberships:[…] }
      * and issues NO session; instead it sets a short-lived selection cookie
      * binding the profile. This endpoint takes the chosen tenant_id, RE-VALIDATES
-     * that the caller still holds an ACTIVE membership in that REAL tenant (never
-     * tenant 0), and only then mints the session JWT. The selection token binds
-     * the two calls so a caller can never select a tenant they don't belong to,
-     * and can never escalate to system authority.
+     * that the caller still holds an ACTIVE membership in that tenant, and only
+     * then mints the session JWT. The selection token binds the two calls so a
+     * caller can never select a tenant they do not belong to.
+     *
+     * Tenant 0 is NOT special-cased here: if the caller genuinely HOLDS an active
+     * tenant-0 membership (the system admin), selecting it is LEGITIMATE system
+     * authority, not an escalation. The escalation the review flagged is a
+     * multi-membership user having tenant 0 silently auto-picked — that is closed
+     * upstream by NEVER auto-selecting for multi-membership (always prompt); it is
+     * not closed by refusing a tenant the caller actually belongs to. The real
+     * integrity guard (don't grant tenant-0 memberships to non-admins) lives at
+     * membership creation (see MembershipRepository::insert follow-up note).
      *
      * @param Request              $request HTTP request with { tenant_id } in body.
      * @param array<string, mixed> $params  Unused route params.
@@ -555,8 +589,17 @@ class AuthHandler
      * Callers MUST have already authorised (profile_id, tenantId): this method
      * does not re-check membership.
      *
+     * FOLLOW-UP NOTE (epoch cutover, later step): when a legacy users row exists
+     * this embeds users.token_epoch and DISCARDS the passed $profileEpoch. That is
+     * correct for the dual-claim window (TokenValidator checks users.token_epoch
+     * for dual tokens), but it is fragile for the POST-CUTOVER window where only
+     * profiles.token_epoch is bumped and the users row is being retired: the two
+     * epochs must be reconciled (take the max) when the legacy row is pruned. The
+     * epoch cutover handoff is deferred to the users-table retirement step; do not
+     * change the source-of-truth here without that step.
+     *
      * @param int         $profileId       Authenticated profile.
-     * @param int         $activeTenantId  The resolved (authorised, real) tenant.
+     * @param int         $activeTenantId  The resolved (authorised) tenant.
      * @param string      $email           Normalised email for claims/response.
      * @param int         $profileEpoch    Fallback epoch when no legacy users row.
      * @param Request     $request         For audit context.
