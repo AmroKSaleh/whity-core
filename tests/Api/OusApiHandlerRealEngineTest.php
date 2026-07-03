@@ -418,6 +418,31 @@ final class OusApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, ?, 'hashed-secret', ?, ?, datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, $email, $roleId, $ouId]);
+
+        // WC-d88de9fa: the members() endpoint now resolves IDENTITY via
+        // profiles/profile_emails (ADR 0005 §1-2) and ROLE/OU via memberships
+        // (ADR 0005 §3). Mirror each user into the new tables so the test
+        // remains green during the dual-window transition.
+        $displayName = strstr($email, '@', true) ?: $email;
+        $pStmt = $this->pdo->prepare(
+            "INSERT INTO profiles
+                (id, display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, datetime('now'), datetime('now'))"
+        );
+        $pStmt->execute([$id, $displayName]);
+
+        $peStmt = $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        );
+        $peStmt->execute([$id, $email]);
+
+        $mStmt = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, ?, 'active', datetime('now'))"
+        );
+        $mStmt->execute([$id, $tenantId, $roleId, $ouId]);
     }
 
     private function assignRoleRow(int $tenantId, int $ouId, int $roleId): void

@@ -218,6 +218,22 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, 2, ?, 'x', datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, $email]);
+
+        // WC-d88de9fa: the tenants list now counts memberships (ADR 0005 §3).
+        // Seed a profile and membership so userCount reflects the seeded data.
+        $pStmt = $this->pdo->prepare(
+            "INSERT INTO profiles
+                (id, display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, datetime('now'), datetime('now'))"
+        );
+        $pStmt->execute([$id, $email]);
+
+        $mStmt = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, 2, 'active', datetime('now'))"
+        );
+        $mStmt->execute([$id, $tenantId]);
     }
 
     /**

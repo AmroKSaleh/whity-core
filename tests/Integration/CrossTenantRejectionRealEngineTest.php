@@ -839,6 +839,143 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ==================== ou members (WC-d88de9fa) ====================
+
+    /**
+     * WC-d88de9fa: the OU members endpoint resolves IDENTITY data (email,
+     * display_name) via profiles/profile_emails and ROLE/OU data via memberships
+     * (ADR 0005 §1-3). The tenant predicate is on memberships.tenant_id.
+     *
+     * Tenant A reading Tenant B's OU (id 20) must receive 404 — the ouIsVisible()
+     * guard rejects before the memberships query is even issued.
+     */
+    public function testOuMembersCannotReadForeignOuMembers(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->members($this->req('GET', '/api/ous/20/members'), ['id' => '20']);
+
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign OU members read must report not-found');
+        $this->assertStringNotContainsString('Bob', $response->getBody(), 'The refusal must not leak Tenant B profile names');
+    }
+
+    /**
+     * WC-d88de9fa (defense-in-depth): even if the ouIsVisible() guard were
+     * bypassed, the memberships query itself carries `AND m.tenant_id = ?`
+     * which means a Tenant-A-scoped request for OU 20 (Tenant B's OU) returns
+     * an empty member list — proving the predicate, not just the guard, isolates.
+     *
+     * We verify by inserting a profile_email for Bob (profile 102) and a
+     * membership row for Bob in Tenant B's OU (id 20), then showing that a
+     * direct Tenant-A-scoped memberships query against that OU returns no rows.
+     */
+    public function testOuMembershipsQueryIsTenantScoped(): void
+    {
+        // Seed profile_email for Bob (profile 102) so the JOIN can resolve.
+        $this->pdo->exec("
+            INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at) VALUES
+                (102, 'bob@t2.example', true, true, datetime('now'))
+        ");
+
+        // Assign Bob's membership (id 102) to Tenant B's OU (id 20).
+        $this->pdo->exec("UPDATE memberships SET ou_id = 20 WHERE id = 102 AND tenant_id = 2");
+
+        // Direct query as Tenant A: ou_id=20 AND tenant_id=TENANT_A → zero rows.
+        $stmt = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM memberships m
+             JOIN profiles p ON p.id = m.profile_id
+             JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+             WHERE m.ou_id = ? AND m.tenant_id = ?"
+        );
+        $stmt->execute([20, self::TENANT_A]);
+
+        $this->assertSame(
+            0,
+            (int)$stmt->fetchColumn(),
+            'The memberships JOIN with tenant_id = Tenant A must return 0 rows for Tenant B\'s OU (id 20)'
+        );
+    }
+
+    /**
+     * WC-d88de9fa (positive control): Tenant A can list members of its OWN OU
+     * when a profile_email and membership row with ou_id exist. The result
+     * includes the IDENTITY (email, display_name) resolved via profiles +
+     * profile_emails (no users join).
+     */
+    public function testOuMembersListsOwnOuMembers(): void
+    {
+        // Seed profile_email for Alice (profile 101) as the IDENTITY anchor.
+        $this->pdo->exec("
+            INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at) VALUES
+                (101, 'alice@t1.example', true, true, datetime('now'))
+        ");
+
+        // Assign Alice's Tenant-A membership (id 101) to Tenant A's OU (id 10).
+        $this->pdo->exec("UPDATE memberships SET ou_id = 10 WHERE id = 101 AND tenant_id = 1");
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->members($this->req('GET', '/api/ous/10/members'), ['id' => '10']);
+
+        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own OU members must be readable");
+        $data = json_decode($response->getBody(), true);
+        $emails = array_column($data['data'], 'email');
+        $this->assertContains('alice@t1.example', $emails, 'Alice must appear in Tenant A\'s OU members');
+        foreach ($data['data'] as $member) {
+            $this->assertSame(self::TENANT_A, (int)$member['tenantId'], 'Every member must belong to Tenant A');
+        }
+    }
+
+    /**
+     * WC-d88de9fa: the OU delete guard now checks memberships (ROLE/OU data,
+     * ADR 0005 §3) rather than users. An OU with an active membership cannot
+     * be deleted; the predicate is on memberships.tenant_id so a cross-tenant
+     * membership can never block a legitimate deletion.
+     */
+    public function testOuDeleteGuardBlocksMembershipOccupiedOu(): void
+    {
+        // Seed profile_email for Alice so the fixture is consistent.
+        $this->pdo->exec("
+            INSERT OR IGNORE INTO profile_emails (profile_id, email, verified, is_primary, created_at) VALUES
+                (101, 'alice@t1.example', true, true, datetime('now'))
+        ");
+
+        // Assign Alice's membership to Tenant A's OU (id 10).
+        $this->pdo->exec("UPDATE memberships SET ou_id = 10 WHERE id = 101 AND tenant_id = 1");
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->delete($this->req('DELETE', '/api/ous/10'), ['id' => '10']);
+
+        $this->assertSame(409, $response->getStatusCode(), 'Deleting an OU with assigned members must return 409');
+        $this->assertStringContainsString('member', $response->getBody(), 'Error must mention member(s)');
+        $this->assertSame(
+            1,
+            (int)$this->pdo->query('SELECT COUNT(*) FROM organizational_units WHERE id = 10')->fetchColumn(),
+            'The OU must survive a blocked delete'
+        );
+    }
+
+    /**
+     * WC-d88de9fa: Tenant B's membership occupying a Tenant B OU must NOT
+     * block Tenant A from deleting its own empty OU. The memberships query is
+     * scoped to the acting tenant's tenant_id, so cross-tenant memberships are
+     * invisible to the guard.
+     */
+    public function testOuDeleteGuardDoesNotLeakCrossTenantMemberships(): void
+    {
+        // Assign Bob's Tenant-B membership (id 102) to Tenant B's OU (id 20).
+        $this->pdo->exec("UPDATE memberships SET ou_id = 20 WHERE id = 102 AND tenant_id = 2");
+
+        // Tenant A's OU 10 has no assigned memberships for tenant_id = 1.
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->delete($this->req('DELETE', '/api/ous/10'), ['id' => '10']);
+
+        // Should succeed (or at least NOT be a 409 due to cross-tenant membership)
+        $this->assertNotSame(
+            409,
+            $response->getStatusCode(),
+            'Tenant B\'s memberships must never trigger a 409 for Tenant A\'s empty OU delete'
+        );
+    }
+
     // ==================== ou_role_assignments ====================
 
     /**

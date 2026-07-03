@@ -93,12 +93,15 @@ class TenantsApiHandler
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                // @tenant-guard-ignore: system-tenant (isSystemUser) lists all real tenants; users LEFT JOIN is unscoped by design — each row is a distinct tenant
+                // ROLE/TENANT data: memberships are the authoritative per-tenant member count
+                // (ADR 0005 §3 — memberships replace users.tenant_id). Only active memberships
+                // are counted (invited/suspended do not represent active accounts).
+                // @tenant-guard-ignore: system-tenant (isSystemUser) lists all real tenants; memberships LEFT JOIN is unscoped by design — each row is a distinct tenant
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
-                           COUNT(u.id) as userCount
+                           COUNT(m.id) as userCount
                     FROM tenants t
-                    LEFT JOIN users u ON t.id = u.tenant_id
+                    LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
                     WHERE t.id != 0
                     GROUP BY t.id
                     ORDER BY t.created_at DESC
@@ -109,19 +112,22 @@ class TenantsApiHandler
                 $stmt->execute();
             } else {
                 // Regular user: only their own tenant (at most 1 row).
-                // @tenant-guard-ignore: caller's own tenant; the users join is constrained by the WHERE t.id = :tenant_id on the tenants row
+                // @tenant-guard-ignore: caller's own tenant; WHERE t.id = :tenant_id on tenants constrains the memberships LEFT JOIN to one tenant's rows
                 $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM tenants t WHERE t.id = :tenant_id AND t.id != 0');
                 $countStmt->bindValue(':tenant_id', $currentTenantId, PDO::PARAM_INT);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                // @tenant-guard-ignore: caller's own tenant; WHERE t.id = :tenant_id on tenants constrains the users LEFT JOIN to one tenant's rows
+                // ROLE/TENANT data: memberships are the authoritative per-tenant member count
+                // (ADR 0005 §3). WHERE t.id = :tenant_id pins the memberships JOIN to the
+                // caller's own tenant so no cross-tenant data leaks.
+                // @tenant-guard-ignore: caller's own tenant; WHERE t.id = :tenant_id on tenants constrains the memberships LEFT JOIN to one tenant's rows
                 $stmt = $this->db->prepare('
                     SELECT t.id, t.name, t.slug, t.created_at,
-                           COUNT(u.id) as userCount
+                           COUNT(m.id) as userCount
                     FROM tenants t
-                    LEFT JOIN users u ON t.id = u.tenant_id
+                    LEFT JOIN memberships m ON t.id = m.tenant_id AND m.status = \'active\'
                     WHERE t.id = :tenant_id
                     GROUP BY t.id
                     LIMIT :limit OFFSET :offset
@@ -406,12 +412,13 @@ class TenantsApiHandler
                 return Response::error('Tenant not found', 404);
             }
 
-            // Check if tenant has users
-            $checkStmt = $this->db->prepare('SELECT COUNT(*) as count FROM users WHERE tenant_id = ?');
+            // Check if tenant has active members (ROLE/TENANT data: memberships are
+            // the authoritative tenant-scoped membership table, ADR 0005 §3).
+            $checkStmt = $this->db->prepare('SELECT COUNT(*) as count FROM memberships WHERE tenant_id = ?');
             $checkStmt->execute([$id]);
             $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
             if ($result['count'] > 0) {
-                return Response::error('Cannot delete tenant with ' . $result['count'] . ' user(s)', 409);
+                return Response::error('Cannot delete tenant with ' . $result['count'] . ' member(s)', 409);
             }
 
             // Dispatch filter hook before deleting tenant

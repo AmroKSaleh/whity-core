@@ -288,6 +288,13 @@ class DelegationsApiHandler
     private function granteeVisible(string $granteeType, int $granteeId, int $tenantId): bool
     {
         if ($granteeType === DelegationRepository::GRANTEE_USER) {
+            // NOTE (WC-d88de9fa): permission_delegations.grantee_id is still keyed on
+            // users.id (legacy FK; the delegation re-keying to profile_id is step 6 of
+            // the identity rewrite, WC-bc07b6de). The visibility check below therefore
+            // still reads from `users` during the transition window. Once the delegation
+            // grantee FK is re-pointed to profiles, this should become a memberships
+            // lookup (profile_id + tenant_id). Classified as AMBIGUOUS — depends on
+            // delegation FK re-keying in step 6.
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) visibility branch; scoped else-branch binds tenant_id
                 $stmt = $this->db->prepare('SELECT 1 FROM users WHERE id = ?');

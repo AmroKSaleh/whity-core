@@ -148,6 +148,14 @@ final class AdminApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, ?, 'x', ?, datetime('now'))"
         );
         $stmt->execute([$id, $tenantId, "u{$id}@example.com", $roleId]);
+
+        // WC-d88de9fa: stats() now counts memberships (ADR 0005 §3).
+        // Seed a membership so the aggregate counts match the seeded users.
+        $mStmt = $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        );
+        $mStmt->execute([$id, $tenantId, $roleId]);
     }
 
     private static function makeSqliteSchema(): PDO
@@ -235,6 +243,19 @@ final class AdminApiHandlerRealEngineTest extends TestCase
                 email TEXT NOT NULL,
                 password TEXT NOT NULL,
                 role_id INTEGER,
+                created_at TEXT
+            )
+        ');
+
+        // WC-d88de9fa: stats() now counts memberships (ADR 0005 §3).
+        $pdo->exec('
+            CREATE TABLE memberships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                tenant_id INTEGER NOT NULL,
+                role_id INTEGER,
+                ou_id INTEGER,
+                status TEXT NOT NULL DEFAULT \'active\',
                 created_at TEXT
             )
         ');
