@@ -25,9 +25,16 @@
     },
     "testFramework": "phpunit",
     // Use the `default` (SQLite) testsuite: it needs no live PostgreSQL service,
-    // so the nightly runner stays self-contained like the scoped job. Integration
-    // and Security suites (real-PG) are intentionally out of scope here — their
-    // coverage contribution is a separate concern from mutation-detector quality.
+    // so the runner stays self-contained like the scoped job. Integration and
+    // Security suites (real-PG) are intentionally out of scope here.
+    //
+    // NOT YET WIRED into mutation-testing.yml (WC-232ec317): Infection forces
+    // executionOrder="random" for its initial test run, which exposes an
+    // order-dependent test in the full `default` suite ("[AdminApiHandler] stats
+    // failed: relation \"users\" does not exist") and aborts before any mutation.
+    // A CLI --order-by override does NOT help (Infection's generated initial
+    // config wins). The prerequisite is fixing the default suite's test isolation
+    // so it passes in random order; only then re-enable the deep scan job.
     "testFrameworkOptions": "--testsuite=default",
     // Match the scoped profile's 60s per-mutant timeout so slow covered mutants
     // run to completion rather than being counted as false timeouts.
