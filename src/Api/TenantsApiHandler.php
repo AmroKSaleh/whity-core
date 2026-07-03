@@ -412,9 +412,13 @@ class TenantsApiHandler
                 return Response::error('Tenant not found', 404);
             }
 
-            // Check if tenant has active members (ROLE/TENANT data: memberships are
-            // the authoritative tenant-scoped membership table, ADR 0005 §3).
-            $checkStmt = $this->db->prepare('SELECT COUNT(*) as count FROM memberships WHERE tenant_id = ?');
+            // Check if tenant has ACTIVE members (ROLE/TENANT data: memberships are
+            // the authoritative tenant-scoped membership table, ADR 0005 §3). Only
+            // active memberships block deletion — a tenant whose only memberships are
+            // invited/suspended has no active occupants and can be deleted.
+            $checkStmt = $this->db->prepare(
+                "SELECT COUNT(*) as count FROM memberships WHERE tenant_id = ? AND status = 'active'"
+            );
             $checkStmt->execute([$id]);
             $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
             if ($result['count'] > 0) {

@@ -976,6 +976,70 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    /**
+     * WC-d88de9fa (review item 1): the OU delete guard counts only ACTIVE
+     * memberships. An OU whose only occupant is a SUSPENDED member is not
+     * considered occupied and must be deletable (409 no longer fires).
+     */
+    public function testOuDeleteGuardIgnoresSuspendedMembers(): void
+    {
+        // Alice's Tenant-A membership (id 101) is suspended and assigned to OU 10.
+        $this->pdo->exec("UPDATE memberships SET ou_id = 10, status = 'suspended' WHERE id = 101 AND tenant_id = 1");
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->delete($this->req('DELETE', '/api/ous/10'), ['id' => '10']);
+
+        $this->assertNotSame(
+            409,
+            $response->getStatusCode(),
+            'An OU whose only member is suspended must not be blocked from deletion'
+        );
+        $this->assertSame(
+            0,
+            (int)$this->pdo->query('SELECT COUNT(*) FROM organizational_units WHERE id = 10')->fetchColumn(),
+            'The OU with only a suspended member must be deleted'
+        );
+    }
+
+    /**
+     * WC-d88de9fa (review item 1): the OU members() endpoint lists only ACTIVE
+     * members — a suspended member of the OU must not appear.
+     */
+    public function testOuMembersExcludesSuspendedMember(): void
+    {
+        // Seed profile_emails for Alice and a second Tenant-A profile.
+        $this->pdo->exec("
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
+                (201, 'Active-Ann', '\$2y\$10\$fakehash3', false, 0, 0, datetime('now'), datetime('now'))
+        ");
+        $this->pdo->exec("
+            INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at) VALUES
+                (101, 'alice@t1.example', true, true, datetime('now')),
+                (201, 'ann@t1.example',   true, true, datetime('now'))
+        ");
+
+        // Alice (membership 101) suspended in OU 10; Ann active in OU 10.
+        $this->pdo->exec("UPDATE memberships SET ou_id = 10, status = 'suspended' WHERE id = 101 AND tenant_id = 1");
+        $this->pdo->exec("
+            INSERT INTO memberships (id, profile_id, tenant_id, role_id, ou_id, status, created_at) VALUES
+                (301, 201, 1, 1, 10, 'active', datetime('now'))
+        ");
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->ousHandler()->members($this->req('GET', '/api/ous/10/members'), ['id' => '10']);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $emails = array_column($data['data'], 'email');
+        $this->assertContains('ann@t1.example', $emails, 'The active member must appear');
+        $this->assertNotContains(
+            'alice@t1.example',
+            $emails,
+            'A suspended member must be excluded from the OU member list'
+        );
+    }
+
     // ==================== ou_role_assignments ====================
 
     /**

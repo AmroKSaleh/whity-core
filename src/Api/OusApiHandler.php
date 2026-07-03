@@ -399,11 +399,13 @@ class OusApiHandler
                 );
             }
 
-            // Check if OU has assigned members (ROLE data: ou_id now lives on
+            // Check if OU has ACTIVE assigned members (ROLE data: ou_id now lives on
             // memberships — ADR 0005 §3; the tenant predicate is on memberships.tenant_id).
-            $usersStmt = $this->db->prepare('
-                SELECT COUNT(*) FROM memberships WHERE ou_id = ? AND tenant_id = ?
-            ');
+            // Only active memberships block deletion — an OU whose only members are
+            // invited/suspended has no active occupants and can be deleted.
+            $usersStmt = $this->db->prepare("
+                SELECT COUNT(*) FROM memberships WHERE ou_id = ? AND tenant_id = ? AND status = 'active'
+            ");
             $usersStmt->execute([$id, $tenantId]);
             $userCount = $usersStmt->fetchColumn();
             if ($userCount > 0) {
@@ -670,16 +672,18 @@ class OusApiHandler
             // roles supplies the role name (ROLE, ADR 0005 §3).
             // The tenant predicate is on memberships.tenant_id — the OU guard above
             // already enforced that this ou_id belongs to $tenantId.
-            $stmt = $this->db->prepare('
+            // Only ACTIVE members are listed, matching the active semantics of the
+            // stat/list/delete-guard queries (invited/suspended members are excluded).
+            $stmt = $this->db->prepare("
                 SELECT m.id, pe.email, p.display_name, m.created_at, m.tenant_id,
                        m.profile_id, r.name AS role
                 FROM memberships m
                 JOIN profiles p ON p.id = m.profile_id
                 JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                 JOIN roles r ON r.id = m.role_id
-                WHERE m.ou_id = ? AND m.tenant_id = ?
+                WHERE m.ou_id = ? AND m.tenant_id = ? AND m.status = 'active'
                 ORDER BY m.created_at DESC
-            ');
+            ");
             $stmt->execute([$id, $tenantId]);
             /** @var array<int, array<string, mixed>> $rows */
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

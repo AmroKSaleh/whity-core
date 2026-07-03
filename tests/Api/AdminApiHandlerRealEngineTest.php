@@ -194,6 +194,9 @@ final class AdminApiHandlerRealEngineTest extends TestCase
                     : parent::query($query, $fetchMode, ...$fetchModeArgs);
             }
 
+            /**
+             * @param array<int|string, mixed> $options
+             */
             public function prepare(string $query, array $options = []): \PDOStatement|false
             {
                 return parent::prepare(self::translate($query), $options);
@@ -248,12 +251,14 @@ final class AdminApiHandlerRealEngineTest extends TestCase
         ');
 
         // WC-d88de9fa: stats() now counts memberships (ADR 0005 §3).
+        // role_id is NOT NULL to match production migration 030 (avoid masking a
+        // real constraint the handler SQL relies on).
         $pdo->exec('
             CREATE TABLE memberships (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 profile_id INTEGER NOT NULL,
                 tenant_id INTEGER NOT NULL,
-                role_id INTEGER,
+                role_id INTEGER NOT NULL,
                 ou_id INTEGER,
                 status TEXT NOT NULL DEFAULT \'active\',
                 created_at TEXT

@@ -59,7 +59,9 @@ class AdminApiHandler
 
             if ($isSystemUser) {
                 // 1. Basic Totals (platform-wide)
-                // IDENTITY: profile count is the global identity anchor (ADR 0005 §1).
+                // ROLE/TENANT data: this is an ACTIVE-MEMBERSHIP count, not a profile
+                // count — a person with active memberships in N tenants counts N times
+                // (each tenant occupancy is one active membership, ADR 0005 §3).
                 // @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
                 $totalUsers = $pdo->query('SELECT COUNT(*) FROM memberships WHERE status = \'active\'')->fetchColumn();
                 $totalTenants = $pdo->query('SELECT COUNT(*) FROM tenants')->fetchColumn();
