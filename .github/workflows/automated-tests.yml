@@ -240,6 +240,10 @@ jobs:
           INITIAL_SYSTEM_ADMIN_PASSWORD: ci_initial_admin_password_min_32_chars_cc
           JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
           ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
+        # Per-mutant timeout is configured via "timeout": 60 in infection.json5
+        # (this Infection version has no --timeout CLI flag). 60s stops the slower
+        # CI runner from false-timing-out covered mutants at the 10s default, which
+        # was deflating Covered-Code MSI.
         run: vendor/bin/infection --no-interaction --no-progress --threads=max
 
       - name: Upload Infection log
