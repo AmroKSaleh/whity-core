@@ -1,0 +1,38 @@
+{
+    "$schema": "vendor/infection/infection/resources/schema.json",
+    // DEEP / WIDE mutation profile (WC-232ec317) — runs NIGHTLY off the critical
+    // path (see .github/workflows/mutation-testing.yml), NOT per-PR and NOT on the
+    // 6-hourly scoped run. It mutates the WHOLE src/ tree (not just the
+    // Auth / Tenant / Delegation critical paths that infection.json5 gates) to
+    // surface weak-test-coverage trends across the codebase.
+    //
+    // This is a TREND report, not a gate: minMsi / minCoveredMsi are 0 so the job
+    // never fails — it exists to publish the infection log as an artifact for
+    // review. The narrow, calibrated floors that DO gate quality live in
+    // infection.json5 and are unchanged.
+    "source": {
+        "directories": [
+            "src"
+        ],
+        "excludes": [
+            // Same multi-class-file reflection limitation as the scoped profile.
+            "Auth/AuthHandler.php"
+        ]
+    },
+    "phpUnit": {
+        "configDir": ".",
+        "customPath": "vendor/bin/phpunit"
+    },
+    "testFramework": "phpunit",
+    // Use the `default` (SQLite) testsuite: it needs no live PostgreSQL service,
+    // so the nightly runner stays self-contained like the scoped job. Integration
+    // and Security suites (real-PG) are intentionally out of scope here — their
+    // coverage contribution is a separate concern from mutation-detector quality.
+    "testFrameworkOptions": "--testsuite=default",
+    // Match the scoped profile's 60s per-mutant timeout so slow covered mutants
+    // run to completion rather than being counted as false timeouts.
+    "timeout": 60,
+    // Informational only — this profile must never fail the build.
+    "minMsi": 0,
+    "minCoveredMsi": 0
+}

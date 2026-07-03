@@ -22,8 +22,61 @@ on:
       - '**/*.md'
       - 'LICENSE'
 
+# A newer push to the same ref obsoletes the in-flight run; never let two full
+# suites race (this is what burned a duplicate ~13-min run when a fix commit
+# landed on a PR before the prior run finished). Mirrors e2e.yml.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Detect which side of the codebase changed so single-sided PRs skip the jobs
+  # they can't affect: a backend-only PR skips the ~2-min `web` job, and a
+  # frontend-only PR skips the ~10-13-min real-Postgres job. The typed-client
+  # drift gate lives in `web` and depends only on public/openapi.json (the
+  # generated contract), so `web` runs whenever that file changes — a src/**
+  # change that alters the API necessarily regenerates it (the `test` job's
+  # OpenAPI drift check enforces that), so the drift gate is never skipped.
+  # Workflow-file edits run everything. If detection can't run (e.g. a push with
+  # no fetchable base), the filter fails open and the jobs run.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'src/**'
+              - 'tests/**'
+              - 'plugins/**'
+              - 'sdk/**'
+              - 'database/**'
+              - 'public/**'
+              - 'scripts/**'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'phpstan.neon'
+              - 'phpstan-baseline.neon'
+              - 'phpunit.xml'
+              - 'infection.json5'
+              - '.github/workflows/automated-tests.yml'
+            frontend:
+              - 'web/**'
+              - 'public/openapi.json'
+              - '.github/workflows/automated-tests.yml'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     name: Unit, static analysis & plugin smoke (SQLite)
     runs-on: ubuntu-latest
 
@@ -38,15 +91,25 @@ jobs:
           extensions: mbstring, pdo, pdo_sqlite
           coverage: pcov
 
+      # Unified composer cache key (WC-232ec317): the vendor/ tree is identical
+      # across the test / postgres / mutation / e2e jobs (they differ only in
+      # loaded PHP extensions, which live outside vendor/), so one shared key
+      # warms them all and cuts redundant cache entries under the 10 GB budget.
       - name: Cache Composer dependencies
         uses: actions/cache@v4
         with:
           path: vendor
-          key: composer-test-${{ hashFiles('composer.lock') }}
-          restore-keys: composer-test-
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
 
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
+
+      # Fail the build on a known security advisory in a locked dependency
+      # (WC-232ec317). Cheap (~seconds) and turns a supply-chain regression into
+      # a pre-merge gate rather than a production surprise.
+      - name: Composer security audit
+        run: composer audit --no-interaction --abandoned=report
 
       - name: Run PHPUnit with coverage
         run: vendor/bin/phpunit --coverage-clover coverage.xml --coverage-text
@@ -75,6 +138,18 @@ jobs:
           php public/index.php generate:openapi
           git diff --exit-code -- public/openapi.json
 
+      # Restore PHPStan's result cache (tmpDir: .phpstan-cache in phpstan.neon)
+      # so unchanged files skip re-analysis — turns a ~60s cold analyse into a
+      # few seconds on a small diff. Keyed per-commit with a loose restore-key so
+      # every run seeds from the most recent cache; PHPStan invalidates internally
+      # on any file/config/version change, so a stale restore is always safe.
+      - name: Cache PHPStan result cache
+        uses: actions/cache@v4
+        with:
+          path: .phpstan-cache
+          key: phpstan-${{ github.sha }}
+          restore-keys: phpstan-
+
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=512M
 
@@ -98,6 +173,8 @@ jobs:
 
   postgres-integration:
     name: Migrations + Integration + Security on real PostgreSQL
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
 
     # A real PostgreSQL service so migrations/seed and the PHPUnit Integration
@@ -140,8 +217,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor
-          key: composer-postgres-${{ hashFiles('composer.lock') }}
-          restore-keys: composer-postgres-
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
 
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
@@ -198,66 +275,17 @@ jobs:
           ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
         run: vendor/bin/phpunit --testsuite Security
 
-  mutation-testing:
-    # Mutation testing (WC-a29727a5): runs Infection against the Auth / Tenant /
-    # Delegation critical paths only.  The scoped `mutation-scope` PHPUnit suite
-    # (defined in phpunit.xml) covers unit + SQLite real-engine tests and does NOT
-    # require a live PostgreSQL service, keeping this job fast and self-contained.
-    #
-    # Thresholds live in infection.json5 (minMsi / minCoveredMsi), anchored to
-    # the CI baseline run — see the derivation comment there before changing.
-    name: Infection mutation testing (Auth/Tenant/Delegation)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          extensions: mbstring, pdo, pdo_sqlite
-          coverage: pcov
-
-      # Distinct cache key prefix so this job never shares a stale vendor/
-      # directory with the main `test` job (different composer.lock hash would
-      # still be caught, but an explicit prefix makes cache provenance obvious).
-      - name: Cache Composer dependencies
-        uses: actions/cache@v4
-        with:
-          path: vendor
-          key: composer-mutation-${{ hashFiles('composer.lock') }}
-          restore-keys: composer-mutation-
-
-      - name: Install Dependencies
-        run: composer install --prefer-dist --no-progress --no-interaction
-
-      # threads=max uses all available vCPUs on the runner (GitHub-hosted runners
-      # provide 4 vCPUs), keeping the mutation run well under 10 minutes.
-      - name: Run Infection mutation testing
-        env:
-          INITIAL_SYSTEM_ADMIN_PASSWORD: ci_initial_admin_password_min_32_chars_cc
-          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
-          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
-        # Per-mutant timeout is configured via "timeout": 60 in infection.json5
-        # (this Infection version has no --timeout CLI flag). 60s stops the slower
-        # CI runner from false-timing-out covered mutants at the 10s default, which
-        # was deflating Covered-Code MSI.
-        run: vendor/bin/infection --no-interaction --no-progress --threads=max
-
-      - name: Upload Infection log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: infection-log
-          path: |
-            infection-log.txt
-            infection-summary.txt
-          retention-days: 14
+  # NOTE: Infection mutation testing moved OFF the per-PR path to a 6-hourly
+  # scheduled run — see .github/workflows/mutation-testing.yml (WC-232ec317).
+  # It took ~24 min (60s per-mutant timeout) and is a quality-TREND gate on main,
+  # not a correctness gate; PRs still run SQLite + real-Postgres + PHPStan +
+  # Playwright here. A mutation-coverage regression surfaces on the next
+  # scheduled run after merge.
 
   web:
     name: Frontend types, tests & generated-artifact drift
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -277,6 +305,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Fail on a high/critical advisory in an installed npm dependency
+      # (WC-232ec317). `--audit-level=high` keeps low/moderate noise out of the
+      # gate while still blocking genuinely exploitable supply-chain regressions.
+      - name: npm security audit
+        run: npm audit --audit-level=high
 
       # The committed lib/api/schema.d.ts must match a fresh generation from
       # public/openapi.json — API changes that skip `npm run generate:api`
@@ -310,6 +344,19 @@ jobs:
       # registry hook then `next build`. On Next 16 `next build` no longer runs
       # ESLint (`next lint` was removed), so this validates ONLY the registry
       # generation plus build-breaking RSC/route/type errors.
+      # Next.js reuses its compiler/output cache in .next/cache across builds;
+      # restoring it makes `next build` incremental. Keyed on the lockfile plus
+      # source hash so a dependency or source change seeds from the most recent
+      # cache (restore-keys) rather than building fully cold.
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/**/*.[jt]s', 'web/**/*.[jt]sx') }}
+          restore-keys: |
+            nextjs-${{ hashFiles('web/package-lock.json') }}-
+            nextjs-
+
       - name: Build (production)
         run: npm run build
 

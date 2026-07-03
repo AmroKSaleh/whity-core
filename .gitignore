@@ -18,6 +18,9 @@ docs/*
 !docs/adr/
 .worktrees/
 .phpunit.cache/
+# PHPStan result cache (project-local tmpDir; restored across CI runs for a fast
+# incremental re-analysis — see phpstan.neon and .github/workflows/automated-tests.yml)
+/.phpstan-cache/
 
 .claude/
 .playwright-mcp/
