@@ -243,10 +243,183 @@ jobs:
             ${{ steps.image.outputs.name }}:${{ github.ref_name }}
             ${{ steps.image.outputs.name }}:latest
 
+  smoke:
+    # WC-2990117b: Boot the GHCR image that was just pushed and confirm it serves
+    # a real HTTP 200 from GET /api/health before the GitHub Release is created.
+    # This closes the gap where a broken image (bad migration, missing extension,
+    # wrong Caddyfile, boot crash) would become a published Release and be picked
+    # up by every sovereign deployment running `update:check`.
+    #
+    # Networking approach: GitHub Actions `services:` containers live on a
+    # separate Docker-managed bridge that job-level `docker run` containers
+    # CANNOT reach by container name — only the runner host can. To mirror a
+    # real docker-compose deploy (app → postgres by DNS name) we create a
+    # user-defined bridge network and run BOTH the Postgres container AND the
+    # release image on it, so the app reaches Postgres as `postgres:5432`.
+    name: Smoke-test the release image
+    runs-on: ubuntu-latest
+    needs: [image]
+
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Resolve the image name the same way the `image` job does: lowercase the
+      # repository path because GHCR requires it and github.repository may not be.
+      - name: Resolve image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      # Isolated bridge so the app reaches Postgres by the container name
+      # `postgres` — same topology as docker-compose.yml (DB_HOST: postgres).
+      - name: Create docker network
+        run: docker network create whity-smoke
+
+      # Run Postgres on the shared bridge. We do NOT use `services:` here
+      # because services containers cannot be placed on a user-defined network
+      # (they always join the default bridge that `docker run` containers
+      # cannot resolve by name). Plain `docker run` + `pg_isready` polling
+      # gives us the same health gate without the topology limitation.
+      - name: Start Postgres
+        run: |
+          docker run -d \
+            --name postgres \
+            --network whity-smoke \
+            -e POSTGRES_USER=whity \
+            -e POSTGRES_PASSWORD=whity_smoke \
+            -e POSTGRES_DB=whity_core \
+            postgres:15-alpine
+
+      - name: Wait for Postgres to be ready
+        run: |
+          for i in $(seq 1 30); do
+            docker exec postgres pg_isready -U whity -d whity_core && break
+            echo "Waiting for Postgres ($i/30)..."
+            sleep 2
+          done
+          docker exec postgres pg_isready -U whity -d whity_core
+
+      - name: Pull release image
+        run: docker pull "${{ steps.image.outputs.name }}:${{ github.ref_name }}"
+
+      # Run migrations and seed inside the release image on the same network so
+      # the app can reach Postgres by the container name `postgres`. APP_ENV is
+      # set to `development` so the seed command actually inserts the initial
+      # accounts (the seed command is a no-op outside development). JWT_SECRET
+      # and ENCRYPTION_KEY must be >= 32 chars to pass the JwtSecretGuard /
+      # TotpService fast-fail checks that fire even for CLI invocations.
+      - name: Run migrations
+        run: |
+          docker run --rm \
+            --network whity-smoke \
+            -e APP_ENV=development \
+            -e DB_HOST=postgres \
+            -e DB_PORT=5432 \
+            -e DB_NAME=whity_core \
+            -e DB_USER=whity \
+            -e DB_PASSWORD=whity_smoke \
+            -e JWT_SECRET=ci_smoke_jwt_secret_min_32_chars_aaaa \
+            -e ENCRYPTION_KEY=ci_smoke_encryption_key_min_32_chars_bb \
+            -e INITIAL_ADMIN_PASSWORD=smoke_admin_password_123 \
+            -e INITIAL_USER_PASSWORD=smoke_user_password_1234 \
+            -e INITIAL_SYSTEM_ADMIN_PASSWORD=smoke_sysadmin_password_12 \
+            -e INITIAL_SUPERUSER_PASSWORD=smoke_superuser_password_12 \
+            "${{ steps.image.outputs.name }}:${{ github.ref_name }}" \
+            php public/index.php migrate run
+
+      - name: Run seed
+        run: |
+          docker run --rm \
+            --network whity-smoke \
+            -e APP_ENV=development \
+            -e DB_HOST=postgres \
+            -e DB_PORT=5432 \
+            -e DB_NAME=whity_core \
+            -e DB_USER=whity \
+            -e DB_PASSWORD=whity_smoke \
+            -e JWT_SECRET=ci_smoke_jwt_secret_min_32_chars_aaaa \
+            -e ENCRYPTION_KEY=ci_smoke_encryption_key_min_32_chars_bb \
+            -e INITIAL_ADMIN_PASSWORD=smoke_admin_password_123 \
+            -e INITIAL_USER_PASSWORD=smoke_user_password_1234 \
+            -e INITIAL_SYSTEM_ADMIN_PASSWORD=smoke_sysadmin_password_12 \
+            -e INITIAL_SUPERUSER_PASSWORD=smoke_superuser_password_12 \
+            "${{ steps.image.outputs.name }}:${{ github.ref_name }}" \
+            php public/index.php seed
+
+      # Start the app detached. Caddy needs auto_https off and an explicit
+      # SERVER_NAME so it binds to :80 rather than trying ACME. These are the
+      # same vars docker-compose.yml passes to the frankenphp service.
+      #
+      # FRANKENPHP_CONFIG: the GHCR release image uses the base FrankenPHP
+      # image's /etc/frankenphp/Caddyfile (not the project's Caddyfile, which
+      # is bind-mounted in docker-compose but not in a plain `docker run`). The
+      # base Caddyfile injects {$FRANKENPHP_CONFIG} into the frankenphp block,
+      # so setting this env var enables persistent worker mode — matching the
+      # production topology — without needing to mount the project Caddyfile.
+      - name: Start app container
+        run: |
+          docker run -d \
+            --name whity-app \
+            --network whity-smoke \
+            -p 8000:80 \
+            -e APP_ENV=production \
+            -e DB_HOST=postgres \
+            -e DB_PORT=5432 \
+            -e DB_NAME=whity_core \
+            -e DB_USER=whity \
+            -e DB_PASSWORD=whity_smoke \
+            -e JWT_SECRET=ci_smoke_jwt_secret_min_32_chars_aaaa \
+            -e ENCRYPTION_KEY=ci_smoke_encryption_key_min_32_chars_bb \
+            -e CADDY_GLOBAL_OPTIONS="auto_https off" \
+            -e SERVER_NAME=":80" \
+            -e SERVER_ROOT="public/" \
+            -e FRANKENPHP_CONFIG="worker /app/public/index.php 4" \
+            "${{ steps.image.outputs.name }}:${{ github.ref_name }}"
+
+      # Poll GET /api/health until HTTP 200. A fresh FrankenPHP worker pool
+      # (8 workers by default) takes a couple of seconds to boot, so we allow
+      # up to 60 seconds (30 × 2 s). On timeout we dump the container logs and
+      # the process list so the failure is diagnosable from the Actions run.
+      - name: Wait for health 200
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/health || true)
+            echo "Attempt $i/30 — HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed."
+              curl -s http://localhost:8000/api/health
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Health check did not return 200 within 60 seconds."
+          docker logs whity-app
+          docker ps -a
+          exit 1
+
+      # Always clean up the containers and network, even on failure, so the
+      # runner is left in a clean state for any subsequent jobs.
+      - name: Tear down
+        if: always()
+        run: |
+          docker rm -f whity-app postgres 2>/dev/null || true
+          docker network rm whity-smoke 2>/dev/null || true
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [verify, postgres-integration, web, image]
+    # smoke is now a gate: a release image that does not boot and serve /api/health
+    # can never become a published GitHub Release (and thus never be picked up by
+    # sovereign deployments running `update:check`).
+    needs: [verify, postgres-integration, web, image, smoke]
 
     permissions:
       contents: write
