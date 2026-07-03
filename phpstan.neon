@@ -3,6 +3,13 @@ includes:
 
 parameters:
     level: 8
+    # Project-local result-cache directory (PHPStan's default is the system temp
+    # dir, which a fresh CI runner never carries between runs). Pinning it here
+    # lets the CI job cache/restore this directory so unchanged files are not
+    # re-analysed. PHPStan invalidates entries itself when a file, its
+    # dependencies, the config, or the PHPStan version changes, so a stale restore
+    # is always safe. Gitignored (/.phpstan-cache/).
+    tmpDir: .phpstan-cache
     # Plugins are loaded at runtime by Whity\Core\PluginLoader's dynamic PSR-4
     # autoloader (directory name => namespace prefix), not by Composer. Tell
     # PHPStan where those symbols live so it can resolve plugin classes

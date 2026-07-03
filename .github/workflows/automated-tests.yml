@@ -22,8 +22,61 @@ on:
       - '**/*.md'
       - 'LICENSE'
 
+# A newer push to the same ref obsoletes the in-flight run; never let two full
+# suites race (this is what burned a duplicate ~13-min run when a fix commit
+# landed on a PR before the prior run finished). Mirrors e2e.yml.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Detect which side of the codebase changed so single-sided PRs skip the jobs
+  # they can't affect: a backend-only PR skips the ~2-min `web` job, and a
+  # frontend-only PR skips the ~10-13-min real-Postgres job. The typed-client
+  # drift gate lives in `web` and depends only on public/openapi.json (the
+  # generated contract), so `web` runs whenever that file changes — a src/**
+  # change that alters the API necessarily regenerates it (the `test` job's
+  # OpenAPI drift check enforces that), so the drift gate is never skipped.
+  # Workflow-file edits run everything. If detection can't run (e.g. a push with
+  # no fetchable base), the filter fails open and the jobs run.
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'src/**'
+              - 'tests/**'
+              - 'plugins/**'
+              - 'sdk/**'
+              - 'database/**'
+              - 'public/**'
+              - 'scripts/**'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'phpstan.neon'
+              - 'phpstan-baseline.neon'
+              - 'phpunit.xml'
+              - 'infection.json5'
+              - '.github/workflows/automated-tests.yml'
+            frontend:
+              - 'web/**'
+              - 'public/openapi.json'
+              - '.github/workflows/automated-tests.yml'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     name: Unit, static analysis & plugin smoke (SQLite)
     runs-on: ubuntu-latest
 
@@ -38,15 +91,25 @@ jobs:
           extensions: mbstring, pdo, pdo_sqlite
           coverage: pcov
 
+      # Unified composer cache key (WC-232ec317): the vendor/ tree is identical
+      # across the test / postgres / mutation / e2e jobs (they differ only in
+      # loaded PHP extensions, which live outside vendor/), so one shared key
+      # warms them all and cuts redundant cache entries under the 10 GB budget.
       - name: Cache Composer dependencies
         uses: actions/cache@v4
         with:
           path: vendor
-          key: composer-test-${{ hashFiles('composer.lock') }}
-          restore-keys: composer-test-
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
 
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
+
+      # Fail the build on a known security advisory in a locked dependency
+      # (WC-232ec317). Cheap (~seconds) and turns a supply-chain regression into
+      # a pre-merge gate rather than a production surprise.
+      - name: Composer security audit
+        run: composer audit --no-interaction --abandoned=report
 
       - name: Run PHPUnit with coverage
         run: vendor/bin/phpunit --coverage-clover coverage.xml --coverage-text
@@ -75,6 +138,18 @@ jobs:
           php public/index.php generate:openapi
           git diff --exit-code -- public/openapi.json
 
+      # Restore PHPStan's result cache (tmpDir: .phpstan-cache in phpstan.neon)
+      # so unchanged files skip re-analysis — turns a ~60s cold analyse into a
+      # few seconds on a small diff. Keyed per-commit with a loose restore-key so
+      # every run seeds from the most recent cache; PHPStan invalidates internally
+      # on any file/config/version change, so a stale restore is always safe.
+      - name: Cache PHPStan result cache
+        uses: actions/cache@v4
+        with:
+          path: .phpstan-cache
+          key: phpstan-${{ github.sha }}
+          restore-keys: phpstan-
+
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse src tests plugins sdk --memory-limit=512M
 
@@ -98,6 +173,8 @@ jobs:
 
   postgres-integration:
     name: Migrations + Integration + Security on real PostgreSQL
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
 
     # A real PostgreSQL service so migrations/seed and the PHPUnit Integration
@@ -140,8 +217,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor
-          key: composer-postgres-${{ hashFiles('composer.lock') }}
-          restore-keys: composer-postgres-
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
 
       - name: Install Dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
@@ -207,6 +284,8 @@ jobs:
 
   web:
     name: Frontend types, tests & generated-artifact drift
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -226,6 +305,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Fail on a high/critical advisory in an installed npm dependency
+      # (WC-232ec317). `--audit-level=high` keeps low/moderate noise out of the
+      # gate while still blocking genuinely exploitable supply-chain regressions.
+      - name: npm security audit
+        run: npm audit --audit-level=high
 
       # The committed lib/api/schema.d.ts must match a fresh generation from
       # public/openapi.json — API changes that skip `npm run generate:api`
@@ -259,6 +344,19 @@ jobs:
       # registry hook then `next build`. On Next 16 `next build` no longer runs
       # ESLint (`next lint` was removed), so this validates ONLY the registry
       # generation plus build-breaking RSC/route/type errors.
+      # Next.js reuses its compiler/output cache in .next/cache across builds;
+      # restoring it makes `next build` incremental. Keyed on the lockfile plus
+      # source hash so a dependency or source change seeds from the most recent
+      # cache (restore-keys) rather than building fully cold.
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/**/*.[jt]s', 'web/**/*.[jt]sx') }}
+          restore-keys: |
+            nextjs-${{ hashFiles('web/package-lock.json') }}-
+            nextjs-
+
       - name: Build (production)
         run: npm run build
 
