@@ -167,4 +167,33 @@ class CookieManager
     {
         header('Set-Cookie: ' . self::buildCookieHeader('temp_auth_token', '', 0, '/api'), false);
     }
+
+    /**
+     * Set the tenant-selection token cookie (ADR 0005 §6).
+     *
+     * Issued by login when a profile has MULTIPLE active memberships and the user
+     * must choose a tenant. Short-lived (default 5 min) and path-restricted to
+     * /api like the 2FA temp token; it binds the login and the subsequent
+     * POST /api/auth/select-tenant so a caller can only complete the login they
+     * started (and only into a tenant they belong to — re-validated server-side).
+     *
+     * @param string $token     JWT of type 'tenant_select'.
+     * @param int    $expiresIn Expiration in seconds (default 300).
+     */
+    public static function setTenantSelectionToken(string $token, int $expiresIn = 300): void
+    {
+        header('Set-Cookie: ' . self::buildCookieHeader('tenant_select_token', $token, $expiresIn, '/api'), false);
+    }
+
+    /** Get the tenant-selection token from cookies, or null if absent. */
+    public static function getTenantSelectionToken(): ?string
+    {
+        return $_COOKIE['tenant_select_token'] ?? null;
+    }
+
+    /** Clear the tenant-selection token cookie (same Path as the setter). */
+    public static function clearTenantSelectionToken(): void
+    {
+        header('Set-Cookie: ' . self::buildCookieHeader('tenant_select_token', '', 0, '/api'), false);
+    }
 }

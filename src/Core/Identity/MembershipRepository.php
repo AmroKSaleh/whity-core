@@ -42,6 +42,15 @@ final class MembershipRepository
     /**
      * Create a membership with an explicit status (default: active).
      *
+     * FOLLOW-UP (WC-c35c4ce0 review, membership-API step): this method has NO
+     * `tenant_id > 0` guard, so a caller could create a membership in the system
+     * tenant (id 0). The LOGIN path is already hardened (system-tenant memberships
+     * are excluded from selection/auto-login, see AuthHandler::listActiveMemberships),
+     * so this cannot be exploited to log in with system authority today. But the
+     * membership-management API (a later step) should reject/authorise tenant-0
+     * membership creation explicitly rather than relying solely on the login-side
+     * filter. Not fixed here to avoid expanding this step's scope.
+     *
      * @return int The new row's id.
      */
     public function insert(

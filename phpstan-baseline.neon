@@ -156,11 +156,6 @@ parameters:
 			path: src/Api/UsersApiHandler.php
 
 		-
-			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:completeTwoFaLogin\\(\\) has parameter \\$claims with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: src/Auth/AuthHandler.php
-
-		-
 			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:handle\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
 			count: 1
 			path: src/Auth/AuthHandler.php
@@ -582,7 +577,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 3
+			count: 6
 			path: tests/Auth/AccessTokenRevocationRealEngineTest.php
 
 		-
@@ -1202,7 +1197,7 @@ parameters:
 
 		-
 			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
-			count: 9
+			count: 6
 			path: tests/Unit/Auth/AuthHandlerTest.php
 
 		-
@@ -1339,3 +1334,8 @@ parameters:
 			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
 			count: 7
 			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
+
+		-
+			message: "#^Property Tests\\\\Integration\\\\ProfileLoginRealEngineTest\\:\\:\\$userIdB is never read, only written\\.$#"
+			count: 1
+			path: tests/Integration/ProfileLoginRealEngineTest.php

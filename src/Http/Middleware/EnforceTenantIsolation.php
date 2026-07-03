@@ -87,6 +87,10 @@ class EnforceTenantIsolation
         // WC-206: versioned auth surface under /api/v1/.
         '/api/v1/login',
         '/api/v1/login/2fa',
+        // ADR 0005 §6: multi-membership tenant selection. Public like login/2fa —
+        // the caller holds only the short-lived selection cookie (no session yet);
+        // AuthHandler::handleSelectTenant re-validates membership before minting.
+        '/api/v1/auth/select-tenant',
         '/api/v1/me',
         '/api/v1/auth/refresh',
         '/api/v1/auth/logout',
@@ -246,10 +250,11 @@ class EnforceTenantIsolation
         // which subscribes to hooks deep inside the handlers and has no access to
         // the Request — can stamp the acting user and client IP on every entry.
         // Reset between requests by the kernel and the worker loop.
-        $actorUserId = ($payload !== null && isset($payload['user_id']) && is_int($payload['user_id']))
-            ? $payload['user_id']
-            : null;
-        AuditContext::set($actorUserId, $this->clientIp($request));
+        //
+        // WC-c35c4ce0 security follow-up (a): use userIdFromPayload() rather than
+        // reading payload['user_id'] inline, so post-cutover tokens that carry
+        // only profile_id (no legacy user_id) still stamp a non-null audit actor.
+        AuditContext::set($this->userIdFromPayload($payload), $this->clientIp($request));
 
         // Determine the tenant the request *declares* it is addressing, if any.
         // This is an attacker-suppliable target (path/query/header), NOT the

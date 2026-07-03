@@ -270,8 +270,9 @@ class AuthFlowTest extends TestCase
 
         // Migration 010 seeds system tenant (id=0). The test user lives in tenant 1.
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'Test Tenant', datetime('now'))");
+        $pdo->exec("INSERT OR IGNORE INTO roles   (id, name) VALUES (1, 'admin')");
 
-        // The test user is NOT seeded by migrations — insert it explicitly.
+        // Legacy users row (dual-claim window backward compat).
         $stmt = $pdo->prepare(
             "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
              VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
@@ -283,6 +284,28 @@ class AuthFlowTest extends TestCase
             password_hash(self::TEST_USER_PASSWORD, PASSWORD_BCRYPT),
             self::TEST_ROLE_ID,
         ]);
+
+        // WC-c35c4ce0: the new login path resolves via profile_emails → profiles → memberships.
+        // Seed the profile model rows so the test user can authenticate.
+        $pdo->prepare(
+            "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, ?, false, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([
+            self::TEST_USER_ID,
+            'testuser',
+            password_hash(self::TEST_USER_PASSWORD, PASSWORD_BCRYPT),
+        ]);
+
+        $pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        )->execute([self::TEST_USER_ID, self::TEST_USER_EMAIL]);
+
+        $pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([self::TEST_USER_ID, self::TEST_TENANT_ID, self::TEST_ROLE_ID]);
 
         return $pdo;
     }

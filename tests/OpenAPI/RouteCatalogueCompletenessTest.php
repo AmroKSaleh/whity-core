@@ -33,6 +33,9 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // to the path-as-written in index.php (no prefix applied by the extractor).
         'POST /api/login',
         'POST /api/login/2fa',
+        // WC-c35c4ce0: ADR 0005 §6 multi-membership tenant selection. Part of the
+        // auth surface — declared once the auth/2FA OpenAPI schema task lands.
+        'POST /api/auth/select-tenant',
         'GET /api/me',
         'PATCH /api/me',
         'POST /api/auth/refresh',

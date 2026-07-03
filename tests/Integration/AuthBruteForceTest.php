@@ -182,7 +182,9 @@ final class AuthBruteForceTest extends TestCase
         $pdo = SchemaFromMigrations::make();
 
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'Test', datetime('now'))");
+        $pdo->exec("INSERT OR IGNORE INTO roles   (id, name) VALUES (1, 'admin')");
 
+        // Legacy users row (dual-claim window backward compat).
         $stmt = $pdo->prepare(
             "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
              VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
@@ -194,6 +196,28 @@ final class AuthBruteForceTest extends TestCase
             password_hash(self::VALID_PASSWORD, PASSWORD_BCRYPT),
             self::TEST_ROLE_ID,
         ]);
+
+        // WC-c35c4ce0: the new login path resolves via profile_emails → profiles → memberships.
+        // Seed the profile model rows so the test user can authenticate.
+        $pdo->prepare(
+            "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, ?, false, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([
+            self::TEST_USER_ID,          // use same id for simplicity
+            'throttle-test',
+            password_hash(self::VALID_PASSWORD, PASSWORD_BCRYPT),
+        ]);
+
+        $pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        )->execute([self::TEST_USER_ID, self::TEST_EMAIL]);
+
+        $pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([self::TEST_USER_ID, self::TEST_TENANT_ID, self::TEST_ROLE_ID]);
 
         return $pdo;
     }

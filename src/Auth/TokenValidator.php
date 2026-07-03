@@ -91,6 +91,16 @@ class TokenValidator
             return null;
         }
 
+        // WC-c35c4ce0 security follow-up (b): when BOTH legacy {tenant_id} and
+        // new {active_tenant_id} claims are present, they must be equal. A
+        // mismatch means McpPrincipal (reads tenant_id) and TenantContext (reads
+        // active_tenant_id) would resolve different tenants — a "split-brain"
+        // that could let a caller pass the membership gate for one tenant while
+        // running tenant-scoped queries against another.
+        if ($this->hasSplitBrainClaims($claims)) {
+            return null;
+        }
+
         // Dual-claim window (WC-d4340daf): a token carrying the new
         // {profile_id, active_tenant_id} claims must be backed by an ACTIVE
         // membership in that tenant (per-membership suspension, ADR 0005 §5).
@@ -143,6 +153,12 @@ class TokenValidator
         // Per-user epoch: an epoch bump (password change) must invalidate refresh
         // tokens too, not only the individually-revoked jtis (WC-185).
         if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
+        // WC-c35c4ce0 security follow-up (b): split-brain invariant (same as
+        // the access-token path above).
+        if ($this->hasSplitBrainClaims($claims)) {
             return null;
         }
 
@@ -482,5 +498,37 @@ class TokenValidator
         } catch (\Exception) {
             return false;
         }
+    }
+
+    /**
+     * Detect the split-brain invariant violation (WC-c35c4ce0, security follow-up b).
+     *
+     * During the dual-claim window tokens carry BOTH legacy {tenant_id} and new
+     * {active_tenant_id} claims.  McpPrincipal reads `tenant_id` while
+     * TenantContext reads `active_tenant_id`; if the two differ, a caller could
+     * pass the ActiveTenantMembershipGuard for tenant A while executing all
+     * tenant-scoped queries against tenant B.
+     *
+     * The invariant: when BOTH integer-valued claims are present, they MUST be
+     * equal. A mismatch is rejected as an invalid token.
+     *
+     * Only triggers when both claims are present and integer-valued.  Tokens
+     * with only legacy claims (no active_tenant_id) or only new claims (no
+     * tenant_id) are unaffected — the invariant only applies in the overlap.
+     *
+     * @param array<string, mixed> $claims Decoded token claims.
+     * @return bool True when the invariant is violated (token must be rejected).
+     */
+    private function hasSplitBrainClaims(array $claims): bool
+    {
+        $tenantId       = $claims['tenant_id'] ?? null;
+        $activeTenantId = $claims['active_tenant_id'] ?? null;
+
+        // Invariant only applies when BOTH claims are present and integer-typed.
+        if (!is_int($tenantId) || !is_int($activeTenantId)) {
+            return false;
+        }
+
+        return $tenantId !== $activeTenantId;
     }
 }
