@@ -188,15 +188,19 @@ class DelegationsApiRbacTest extends TestCase
 
         // Someone ELSE delegates users:read directly TO the grantor, so the grantor
         // now "has" users:read ONLY via delegation — never through a role.
-        // Use a real user as the external delegator so that PostgreSQL's FK constraint
-        // on permission_delegations.grantor_user_id is satisfied (SQLite ignores FKs
-        // by default, but Postgres enforces them strictly).
+        // WC-bc07b6de: permission_delegations now references grantor_profile_id (profiles.id).
+        // Since this test does not seed profiles, we use the user id as a stand-in
+        // for the profile id — SQLite does not enforce FK constraints at runtime, so
+        // the insert succeeds; Postgres integration tests that enforce FKs must seed
+        // profiles explicitly. The grantee_id must equal $grantorId so that
+        // RoleChecker's fallback legacy path (which passes user_id to
+        // delegatedPermissionsForUser) finds the row.
         $externalDelegatorId = $this->seedPlainUser('external-delegator@example.com');
         $this->pdo->prepare(
             'INSERT INTO permission_delegations
-                (tenant_id, grantor_user_id, grantee_type, grantee_id, permission, ou_id, granted_at)
+                (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, ou_id, granted_at)
              VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([self::TENANT, $externalDelegatorId, DelegationRepository::GRANTEE_USER, $grantorId, 'users:read']);
+        )->execute([self::TENANT, $externalDelegatorId, DelegationRepository::GRANTEE_PROFILE, $grantorId, 'users:read']);
         RoleChecker::clearCache();
 
         // The grantor attempts to RE-DELEGATE users:read to the grantee. This drives

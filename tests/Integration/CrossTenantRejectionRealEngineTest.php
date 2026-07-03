@@ -1668,13 +1668,6 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (20, 2, 'b-greeting', datetime('now'))
         ");
 
-        $pdo->exec("
-            INSERT INTO permission_delegations
-                (id, tenant_id, grantor_user_id, grantee_type, grantee_id, permission, granted_at) VALUES
-                (1, 1, 10, 'user', 11, 'users:read', datetime('now')),
-                (2, 2, 20, 'user', 21, 'users:read', datetime('now'))
-        ");
-
         // Profiles (global, migration 028) — one per person, tenant-independent.
         // Profile 101 (Alice) has memberships in BOTH tenants so findForProfile()
         // cross-tenant scan can be verified; Profile 102 (Bob) is Tenant B only.
@@ -1699,6 +1692,17 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $pdo->exec("
             INSERT INTO memberships (id, profile_id, tenant_id, role_id, ou_id, status, created_at) VALUES
                 (103, 101, 2, 2, NULL, 'active', datetime('now'))
+        ");
+
+        // WC-bc07b6de: permission_delegations now use grantor_profile_id (profiles.id)
+        // and grantee_type='profile'. Delegation 1 belongs to Tenant A (grantor = Alice,
+        // profile 101); delegation 2 belongs to Tenant B (grantor = Bob, profile 102).
+        // These fixtures verify that cross-tenant revoke/read still fails closed.
+        $pdo->exec("
+            INSERT INTO permission_delegations
+                (id, tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, granted_at) VALUES
+                (1, 1, 101, 'profile', 101, 'users:read', datetime('now')),
+                (2, 2, 102, 'profile', 102, 'users:read', datetime('now'))
         ");
 
         // Tenant email-domain registrations (tenant_email_domains, migration 031):

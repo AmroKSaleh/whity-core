@@ -60,8 +60,8 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
     {
         $this->pdo->exec("
             INSERT INTO permission_delegations
-                (tenant_id, grantor_user_id, grantee_type, grantee_id, permission, granted_at, revoked_at)
-            VALUES (1, 10, 'user', 11, 'users:read', datetime('now'), datetime('now'))
+                (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, granted_at, revoked_at)
+            VALUES (1, 10, 'profile', 11, 'users:read', datetime('now'), datetime('now'))
         ");
 
         $_GET = ['includeRevoked' => '1'];

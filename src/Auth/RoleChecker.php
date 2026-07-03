@@ -18,21 +18,43 @@ use Whity\Core\RBAC\PermissionRegistry;
  * grants reached through tenant-scoped organizational units can never leak across
  * tenant boundaries.
  *
+ * Membership-aware permission model (WC-bc07b6de)
+ * ------------------------------------------------
+ * Effective permissions are resolved from the caller's MEMBERSHIP in the ACTIVE
+ * tenant. A caller identified by (profile_id, active_tenant_id) maps to exactly
+ * one `memberships` row (UNIQUE(profile_id, tenant_id)), which carries the
+ * `role_id` and optional `ou_id` for that tenant. The same profile can be admin
+ * in tenant A and read-only in tenant B — permissions are strictly per-membership.
+ *
+ * Primary API:
+ *   - {@see self::hasPermissionForProfile()} — membership-aware, new callers use this.
+ *   - {@see self::hasRoleForProfile()} — membership-aware role check.
+ *   - {@see self::getEffectivePermissionsForProfile()} — full resolution set.
+ *
+ * Legacy dual-window compatibility:
+ *   - {@see self::hasPermission()} and {@see self::hasRole()} still work during
+ *     the Phase B transition. They first attempt a membership lookup (mapping the
+ *     legacy user_id to a profile via migration_035_profile_ids, then resolving
+ *     via memberships). If that lookup succeeds the membership path is used. If
+ *     the 035 mapping is absent (fresh database, no legacy data) they fall back
+ *     to the original users-table path so no existing behavior is weakened.
+ *
  * Effective-roles model (WC-54)
  * -----------------------------
- * A user's EFFECTIVE role set is the UNION of:
- *  1. Their DIRECT role (`users.role_id`).
- *  2. Every role assigned to the organizational unit the user belongs to
- *     (`users.ou_id`), AND every role assigned to that OU's ANCESTORS — the chain
- *     of `organizational_units.parent_id` walked UP to the root. A user in a child
- *     OU therefore inherits the roles granted to every OU above it. All OU role
- *     lookups are filtered by `ou_role_assignments.tenant_id = :tenantId`, so an
- *     OU role assigned in tenant A never grants anything in tenant B.
+ * A caller's EFFECTIVE role set is the UNION of:
+ *  1. Their DIRECT role (from `memberships.role_id`).
+ *  2. Every role assigned to the organizational unit the caller belongs to
+ *     (`memberships.ou_id`), AND every role assigned to that OU's ANCESTORS —
+ *     the chain of `organizational_units.parent_id` walked UP to the root.
+ *     A caller in a child OU therefore inherits the roles granted to every OU
+ *     above it. All OU role lookups are filtered by
+ *     `ou_role_assignments.tenant_id = :tenantId`, so an OU role assigned in
+ *     tenant A never grants anything in tenant B.
  *
- * The user's EFFECTIVE PERMISSION set is then the union of the hierarchy-resolved
- * permission set (see below) of EVERY effective role. So a permission is granted
- * if the user's direct role — or any OU/ancestor-OU role, or any role those
- * inherit through the role hierarchy — holds it.
+ * The caller's EFFECTIVE PERMISSION set is then the union of the
+ * hierarchy-resolved permission set (see below) of EVERY effective role. So a
+ * permission is granted if the membership role — or any OU/ancestor-OU role,
+ * or any role those inherit through the role hierarchy — holds it.
  *
  * Role hierarchy (WC-15)
  * ----------------------
@@ -57,14 +79,15 @@ use Whity\Core\RBAC\PermissionRegistry;
  * never re-walks the graph on every check:
  *  - {@see self::$effectivePermissionCache}: roleId => permission list (a role's
  *    hierarchy-resolved permissions; tenant-independent).
- *  - {@see self::$effectiveUserPermissionCache}: "userId:tenantId" => permission
- *    list (the user's full effective permission set, which IS tenant scoped
- *    because OU membership/assignments are).
+ *  - {@see self::$effectiveUserPermissionCache}: cache key => permission list.
+ *    Keys have the form "p:profileId:tenantId:delegationFlag" for membership-aware
+ *    callers and "u:userId:tenantId:delegationFlag" for legacy-user callers.
  * Both hold only derived data (no request-specific state), so they are safe to
  * share across the requests a FrankenPHP worker serves. They MUST be invalidated
  * whenever role/permission assignments, the role hierarchy, OU membership, or OU
- * role assignments change — {@see RolesApiHandler}, {@see UsersApiHandler} and
- * {@see OusApiHandler} call {@see self::clearCache()} after any mutating write.
+ * role assignments change — {@see RolesApiHandler}, {@see UsersApiHandler},
+ * {@see OusApiHandler}, and {@see DelegationsApiHandler} call
+ * {@see self::clearCache()} after any mutating write.
  */
 class RoleChecker
 {
@@ -91,23 +114,18 @@ class RoleChecker
     private static array $effectivePermissionCache = [];
 
     /**
-     * Process (worker) level cache of a user's full effective permission set,
-     * keyed by "userId:tenantId".
+     * Process (worker) level cache of a caller's full effective permission set.
      *
-     * The set unions the hierarchy-resolved permissions of the user's direct role
-     * AND every OU/ancestor-OU role. Because OU membership and OU role assignments
-     * are tenant scoped, this cache MUST be keyed by tenant in addition to user —
-     * the same user resolved under a different tenant may see a different set.
+     * Keys have the form:
+     *  - "p:{profileId}:{tenantId}:{delegationFlag}" — membership-aware resolution
+     *    (profile_id + active_tenant_id → memberships row).
+     *  - "u:{userId}:{tenantId}:{delegationFlag}" — legacy-user resolution
+     *    (falls back to users.role_id when no membership mapping exists).
      *
-     * The key ALSO carries a delegation-awareness flag ("userId:tenantId:1" when a
-     * {@see DelegatedPermissionResolver} is wired, ":0" otherwise). Two checkers
-     * share this static cache — the delegation-aware one used by RbacMiddleware and
-     * the delegation-UNAWARE one that bounds a grantor's delegable set (WC-34). They
-     * resolve DIFFERENT sets for the same (user, tenant), so they MUST NOT collide
-     * on a single key: without the flag, the enforcement checker priming the cache
-     * for a grantor would let the bounding checker read a delegation-inclusive set
-     * and permit transitive re-delegation escalation (and, in the reverse order,
-     * mask legitimately delegated access).
+     * The delegation-awareness flag ("1" when a DelegatedPermissionResolver is
+     * wired, "0" otherwise) prevents two checkers — the enforcement checker and
+     * the bounding checker — from colliding on the same key, which would permit
+     * transitive re-delegation escalation (WC-34).
      *
      * Derived data only; invalidated via {@see self::clearCache()}.
      *
@@ -122,7 +140,7 @@ class RoleChecker
     /**
      * Optional resolver for delegated permissions (WC-34).
      *
-     * When wired, a user's effective permission set is unioned with the LIVE
+     * When wired, a caller's effective permission set is unioned with the LIVE
      * (non-revoked) permissions delegated to them — directly or through any of
      * their effective roles, within OU scope — so a delegation actually grants
      * access through {@see self::hasPermission()}. When null (e.g. legacy tests),
@@ -154,6 +172,155 @@ class RoleChecker
         $this->delegationResolver = $delegationResolver;
     }
 
+    // =========================================================================
+    // Membership-aware public API (WC-bc07b6de — preferred for new callers)
+    // =========================================================================
+
+    /**
+     * Check if a profile effectively has a specific role within a tenant,
+     * resolving from the `memberships` table.
+     *
+     * A profile "has" a role when it is in their EFFECTIVE role set —
+     * their membership role OR any role assigned to their membership OU or
+     * any of its ancestors, all scoped to {@see $tenantId}. System tenant (id 0)
+     * retains platform-wide authority: checks against tenant 0 return true when
+     * the profile's system-tenant membership carries the required role.
+     *
+     * @param int    $profileId    The profile id (ADR 0005 §1).
+     * @param string $requiredRole The role name to verify against.
+     * @param int    $tenantId     The resolved tenant id (0 = system tenant).
+     * @return bool True if the profile effectively has the required role.
+     */
+    public function hasRoleForProfile(int $profileId, string $requiredRole, int $tenantId): bool
+    {
+        $effectiveRoles = $this->getEffectiveRolesForProfile($profileId, $tenantId);
+        return in_array($requiredRole, $effectiveRoles, true);
+    }
+
+    /**
+     * Check if a profile effectively has a specific permission within a tenant,
+     * resolving from the `memberships` table (membership-aware primary path).
+     *
+     * Resolution order:
+     *  1. The permission must exist in the {@see PermissionRegistry}.
+     *  2. The profile must have an ACTIVE membership in $tenantId (suspended
+     *     memberships contribute no permissions — the token may still be valid
+     *     but the HTTP middleware should already have rejected it; this is a
+     *     second line of defence).
+     *  3. The membership's role — and every OU/ancestor-OU role in that tenant —
+     *     is expanded through the role hierarchy to build the effective set.
+     *  4. Live delegations (when a DelegatedPermissionResolver is wired) are
+     *     unioned in last.
+     *
+     * A `:read` permission string can never satisfy a `:write` check.
+     *
+     * @param int    $profileId  The profile id.
+     * @param string $permission The permission string to verify (colon notation).
+     * @param int    $tenantId   The resolved tenant id (0 = system tenant).
+     * @return bool True if the profile effectively has the permission.
+     */
+    public function hasPermissionForProfile(int $profileId, string $permission, int $tenantId): bool
+    {
+        if (!$this->registry->exists($permission)) {
+            return false;
+        }
+        return in_array($permission, $this->getEffectivePermissionsForProfile($profileId, $tenantId), true);
+    }
+
+    /**
+     * Get a profile's effective roles (names) within a tenant, resolving from
+     * the `memberships` table.
+     *
+     * Returns the union of:
+     *  1. The profile's direct role from `memberships.role_id` in the given tenant.
+     *  2. Roles assigned to the profile's OU and every ancestor OU (walking
+     *     `organizational_units.parent_id` up to the root), via
+     *     `ou_role_assignments`, filtered to {@see $tenantId}.
+     *
+     * @param int $profileId The profile id.
+     * @param int $tenantId  The tenant ID for scoping (0 = system tenant).
+     * @return array<int, string> Distinct effective role NAMES.
+     */
+    public function getEffectiveRolesForProfile(int $profileId, int $tenantId): array
+    {
+        $roleIds = $this->getEffectiveRoleIdsForProfile($profileId, $tenantId);
+        if ($roleIds === []) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($roleIds as $roleId) {
+            $name = $this->getRoleName($roleId);
+            if ($name !== null) {
+                $names[$name] = true;
+            }
+        }
+
+        return array_keys($names);
+    }
+
+    /**
+     * Resolve a profile's full EFFECTIVE permission set within a tenant,
+     * using the `memberships` table as the authority for role resolution.
+     *
+     * The union, over every effective role of the profile (membership role +
+     * every tenant-scoped OU/ancestor-OU role), of that role's hierarchy-resolved
+     * permissions. This is the set {@see self::hasPermissionForProfile()} tests
+     * against.
+     *
+     * Results are memoised in the per-profile worker-level cache (keyed by
+     * "p:{profileId}:{tenantId}:{flag}"); {@see self::clearCache()} invalidates
+     * them after any role/membership/delegation mutation.
+     *
+     * @param int $profileId The profile id.
+     * @param int $tenantId  The resolved tenant id (0 = system tenant).
+     * @return array<int, string> The effective permission strings.
+     */
+    public function getEffectivePermissionsForProfile(int $profileId, int $tenantId): array
+    {
+        $cacheKey = 'p:' . $profileId . ':' . $tenantId . ':' . ($this->delegationResolver !== null ? '1' : '0');
+        if (isset(self::$effectiveUserPermissionCache[$cacheKey])) {
+            return self::$effectiveUserPermissionCache[$cacheKey];
+        }
+
+        $permissions = [];
+
+        $effectiveRoleIds = $this->getEffectiveRoleIdsForProfile($profileId, $tenantId);
+        foreach ($effectiveRoleIds as $roleId) {
+            foreach ($this->getEffectivePermissionsForRole($roleId, $tenantId) as $permission) {
+                $permissions[$permission] = true;
+            }
+        }
+
+        // WC-34: union in LIVE delegated permissions via the profile-id path.
+        // The DelegatedPermissionResolver interface still takes a user_id; during
+        // the transition we pass the profile_id as the "userId" argument because
+        // the delegation rows now reference profile_ids (migration 037). The
+        // resolver remains tenant-scoped and honours OU scope.
+        if ($this->delegationResolver !== null) {
+            $inScopeOuIds = $this->getOuChainIdsForProfile($profileId, $tenantId);
+            foreach (
+                $this->delegationResolver->delegatedPermissionsForUser(
+                    $profileId,
+                    $tenantId,
+                    $effectiveRoleIds,
+                    $inScopeOuIds
+                ) as $permission
+            ) {
+                $permissions[$permission] = true;
+            }
+        }
+
+        $resolved = array_keys($permissions);
+        self::$effectiveUserPermissionCache[$cacheKey] = $resolved;
+
+        return $resolved;
+    }
+
+    // =========================================================================
+    // Legacy user-based API (preserved for Phase B dual-window compatibility)
+    // =========================================================================
+
     /**
      * Get the role name for a specific user.
      *
@@ -182,13 +349,11 @@ class RoleChecker
     /**
      * Check if a user effectively has a specific role within a tenant.
      *
-     * A user "has" a role when it is in their EFFECTIVE role set — their direct
-     * role ({@see users}.role_id) OR any role assigned to their organizational
-     * unit or any of its ancestors, all scoped to {@see $tenantId}. OU role
-     * assignments are therefore additive: a user in an OU that has the `admin`
-     * role assigned satisfies a `hasRole($userId, 'admin', $tenantId)` check even
-     * if their direct role is `user`. Cross-tenant OU roles never count because
-     * the OU-role lookup is filtered by tenant id.
+     * Dual-window: first attempts to resolve via the membership path (mapping
+     * user_id → profile_id via migration_035_profile_ids, then querying
+     * memberships). When the mapping is present the membership-aware path is used
+     * so the same profile is admin in tenant A but not in tenant B. Falls back to
+     * the legacy users.role_id path when no mapping exists.
      *
      * @param int    $userId       The user ID to check.
      * @param string $requiredRole The role name to verify against.
@@ -198,25 +363,17 @@ class RoleChecker
     public function hasRole(int $userId, string $requiredRole, int $tenantId): bool
     {
         $effectiveRoles = $this->getEffectiveRolesForUser($userId, $tenantId);
-
         return in_array($requiredRole, $effectiveRoles, true);
     }
 
     /**
      * Check if a user effectively has a specific permission within a tenant.
      *
-     * Resolution order:
-     *  1. The permission must exist in the {@see PermissionRegistry} (an unknown
-     *     permission can never be granted).
-     *  2. Otherwise the permission is resolved against the user's EFFECTIVE
-     *     permission set: the union, over every effective role (direct role +
-     *     OU/ancestor-OU roles, all tenant scoped), of that role's
-     *     hierarchy-resolved permissions ({@see self::getEffectivePermissionsForRole()}).
-     *
-     * Direct-role grants, role-hierarchy inheritance and OU-inherited grants are
-     * all read through the SAME `role_permissions.permission_id -> permissions.name`
-     * join, so the paths can never diverge on which schema they read (WC-54). There
-     * is no `role_permissions.permission_string` column.
+     * Dual-window: when the user_id → profile_id mapping (from migration 035)
+     * is present, the membership-aware resolution path is used. Otherwise falls
+     * back to the legacy users-table resolution. Neither path can ever grant a
+     * permission the user/membership does not hold; unknown permissions are
+     * rejected at the registry gate before any DB lookup.
      *
      * @param int    $userId     The user ID to check.
      * @param string $permission The permission string to verify (colon notation).
@@ -230,9 +387,6 @@ class RoleChecker
             return false;
         }
 
-        // Step 2: resolve the user's full effective permission set (direct role +
-        // OU/ancestor-OU roles, each expanded through the role hierarchy) and test
-        // membership.
         return in_array($permission, $this->getEffectivePermissionsForUser($userId, $tenantId), true);
     }
 
@@ -268,14 +422,14 @@ class RoleChecker
     /**
      * Resolve a user's full EFFECTIVE permission set within a tenant.
      *
-     * The union, over every effective role of the user (direct role + every
-     * tenant-scoped OU/ancestor-OU role), of that role's hierarchy-resolved
-     * permissions ({@see self::getEffectivePermissionsForRole()}). This is the set
-     * {@see self::hasPermission()} tests against.
+     * Dual-window: when the user_id → profile_id mapping (from migration 035)
+     * is present, delegates entirely to {@see self::getEffectivePermissionsForProfile()}
+     * so permissions are membership-aware (per-tenant). When no mapping exists
+     * (fresh schema, no legacy users) falls back to the users-table resolution
+     * path so pre-migration behaviour is unaffected.
      *
-     * Results are memoised in the per-user worker-level cache (keyed by
-     * userId:tenantId because OU membership/assignments are tenant scoped);
-     * {@see self::clearCache()} invalidates them after any role/OU mutation.
+     * Results are memoised in the worker-level cache; {@see self::clearCache()}
+     * invalidates them after any role/OU/membership/delegation mutation.
      *
      * @param int $userId   The user ID to resolve.
      * @param int $tenantId The resolved tenant id (0 = system tenant).
@@ -283,15 +437,22 @@ class RoleChecker
      */
     public function getEffectivePermissionsForUser(int $userId, int $tenantId): array
     {
-        // Key by delegation-awareness too: the bounding (resolver-less) checker and
-        // the enforcement (delegation-aware) checker share this static cache but
-        // resolve different sets, so they must never read each other's entries
-        // (WC-34 — see the cache property docblock).
-        $cacheKey = $userId . ':' . $tenantId . ':' . ($this->delegationResolver !== null ? '1' : '0');
+        $cacheKey = 'u:' . $userId . ':' . $tenantId . ':' . ($this->delegationResolver !== null ? '1' : '0');
         if (isset(self::$effectiveUserPermissionCache[$cacheKey])) {
             return self::$effectiveUserPermissionCache[$cacheKey];
         }
 
+        // Dual-window: attempt membership-aware resolution via the 035 mapping.
+        $profileId = $this->getProfileIdForUser($userId);
+        if ($profileId !== null) {
+            // Delegate to the membership-aware path. Cache under the legacy key so
+            // the same result is returned on subsequent calls without re-querying.
+            $resolved = $this->getEffectivePermissionsForProfile($profileId, $tenantId);
+            self::$effectiveUserPermissionCache[$cacheKey] = $resolved;
+            return $resolved;
+        }
+
+        // Legacy fallback: users-table resolution.
         $permissions = [];
 
         $effectiveRoleIds = $this->getEffectiveRoleIdsForUser($userId, $tenantId);
@@ -301,12 +462,7 @@ class RoleChecker
             }
         }
 
-        // WC-34: union in LIVE delegated permissions. A delegation made to the
-        // user directly, or to any of their effective roles, grants access too —
-        // honouring the delegation lifecycle (revoked delegations contribute
-        // nothing) and OU scope (an OU-scoped delegation applies only when the
-        // user falls within that OU subtree). Resolution stays tenant scoped
-        // because the resolver itself filters by tenant.
+        // WC-34: union in LIVE delegated permissions on the legacy path too.
         if ($this->delegationResolver !== null) {
             $inScopeOuIds = $this->getOuChainIdsForUser($userId, $tenantId);
             foreach (
@@ -325,6 +481,40 @@ class RoleChecker
         self::$effectiveUserPermissionCache[$cacheKey] = $resolved;
 
         return $resolved;
+    }
+
+    /**
+     * Resolve a user's full EFFECTIVE permission set within a tenant.
+     *
+     * Dual-window delegation to getEffectivePermissionsForUser.
+     *
+     * @param int $userId   The user ID to resolve.
+     * @param int $tenantId The resolved tenant id (0 = system tenant).
+     * @return array<int, string> Distinct effective role NAMES.
+     */
+    public function getEffectiveRolesForUser(int $userId, int $tenantId): array
+    {
+        // Dual-window: attempt membership-aware resolution via the 035 mapping.
+        $profileId = $this->getProfileIdForUser($userId);
+        if ($profileId !== null) {
+            return $this->getEffectiveRolesForProfile($profileId, $tenantId);
+        }
+
+        // Legacy fallback.
+        $roleIds = $this->getEffectiveRoleIdsForUser($userId, $tenantId);
+        if ($roleIds === []) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($roleIds as $roleId) {
+            $name = $this->getRoleName($roleId);
+            if ($name !== null) {
+                $names[$name] = true;
+            }
+        }
+
+        return array_keys($names);
     }
 
     /**
@@ -386,48 +576,15 @@ class RoleChecker
     }
 
     /**
-     * Get a user's effective roles (names) within a tenant.
-     *
-     * Returns the union of:
-     *  1. The user's direct role from {@see users}.role_id.
-     *  2. Roles assigned to the user's organizational unit AND every ancestor OU
-     *     (walking {@see organizational_units}.parent_id up to the root), via
-     *     {@see ou_role_assignments}, filtered to {@see $tenantId}.
-     *
-     * OU role assignments are additive and tenant scoped: an assignment made in
-     * another tenant can never appear here. The OU parent-chain walk is bounded by
-     * cycle/depth safety identical to the role hierarchy.
-     *
-     * @param int $userId   The user ID to query.
-     * @param int $tenantId The tenant ID for scoping (0 = system tenant).
-     * @return array<int, string> Distinct effective role NAMES (direct + OU-inherited).
-     */
-    public function getEffectiveRolesForUser(int $userId, int $tenantId): array
-    {
-        $roleIds = $this->getEffectiveRoleIdsForUser($userId, $tenantId);
-        if ($roleIds === []) {
-            return [];
-        }
-
-        $names = [];
-        foreach ($roleIds as $roleId) {
-            $name = $this->getRoleName($roleId);
-            if ($name !== null) {
-                $names[$name] = true;
-            }
-        }
-
-        return array_keys($names);
-    }
-
-    /**
      * Invalidate the worker-level effective-permission caches.
      *
      * Must be called whenever any input to authorization changes — role/permission
-     * assignments, the role hierarchy, a user's OU membership, or OU role
-     * assignments — so subsequent checks see the new grants rather than a stale
-     * resolved set. {@see RolesApiHandler}, {@see UsersApiHandler} and
-     * {@see OusApiHandler} invoke this after any such mutating write.
+     * assignments, the role hierarchy, a user's OU membership, membership role
+     * changes, membership suspension/removal, or delegation changes — so subsequent
+     * checks see the new grants rather than a stale resolved set.
+     *
+     * {@see RolesApiHandler}, {@see UsersApiHandler}, {@see OusApiHandler}, and
+     * {@see DelegationsApiHandler} invoke this after any such mutating write.
      *
      * @return void
      */
@@ -437,13 +594,142 @@ class RoleChecker
         self::$effectiveUserPermissionCache = [];
     }
 
+    // =========================================================================
+    // Membership-aware private helpers
+    // =========================================================================
+
     /**
-     * Resolve the distinct effective role IDs for a user within a tenant.
+     * Resolve the distinct effective role IDs for a profile within a tenant,
+     * using `memberships` as the authority.
      *
-     * The union of the user's direct role id and every role id assigned to their
-     * OU and its ancestors (tenant scoped). This is the integer backbone shared by
-     * {@see self::getEffectiveRolesForUser()} (which maps to names) and
-     * {@see self::getEffectivePermissionsForUser()} (which expands to permissions).
+     * The union of:
+     *  1. The membership's direct role_id (from `memberships.role_id`).
+     *  2. Every role id assigned to the membership's OU and its ancestors
+     *     (tenant scoped, via `ou_role_assignments`).
+     *
+     * @param int $profileId The profile id.
+     * @param int $tenantId  The tenant ID for scoping.
+     * @return array<int, int> Distinct effective role ids.
+     */
+    private function getEffectiveRoleIdsForProfile(int $profileId, int $tenantId): array
+    {
+        $roleIds = [];
+
+        $membership = $this->getMembershipRow($profileId, $tenantId);
+        if ($membership === null) {
+            return [];
+        }
+
+        // Only ACTIVE memberships grant permissions. Suspended/invited memberships
+        // contribute nothing — the HTTP layer should already have rejected the
+        // request, but this is a belt-and-braces guard.
+        if ((string) $membership['status'] !== 'active') {
+            return [];
+        }
+
+        $directRoleId = $membership['role_id'] !== null ? (int) $membership['role_id'] : null;
+        if ($directRoleId !== null) {
+            $roleIds[$directRoleId] = true;
+        }
+
+        $ouId = $membership['ou_id'] !== null ? (int) $membership['ou_id'] : null;
+        if ($ouId !== null) {
+            foreach ($this->getOuChainRoleIds($ouId, $tenantId) as $roleId) {
+                $roleIds[$roleId] = true;
+            }
+        }
+
+        return array_keys($roleIds);
+    }
+
+    /**
+     * Fetch the active membership row for a (profile, tenant) pair.
+     *
+     * Returns null when no membership exists OR when the membership status is not
+     * 'active'. Only active memberships contribute to permission resolution.
+     *
+     * @param int $profileId The profile id.
+     * @param int $tenantId  The tenant id.
+     * @return array<string, mixed>|null The normalised membership row, or null.
+     */
+    private function getMembershipRow(int $profileId, int $tenantId): ?array
+    {
+        $statement = $this->db->query(
+            'SELECT role_id, ou_id, status FROM memberships
+             WHERE profile_id = :profileId AND tenant_id = :tenantId
+             LIMIT 1',
+            [':profileId' => $profileId, ':tenantId' => $tenantId]
+        );
+        $result = $statement->fetch();
+
+        if ($result === false) {
+            return null;
+        }
+
+        return [
+            'role_id' => $result['role_id'] !== null ? (int) $result['role_id'] : null,
+            'ou_id'   => $result['ou_id']   !== null ? (int) $result['ou_id']   : null,
+            'status'  => (string) $result['status'],
+        ];
+    }
+
+    /**
+     * Collect the OU ids in scope for a profile's membership: the membership's
+     * own OU and every ancestor OU (walking organizational_units.parent_id up to
+     * the root), tenant scoped. Returns an empty list when the profile's
+     * membership has no OU assignment.
+     *
+     * @param int $profileId The profile id.
+     * @param int $tenantId  The tenant id.
+     * @return array<int, int> Distinct OU ids (own OU + ancestors).
+     */
+    private function getOuChainIdsForProfile(int $profileId, int $tenantId): array
+    {
+        $membership = $this->getMembershipRow($profileId, $tenantId);
+        if ($membership === null || $membership['ou_id'] === null) {
+            return [];
+        }
+
+        return $this->buildOuChainIds((int) $membership['ou_id'], $tenantId);
+    }
+
+    // =========================================================================
+    // Legacy user-based private helpers (dual-window fallback)
+    // =========================================================================
+
+    /**
+     * Map a user_id to a profile_id via the migration_035_profile_ids mapping
+     * table established by migration 035.
+     *
+     * Returns null when:
+     *  - the mapping table does not exist (migration 035 never ran), or
+     *  - the user_id has no mapping row.
+     *
+     * @param int $userId The legacy user id.
+     * @return int|null The corresponding profile id, or null.
+     */
+    private function getProfileIdForUser(int $userId): ?int
+    {
+        try {
+            // @tenant-guard-ignore: migration_035_profile_ids is a global cross-tenant mapping table
+            $statement = $this->db->query(
+                'SELECT profile_id FROM migration_035_profile_ids WHERE user_id = :userId LIMIT 1',
+                [':userId' => $userId]
+            );
+            $result = $statement->fetch();
+            if ($result === false) {
+                return null;
+            }
+            return (int) $result['profile_id'];
+        } catch (\Throwable $e) {
+            // Table does not exist (fresh schema) — fall through to legacy path.
+            return null;
+        }
+    }
+
+    /**
+     * Resolve the distinct effective role IDs for a user within a tenant
+     * (legacy users-table path).
      *
      * @param int $userId   The user ID.
      * @param int $tenantId The tenant ID for scoping.
@@ -469,7 +755,7 @@ class RoleChecker
     }
 
     /**
-     * Resolve the primary role id for a user.
+     * Resolve the primary role id for a user (legacy users table).
      *
      * @param int $userId The user ID.
      * @return int|null The role id, or null if the user has no role / does not exist.
@@ -491,11 +777,8 @@ class RoleChecker
     }
 
     /**
-     * Resolve the organizational unit id a user belongs to, tenant scoped.
-     *
-     * The tenant predicate guarantees a user record is only read in the context of
-     * its own tenant, so a mismatched (userId, tenantId) pair yields no OU and
-     * therefore no OU-inherited roles.
+     * Resolve the organizational unit id a user belongs to, tenant scoped
+     * (legacy users table).
      *
      * @param int $userId   The user ID.
      * @param int $tenantId The tenant ID for scoping.
@@ -514,6 +797,66 @@ class RoleChecker
         }
 
         return (int) $result['ou_id'];
+    }
+
+    /**
+     * Collect the OU ids in scope for a user: their own OU and every ancestor OU,
+     * tenant scoped. Returns an empty list when the user is in no OU.
+     *
+     * @param int $userId   The user ID.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return array<int, int> Distinct OU ids (own OU + ancestors), tenant scoped.
+     */
+    private function getOuChainIdsForUser(int $userId, int $tenantId): array
+    {
+        $ouId = $this->getOuIdForUser($userId, $tenantId);
+        if ($ouId === null) {
+            return [];
+        }
+
+        return $this->buildOuChainIds($ouId, $tenantId);
+    }
+
+    // =========================================================================
+    // Shared OU helpers
+    // =========================================================================
+
+    /**
+     * Build the full OU-chain ids list starting from $ouId, walking up to the root.
+     *
+     * Shared by both the membership-aware and legacy paths. Bounded by visited-set
+     * cycle detection and a hard {@see self::MAX_HIERARCHY_DEPTH}.
+     *
+     * @param int $ouId     The starting OU id.
+     * @param int $tenantId The tenant ID for scoping.
+     * @return array<int, int> Distinct OU ids (own OU + ancestors).
+     */
+    private function buildOuChainIds(int $ouId, int $tenantId): array
+    {
+        $ouIds = [];
+        $visited = [];
+        $currentOuId = $ouId;
+        $depth = 0;
+
+        while ($currentOuId !== null) {
+            if (isset($visited[$currentOuId])) {
+                $this->warnCircularOuChain($ouId, $currentOuId, $tenantId, array_keys($visited));
+                break;
+            }
+
+            if ($depth >= self::MAX_HIERARCHY_DEPTH) {
+                $this->warnOuMaxDepthExceeded($ouId, $tenantId);
+                break;
+            }
+
+            $visited[$currentOuId] = true;
+            $depth++;
+            $ouIds[$currentOuId] = true;
+
+            $currentOuId = $this->getParentOuId($currentOuId, $tenantId);
+        }
+
+        return array_keys($ouIds);
     }
 
     /**
@@ -559,54 +902,6 @@ class RoleChecker
         }
 
         return array_keys($roleIds);
-    }
-
-    /**
-     * Collect the OU ids in scope for a user: the user's own OU and every
-     * ancestor OU (walking {@see organizational_units}.parent_id up to the root),
-     * tenant scoped. Returns an empty list when the user is in no OU.
-     *
-     * This is the OU-subtree membership a user satisfies "from below": a
-     * delegation scoped to OU X applies to a user whose OU is X or any descendant
-     * of X — which is exactly when X appears in this user's OU + ancestor chain.
-     * Bounded by the same visited-set cycle detection and {@see self::MAX_HIERARCHY_DEPTH}
-     * as the role-id walk (WC-34).
-     *
-     * @param int $userId   The user ID.
-     * @param int $tenantId The tenant ID for scoping.
-     * @return array<int, int> Distinct OU ids (own OU + ancestors), tenant scoped.
-     */
-    private function getOuChainIdsForUser(int $userId, int $tenantId): array
-    {
-        $ouId = $this->getOuIdForUser($userId, $tenantId);
-        if ($ouId === null) {
-            return [];
-        }
-
-        $ouIds = [];
-        $visited = [];
-        $currentOuId = $ouId;
-        $depth = 0;
-
-        while ($currentOuId !== null) {
-            if (isset($visited[$currentOuId])) {
-                $this->warnCircularOuChain($ouId, $currentOuId, $tenantId, array_keys($visited));
-                break;
-            }
-
-            if ($depth >= self::MAX_HIERARCHY_DEPTH) {
-                $this->warnOuMaxDepthExceeded($ouId, $tenantId);
-                break;
-            }
-
-            $visited[$currentOuId] = true;
-            $depth++;
-            $ouIds[$currentOuId] = true;
-
-            $currentOuId = $this->getParentOuId($currentOuId, $tenantId);
-        }
-
-        return array_keys($ouIds);
     }
 
     /**
@@ -722,6 +1017,10 @@ class RoleChecker
 
         return (int) $result['parent_id'];
     }
+
+    // =========================================================================
+    // Warning helpers
+    // =========================================================================
 
     /**
      * Emit a structured warning that a circular role hierarchy was detected.

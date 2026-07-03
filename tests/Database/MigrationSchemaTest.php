@@ -959,6 +959,45 @@ final class MigrationSchemaTest extends TestCase
         );
     }
 
+    /**
+     * WC-bc07b6de: migration 037 re-keys permission_delegations.grantor_user_id
+     * to grantor_profile_id (references profiles.id) and backfills grantee_id for
+     * 'profile' grantees. The migration must be present, reversible, and idempotent.
+     */
+    public function testMigration037RekeysDelegationsToProfilesSchema(): void
+    {
+        $sql = $this->readFile('037_rekey_delegations_to_profiles.php');
+
+        // New column grantor_profile_id referencing profiles(id) ON DELETE CASCADE.
+        $this->assertMatchesRegularExpression(
+            '/grantor_profile_id\s+INTEGER\s+NULL\s+REFERENCES\s+profiles\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'migration 037 must add grantor_profile_id INTEGER NULL REFERENCES profiles(id) ON DELETE CASCADE.'
+        );
+
+        // Index for listing by grantor_profile_id.
+        $this->assertMatchesRegularExpression(
+            '/CREATE INDEX IF NOT EXISTS\s+idx_pd_grantor_profile/i',
+            $sql,
+            'migration 037 must create idx_pd_grantor_profile index.'
+        );
+
+        // Reversible: down() drops grantor_profile_id column and its index.
+        $this->assertMatchesRegularExpression(
+            '/idx_pd_grantor_profile/i',
+            $sql,
+            'migration 037 down() must reference idx_pd_grantor_profile for cleanup.'
+        );
+
+        // Both up() and down() declared (already enforced by the generic test, but
+        // explicitly assert the class name resolves to RekeyDelegationsToProfiles).
+        $this->assertStringContainsString(
+            'class RekeyDelegationsToProfiles',
+            $sql,
+            'migration 037 must declare class RekeyDelegationsToProfiles.'
+        );
+    }
+
     public function testAllMigrationFilesDeclareTheMigrationsNamespace(): void
     {
         foreach (array_keys(self::migrationFileProvider()) as $fileName) {

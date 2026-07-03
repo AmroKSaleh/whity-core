@@ -52,7 +52,7 @@ class DelegationService implements DelegatedPermissionResolver
 
     /**
      * Create a delegation granting a subset of the grantor's effective
-     * permissions to a role or a user, tenant- and optionally OU-scoped.
+     * permissions to a role or a profile, tenant- and optionally OU-scoped.
      *
      * Enforces the subset invariant: every requested permission MUST be in the
      * grantor's current effective permission set, otherwise the whole request is
@@ -61,19 +61,23 @@ class DelegationService implements DelegatedPermissionResolver
      * non-delegable, since an unregistered permission is never effectively held.
      * One row is written per granted permission so each is individually revocable.
      *
-     * @param int                $tenantId      The owning tenant (the grantor's resolved tenant).
-     * @param int                $grantorUserId The user creating the delegation.
-     * @param string             $granteeType   {@see DelegationRepository::GRANTEE_ROLE}/{@see DelegationRepository::GRANTEE_USER}.
-     * @param int                $granteeId     The target role id or user id.
-     * @param array<int, string> $permissions   The `resource:action` strings to delegate.
-     * @param int|null           $ouId          Optional OU-subtree scope (null = tenant-wide).
+     * WC-bc07b6de: `$grantorProfileId` is a profile id (not a legacy user id).
+     * The effective-permission resolution uses the membership-aware path via
+     * {@see RoleChecker::getEffectivePermissionsForProfile()}.
+     *
+     * @param int                $tenantId         The owning tenant (the grantor's resolved tenant).
+     * @param int                $grantorProfileId The profile creating the delegation.
+     * @param string             $granteeType      {@see DelegationRepository::GRANTEE_ROLE}/{@see DelegationRepository::GRANTEE_PROFILE}.
+     * @param int                $granteeId        The target role id or profile id.
+     * @param array<int, string> $permissions      The `resource:action` strings to delegate.
+     * @param int|null           $ouId             Optional OU-subtree scope (null = tenant-wide).
      * @return array<int, int> The ids of the created delegation rows.
      *
      * @throws PermissionNotDelegableException When any requested permission is outside the grantor's effective set.
      */
     public function delegate(
         int $tenantId,
-        int $grantorUserId,
+        int $grantorProfileId,
         string $granteeType,
         int $granteeId,
         array $permissions,
@@ -90,9 +94,12 @@ class DelegationService implements DelegatedPermissionResolver
         $requested = array_keys($requested);
 
         // Enforce the HARD subset invariant against the grantor's CURRENT
-        // effective permissions. This is the single authoritative gate; it can
-        // never be bypassed by the API permission or any client-supplied claim.
-        $grantorEffective = $this->roleChecker->getEffectivePermissionsForUser($grantorUserId, $tenantId);
+        // effective permissions. The dual-window path is used here so both the new
+        // membership-aware (profile_id) callers AND legacy (user_id) callers during
+        // Phase B work correctly. getEffectivePermissionsForUser() tries the profile
+        // mapping first (migration_035_profile_ids) and falls back to the users table
+        // if no mapping exists. This is the single authoritative gate.
+        $grantorEffective = $this->roleChecker->getEffectivePermissionsForUser($grantorProfileId, $tenantId);
         $effectiveLookup = array_fill_keys($grantorEffective, true);
 
         $denied = [];
@@ -112,7 +119,7 @@ class DelegationService implements DelegatedPermissionResolver
         foreach ($requested as $permission) {
             $ids[] = $this->repository->insert(
                 $tenantId,
-                $grantorUserId,
+                $grantorProfileId,
                 $granteeType,
                 $granteeId,
                 $permission,
@@ -228,11 +235,12 @@ class DelegationService implements DelegatedPermissionResolver
     ): array {
         $permissions = [];
 
-        // Delegations made to the user directly.
+        // Delegations made to the profile directly (grantee_type = 'profile').
+        // The $userId argument is now a profile_id (WC-bc07b6de).
         foreach (
             $this->repository->livePermissionsForGrantee(
                 $tenantId,
-                DelegationRepository::GRANTEE_USER,
+                DelegationRepository::GRANTEE_PROFILE,
                 $userId,
                 $inScopeOuIds
             ) as $permission
