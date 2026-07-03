@@ -1,0 +1,98 @@
+name: Mutation Testing (scheduled)
+
+# Infection mutation testing (WC-a29727a5, scoped to Auth / Tenant / Delegation)
+# runs on a 6-hour schedule instead of on every PR. Rationale (WC-232ec317): the
+# job takes ~24 min (the 60s per-mutant timeout in infection.json5 lets slow
+# covered mutants run to completion so Covered-Code MSI is stable, not flaky) —
+# too slow to gate every PR. It is a quality-TREND gate on `main`, not a
+# correctness gate: PRs still run SQLite + real-Postgres + PHPStan + Playwright.
+# A mutation-coverage regression therefore surfaces on the next scheduled run
+# after merge rather than blocking the PR.
+#
+# The `changes` guard skips the run when `main` has had no new commits since the
+# previous window ("only if there is new code") — no point re-mutating an
+# unchanged tree every 6 hours. `workflow_dispatch` always runs (manual force).
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # every 6 hours, on the hour
+  workflow_dispatch: {}
+
+jobs:
+  changes:
+    name: Gate on new commits since last window
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Checkout main with recent history
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 100
+
+      - name: Determine whether main moved since the last window
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch — running regardless of new commits."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 390 minutes = 6h30m: a 30-minute overlap over the 6h cron so a commit
+          # landing near a window boundary is never missed (an occasional harmless
+          # double-run on the same commit is fine; a missed commit is not).
+          if [ -n "$(git log --since='390 minutes ago' --format=%H)" ]; then
+            echo "New commits on main in the last 6h30m — running mutation tests."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No new commits since the last window — skipping mutation run."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  mutation-testing:
+    name: Infection mutation testing (Auth/Tenant/Delegation)
+    needs: changes
+    if: needs.changes.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_sqlite
+          coverage: pcov
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: composer-mutation-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-mutation-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Run Infection mutation testing
+        env:
+          INITIAL_SYSTEM_ADMIN_PASSWORD: ci_initial_admin_password_min_32_chars_cc
+          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
+        # Per-mutant timeout is configured via "timeout": 60 in infection.json5
+        # (this Infection version has no --timeout CLI flag). 60s stops the slower
+        # CI runner from false-timing-out covered mutants at the 10s default, which
+        # was deflating Covered-Code MSI. Thresholds (minMsi / minCoveredMsi) also
+        # live in infection.json5 — see the derivation comment there before changing.
+        run: vendor/bin/infection --no-interaction --no-progress --threads=max
+
+      - name: Upload Infection log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infection-log
+          path: |
+            infection-log.txt
+            infection-summary.txt
+          retention-days: 14
