@@ -10,14 +10,33 @@ interface User {
   tenant_id: number;
 }
 
+/**
+ * A single tenant membership belonging to the authenticated profile.
+ * Returned by GET /api/me (WC-f8164c87) for the sidenav tenant-switcher.
+ */
+export interface Membership {
+  tenant_id: number;
+  tenant_name: string;
+  role: string;
+}
+
 interface AuthContextType {
   user: User | null;
+  /** The authenticated profile's active memberships (WC-f8164c87). Empty array
+   * for unauthenticated or legacy-token sessions. */
+  memberships: Membership[];
   isLoading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: () => boolean;
   refreshAuth: () => Promise<void>;
+  /**
+   * Switch the active tenant for the current session (WC-f8164c87).
+   * POSTs to /api/v1/auth/switch-tenant and re-fetches /api/v1/me on success,
+   * so user and memberships are updated without a full page reload.
+   */
+  switchTenant: (tenantId: number) => Promise<void>;
   apiClient: (
     url: string,
     options?: RequestInit
@@ -63,6 +82,7 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +112,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const data = await response.json();
           if (data.user) {
             setUser(data.user);
+          }
+          if (Array.isArray(data.memberships)) {
+            setMemberships(data.memberships as Membership[]);
           }
         }
       } catch (error) {
@@ -176,6 +199,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.error('Logout request failed:', error);
     } finally {
       setUser(null);
+      setMemberships([]);
       setError(null);
     }
   };
@@ -191,13 +215,47 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (data.user) {
           setUser(data.user);
         }
+        if (Array.isArray(data.memberships)) {
+          setMemberships(data.memberships as Membership[]);
+        }
       } else {
         setUser(null);
+        setMemberships([]);
       }
     } catch (error) {
       console.error('Failed to refresh auth:', error);
       setUser(null);
+      setMemberships([]);
     }
+  };
+
+  /**
+   * Switch the active tenant (WC-f8164c87).
+   *
+   * POSTs to /api/v1/auth/switch-tenant with the chosen tenant_id, then
+   * refetches /api/v1/me so user state (including the new tenant_id and
+   * memberships) reflects the new session without a page reload.
+   */
+  const switchTenant = async (tenantId: number): Promise<void> => {
+    const switchResponse = await fetch('/api/v1/auth/switch-tenant', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        // CSRF defense (WC-160): required on state-changing auth POSTs.
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: JSON.stringify({ tenant_id: tenantId }),
+    });
+
+    if (!switchResponse.ok) {
+      const errData = await switchResponse.json().catch(() => ({})) as Record<string, unknown>;
+      throw new Error((errData['error'] as string | undefined) ?? 'Tenant switch failed');
+    }
+
+    // Re-fetch /api/v1/me so the in-memory user/memberships reflect the new
+    // active_tenant_id without a full page reload.
+    await refreshAuth();
   };
 
   const isAuthenticated = useCallback((): boolean => {
@@ -213,12 +271,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const value: AuthContextType = {
     user,
+    memberships,
     isLoading,
     error,
     login,
     logout,
     isAuthenticated,
     refreshAuth,
+    switchTenant,
     apiClient,
   };
 

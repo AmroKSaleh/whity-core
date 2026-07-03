@@ -3,9 +3,18 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import type { Membership } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
 import { Button } from '@whity/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@whity/ui/dropdown-menu';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
@@ -15,8 +24,11 @@ import {
   IconChevronRight,
   IconDashboard,
   IconUserCog,
+  IconBuilding,
+  IconChevronDown,
+  IconCheck,
 } from '@tabler/icons-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { Icon } from '@tabler/icons-react';
 
 /**
@@ -49,10 +61,146 @@ function resolveIcon(name: string | undefined): Icon {
   return tablerIcons[componentName] ?? IconDashboard;
 }
 
+// ---------------------------------------------------------------------------
+// TenantSwitcher — renders a dropdown when the profile has 2+ active
+// memberships, or a plain label when there is only one (or zero).
+// ---------------------------------------------------------------------------
+
+interface TenantSwitcherProps {
+  /** The profile's active memberships (from auth-context). */
+  memberships: Membership[];
+  /** The currently active tenant_id (from user.tenant_id). */
+  activeTenantId: number | undefined;
+  /** Whether the sidebar is in icon-only (collapsed) mode. */
+  collapsed: boolean;
+}
+
+function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitcherProps) {
+  const { switchTenant } = useAuth();
+  const { refresh: refreshNav } = useNavigation();
+  const [isSwitching, setIsSwitching] = useState(false);
+
+  const activeMembership = memberships.find((m) => m.tenant_id === activeTenantId);
+  const displayName = activeMembership?.tenant_name ?? 'No tenant';
+
+  const handleSwitch = useCallback(
+    async (tenantId: number) => {
+      if (tenantId === activeTenantId || isSwitching) return;
+      setIsSwitching(true);
+      try {
+        await switchTenant(tenantId);
+        await refreshNav();
+      } finally {
+        setIsSwitching(false);
+      }
+    },
+    [activeTenantId, isSwitching, switchTenant, refreshNav],
+  );
+
+  // 0 or 1 membership — static label only.
+  if (memberships.length < 2) {
+    if (collapsed) {
+      return (
+        <div
+          className="flex justify-center px-2 py-2 bg-background rounded-lg"
+          title={displayName}
+          aria-label={`Current tenant: ${displayName}`}
+        >
+          <IconBuilding size={20} className="text-muted-foreground shrink-0" />
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg">
+        <IconBuilding size={20} className="shrink-0 text-muted-foreground" />
+        <span className="min-w-0">
+          <span className="block text-xs text-muted-foreground">Tenant</span>
+          <span className="block text-sm font-medium truncate">{displayName}</span>
+        </span>
+      </div>
+    );
+  }
+
+  // 2+ memberships — dropdown.
+  if (collapsed) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="flex justify-center px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors w-full"
+            title={`Switch tenant (current: ${displayName})`}
+            aria-label={`Switch tenant, current: ${displayName}`}
+            disabled={isSwitching}
+          >
+            <IconBuilding size={20} className="text-muted-foreground shrink-0" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="end">
+          <DropdownMenuLabel>Switch tenant</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {memberships.map((m) => (
+            <DropdownMenuItem
+              key={m.tenant_id}
+              onSelect={() => { void handleSwitch(m.tenant_id); }}
+              disabled={isSwitching}
+            >
+              {m.tenant_id === activeTenantId && (
+                <IconCheck size={14} className="mr-1 shrink-0" />
+              )}
+              <span className="truncate">{m.tenant_name}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors w-full text-left"
+          aria-label={`Switch tenant, current: ${displayName}`}
+          disabled={isSwitching}
+        >
+          <IconBuilding size={20} className="shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs text-muted-foreground">Tenant</span>
+            <span className="block text-sm font-medium truncate">{displayName}</span>
+          </span>
+          <IconChevronDown
+            size={14}
+            className="shrink-0 text-muted-foreground ml-auto"
+            aria-hidden
+          />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start">
+        <DropdownMenuLabel>Switch tenant</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {memberships.map((m) => (
+          <DropdownMenuItem
+            key={m.tenant_id}
+            onSelect={() => { void handleSwitch(m.tenant_id); }}
+            disabled={isSwitching}
+          >
+            {m.tenant_id === activeTenantId && (
+              <IconCheck size={14} className="mr-1 shrink-0" />
+            )}
+            <span className="truncate">{m.tenant_name}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { logout, user } = useAuth();
+  const { logout, user, memberships } = useAuth();
   const { getGroupedItems } = useNavigation();
   const branding = useBranding();
   const groupedItems = getGroupedItems();
@@ -191,7 +339,7 @@ export function Sidebar() {
                           className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
                           title={isCollapsed && !isMobile ? item.label : `${index + 1}. ${item.label}`}
                         >
-                          <Icon size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 flex-shrink-0'} />
+                          <Icon size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 shrink-0'} />
                           {(!isCollapsed || isMobile) && (
                             <>
                               <span className="text-xs text-muted-foreground mr-2 w-5">
@@ -226,7 +374,7 @@ export function Sidebar() {
               className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg text-center md:text-left hover:bg-background/70 transition-colors"
               title="Account settings"
             >
-              <IconUserCog size={20} className="flex-shrink-0 text-muted-foreground" />
+              <IconUserCog size={20} className="shrink-0 text-muted-foreground" />
               <span className="min-w-0">
                 <span className="block text-xs text-muted-foreground truncate">Logged in as</span>
                 <span className="block text-sm font-medium truncate">{user?.email}</span>
@@ -239,9 +387,15 @@ export function Sidebar() {
               className="flex justify-center px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors"
               title="Account settings"
             >
-              <IconUserCog size={20} className="flex-shrink-0 text-muted-foreground" />
+              <IconUserCog size={20} className="shrink-0 text-muted-foreground" />
             </Link>
           )}
+          {/* Tenant switcher (WC-f8164c87) */}
+          <TenantSwitcher
+            memberships={memberships}
+            activeTenantId={user?.tenant_id}
+            collapsed={isCollapsed && !isMobile}
+          />
           <Button
             onClick={handleLogout}
             variant="outline"
@@ -249,7 +403,7 @@ export function Sidebar() {
             className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
             title={isCollapsed && !isMobile ? 'Logout' : undefined}
           >
-            <IconLogout size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 flex-shrink-0'} />
+            <IconLogout size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 shrink-0'} />
             {(!isCollapsed || isMobile) && 'Logout'}
           </Button>
         </div>

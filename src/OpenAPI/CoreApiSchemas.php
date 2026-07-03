@@ -95,6 +95,7 @@ final class CoreApiSchemas
         );
     }
 
+
     /**
      * Auth surface route declarations: login, 2FA login-completion,
      * multi-tenant selection, /me (read + self-service update),
@@ -349,10 +350,33 @@ final class CoreApiSchemas
             ],
         ];
 
+        // POST /api/auth/switch-tenant — AuthHandler::handleSwitchTenant()
+        // WC-f8164c87: authenticated tenant switch. Requires a full session
+        // (access token cookie); re-mints the JWT with the new active_tenant_id
+        // after validating the caller holds an ACTIVE membership there.
+        $switchTenantRoute = [
+            'method' => 'POST',
+            'path' => '/api/auth/switch-tenant',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Switch the active tenant for an already-logged-in profile',
+                'tags' => ['auth'],
+                'request' => 'SwitchTenantRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Session re-issued for the chosen tenant; auth cookies replaced', 'SessionUserResponse'),
+                    400 => self::errorResponse('tenant_id missing or not numeric'),
+                    401 => self::errorResponse('Missing, invalid, or legacy-only access token'),
+                    403 => self::errorResponse('Profile has no active membership in the requested tenant'),
+                ],
+            ],
+        ];
+
         return [
             $loginRoute,
             $login2faRoute,
             $selectTenantRoute,
+            $switchTenantRoute,
             $getMeRoute,
             $patchMeRoute,
             $refreshRoute,
@@ -1373,11 +1397,22 @@ final class CoreApiSchemas
                 'user' => $sessionUser,
             ], ['user']),
 
+            // POST /api/auth/switch-tenant — request body (WC-f8164c87)
+            'SwitchTenantRequest' => self::object([
+                'tenant_id' => self::int(),
+            ], ['tenant_id']),
+
             // GET /api/me — 200 response. AuthHandler::handleMe() reads directly
             // from the access-token claims and INCLUDES tenant_id in the user.
+            // Also includes the caller's own active memberships (WC-f8164c87) for
+            // the sidenav tenant-switcher — empty array for legacy-only tokens.
             'MeGetResponse' => self::object([
                 'user' => $sessionUser,
-            ], ['user']),
+                'memberships' => [
+                    'type' => 'array',
+                    'items' => $membershipEntry,
+                ],
+            ], ['user', 'memberships']),
 
             // PATCH /api/me — 200 response. AuthHandler::handleUpdateMe() shapes
             // the row via shapeSelf(), which returns id/email/role ONLY (no

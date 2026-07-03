@@ -208,6 +208,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/switch-tenant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Switch the active tenant for an already-logged-in profile */
+        post: operations["post_api_v1_auth_switch_tenant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branding": {
         parameters: {
             query?: never;
@@ -1382,6 +1399,11 @@ export interface components {
                 role: string;
                 tenant_id: number;
             };
+            memberships: {
+                tenant_id: number;
+                tenant_name: string;
+                role: string;
+            }[];
         };
         MeResponse: {
             user: {
@@ -1700,6 +1722,9 @@ export interface components {
         };
         SimpleMessageResponse: {
             message: string;
+        };
+        SwitchTenantRequest: {
+            tenant_id: number;
         };
         Tenant: {
             id: number;
@@ -2522,6 +2547,84 @@ export interface operations {
             };
             /** @description No pending selection token, expired/invalid token, or invalid tenant */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_auth_switch_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description Session re-issued for the chosen tenant; auth cookies replaced */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionUserResponse"];
+                };
+            };
+            /** @description tenant_id missing or not numeric */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing, invalid, or legacy-only access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Profile has no active membership in the requested tenant */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
