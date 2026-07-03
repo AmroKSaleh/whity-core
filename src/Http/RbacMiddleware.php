@@ -96,9 +96,15 @@ class RbacMiddleware
             return Response::error('Invalid or expired token', 401);
         }
 
-        // The user identity must be present and well-typed.
-        $userId = $payload['user_id'] ?? null;
-        if (!is_int($userId)) {
+        // The identity must be present and well-typed. ADR 0005 dual-window: the
+        // new JWT shape carries `profile_id`; the legacy shape carries `user_id`.
+        // Prefer `profile_id` (membership-aware authorization); fall back to
+        // `user_id` (which RoleChecker resolves through the users→profiles mapping
+        // when one exists, else the legacy users-table path).
+        $profileId = $payload['profile_id'] ?? null;
+        $userId    = $payload['user_id'] ?? null;
+        $isProfile = is_int($profileId);
+        if (!$isProfile && !is_int($userId)) {
             return Response::error('Invalid token payload', 401);
         }
 
@@ -113,14 +119,24 @@ class RbacMiddleware
         }
 
         // Enforce the required role against the authoritative store.
-        if ($requiredRole !== null && !$this->roleChecker->hasRole($userId, $requiredRole, $tenantId)) {
-            return $this->forbidden();
+        if ($requiredRole !== null) {
+            $hasRole = $isProfile
+                ? $this->roleChecker->hasRoleForProfile((int) $profileId, $requiredRole, $tenantId)
+                : $this->roleChecker->hasRole((int) $userId, $requiredRole, $tenantId);
+            if (!$hasRole) {
+                return $this->forbidden();
+            }
         }
 
         // Enforce the required permission against the authoritative store. The
         // permission name is echoed back so clients know what they are missing.
-        if ($requiredPermission !== null && !$this->roleChecker->hasPermission($userId, $requiredPermission, $tenantId)) {
-            return $this->forbidden($requiredPermission);
+        if ($requiredPermission !== null) {
+            $hasPermission = $isProfile
+                ? $this->roleChecker->hasPermissionForProfile((int) $profileId, $requiredPermission, $tenantId)
+                : $this->roleChecker->hasPermission((int) $userId, $requiredPermission, $tenantId);
+            if (!$hasPermission) {
+                return $this->forbidden($requiredPermission);
+            }
         }
 
         // Attach the validated payload for downstream handlers.

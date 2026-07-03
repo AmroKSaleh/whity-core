@@ -139,8 +139,8 @@ class DelegationsApiHandler
                 return Response::error('Tenant context is required', 400);
             }
 
-            $grantorUserId = $this->actingUserId($request);
-            if ($grantorUserId === null) {
+            $grantorProfileId = $this->actingUserId($request);
+            if ($grantorProfileId === null) {
                 return Response::error('Authenticated user is required', 401);
             }
 
@@ -179,7 +179,7 @@ class DelegationsApiHandler
             // Enforce the subset invariant + persist (one row per permission).
             $ids = $this->service->delegate(
                 $tenantId,
-                $grantorUserId,
+                $grantorProfileId,
                 $granteeType,
                 $granteeId,
                 $permissions,
@@ -192,7 +192,7 @@ class DelegationsApiHandler
             $this->log('info', 'Delegation created', [
                 'event' => 'delegations.create',
                 'tenant_id' => $tenantId,
-                'grantor_user_id' => $grantorUserId,
+                'grantor_profile_id' => $grantorProfileId,
                 'grantee_type' => $granteeType,
                 'grantee_id' => $granteeId,
                 'ou_id' => $ouId,
@@ -298,18 +298,17 @@ class DelegationsApiHandler
     private function granteeVisible(string $granteeType, int $granteeId, int $tenantId): bool
     {
         if ($granteeType === DelegationRepository::GRANTEE_PROFILE) {
-            // Profile grantee: must have an active membership in the acting tenant.
-            // System tenant (id 0) can grant to any profile globally.
+            // Profile grantee: the delegation row stores grantee_id as a
+            // profiles.id, so it MUST be validated consistently as a profile —
+            // never against users.id (that would let a delegation be written with
+            // a grantee_id that is a user_id, i.e. an invalid grantee reference).
+            //
+            // System tenant (id 0) can grant to any existing profile globally;
+            // any other tenant requires the profile to hold an ACTIVE membership
+            // in that tenant.
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) visibility branch; scoped else-branch binds tenant_id
                 $stmt = $this->db->prepare('SELECT 1 FROM profiles WHERE id = ?');
-                $stmt->execute([$granteeId]);
-                if ($stmt->fetchColumn() !== false) {
-                    return true;
-                }
-                // Phase B dual-window: also accept a legacy user (no profile yet).
-                // @tenant-guard-ignore: system-tenant (id 0) visibility branch; scoped else-branch binds tenant_id
-                $stmt = $this->db->prepare('SELECT 1 FROM users WHERE id = ?');
                 $stmt->execute([$granteeId]);
                 return $stmt->fetchColumn() !== false;
             }
@@ -318,16 +317,6 @@ class DelegationsApiHandler
             $stmt = $this->db->prepare(
                 "SELECT 1 FROM memberships
                  WHERE profile_id = ? AND tenant_id = ? AND status = 'active'"
-            );
-            $stmt->execute([$granteeId, $tenantId]);
-            if ($stmt->fetchColumn() !== false) {
-                return true;
-            }
-
-            // Phase B dual-window: also accept a legacy user in this tenant
-            // (user row exists but profile/membership not yet migrated).
-            $stmt = $this->db->prepare(
-                'SELECT 1 FROM users WHERE id = ? AND tenant_id = ?'
             );
             $stmt->execute([$granteeId, $tenantId]);
             return $stmt->fetchColumn() !== false;

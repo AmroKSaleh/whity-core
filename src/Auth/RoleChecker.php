@@ -586,6 +586,13 @@ class RoleChecker
      * {@see RolesApiHandler}, {@see UsersApiHandler}, {@see OusApiHandler}, and
      * {@see DelegationsApiHandler} invoke this after any such mutating write.
      *
+     * CONTRACT (WC-bc07b6de): the forthcoming membership-management HTTP API
+     * (WC-32e5bb09) MUST call this method after any membership suspend, removal,
+     * or role change. No membership-mutation HTTP path exists in this change set,
+     * so there is nothing to wire here yet; a stale cache that keeps granting a
+     * permission revoked by a membership change is a security bug. The invariant
+     * is pinned by MembershipRbacTest::testClearCacheEnforcesConsistencyAroundMembershipSuspend.
+     *
      * @return void
      */
     public static function clearCache(): void

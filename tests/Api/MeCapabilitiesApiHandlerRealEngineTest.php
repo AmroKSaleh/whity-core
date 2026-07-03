@@ -204,17 +204,38 @@ final class MeCapabilitiesApiHandlerRealEngineTest extends TestCase
         )->execute([$roleId, $permissionId]);
     }
 
+    /**
+     * Seed a PROFILE with an ACTIVE membership carrying the given role, and a
+     * migration_035_profile_ids self-mapping so the SAME id resolves correctly
+     * through BOTH RoleChecker paths:
+     *   - getEffectivePermissionsForUser(id) → maps id→profile (035) → membership
+     *   - getEffectivePermissionsForProfile(id) → membership directly (delegate()).
+     * Returns that id. WC-bc07b6de: delegations are profile-keyed; the handler
+     * READ path is user-keyed — the self-mapping bridges the two for the test.
+     */
     private function seedUser(string $email, string $roleName): int
     {
         $roleId = (int) $this->pdo->query("SELECT id FROM roles WHERE name = '{$roleName}'")->fetchColumn();
 
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (?, ?, ?, ?, NOW())'
-        );
-        $stmt->execute([self::TENANT_ID, $email, 'x', $roleId]);
+        $this->pdo->prepare(
+            "INSERT INTO profiles
+                 (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version,
+                  token_epoch, created_at, updated_at)
+             VALUES ('', '', false, 0, 0, NOW(), NOW())"
+        )->execute();
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, NULL, 'active', NOW())"
+        )->execute([$profileId, self::TENANT_ID, $roleId]);
+
+        // Self-mapping: the handler's user-keyed READ path resolves id→profile.
+        $this->pdo->prepare(
+            'INSERT INTO migration_035_profile_ids (user_id, profile_id) VALUES (?, ?)'
+        )->execute([$profileId, $profileId]);
+
+        return $profileId;
     }
 
     private function authedRequest(int $userId): Request

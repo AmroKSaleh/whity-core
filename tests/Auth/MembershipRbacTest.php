@@ -254,6 +254,53 @@ final class MembershipRbacTest extends TestCase
     }
 
     /**
+     * FULL authorization-path cross-tenant denial (not just repository-level):
+     * a delegation that grants users:delete to a profile in TENANT B must NOT be
+     * exercisable when RoleChecker::hasPermissionForProfile() is asked about
+     * TENANT A. This drives the real checker → DelegationService →
+     * DelegationRepository chain, proving the tenant predicate holds end to end.
+     *
+     * Runs on SQLite and, under PHPUNIT_PG_DSN, on real PostgreSQL.
+     */
+    public function testDelegationInTenantBCannotBeExercisedViaHasPermissionForProfileInTenantA(): void
+    {
+        // The same profile is a viewer in BOTH tenants (no users:delete via role).
+        $profile = $this->seedProfile('xt@example.com');
+        $this->addMembership($profile, self::TENANT_A, 'viewer');
+        $this->addMembership($profile, self::TENANT_B, 'viewer');
+        $this->grantPermission('viewer', 'users:read');
+
+        // A delegation in TENANT B grants users:delete to the profile.
+        $grantorB = $this->seedProfile('xt-grantor@example.com');
+        $this->addMembership($grantorB, self::TENANT_B, 'admin');
+        $this->grantPermission('admin', 'users:delete');
+        $this->pdo->prepare(
+            "INSERT INTO permission_delegations
+                 (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, granted_at)
+             VALUES (?, ?, 'profile', ?, 'users:delete', datetime('now'))"
+        )->execute([self::TENANT_B, $grantorB, $profile]);
+
+        // Build a DELEGATION-AWARE checker (the enforcement checker in production).
+        $delegationService = $this->makeDelegationService();
+        $checker = new RoleChecker($this->db, $this->registry(), null, $delegationService);
+        RoleChecker::clearCache();
+
+        // In TENANT B the delegation DOES grant users:delete (positive control).
+        $this->assertTrue(
+            $checker->hasPermissionForProfile($profile, 'users:delete', self::TENANT_B),
+            'Positive control: the delegation must grant users:delete in its own tenant B.'
+        );
+
+        // In TENANT A the SAME profile must NOT gain users:delete — the tenant-B
+        // delegation is invisible across the tenant boundary through the full
+        // authorization path.
+        $this->assertFalse(
+            $checker->hasPermissionForProfile($profile, 'users:delete', self::TENANT_A),
+            'A delegation in tenant B must never be exercisable in tenant A via hasPermissionForProfile().'
+        );
+    }
+
+    /**
      * A cross-tenant revoke must touch zero rows — the tenant B delegation row
      * must remain active after tenant A tries to revoke it.
      */
@@ -370,8 +417,16 @@ final class MembershipRbacTest extends TestCase
     }
 
     /**
-     * A stale cache entry must NOT be served after clearCache() is called:
-     * two consecutive checks around clearCache() see consistent results.
+     * Proves the exact cache-invalidation SEMANTICS: the STALE (pre-clear) value
+     * is deterministically served after the suspend-without-clear, and the
+     * CORRECT (denied) value is served only after clearCache(). This is what makes
+     * clearCache() the security-critical contract:
+     *
+     *   CONTRACT — the future membership-management API (WC-32e5bb09) MUST call
+     *   RoleChecker::clearCache() on any membership suspend/remove/role-change.
+     *   No membership-mutation HTTP path exists in THIS PR, so there is nothing to
+     *   wire here; this test pins the semantics that path must honour. A stale
+     *   cache that keeps granting a revoked permission is a security bug.
      */
     public function testClearCacheEnforcesConsistencyAroundMembershipSuspend(): void
     {
@@ -379,29 +434,106 @@ final class MembershipRbacTest extends TestCase
         $membershipId = $this->addMembership($profileId, self::TENANT_A, 'admin');
         $this->grantPermission('admin', 'users:delete');
 
-        // Prime the cache.
+        // Prime the cache: active admin membership grants users:delete.
         $this->assertTrue(
             $this->checker->hasPermissionForProfile($profileId, 'users:delete', self::TENANT_A),
             'Pre-suspension: must have users:delete.'
         );
 
-        // Suspend without clearCache — stale entry.
+        // Suspend WITHOUT clearing the cache.
         $this->pdo->prepare("UPDATE memberships SET status = 'suspended' WHERE id = ?")
             ->execute([$membershipId]);
 
-        // WITHOUT clearCache, the cached value is served (demonstrates cache exists).
-        $cachedResult = $this->checker->hasPermissionForProfile($profileId, 'users:delete', self::TENANT_A);
-        // We don't assert its value — just that it is a bool. The point is that
-        // after clearCache() the correct value is returned.
-        $this->assertIsBool($cachedResult);
+        // WITHOUT clearCache the STALE (granted) value is deterministically served
+        // — this proves the worker-level cache is real and that a mutation which
+        // forgets to invalidate would keep granting a revoked permission.
+        $this->assertTrue(
+            $this->checker->hasPermissionForProfile($profileId, 'users:delete', self::TENANT_A),
+            'Stale cache must still return the pre-suspension (granted) value until clearCache().'
+        );
 
-        // Simulate the invalidation a handler would call.
+        // The invalidation a membership-mutation handler MUST call (contract above).
         RoleChecker::clearCache();
 
-        // Now the suspended membership must deny.
+        // AFTER clearCache the suspended membership correctly denies.
         $this->assertFalse(
             $this->checker->hasPermissionForProfile($profileId, 'users:delete', self::TENANT_A),
             'After clearCache(): suspended membership must deny users:delete.'
+        );
+    }
+
+    // =========================================================================
+    // Blocker 2 regression — profile grantor delegation bounding
+    // =========================================================================
+
+    /**
+     * A profile grantor CAN delegate a permission it actually holds via its
+     * membership role. This is the positive half of the subset-invariant gate and
+     * regresses the bug where delegate() resolved the grantor through the
+     * user→profile mapping path (getEffectivePermissionsForUser) and thus saw an
+     * EMPTY set for a profile-only grantor — which silently blocked ALL delegation.
+     */
+    public function testProfileGrantorCanDelegateHeldPermission(): void
+    {
+        $service = $this->makeDelegationService();
+
+        $grantor = $this->seedProfile('grantor-holds@example.com');
+        $grantee = $this->seedProfile('grantee-holds@example.com');
+        $this->addMembership($grantor, self::TENANT_A, 'admin');
+        $this->addMembership($grantee, self::TENANT_A, 'viewer');
+        $this->grantPermission('admin', 'users:delete');
+
+        // Grantor (admin) holds users:delete → delegation succeeds, one row written.
+        $ids = $service->delegate(
+            self::TENANT_A,
+            $grantor,
+            DelegationRepository::GRANTEE_PROFILE,
+            $grantee,
+            ['users:delete'],
+            null
+        );
+
+        $this->assertCount(1, $ids, 'A profile grantor must be able to delegate a permission it holds.');
+        $this->assertGreaterThan(0, $ids[0]);
+    }
+
+    /**
+     * A profile grantor CANNOT delegate a permission it does NOT hold — the subset
+     * invariant throws PermissionNotDelegableException and writes nothing.
+     */
+    public function testProfileGrantorCannotDelegateUnheldPermission(): void
+    {
+        $service = $this->makeDelegationService();
+
+        $grantor = $this->seedProfile('grantor-lacks@example.com');
+        $grantee = $this->seedProfile('grantee-lacks@example.com');
+        $this->addMembership($grantor, self::TENANT_A, 'viewer');
+        $this->addMembership($grantee, self::TENANT_A, 'viewer');
+        $this->grantPermission('viewer', 'users:read'); // grantor holds only users:read
+
+        $threw = false;
+        try {
+            $service->delegate(
+                self::TENANT_A,
+                $grantor,
+                DelegationRepository::GRANTEE_PROFILE,
+                $grantee,
+                ['users:delete'], // NOT held
+                null
+            );
+        } catch (\Whity\Api\Exception\PermissionNotDelegableException $e) {
+            $threw = true;
+        }
+
+        $this->assertTrue($threw, 'Delegating an unheld permission must throw PermissionNotDelegableException.');
+        $stmt = $this->pdo->query(
+            "SELECT COUNT(*) FROM permission_delegations WHERE grantee_id = {$grantee} AND permission = 'users:delete'"
+        );
+        $this->assertNotFalse($stmt, 'Expected query to return a PDOStatement.');
+        $this->assertSame(
+            0,
+            (int) $stmt->fetchColumn(),
+            'No delegation row may be written when the grantor lacks the permission.'
         );
     }
 

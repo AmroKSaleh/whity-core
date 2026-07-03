@@ -188,13 +188,10 @@ class DelegationsApiRbacTest extends TestCase
 
         // Someone ELSE delegates users:read directly TO the grantor, so the grantor
         // now "has" users:read ONLY via delegation — never through a role.
-        // WC-bc07b6de: permission_delegations now references grantor_profile_id (profiles.id).
-        // Since this test does not seed profiles, we use the user id as a stand-in
-        // for the profile id — SQLite does not enforce FK constraints at runtime, so
-        // the insert succeeds; Postgres integration tests that enforce FKs must seed
-        // profiles explicitly. The grantee_id must equal $grantorId so that
-        // RoleChecker's fallback legacy path (which passes user_id to
-        // delegatedPermissionsForUser) finds the row.
+        // WC-bc07b6de: permission_delegations references grantor_profile_id/grantee
+        // profile_id (profiles.id). Both ids below are real profile ids with active
+        // memberships. grantee_id equals $grantorId so the grantor resolves the
+        // delegated permission via its own profile-keyed delegation lookup.
         $externalDelegatorId = $this->seedPlainUser('external-delegator@example.com');
         $this->pdo->prepare(
             'INSERT INTO permission_delegations
@@ -252,13 +249,18 @@ class DelegationsApiRbacTest extends TestCase
     }
 
     /**
+     * Mint a JWT for a PROFILE (ADR 0005 shape). The grantor/grantee identities in
+     * these tests are profiles with real memberships, matching the production
+     * model after migration 035/037.
+     *
      * @return array<string, string>
      */
-    private function auth(int $userId): array
+    private function auth(int $profileId): array
     {
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => "user{$userId}@example.com",
+            'profile_id' => $profileId,
+            'email' => "profile{$profileId}@example.com",
+            'active_tenant_id' => self::TENANT,
             'tenant_id' => self::TENANT,
         ]);
 
@@ -266,8 +268,8 @@ class DelegationsApiRbacTest extends TestCase
     }
 
     /**
-     * Seed a user (tenant 1, no OU) whose dedicated role grants exactly the given
-     * permissions; returns the user id.
+     * Seed a PROFILE with an ACTIVE membership in the test tenant whose dedicated
+     * role grants exactly the given permissions; returns the profile id.
      *
      * @param array<int, string> $permissions
      */
@@ -286,19 +288,38 @@ class DelegationsApiRbacTest extends TestCase
                 ->execute([$roleId, $permissionId]);
         }
 
-        $this->pdo->prepare('INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, ?, ?, ?, NULL, NOW())')
-            ->execute([self::TENANT, 'u' . $roleId . '@example.com', 'x', $roleId]);
-
-        return (int) $this->pdo->lastInsertId();
+        return $this->seedProfileWithMembership($roleId);
     }
 
+    /**
+     * Seed a plain PROFILE with an active membership carrying the base 'user'
+     * role (id 2, grants nothing); returns the profile id.
+     */
     private function seedPlainUser(string $email): int
     {
-        // The 'user' base role (id 2) grants nothing.
-        $this->pdo->prepare('INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, ?, ?, 2, NULL, NOW())')
-            ->execute([self::TENANT, $email, 'x']);
+        return $this->seedProfileWithMembership(2);
+    }
 
-        return (int) $this->pdo->lastInsertId();
+    /**
+     * Create a profile + an ACTIVE membership binding it to the test tenant with
+     * the given role. Returns the profile id (the identity used in JWT claims).
+     */
+    private function seedProfileWithMembership(int $roleId): int
+    {
+        $this->pdo->prepare(
+            "INSERT INTO profiles
+                 (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version,
+                  token_epoch, created_at, updated_at)
+             VALUES ('', '', false, 0, 0, NOW(), NOW())"
+        )->execute();
+        $profileId = (int) $this->pdo->lastInsertId();
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, NULL, 'active', NOW())"
+        )->execute([$profileId, self::TENANT, $roleId]);
+
+        return $profileId;
     }
 
     private static function wrapSqlite(PDO $pdo): Database

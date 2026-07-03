@@ -15,41 +15,59 @@ use Whity\Database\Database;
  * profiles, not users).
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * Schema changes
+ * Schema changes (up)
  * ─────────────────────────────────────────────────────────────────────────────
- * 1. Add `grantor_profile_id INTEGER NULL REFERENCES profiles(id) ON DELETE CASCADE`
- *    (nullable during backfill; NOT NULL enforced after backfill completes).
- * 2. Backfill `grantor_profile_id` from the users→profiles mapping established
- *    by migration 035 (migration_035_profile_ids table).
- * 3. Drop `grantor_user_id` column (on PostgreSQL via ALTER TABLE DROP COLUMN;
- *    on SQLite via table-recreate because SQLite does not support DROP COLUMN
- *    on a column with a foreign-key reference in older versions — we use the
- *    rename-recreate idiom supported since SQLite 3.25.0).
- * 4. Add `grantor_profile_id_idx` index backing the listing-by-grantor query.
- *
- * User-grantee FK: the grantee_id for `grantee_type = 'user'` rows is also
- * re-keyed to profile_id via the same 035 mapping. The column is left as a
- * generic INTEGER (no FK — polymorphic grantee; the CHECK constraint keeps it
- * type-safe). Backfill updates `grantee_id` for `grantee_type = 'user'` rows.
+ * 1. Add `grantor_profile_id INTEGER NULL REFERENCES profiles(id) ON DELETE CASCADE`.
+ * 2. Backfill `grantor_profile_id` from the users→profiles mapping established by
+ *    migration 035 (migration_035_profile_ids table).
+ * 3. Re-key the user-grantee path: for every `grantee_type = 'user'` row, set
+ *    `grantee_id` to the mapped profile_id AND flip `grantee_type` to 'profile'
+ *    in lock-step. After up() there are NO `grantee_type = 'user'` rows — this is
+ *    essential because the resolver queries `grantee_type = 'profile'` only (both
+ *    GRANTEE_USER and GRANTEE_PROFILE now equal the string 'profile'), so a
+ *    leftover 'user' row would become a permanently-invisible silent permission
+ *    drop.
+ * 4. Handle orphan grantor rows: any row whose `grantor_user_id` has no mapping
+ *    in migration_035_profile_ids would keep `grantor_profile_id = NULL`. Since
+ *    migration 035 migrated every non-system user, a remaining orphan is a
+ *    dangling/unenforceable grantor — we DELETE such rows (logging the count) so
+ *    the NOT NULL constraint below can be enforced honestly.
+ * 5. Drop `grantor_user_id` (PostgreSQL via ALTER TABLE DROP COLUMN; SQLite via
+ *    the rename-recreate idiom, which also recreates ALL of migration 014's
+ *    indexes: idx_pd_resolution, idx_pd_grantor (dropped later), idx_pd_ou).
+ * 6. Enforce `grantor_profile_id NOT NULL` (matches the docblock/contract).
+ * 7. Widen the grantee_type CHECK from ('role', 'user') to ('role', 'user',
+ *    'profile'). The rewrite is quote-escaping robust and, on SQLite, is applied
+ *    during the table recreate.
+ * 8. Add `idx_pd_grantor_profile (tenant_id, grantor_profile_id)`; drop the old
+ *    `idx_pd_grantor`.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Idempotency
  * ─────────────────────────────────────────────────────────────────────────────
- * up() checks for the existence of `grantor_profile_id` before adding it, so
- * re-running up() on an already-migrated database is safe.
+ * up() checks column/constraint state before mutating, so a re-run on an
+ * already-migrated database is safe.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * Reversibility (down)
  * ─────────────────────────────────────────────────────────────────────────────
- * down() re-adds `grantor_user_id INTEGER NULL REFERENCES users(id) ON DELETE
- * CASCADE` and back-fills from the 035 mapping (profile_id → kept_user_id) so
- * the column returns with plausible values. The reverse-backfill for the user-
- * grantee path restores grantee_id to user_id using the same map.
+ * down() reverses the schema in the correct order:
+ * 1. Re-add `grantor_user_id INTEGER NULL REFERENCES users(id) ON DELETE CASCADE`.
+ * 2. Reverse-backfill grantor_user_id from the 035 mapping (profile_id → kept
+ *    user_id).
+ * 3. Convert grantee rows back: 'profile' → 'user' with grantee_id → user_id via
+ *    the 035 mapping. This MUST happen BEFORE the CHECK is narrowed (item 5),
+ *    otherwise a surviving 'profile' row would violate the narrowed CHECK on PG.
+ * 4. Re-add idx_pd_grantor.
+ * 5. Narrow the grantee_type CHECK back to ('role', 'user').
+ * 6. Drop grantor_profile_id + idx_pd_grantor_profile.
  *
- * WARNING: if a profile was created by 035's collision-collapse (multiple users
- * → one profile), the reverse mapping is ambiguous for dropped user rows. The
- * kept_user_id from migration_035_profile_ids is used, which is the lowest-id
- * user for that email — the same canonical choice 035 made.
+ * WARNING: rows DELETED by up()'s orphan handling (item 4) cannot be restored by
+ * down() — the source user rows they referenced no longer have a mapping. down()
+ * logs that any such rows are unrecoverable. Also, if a profile was created by
+ * 035's collision-collapse (multiple users → one profile), the reverse mapping
+ * is ambiguous; the kept_user_id (lowest-id user for that email) is used — the
+ * same canonical choice 035 made.
  */
 class RekeyDelegationsToProfiles
 {
@@ -71,7 +89,6 @@ class RekeyDelegationsToProfiles
     private static function runUp(Database $db, string $driver): void
     {
         // ── 1. Add grantor_profile_id (idempotent) ────────────────────────────
-        // Check column existence first so re-runs are safe.
         if (!self::columnExists($db, $driver, 'permission_delegations', 'grantor_profile_id')) {
             $db->exec('
                 ALTER TABLE permission_delegations
@@ -80,12 +97,28 @@ class RekeyDelegationsToProfiles
             ');
         }
 
-        // ── 2. Backfill grantor_profile_id from migration_035_profile_ids ─────
-        // migration_035_profile_ids maps users.id → profiles.id. If that table
-        // does not exist (migration 035 was never applied — e.g. fresh database
-        // with no legacy users), skip the backfill gracefully: the column stays
-        // NULL for rows that have no mapping (no legacy delegation rows either).
-        if (self::tableExists($db, $driver, 'migration_035_profile_ids')) {
+        // ── 2. Widen the grantee_type CHECK to permit 'profile' FIRST ─────────
+        // This must precede the grantee re-key (step 3) which writes
+        // grantee_type='profile'; otherwise the still-narrow CHECK rejects it.
+        // On SQLite this rebuild keeps every column (grantor_user_id is dropped
+        // later in step 5); on PG it swaps the constraint in place.
+        if ($driver === 'pgsql') {
+            self::setGranteeCheckPg($db, ['role', 'user', 'profile']);
+        } else {
+            self::ensureGranteeCheckSqlite($db, ['role', 'user', 'profile']);
+        }
+
+        // ── 3. Backfill grantor + re-key grantee (type AND id) in lock-step ───
+        // migration_035_profile_ids maps users.id → profiles.id. When it does not
+        // exist (fresh database, no legacy users, no legacy delegation rows) skip
+        // the backfill gracefully.
+        $hasMapping = self::tableExists($db, $driver, 'migration_035_profile_ids');
+        // Only re-key from grantor_user_id when that column still exists (i.e. this
+        // is a genuine forward migration of a legacy schema, not a re-run).
+        $hasLegacyGrantor = self::columnExists($db, $driver, 'permission_delegations', 'grantor_user_id');
+
+        if ($hasMapping && $hasLegacyGrantor) {
+            // Grantor: user_id → profile_id.
             // @tenant-guard-ignore: cross-table migration backfill; updates own table rows using external mapping
             $db->exec('
                 UPDATE permission_delegations
@@ -98,17 +131,20 @@ class RekeyDelegationsToProfiles
                 WHERE grantor_profile_id IS NULL
             ');
 
-            // Backfill user-grantee rows: grantee_type = \'user\', grantee_id = users.id
-            // → update grantee_id to the corresponding profile_id.
-            // @tenant-guard-ignore: cross-table migration backfill; grantee_id for 'user' type is re-keyed to profile_id
+            // Grantee re-key: for every 'user' grantee row that HAS a mapping,
+            // set grantee_id to the profile_id AND flip grantee_type to 'profile'.
+            // Doing both together guarantees the resolver (which matches
+            // grantee_type='profile') keeps finding the row.
+            // @tenant-guard-ignore: cross-table migration backfill; grantee re-keyed user→profile in lock-step
             $db->exec("
                 UPDATE permission_delegations
                 SET grantee_id = (
-                    SELECT m.profile_id
-                    FROM migration_035_profile_ids m
-                    WHERE m.user_id = permission_delegations.grantee_id
-                    LIMIT 1
-                )
+                        SELECT m.profile_id
+                        FROM migration_035_profile_ids m
+                        WHERE m.user_id = permission_delegations.grantee_id
+                        LIMIT 1
+                    ),
+                    grantee_type = 'profile'
                 WHERE grantee_type = 'user'
                   AND EXISTS (
                     SELECT 1
@@ -118,59 +154,64 @@ class RekeyDelegationsToProfiles
             ");
         }
 
-        // ── 3. Drop grantor_user_id ───────────────────────────────────────────
+        // ── 4. Orphan handling ────────────────────────────────────────────────
+        // Any row still carrying grantor_profile_id IS NULL after the backfill has
+        // a grantor with no profile mapping. Since 035 migrated every non-system
+        // user, such a row is a dangling/unenforceable grantor: DELETE it (log the
+        // count) so the NOT NULL constraint below is honest.
+        //
+        // Likewise, any grantee_type='user' row that survived the re-key (its
+        // grantee_id had no mapping) is an unresolvable grantee — delete it too so
+        // no 'user' rows remain (the resolver could never match them).
+        if ($hasLegacyGrantor || self::columnExists($db, $driver, 'permission_delegations', 'grantor_profile_id')) {
+            $orphanGrantors = self::countWhere($db, 'grantor_profile_id IS NULL');
+            if ($orphanGrantors > 0) {
+                // @tenant-guard-ignore: migration cleanup of dangling grantor rows across all tenants
+                $db->exec('DELETE FROM permission_delegations WHERE grantor_profile_id IS NULL');
+                self::log("migration 037: deleted {$orphanGrantors} delegation row(s) with an unmappable grantor_user_id (no profile mapping).");
+            }
+        }
+
+        $orphanGrantees = self::countWhere($db, "grantee_type = 'user'");
+        if ($orphanGrantees > 0) {
+            // @tenant-guard-ignore: migration cleanup of unresolvable user-grantee rows across all tenants
+            $db->exec("DELETE FROM permission_delegations WHERE grantee_type = 'user'");
+            self::log("migration 037: deleted {$orphanGrantees} delegation row(s) with an unmappable user grantee (no profile mapping).");
+        }
+
+        // ── 5. Drop grantor_user_id (recreates all migration 014 indexes on SQLite) ─
         if (self::columnExists($db, $driver, 'permission_delegations', 'grantor_user_id')) {
             if ($driver === 'pgsql') {
                 $db->exec('ALTER TABLE permission_delegations DROP COLUMN IF EXISTS grantor_user_id');
             } else {
-                // SQLite: rename-and-recreate idiom.
-                self::dropColumnSqlite($db, 'permission_delegations', 'grantor_user_id');
+                // SQLite: rename-recreate. This rebuilds the table WITHOUT
+                // grantor_user_id, WITH the widened CHECK, and re-creates every
+                // migration-014 index (idx_pd_resolution, idx_pd_ou) plus the new
+                // idx_pd_grantor_profile.
+                self::rebuildDelegationsSqlite($db, dropColumn: 'grantor_user_id', granteeTypes: ['role', 'user', 'profile']);
             }
         }
 
-        // ── 4. Widen the grantee_type CHECK to include 'profile' ─────────────
-        // Migration 014 created the constraint with ('role', 'user'). Now that
-        // delegations reference profiles instead of users we must allow 'profile'
-        // as a valid discriminator. Widening is backward-compatible: 'role' and
-        // 'user' literals remain valid during the Phase B dual-window window.
+        // ── 6. Enforce grantor_profile_id NOT NULL (matches the contract) ─────
         if ($driver === 'pgsql') {
-            // PostgreSQL: drop the named constraint and re-add it widened.
-            $db->exec("
-                ALTER TABLE permission_delegations
-                DROP CONSTRAINT IF EXISTS chk_permission_delegations_grantee_type
-            ");
-            $db->exec("
-                ALTER TABLE permission_delegations
-                ADD CONSTRAINT chk_permission_delegations_grantee_type
-                CHECK (grantee_type IN ('role', 'user', 'profile'))
-            ");
-        } else {
-            // SQLite: there is no ALTER TABLE … ADD/DROP CONSTRAINT. The
-            // rename-recreate in step 3 (dropColumnSqlite) already rebuilds the
-            // table from the migration 014 DDL. We call an additional table
-            // rebuild here only when grantor_user_id was NOT present (meaning
-            // dropColumnSqlite was not called because the column was already
-            // absent). In all cases, widen the check via patchCheckConstraint.
-            self::patchCheckConstraintSqlite($db);
+            $db->exec('ALTER TABLE permission_delegations ALTER COLUMN grantor_profile_id SET NOT NULL');
         }
+        // SQLite: the recreated DDL keeps grantor_profile_id nullable at the
+        // column level (SQLite cannot ALTER a column to NOT NULL in place, and the
+        // recreate copies the migration-014 column list). We enforce non-null at
+        // the application layer (DelegationRepository::insert always supplies it)
+        // and by the orphan-deletion above; a partial-index/trigger is avoided to
+        // keep the schema portable. The PG path — the production engine — carries
+        // the real NOT NULL guarantee.
 
-        // ── 5. Index for listing by grantor_profile_id ────────────────────────
+        // ── 7. Index for listing by grantor_profile_id ────────────────────────
         $db->exec('
             CREATE INDEX IF NOT EXISTS idx_pd_grantor_profile
             ON permission_delegations (tenant_id, grantor_profile_id)
         ');
 
         // Drop the old grantor-user index if it still exists (idempotent).
-        if ($driver === 'pgsql') {
-            $db->exec('DROP INDEX IF EXISTS idx_pd_grantor');
-        } else {
-            // SQLite: DROP INDEX is safe without IF on older versions; use IF EXISTS.
-            try {
-                $db->exec('DROP INDEX IF EXISTS idx_pd_grantor');
-            } catch (\Throwable $e) {
-                // Index may not exist; ignore.
-            }
-        }
+        self::dropIndexSafe($db, 'idx_pd_grantor');
     }
 
     public static function down(Database $db): void
@@ -199,8 +240,11 @@ class RekeyDelegationsToProfiles
             ');
         }
 
-        // ── 2. Reverse-backfill grantor_user_id from 035 mapping ─────────────
+        // ── 2 + 3. Reverse-backfill grantor and convert grantee 'profile'→'user'.
+        // The grantee conversion MUST happen before the CHECK is narrowed (step 5)
+        // so no 'profile' row survives to violate the narrowed constraint on PG.
         if (self::tableExists($db, $driver, 'migration_035_profile_ids')) {
+            // 2. Grantor: profile_id → kept user_id.
             // @tenant-guard-ignore: reverse migration backfill; profile_id → kept user_id
             $db->exec('
                 UPDATE permission_delegations
@@ -214,18 +258,21 @@ class RekeyDelegationsToProfiles
                 WHERE grantor_user_id IS NULL
             ');
 
-            // Reverse user-grantee: profile_id → user_id.
-            // @tenant-guard-ignore: reverse migration backfill; grantee_id for 'user' type back to user_id
+            // 3. Grantee: profile → user (id + type) in lock-step. Only rows that
+            // have a reverse mapping are converted; any without a mapping stay
+            // 'profile' and are cleaned up below so the narrowed CHECK holds.
+            // @tenant-guard-ignore: reverse migration backfill; grantee profile→user in lock-step
             $db->exec("
                 UPDATE permission_delegations
                 SET grantee_id = (
-                    SELECT m.user_id
-                    FROM migration_035_profile_ids m
-                    WHERE m.profile_id = permission_delegations.grantee_id
-                    ORDER BY m.user_id ASC
-                    LIMIT 1
-                )
-                WHERE grantee_type = 'user'
+                        SELECT m.user_id
+                        FROM migration_035_profile_ids m
+                        WHERE m.profile_id = permission_delegations.grantee_id
+                        ORDER BY m.user_id ASC
+                        LIMIT 1
+                    ),
+                    grantee_type = 'user'
+                WHERE grantee_type = 'profile'
                   AND EXISTS (
                     SELECT 1
                     FROM migration_035_profile_ids m
@@ -234,44 +281,41 @@ class RekeyDelegationsToProfiles
             ");
         }
 
-        // ── 3. Re-add old grantor index ───────────────────────────────────────
+        // Any 'profile' grantee row left without a reverse mapping cannot be
+        // represented under the narrowed CHECK — delete it (unrecoverable).
+        $unconvertible = self::countWhere($db, "grantee_type = 'profile'");
+        if ($unconvertible > 0) {
+            // @tenant-guard-ignore: reverse migration cleanup of unconvertible profile-grantee rows
+            $db->exec("DELETE FROM permission_delegations WHERE grantee_type = 'profile'");
+            self::log("migration 037 down(): deleted {$unconvertible} profile-grantee delegation row(s) with no reverse mapping (unrecoverable).");
+        }
+
+        // ── 4. Re-add old grantor index ───────────────────────────────────────
         $db->exec('
             CREATE INDEX IF NOT EXISTS idx_pd_grantor
             ON permission_delegations (tenant_id, grantor_user_id)
         ');
 
-        // ── 4. Narrow the grantee_type CHECK back to ('role', 'user') ────────
+        // ── 5. Narrow the grantee_type CHECK back to ('role', 'user') ────────
         if ($driver === 'pgsql') {
-            $db->exec("
-                ALTER TABLE permission_delegations
-                DROP CONSTRAINT IF EXISTS chk_permission_delegations_grantee_type
-            ");
-            $db->exec("
-                ALTER TABLE permission_delegations
-                ADD CONSTRAINT chk_permission_delegations_grantee_type
-                CHECK (grantee_type IN ('role', 'user'))
-            ");
+            self::setGranteeCheckPg($db, ['role', 'user']);
         } else {
-            self::narrowCheckConstraintSqlite($db);
+            // SQLite: rebuild WITHOUT grantor_profile_id, WITH the narrow CHECK,
+            // re-creating every migration-014 index + the restored idx_pd_grantor.
+            self::rebuildDelegationsSqlite($db, dropColumn: 'grantor_profile_id', granteeTypes: ['role', 'user']);
         }
 
-        // ── 5. Drop grantor_profile_id + its index ────────────────────────────
+        // ── 6. Drop grantor_profile_id + its index ────────────────────────────
         if ($driver === 'pgsql') {
             $db->exec('DROP INDEX IF EXISTS idx_pd_grantor_profile');
             $db->exec('ALTER TABLE permission_delegations DROP COLUMN IF EXISTS grantor_profile_id');
         } else {
-            try {
-                $db->exec('DROP INDEX IF EXISTS idx_pd_grantor_profile');
-            } catch (\Throwable $e) {
-                // Index may not exist.
-            }
-            if (self::columnExists($db, $driver, 'permission_delegations', 'grantor_profile_id')) {
-                self::dropColumnSqlite($db, 'permission_delegations', 'grantor_profile_id');
-            }
+            // The rebuild above already dropped grantor_profile_id; just drop its index.
+            self::dropIndexSafe($db, 'idx_pd_grantor_profile');
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Introspection helpers ───────────────────────────────────────────────
 
     private static function tableExists(Database $db, string $driver, string $table): bool
     {
@@ -320,282 +364,223 @@ class RekeyDelegationsToProfiles
     }
 
     /**
-     * Drop a column from a SQLite table using the rename-recreate idiom.
-     *
-     * Reads the DDL stored in sqlite_master, removes the named column (and
-     * widens the grantee_type CHECK constraint from ('role','user') to
-     * ('role','user','profile') in the same pass), drops the original table,
-     * recreates without the dropped column but with the widened CHECK, then
-     * copies the data.
-     * Works on SQLite 3.25+ (the minimum required by this project).
+     * Count permission_delegations rows matching a WHERE fragment (no user input;
+     * the fragment is a constant literal supplied by this migration only).
      */
-    private static function dropColumnSqlite(Database $db, string $table, string $colToDrop): void
+    private static function countWhere(Database $db, string $whereFragment): int
+    {
+        $pdo  = $db->getPdo();
+        // @tenant-guard-ignore: migration-internal count over all tenants; fragment is a constant literal
+        $stmt = $pdo->query("SELECT COUNT(*) AS c FROM permission_delegations WHERE {$whereFragment}");
+        if ($stmt === false) {
+            return 0;
+        }
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+        return $row !== false ? (int) $row['c'] : 0;
+    }
+
+    private static function dropIndexSafe(Database $db, string $index): void
+    {
+        try {
+            $db->exec("DROP INDEX IF EXISTS {$index}");
+        } catch (\Throwable $e) {
+            // Index may not exist on this engine; ignore.
+        }
+    }
+
+    /**
+     * Emit an operator-facing migration notice. Uses STDOUT like other migrations
+     * (e.g. 010/035); the test harness silences stdout via ob_start().
+     */
+    private static function log(string $message): void
+    {
+        // Match the convention of migrations 010/035: write to STDOUT via echo so
+        // the test harness's ob_start() capture silences it during test runs.
+        echo '[migration 037] ' . $message . "\n";
+    }
+
+    // ── PostgreSQL CHECK management ─────────────────────────────────────────
+
+    /**
+     * Replace the grantee_type CHECK constraint on PostgreSQL with one permitting
+     * exactly the given discriminator values.
+     *
+     * @param list<string> $types
+     */
+    private static function setGranteeCheckPg(Database $db, array $types): void
+    {
+        $list = implode(', ', array_map(static fn (string $t): string => "'" . $t . "'", $types));
+        $db->exec('
+            ALTER TABLE permission_delegations
+            DROP CONSTRAINT IF EXISTS chk_permission_delegations_grantee_type
+        ');
+        $db->exec("
+            ALTER TABLE permission_delegations
+            ADD CONSTRAINT chk_permission_delegations_grantee_type
+            CHECK (grantee_type IN ({$list}))
+        ");
+    }
+
+    // ── SQLite table rebuild (rename-recreate) ──────────────────────────────
+
+    /**
+     * Rebuild permission_delegations on SQLite via the rename-recreate idiom:
+     * drops $dropColumn, sets the grantee_type CHECK to permit exactly
+     * $granteeTypes, copies the data, and re-creates ALL indexes the table must
+     * carry (migration 014's idx_pd_resolution + idx_pd_ou, plus whichever
+     * grantor index is appropriate for the resulting column set).
+     *
+     * @param list<string> $granteeTypes
+     */
+    private static function rebuildDelegationsSqlite(Database $db, string $dropColumn, array $granteeTypes): void
     {
         $pdo = $db->getPdo();
 
-        // Fetch all columns from PRAGMA
-        $stmt = $pdo->query("PRAGMA table_info({$table})");
-        if ($stmt === false) {
+        // Column list to keep (everything except $dropColumn).
+        $info = $pdo->query('PRAGMA table_info(permission_delegations)');
+        if ($info === false) {
             return;
         }
-        $cols = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        $keepCols = array_filter($cols, static fn ($c) => (string) $c['name'] !== $colToDrop);
+        $cols = $info->fetchAll(PDO::FETCH_ASSOC);
+        $keep = array_values(array_filter(
+            $cols,
+            static fn (array $c): bool => (string) $c['name'] !== $dropColumn
+        ));
+        $keepNames = array_map(static fn (array $c): string => '"' . $c['name'] . '"', $keep);
+        $colList   = implode(', ', $keepNames);
 
-        $colNames  = array_map(static fn ($c) => '"' . $c['name'] . '"', $keepCols);
-        $colList   = implode(', ', $colNames);
+        // Deterministically reconstruct the table definition from the known-good
+        // column set. Building it ourselves (rather than string-editing the stored
+        // DDL) makes the CHECK-widening immune to quote-escaping variations.
+        $newDdl = self::buildDelegationsCreateSql($keep, $granteeTypes);
 
-        // Read original DDL
-        $ddlStmt = $pdo->prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name = ?");
-        $ddlStmt->execute([$table]);
-        $ddlRow  = $ddlStmt->fetch(PDO::FETCH_ASSOC);
-        $ddlStmt->closeCursor();
-        if ($ddlRow === false) {
-            return;
-        }
-
-        // Rename original
-        $pdo->exec("ALTER TABLE \"{$table}\" RENAME TO \"{$table}_old_037\"");
-
-        // Rebuild DDL without the dropped column.
-        // SQLite stores the column definition as a single logical line; we use a
-        // line-based removal so nested parentheses inside REFERENCES clauses
-        // (e.g. REFERENCES users(id) ON DELETE CASCADE) cannot confuse the regex.
-        $ddl = (string) $ddlRow['sql'];
-        $ddl = self::removeColumnLineSqlite($ddl, $colToDrop);
-        // Widen the grantee_type CHECK in the same pass.
-        $ddl = self::widenCheckInDdl($ddl);
-        // Replace the old table name in the CREATE
-        $newDdl = preg_replace('/CREATE TABLE\s+(IF NOT EXISTS\s+)?"?' . preg_quote($table, '/') . '"?/i', "CREATE TABLE \"{$table}\"", $ddl);
-        if ($newDdl === null || $newDdl === '') {
-            // Fallback: just rename back
-            $pdo->exec("ALTER TABLE \"{$table}_old_037\" RENAME TO \"{$table}\"");
-            return;
-        }
-
+        $pdo->exec('ALTER TABLE "permission_delegations" RENAME TO "permission_delegations_old_037"');
         $pdo->exec($newDdl);
+        $pdo->exec("INSERT INTO \"permission_delegations\" ({$colList}) SELECT {$colList} FROM \"permission_delegations_old_037\"");
+        $pdo->exec('DROP TABLE "permission_delegations_old_037"');
 
-        // Copy data
-        $pdo->exec("INSERT INTO \"{$table}\" ({$colList}) SELECT {$colList} FROM \"{$table}_old_037\"");
+        // Re-create the indexes that migration 014 defined and that the recreate
+        // just dropped. idx_pd_resolution and idx_pd_ou are the delegation
+        // hot-path indexes; losing them silently degrades every permission check.
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_resolution ON permission_delegations (tenant_id, grantee_type, grantee_id, revoked_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_ou ON permission_delegations (ou_id)');
 
-        // Drop old table
-        $pdo->exec("DROP TABLE \"{$table}_old_037\"");
+        // Grantor index appropriate to the resulting schema.
+        $keepColNames = array_map(static fn (array $c): string => (string) $c['name'], $keep);
+        if (in_array('grantor_profile_id', $keepColNames, true)) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_grantor_profile ON permission_delegations (tenant_id, grantor_profile_id)');
+        }
+        if (in_array('grantor_user_id', $keepColNames, true)) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_grantor ON permission_delegations (tenant_id, grantor_user_id)');
+        }
     }
 
     /**
-     * Remove a column definition from a table's DDL string (as stored in
-     * sqlite_master) using a line-based approach so nested parentheses in
-     * REFERENCES clauses cannot corrupt the surrounding DDL.
+     * Ensure the grantee_type CHECK on SQLite permits exactly $granteeTypes. If it
+     * already does (idempotent re-run), this is a no-op; otherwise the table is
+     * rebuilt in place (no column dropped).
      *
-     * Logic:
-     *  1. Split DDL into lines.
-     *  2. Identify the line whose first non-whitespace token matches $colToDrop.
-     *  3. Remove that line.
-     *  4. If the previous non-blank, non-comment line ends with a trailing comma
-     *     that now has no following column definition, strip that trailing comma.
-     *
-     * This correctly handles patterns like:
-     *   grantor_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-     * regardless of nested parentheses in REFERENCES clauses.
+     * @param list<string> $granteeTypes
      */
-    private static function removeColumnLineSqlite(string $ddl, string $colToDrop): string
-    {
-        $lines   = explode("\n", $ddl);
-        $pattern = '/^\s*' . preg_quote($colToDrop, '/') . '\b/i';
-
-        // Find and remove the target column line.
-        $dropIdx = null;
-        foreach ($lines as $i => $line) {
-            if (preg_match($pattern, $line)) {
-                $dropIdx = $i;
-                break;
-            }
-        }
-        if ($dropIdx === null) {
-            return $ddl; // column not found; return unchanged
-        }
-
-        // Remove the column line.
-        array_splice($lines, $dropIdx, 1);
-
-        // After removal, the line immediately BEFORE the dropped one (which is
-        // now at index $dropIdx - 1 in the original numbering) may end with a
-        // trailing comma that is no longer valid if the removed line was the
-        // last column before a CONSTRAINT or closing parenthesis.
-        // Find the last non-empty line before the gap.
-        for ($i = $dropIdx - 1; $i >= 0; $i--) {
-            $trimmed = rtrim($lines[$i]);
-            if ($trimmed === '') {
-                continue;
-            }
-            // If it ends with a comma AND the next meaningful line starts a
-            // CONSTRAINT or closing paren, strip the trailing comma.
-            // Determine what the next meaningful line is.
-            $nextMeaningful = null;
-            for ($j = $dropIdx; $j < count($lines); $j++) {
-                if (trim($lines[$j]) !== '') {
-                    $nextMeaningful = ltrim($lines[$j]);
-                    break;
-                }
-            }
-            if (
-                str_ends_with($trimmed, ',') &&
-                $nextMeaningful !== null &&
-                (
-                    str_starts_with($nextMeaningful, 'CONSTRAINT') ||
-                    str_starts_with($nextMeaningful, ')') ||
-                    str_starts_with($nextMeaningful, 'CHECK')
-                )
-            ) {
-                $lines[$i] = substr($trimmed, 0, -1); // strip trailing comma
-            }
-            break;
-        }
-
-        return implode("\n", $lines);
-    }
-
-    /**
-     * Widen the grantee_type CHECK constraint in a table's DDL string from
-     * ('role', 'user') to ('role', 'user', 'profile').
-     *
-     * Used on the SQLite path only: both when dropping grantor_user_id via
-     * rename-recreate (the check is embedded in the DDL) and when calling
-     * patchCheckConstraintSqlite() directly when grantor_user_id was already absent.
-     */
-    private static function widenCheckInDdl(string $ddl): string
-    {
-        // Replace  grantee_type IN ('role', 'user')  (any quote style)
-        // with     grantee_type IN ('role', 'user', 'profile')
-        $widened = preg_replace(
-            "/grantee_type\s+IN\s*\(\s*'role'\s*,\s*'user'\s*\)/i",
-            "grantee_type IN ('role', 'user', 'profile')",
-            $ddl
-        );
-        return $widened ?? $ddl;
-    }
-
-    /**
-     * Re-create permission_delegations on SQLite with the widened grantee_type
-     * CHECK, when dropColumnSqlite() was NOT called (i.e. grantor_user_id was
-     * already absent so the table was not rebuilt in step 3).
-     *
-     * This is idempotent: if the CHECK already contains 'profile' the regex
-     * will not match and the table is left unchanged (no rename-recreate cycle).
-     */
-    private static function patchCheckConstraintSqlite(Database $db): void
+    private static function ensureGranteeCheckSqlite(Database $db, array $granteeTypes): void
     {
         $pdo = $db->getPdo();
-
-        $ddlStmt = $pdo->prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name = ?");
-        $ddlStmt->execute(['permission_delegations']);
-        $ddlRow = $ddlStmt->fetch(PDO::FETCH_ASSOC);
-        $ddlStmt->closeCursor();
-        if ($ddlRow === false) {
+        $stmt = $pdo->prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name = ?");
+        $stmt->execute(['permission_delegations']);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->closeCursor();
+        if ($row === false) {
             return;
         }
+        $ddl = (string) $row['sql'];
 
-        $ddl = (string) $ddlRow['sql'];
-
-        // If 'profile' is already in the CHECK, nothing to do.
-        if (stripos($ddl, "'profile'") !== false) {
-            return;
+        // Already permits 'profile'? (cheap check for the common widen case)
+        $wantsProfile = in_array('profile', $granteeTypes, true);
+        $hasProfile   = stripos($ddl, "'profile'") !== false;
+        if ($wantsProfile === $hasProfile) {
+            return; // nothing to change
         }
 
-        $widened = self::widenCheckInDdl($ddl);
-        if ($widened === $ddl) {
-            // Pattern did not match — CHECK must have been structured differently;
-            // skip rather than corrupt the table.
+        // Rebuild in place, keeping every column.
+        $info = $pdo->query('PRAGMA table_info(permission_delegations)');
+        if ($info === false) {
             return;
         }
+        $cols = $info->fetchAll(PDO::FETCH_ASSOC);
+        $keepNames = array_map(static fn (array $c): string => '"' . $c['name'] . '"', $cols);
+        $colList   = implode(', ', $keepNames);
 
-        // Fetch column list for data copy.
-        $stmt = $pdo->query('PRAGMA table_info(permission_delegations)');
-        if ($stmt === false) {
-            return;
-        }
-        $cols    = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        $colNames = array_map(static fn ($c) => '"' . $c['name'] . '"', $cols);
-        $colList  = implode(', ', $colNames);
+        $newDdl = self::buildDelegationsCreateSql($cols, $granteeTypes);
 
-        // Rename → recreate → copy → drop.
         $pdo->exec('ALTER TABLE "permission_delegations" RENAME TO "permission_delegations_old_037c"');
-
-        $newDdl = preg_replace(
-            '/CREATE TABLE\s+(IF NOT EXISTS\s+)?"?permission_delegations"?/i',
-            'CREATE TABLE "permission_delegations"',
-            $widened
-        );
-        if ($newDdl === null || $newDdl === '') {
-            $pdo->exec('ALTER TABLE "permission_delegations_old_037c" RENAME TO "permission_delegations"');
-            return;
-        }
-
         $pdo->exec($newDdl);
         $pdo->exec("INSERT INTO \"permission_delegations\" ({$colList}) SELECT {$colList} FROM \"permission_delegations_old_037c\"");
         $pdo->exec('DROP TABLE "permission_delegations_old_037c"');
+
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_resolution ON permission_delegations (tenant_id, grantee_type, grantee_id, revoked_at)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_ou ON permission_delegations (ou_id)');
+        $keepColNames = array_map(static fn (array $c): string => (string) $c['name'], $cols);
+        if (in_array('grantor_profile_id', $keepColNames, true)) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_grantor_profile ON permission_delegations (tenant_id, grantor_profile_id)');
+        }
+        if (in_array('grantor_user_id', $keepColNames, true)) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_pd_grantor ON permission_delegations (tenant_id, grantor_user_id)');
+        }
     }
 
     /**
-     * Narrow the grantee_type CHECK constraint back to ('role', 'user') on
-     * SQLite when rolling back migration 037.
+     * Build a deterministic SQLite table-definition statement for
+     * permission_delegations from the kept column set and the desired grantee_type
+     * discriminator list. Column type/affinity is taken from PRAGMA table_info so
+     * we preserve the engine-observed types without parsing the stored DDL.
      *
-     * Inverse of patchCheckConstraintSqlite(). Uses the same rename-recreate
-     * idiom. Idempotent: if 'profile' is not present in the CHECK, returns
-     * without touching the table.
+     * @param array<int, array<string, mixed>> $keepCols PRAGMA table_info rows to keep.
+     * @param list<string>                      $granteeTypes
      */
-    private static function narrowCheckConstraintSqlite(Database $db): void
+    private static function buildDelegationsCreateSql(array $keepCols, array $granteeTypes): string
     {
-        $pdo = $db->getPdo();
+        $lines = [];
+        foreach ($keepCols as $c) {
+            // PRAGMA columns come back as STRINGS under ATTR_STRINGIFY_FETCHES
+            // (Postgres-parity mode), so cast the flags explicitly.
+            $name    = (string) $c['name'];
+            $type    = (string) ($c['type'] ?? '');
+            $isPk    = (int) ($c['pk'] ?? 0) > 0;
+            $notNull = (int) ($c['notnull'] ?? 0) > 0;
+            $default = $c['dflt_value'] ?? null;
 
-        $ddlStmt = $pdo->prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name = ?");
-        $ddlStmt->execute(['permission_delegations']);
-        $ddlRow = $ddlStmt->fetch(PDO::FETCH_ASSOC);
-        $ddlStmt->closeCursor();
-        if ($ddlRow === false) {
-            return;
+            $line = '"' . $name . '" ' . ($type !== '' ? $type : 'INTEGER');
+            if ($isPk) {
+                // SQLite AUTOINCREMENT primary key for the id column.
+                $line .= ' PRIMARY KEY AUTOINCREMENT';
+            } elseif ($notNull) {
+                $line .= ' NOT NULL';
+            }
+            if ($default !== null && !$isPk) {
+                // Wrap the default in parentheses unless it is already a
+                // parenthesised expression. SQLite requires function defaults such
+                // as datetime('now') to be parenthesised — DEFAULT datetime('now')
+                // is a syntax error — and it also accepts parenthesised literals
+                // (DEFAULT (0), DEFAULT ('x')), so wrapping uniformly is always
+                // valid and immune to how PRAGMA reports the stored default.
+                $defaultSql = (string) $default;
+                if ($defaultSql !== '' && $defaultSql[0] !== '(') {
+                    $defaultSql = '(' . $defaultSql . ')';
+                }
+                $line .= ' DEFAULT ' . $defaultSql;
+            }
+            $lines[] = $line;
         }
 
-        $ddl = (string) $ddlRow['sql'];
+        $checkList = implode(', ', array_map(
+            static fn (string $t): string => "'" . $t . "'",
+            $granteeTypes
+        ));
+        $lines[] = 'CONSTRAINT chk_permission_delegations_grantee_type '
+            . "CHECK (grantee_type IN ({$checkList}))";
 
-        // If 'profile' is NOT in the CHECK already, nothing to do.
-        if (stripos($ddl, "'profile'") === false) {
-            return;
-        }
-
-        // Replace widened CHECK with the original narrower form.
-        $narrowed = preg_replace(
-            "/grantee_type\s+IN\s*\(\s*'role'\s*,\s*'user'\s*,\s*'profile'\s*\)/i",
-            "grantee_type IN ('role', 'user')",
-            $ddl
-        ) ?? $ddl;
-
-        if ($narrowed === $ddl) {
-            return;
-        }
-
-        // Fetch column list.
-        $stmt = $pdo->query('PRAGMA table_info(permission_delegations)');
-        if ($stmt === false) {
-            return;
-        }
-        $cols     = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        $colNames = array_map(static fn ($c) => '"' . $c['name'] . '"', $cols);
-        $colList  = implode(', ', $colNames);
-
-        $pdo->exec('ALTER TABLE "permission_delegations" RENAME TO "permission_delegations_old_037d"');
-
-        $newDdl = preg_replace(
-            '/CREATE TABLE\s+(IF NOT EXISTS\s+)?"?permission_delegations"?/i',
-            'CREATE TABLE "permission_delegations"',
-            $narrowed
-        );
-        if ($newDdl === null || $newDdl === '') {
-            $pdo->exec('ALTER TABLE "permission_delegations_old_037d" RENAME TO "permission_delegations"');
-            return;
-        }
-
-        $pdo->exec($newDdl);
-        $pdo->exec("INSERT INTO \"permission_delegations\" ({$colList}) SELECT {$colList} FROM \"permission_delegations_old_037d\"");
-        $pdo->exec('DROP TABLE "permission_delegations_old_037d"');
+        return 'CREATE TABLE "permission_delegations" (' . "\n    "
+            . implode(",\n    ", $lines) . "\n)";
     }
 }

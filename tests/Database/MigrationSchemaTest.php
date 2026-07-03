@@ -996,6 +996,42 @@ final class MigrationSchemaTest extends TestCase
             $sql,
             'migration 037 must declare class RekeyDelegationsToProfiles.'
         );
+
+        // The grantee re-key must flip grantee_type to 'profile' in lock-step with
+        // grantee_id (Blocker 1: leaving 'user' would make rows invisible to the
+        // resolver). The EXECUTING assertion lives in
+        // DelegationRekeyMigrationRealEngineTest; here we pin the source contract.
+        $this->assertMatchesRegularExpression(
+            "/grantee_type\s*=\s*'profile'/i",
+            $sql,
+            "migration 037 must set grantee_type = 'profile' when re-keying user grantees."
+        );
+
+        // The CHECK must be widened to include 'profile'.
+        $this->assertMatchesRegularExpression(
+            "/'role'\s*,\s*'user'\s*,\s*'profile'/i",
+            $sql,
+            "migration 037 must widen the grantee_type CHECK to include 'profile'."
+        );
+
+        // NOT NULL must be enforced on grantor_profile_id (the docblock contract).
+        $this->assertMatchesRegularExpression(
+            '/ALTER\s+COLUMN\s+grantor_profile_id\s+SET\s+NOT\s+NULL/i',
+            $sql,
+            'migration 037 must enforce grantor_profile_id NOT NULL to match its contract.'
+        );
+
+        // The SQLite rename-recreate must re-create migration-014 hot-path indexes.
+        $this->assertStringContainsString(
+            'idx_pd_resolution',
+            $sql,
+            'migration 037 must re-create idx_pd_resolution after the SQLite table rebuild.'
+        );
+        $this->assertStringContainsString(
+            'idx_pd_ou',
+            $sql,
+            'migration 037 must re-create idx_pd_ou after the SQLite table rebuild.'
+        );
     }
 
     public function testAllMigrationFilesDeclareTheMigrationsNamespace(): void

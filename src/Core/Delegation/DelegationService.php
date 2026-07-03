@@ -94,12 +94,17 @@ class DelegationService implements DelegatedPermissionResolver
         $requested = array_keys($requested);
 
         // Enforce the HARD subset invariant against the grantor's CURRENT
-        // effective permissions. The dual-window path is used here so both the new
-        // membership-aware (profile_id) callers AND legacy (user_id) callers during
-        // Phase B work correctly. getEffectivePermissionsForUser() tries the profile
-        // mapping first (migration_035_profile_ids) and falls back to the users table
-        // if no mapping exists. This is the single authoritative gate.
-        $grantorEffective = $this->roleChecker->getEffectivePermissionsForUser($grantorProfileId, $tenantId);
+        // effective permissions. The grantor is identified by profile_id (ADR
+        // 0005), so resolution MUST use the membership-aware path directly:
+        // getEffectivePermissionsForProfile() reads memberships.role_id (+ OU
+        // inheritance + live delegations) for THIS profile in THIS tenant. Using
+        // the user-keyed path here would (mis)treat the profile_id as a user_id
+        // and route it through the users→profiles mapping, resolving a
+        // profile-only grantor to an EMPTY set — which would silently block ALL
+        // delegation creation (the very gate that stops delegating a permission
+        // you do not hold). This is the single authoritative gate; it can never be
+        // bypassed by the API permission or any client-supplied claim.
+        $grantorEffective = $this->roleChecker->getEffectivePermissionsForProfile($grantorProfileId, $tenantId);
         $effectiveLookup = array_fill_keys($grantorEffective, true);
 
         $denied = [];

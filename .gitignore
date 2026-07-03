@@ -24,3 +24,7 @@ docs/*
 tests/Local/
 docker-compose.override.yml
 /storage/
+
+# Infection mutation-testing run artifacts (regenerated each run; uploaded as CI artifacts)
+/infection-log.txt
+/infection-summary.txt
