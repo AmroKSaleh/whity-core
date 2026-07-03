@@ -340,9 +340,20 @@ class RekeyDelegationsToProfiles
     {
         $pdo = $db->getPdo();
         if ($driver === 'pgsql') {
+            // MUST scope to the CURRENT schema. Without the table_schema filter,
+            // information_schema.columns matches the same table name in EVERY
+            // schema — so when the app's `public` schema already carries a
+            // migrated permission_delegations.grantor_profile_id, this guard would
+            // wrongly report the column as present inside a fresh per-test schema
+            // (SchemaFromMigrations runs each test class in its own search_path-
+            // scoped Postgres schema). That false positive skipped the ADD COLUMN
+            // and left the column missing → "column grantor_profile_id does not
+            // exist" on every downstream delegation query.
             $stmt = $pdo->prepare(
                 "SELECT 1 FROM information_schema.columns
-                 WHERE table_name = ? AND column_name = ?"
+                 WHERE table_schema = current_schema()
+                   AND table_name = ?
+                   AND column_name = ?"
             );
             $stmt->execute([$table, $column]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
