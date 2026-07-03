@@ -62,13 +62,14 @@ final class ProfileLoginClaimCapturingJwtParser extends JwtParser
  *  LOGIN ALGORITHM (ADR 0005 §6)
  *   - verified profile_email + correct password → login succeeds, JWT carries
  *     {profile_id, active_tenant_id}.
- *   - unverified profile_email → login refused (403).
+ *   - unverified profile_email → login refused with a GENERIC 401 (no
+ *     enumeration oracle; the PG "f"-string boolean bug is covered here).
  *   - wrong password → login refused (401).
- *   - zero active memberships → login refused (403).
+ *   - zero active memberships → login refused with a GENERIC 401.
  *   - exactly one active membership → auto-selected as active_tenant_id.
  *   - multiple active memberships → deterministic selection (lowest tenant_id).
- *   - suspended membership only → login refused (403).
- *   - invited membership only → login refused (403).
+ *   - suspended membership only → login refused (401).
+ *   - invited membership only → login refused (401).
  *   - profile missing → login refused (401).
  *
  *  2FA PATH
@@ -80,8 +81,8 @@ final class ProfileLoginClaimCapturingJwtParser extends JwtParser
  *     existing sessions remain valid during the dual window.
  *
  *  SECURITY FOLLOW-UPS (WC-c35c4ce0, step-1 review carry-overs)
- *   (a) AuditContext::set uses userIdFromPayload() — covered in
- *       EnforceTenantIsolationAuditContextTest in the Http suite.
+ *   (a) AuditContext::set uses userIdFromPayload() — covered by
+ *       Tests\Unit\Http\Middleware\EnforceTenantIsolationAuditContextTest.
  *   (b) tenant_id === active_tenant_id invariant enforcement when both legacy
  *       and new claims are present — covered by
  *       TokenSplitBrainInvariantRealEngineTest in the Auth suite.
@@ -249,7 +250,16 @@ final class ProfileLoginRealEngineTest extends TestCase
     }
 
     /**
-     * Unverified email must be rejected even if password is correct.
+     * BLOCKER-1 + MAJOR-2 (WC-c35c4ce0 review): an unverified profile_email must
+     * be refused even with the CORRECT password, and must return a GENERIC 401
+     * "Invalid credentials" — not a verification-specific status that would leak
+     * whether the email is registered-but-unverified.
+     *
+     * This test also guards the PostgreSQL boolean coercion bug: pdo_pgsql returns
+     * the STRING "f" for a false `verified` column, and a naive (bool)"f" is TRUE,
+     * which would SKIP the guard and let unverified emails in on prod Postgres.
+     * The Integration suite runs on real PG in CI (PHPUNIT_PG_DSN), so a 200 here
+     * would fail the CI PG job — exactly the hole a SQLite-only run missed.
      */
     public function testLoginWithUnverifiedEmailIsRejected(): void
     {
@@ -258,8 +268,18 @@ final class ProfileLoginRealEngineTest extends TestCase
         $this->memberships->insert($unverifiedId, self::TENANT_A, 1);
 
         $response = $this->login('unverified@corp.com');
-        // Must not be 200 (403 or 401 both acceptable).
-        self::assertNotSame(200, $response->getStatusCode(), 'An unverified email must not authenticate.');
+        self::assertSame(
+            401,
+            $response->getStatusCode(),
+            'An unverified email must be refused with a generic 401 (no enumeration oracle).'
+        );
+        $body = json_decode($response->getBody(), true);
+        self::assertIsArray($body);
+        self::assertSame(
+            'Invalid credentials',
+            $body['error'] ?? null,
+            'The unverified-email error must be the generic credential error, not a "not verified" oracle.'
+        );
     }
 
     /**
@@ -286,7 +306,7 @@ final class ProfileLoginRealEngineTest extends TestCase
         $this->memberships->suspend($membershipId, self::TENANT_A);
 
         $response = $this->login('suspended@corp.com');
-        self::assertSame(403, $response->getStatusCode(), 'Suspended-only membership must refuse login.');
+        self::assertSame(401, $response->getStatusCode(), 'Suspended-only membership must refuse login with a generic 401.');
     }
 
     /**
@@ -299,7 +319,7 @@ final class ProfileLoginRealEngineTest extends TestCase
         $this->memberships->invite($profileId, self::TENANT_A, 1);
 
         $response = $this->login('invited@corp.com');
-        self::assertSame(403, $response->getStatusCode(), 'Invite-only membership must refuse login.');
+        self::assertSame(401, $response->getStatusCode(), 'Invite-only membership must refuse login with a generic 401.');
     }
 
     /**
@@ -311,7 +331,7 @@ final class ProfileLoginRealEngineTest extends TestCase
         $this->seedUser('orphan@corp.com', self::TENANT_A);
 
         $response = $this->login('orphan@corp.com');
-        self::assertSame(403, $response->getStatusCode(), 'Profile with no memberships must be refused.');
+        self::assertSame(401, $response->getStatusCode(), 'Profile with no memberships must be refused with a generic 401.');
     }
 
     /**
@@ -328,28 +348,176 @@ final class ProfileLoginRealEngineTest extends TestCase
     }
 
     /**
-     * Multiple active memberships → deterministic selection: lowest tenant_id.
+     * Multiple active memberships → tenant-SELECTION prompt, NO session issued
+     * (ADR 0005 §6, review decision — supersedes the old auto-select-lowest).
      *
-     * ADR 0005 §6: when multiple active memberships exist, the login picks the
-     * one with the lowest tenant_id as a deterministic default (the tenant-switcher,
-     * a later step, lets the user change it).
+     * Login returns 200 { requires_tenant_selection: true, memberships:[…] } and
+     * mints NO access token. The user then completes login via
+     * POST /api/auth/select-tenant.
      */
-    public function testLoginWithMultipleMembershipsSelectsLowestTenantId(): void
+    public function testLoginWithMultipleMembershipsPromptsForSelection(): void
     {
         // Give alice memberships in BOTH tenant A and tenant B.
         $this->memberships->insert($this->profileIdA, self::TENANT_B, 1);
 
+        $this->jwtParser->captured = [];
         $response = $this->login('alice@corp.com');
+        self::assertSame(200, $response->getStatusCode());
+
+        $body = json_decode($response->getBody(), true);
+        self::assertIsArray($body);
+        self::assertTrue(
+            $body['requires_tenant_selection'] ?? false,
+            'Multiple memberships must return requires_tenant_selection=true.'
+        );
+        self::assertIsArray($body['memberships'] ?? null);
+        self::assertCount(2, $body['memberships'], 'Both selectable tenants must be offered.');
+        $tenantIds = array_map(static fn(array $m): int => $m['tenant_id'], $body['memberships']);
+        self::assertSame([self::TENANT_A, self::TENANT_B], $tenantIds, 'Memberships listed by tenant_id ASC.');
+        // Each entry carries the tenant name + role for the UI.
+        self::assertArrayHasKey('tenant_name', $body['memberships'][0]);
+        self::assertArrayHasKey('role', $body['memberships'][0]);
+
+        // NO session (access) token was minted — only a tenant_select token.
+        self::assertNull(
+            $this->jwtParser->lastPayloadOfType('access'),
+            'A multi-membership login must NOT mint a session before tenant selection.'
+        );
+        self::assertNotNull(
+            $this->jwtParser->lastPayloadOfType('tenant_select'),
+            'A short-lived tenant_select token must be issued to bind the selection call.'
+        );
+    }
+
+    /**
+     * The tenant-selection completion endpoint mints the session for a tenant the
+     * caller actually belongs to, and rejects one they do not.
+     */
+    public function testSelectTenantCompletesLoginForHeldMembership(): void
+    {
+        $this->memberships->insert($this->profileIdA, self::TENANT_B, 1);
+
+        // Drive login to the prompt, then present the selection token as a cookie.
+        $this->login('alice@corp.com');
+        $selectClaims = $this->jwtParser->lastPayloadOfType('tenant_select');
+        self::assertIsArray($selectClaims);
+        $_COOKIE['tenant_select_token'] = $this->jwtParser->create($selectClaims, 300, 'tenant_select');
+
+        // Choose tenant B (a held membership) → 200 with a session anchored to B.
+        $this->jwtParser->captured = [];
+        $response = $this->selectTenant(self::TENANT_B);
         self::assertSame(200, $response->getStatusCode());
 
         $payload = $this->jwtParser->lastPayloadOfType('access');
         self::assertIsArray($payload);
-        // Lowest tenant_id wins (tenant A = 1, tenant B = 2).
-        self::assertSame(
-            self::TENANT_A,
-            $payload['active_tenant_id'] ?? null,
-            'With multiple active memberships, the lowest tenant_id must be selected as the default.'
+        self::assertSame($this->profileIdA, $payload['profile_id'] ?? null);
+        self::assertSame(self::TENANT_B, $payload['active_tenant_id'] ?? null);
+    }
+
+    /**
+     * select-tenant must REFUSE a tenant the caller holds no active membership in
+     * (the authorization gate — the submitted tenant_id is never trusted alone).
+     */
+    public function testSelectTenantRejectsTenantWithoutMembership(): void
+    {
+        $this->memberships->insert($this->profileIdA, self::TENANT_B, 1);
+
+        $this->login('alice@corp.com');
+        $selectClaims = $this->jwtParser->lastPayloadOfType('tenant_select');
+        self::assertIsArray($selectClaims);
+        $_COOKIE['tenant_select_token'] = $this->jwtParser->create($selectClaims, 300, 'tenant_select');
+
+        // Tenant 99: alice has NO membership → 401, no session.
+        $this->jwtParser->captured = [];
+        $response = $this->selectTenant(99);
+        self::assertSame(401, $response->getStatusCode());
+        self::assertNull($this->jwtParser->lastPayloadOfType('access'));
+    }
+
+    /**
+     * SYSTEM ADMIN (single tenant-0 membership) MUST log in and receive a
+     * system-authority session (active_tenant_id = 0). Tenant 0 is the system
+     * admin's legitimate home (migration 036 seeds system@whity.local with its
+     * only membership in tenant 0); refusing it would lock the system admin out.
+     * This is correct authority, NOT an escalation — the escalation guard lives at
+     * the multi-membership auto-pick (next test) and at membership creation, never
+     * at login refusal.
+     */
+    public function testSingleSystemTenantMembershipLogsInWithSystemAuthority(): void
+    {
+        $sysProfileId = $this->seedProfile('sysadmin@corp.com', true);
+        $this->seedUser('sysadmin@corp.com', 0); // legacy users row in tenant 0
+        $this->pdo->exec(
+            "INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (0, 'system', datetime('now'))"
         );
+        $this->memberships->insert($sysProfileId, 0, 1);
+
+        $this->jwtParser->captured = [];
+        $response = $this->login('sysadmin@corp.com');
+        self::assertSame(
+            200,
+            $response->getStatusCode(),
+            'A single tenant-0 membership (the system admin) MUST authenticate.'
+        );
+        $payload = $this->jwtParser->lastPayloadOfType('access');
+        self::assertIsArray($payload);
+        self::assertSame(
+            0,
+            $payload['active_tenant_id'] ?? null,
+            'The system admin must receive active_tenant_id = 0 (correct system authority).'
+        );
+    }
+
+    /**
+     * A profile with BOTH a system-tenant (0) membership AND a real-tenant
+     * membership has MULTIPLE active memberships → §6 selection prompt, and it
+     * must NEVER silently auto-select tenant 0 (or any tenant). This is where the
+     * tenant-0 escalation is actually closed: no auto-pick for multi-membership.
+     */
+    public function testMultiMembershipIncludingSystemTenantPromptsAndNeverAutoSelectsZero(): void
+    {
+        $this->pdo->exec(
+            "INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (0, 'system', datetime('now'))"
+        );
+        // alice already has tenant A; add a tenant-0 membership too → 2 memberships.
+        $this->memberships->insert($this->profileIdA, 0, 1);
+
+        $this->jwtParser->captured = [];
+        $response = $this->login('alice@corp.com');
+
+        // Multiple memberships → selection prompt, NO session (so no silent 0).
+        self::assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        self::assertIsArray($body);
+        self::assertTrue(
+            $body['requires_tenant_selection'] ?? false,
+            'A multi-membership profile (incl. tenant 0) must be prompted, never auto-logged-in.'
+        );
+        self::assertNull(
+            $this->jwtParser->lastPayloadOfType('access'),
+            'No session may be minted before selection — tenant 0 is never silently auto-selected.'
+        );
+        // Both tenants (0 and A) are offered; ordered by tenant_id ASC.
+        $tenantIds = array_map(static fn(array $m): int => $m['tenant_id'], $body['memberships']);
+        self::assertSame([0, self::TENANT_A], $tenantIds);
+    }
+
+    /**
+     * EMAIL CASE-NORMALIZATION: a mixed-case / whitespace-padded email must match
+     * the lowercased stored profile_email (login normalizes with LOWER(TRIM())).
+     */
+    public function testLoginNormalizesEmailCaseBeforeLookup(): void
+    {
+        // alice@corp.com is stored lowercased; log in with mixed case + padding.
+        $response = $this->handler->handle(new Request('POST', '/api/login', [], (string) json_encode([
+            'email'    => '  Alice@Corp.com  ',
+            'password' => self::PASSWORD,
+        ])));
+        self::assertSame(200, $response->getStatusCode(), 'A mixed-case/padded email must still authenticate.');
+
+        $payload = $this->jwtParser->lastPayloadOfType('access');
+        self::assertIsArray($payload);
+        self::assertSame($this->profileIdA, $payload['profile_id'] ?? null);
     }
 
     /**
@@ -430,6 +598,14 @@ final class ProfileLoginRealEngineTest extends TestCase
         return $this->handler->handle(new Request('POST', '/api/login', [], (string) json_encode([
             'email'    => $email,
             'password' => self::PASSWORD,
+        ])));
+    }
+
+    /** Drive POST /api/auth/select-tenant with the chosen tenant id. */
+    private function selectTenant(int $tenantId): \Whity\Core\Response
+    {
+        return $this->handler->handleSelectTenant(new Request('POST', '/api/auth/select-tenant', [], (string) json_encode([
+            'tenant_id' => $tenantId,
         ])));
     }
 

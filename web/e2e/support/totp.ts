@@ -66,11 +66,19 @@ const DB_NAME = process.env.E2E_DB_NAME ?? 'whity_core';
  * run can NEVER leave admin/admin123 behind a login challenge (the seeder ships
  * no 2FA and the rest of the suite depends on plain admin login). Best-effort:
  * swallows errors so it is always safe to call from a teardown hook.
+ *
+ * After the WC-c35c4ce0 login rewrite, login reads 2FA state from `profiles`
+ * (not `users`), so the reset MUST clear BOTH the legacy users row AND the
+ * profile row (resolved via the globally-unique profile_emails.email) — a
+ * users-only reset would leave the profile 2FA-enabled and every later spec
+ * would get a 202 challenge on admin login.
  */
 export async function resetTwoFactorViaDb(email: string): Promise<void> {
   const sql =
     `UPDATE users SET two_factor_enabled=false, two_factor_secret=NULL, ` +
     `two_factor_backup_codes_version=0 WHERE email='${email}'; ` +
+    `UPDATE profiles SET two_factor_enabled=false, two_factor_secret=NULL, ` +
+    `two_factor_backup_codes_version=0 WHERE id=(SELECT profile_id FROM profile_emails WHERE email='${email}'); ` +
     `DELETE FROM backup_codes WHERE user_id=(SELECT id FROM users WHERE email='${email}');`;
   await execFileAsync('docker', [
     'exec',

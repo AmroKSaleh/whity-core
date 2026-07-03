@@ -542,6 +542,11 @@ $loginThrottle = new LoginThrottleService(new DatabaseSharedStore($db->getPdo())
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 $router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
+// ADR 0005 §6: multi-membership tenant selection. Public like /api/login/2fa —
+// the caller holds only the short-lived selection cookie (not a full session);
+// the handler re-validates the chosen tenant against the caller's active
+// memberships before minting the session.
+$router->register('POST', '/api/auth/select-tenant', [$authHandler, 'handleSelectTenant'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
 $router->register('PATCH', '/api/me', [$authHandler, 'handleUpdateMe'], null);
 $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);

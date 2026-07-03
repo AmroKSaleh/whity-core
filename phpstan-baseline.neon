@@ -577,7 +577,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 3
+			count: 6
 			path: tests/Auth/AccessTokenRevocationRealEngineTest.php
 
 		-

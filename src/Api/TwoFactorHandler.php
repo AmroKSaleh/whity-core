@@ -83,6 +83,94 @@ class TwoFactorHandler
     }
 
     /**
+     * Resolve the caller's profile_id so 2FA state can be mirrored onto the
+     * PROFILE model (ADR 0005). After the WC-c35c4ce0 login rewrite, login reads
+     * two_factor_enabled/secret/backup_codes_version from `profiles`, so a 2FA
+     * change written only to `users` would be invisible to login (no challenge)
+     * — exactly the split-brain the mirror closes. Prefers the token's
+     * profile_id claim; falls back to a profile_emails lookup by the user's email.
+     *
+     * @param array<string, mixed> $claims Validated access-token claims.
+     * @return int|null The profile id, or null when none can be resolved.
+     */
+    private function resolveProfileId(array $claims, int $userId, ?int $tenantId): ?int
+    {
+        if (isset($claims['profile_id']) && is_numeric($claims['profile_id'])) {
+            return (int) $claims['profile_id'];
+        }
+
+        try {
+            // Resolve the user's email, then the globally-unique profile_email.
+            if ($tenantId === null) {
+                // @tenant-guard-ignore: self-scoped by the caller's own token-derived user id
+                $uStmt = $this->db->prepare('SELECT email FROM users WHERE id = ? LIMIT 1');
+                $uStmt->execute([$userId]);
+            } else {
+                $uStmt = $this->db->prepare('SELECT email FROM users WHERE id = ? AND tenant_id = ? LIMIT 1');
+                $uStmt->execute([$userId, $tenantId]);
+            }
+            $email = $uStmt->fetchColumn();
+            if ($email === false) {
+                return null;
+            }
+
+            // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
+            $peStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
+            $peStmt->execute([$email]);
+            $profileId = $peStmt->fetchColumn();
+
+            return $profileId !== false ? (int) $profileId : null;
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Mirror a 2FA state change onto the caller's profile row so the profile-based
+     * login sees it (challenge on login, backup-code version for recovery). Safe
+     * no-op when no profile can be resolved (pre-migration account).
+     *
+     * @param array<string, mixed> $claims                  Validated token claims.
+     * @param string|null          $encryptedSecretOrNull   Encrypted secret, or null to clear.
+     * @param bool                 $enabled                 New two_factor_enabled value.
+     * @param int|null             $backupCodesVersion       New version, or null to leave unchanged.
+     */
+    private function mirrorTwoFactorToProfile(
+        array $claims,
+        int $userId,
+        ?int $tenantId,
+        ?string $encryptedSecretOrNull,
+        bool $enabled,
+        ?int $backupCodesVersion
+    ): void {
+        $profileId = $this->resolveProfileId($claims, $userId, $tenantId);
+        if ($profileId === null) {
+            return;
+        }
+
+        try {
+            if ($backupCodesVersion !== null) {
+                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                $this->db->prepare(
+                    'UPDATE profiles
+                     SET two_factor_secret = ?, two_factor_enabled = ?,
+                         two_factor_backup_codes_version = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?'
+                )->execute([$encryptedSecretOrNull, $enabled ? 1 : 0, $backupCodesVersion, $profileId]);
+            } else {
+                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                $this->db->prepare(
+                    'UPDATE profiles
+                     SET two_factor_secret = ?, two_factor_enabled = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?'
+                )->execute([$encryptedSecretOrNull, $enabled ? 1 : 0, $profileId]);
+            }
+        } catch (\Exception $e) {
+            error_log('[TwoFactorHandler] profile 2FA mirror failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Record a 2FA audit entry when an audit logger is configured.
      *
      * The 2FA routes run behind tenant isolation, so the tenant, actor and IP are
@@ -243,6 +331,16 @@ class TwoFactorHandler
                 $insertStmt->execute([$userId, $hashedCode, 1]);
             }
 
+            // Mirror onto the profile so login challenges for 2FA (ADR 0005).
+            $this->mirrorTwoFactorToProfile(
+                $claims,
+                (int) $userId,
+                $tenantId,
+                $encryptedSecret,
+                true,
+                1
+            );
+
             $this->audit('auth.2fa.enabled', (int) $userId);
 
             return Response::json([
@@ -328,6 +426,17 @@ class TwoFactorHandler
                 ');
                 $updateStmt->execute([$userId, $tenantId]);
             }
+
+            // Mirror the disable onto the profile so login stops challenging and
+            // the stale secret is cleared (ADR 0005). Version 0 = no backup codes.
+            $this->mirrorTwoFactorToProfile(
+                $claims,
+                (int) $userId,
+                $tenantId,
+                null,
+                false,
+                0
+            );
 
             $this->audit('auth.2fa.disabled', (int) $userId);
 
@@ -418,6 +527,25 @@ class TwoFactorHandler
                     WHERE id = ? AND tenant_id = ?
                 ');
                 $updateStmt->execute([$newVersion, $userId, $tenantId]);
+            }
+
+            // Mirror the version bump onto the profile so the login backup-code
+            // path (which reads two_factor_backup_codes_version from profiles)
+            // accepts the NEW codes and rejects the old (ADR 0005). Secret and
+            // enabled state are unchanged by a regenerate, so only the version
+            // is written here.
+            $profileId = $this->resolveProfileId($claims, (int) $userId, $tenantId);
+            if ($profileId !== null) {
+                try {
+                    // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                    $this->db->prepare(
+                        'UPDATE profiles
+                         SET two_factor_backup_codes_version = ?, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?'
+                    )->execute([$newVersion, $profileId]);
+                } catch (\Exception $e) {
+                    error_log('[TwoFactorHandler] profile backup-code version mirror failed: ' . $e->getMessage());
+                }
             }
 
             // Generate 15 new codes

@@ -87,6 +87,10 @@ class EnforceTenantIsolation
         // WC-206: versioned auth surface under /api/v1/.
         '/api/v1/login',
         '/api/v1/login/2fa',
+        // ADR 0005 §6: multi-membership tenant selection. Public like login/2fa —
+        // the caller holds only the short-lived selection cookie (no session yet);
+        // AuthHandler::handleSelectTenant re-validates membership before minting.
+        '/api/v1/auth/select-tenant',
         '/api/v1/me',
         '/api/v1/auth/refresh',
         '/api/v1/auth/logout',

@@ -160,17 +160,19 @@ final class DualClaimAuthFlowTest extends TestCase
 
     /**
      * WC-c35c4ce0: a profile whose only membership is suspended must be refused
-     * login with 403 (no active membership).  The old code returned 200 with
-     * legacy-only claims; the new code is strict.
+     * login.  The old code returned 200 with legacy-only claims; the new code is
+     * strict. Post-review (MAJOR-2) the status is a GENERIC 401 rather than a
+     * distinct "No active membership" 403, so the response is not a
+     * user-enumeration oracle.
      */
     public function testLoginRejectsSuspendedMembership(): void
     {
         $response = $this->login(self::SUSPENDED_EMAIL);
 
         self::assertSame(
-            403,
+            401,
             $response->getStatusCode(),
-            'A profile whose only membership is suspended must be refused login (403).'
+            'A profile whose only membership is suspended must be refused login (generic 401).'
         );
     }
 

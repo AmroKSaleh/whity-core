@@ -269,6 +269,16 @@ class UsersApiHandler
 
             $userId = (int)$this->db->lastInsertId();
 
+            // Provision the PROFILE model so the new account can actually log in.
+            // After the WC-c35c4ce0 login rewrite, authentication runs through
+            // profile_emails → profiles → memberships (the #181 fix); a bare
+            // `users` row is NOT login-capable. Every account created here must
+            // therefore get a profile, a verified PRIMARY profile_email, and an
+            // ACTIVE membership in this tenant — mirroring the seeder and
+            // migration 035. Uses the SAME password hash so both the legacy and
+            // profile login paths accept the same credential.
+            $this->provisionProfileForUser($email, $password, (int) $roleId, (int) $tenantId);
+
             // Dispatch synchronous hook after user is created
             $this->hookManager->dispatch('user.created', [
                 'id' => $userId,
@@ -556,6 +566,93 @@ class UsersApiHandler
      *
      * @param int $id The user id.
      * @return array{id: int, name: string, email: string, role: string, tenantId: int, createdAt: string|null}
+     */
+    /**
+     * Provision the profile-model identity for a newly-created user so the
+     * account is login-capable under the profile-based auth (WC-c35c4ce0).
+     *
+     * Creates, idempotently:
+     *  - a `profiles` row (global identity) carrying the SAME password hash, when
+     *    no profile already owns this email;
+     *  - a verified PRIMARY `profile_emails` row (the globally-unique login key);
+     *  - an ACTIVE `memberships` row binding the profile to this tenant + role.
+     *
+     * profile_emails.email is globally UNIQUE, so when the email already has a
+     * profile (e.g. the same person added to a second tenant) we REUSE that
+     * profile and only add the tenant membership — never a duplicate identity.
+     * Runs in a transaction so a partial identity can never be persisted.
+     *
+     * @param string $email        The account email (login key).
+     * @param string $passwordHash The already-bcrypt-hashed password.
+     * @param int    $roleId       The tenant role id for the membership.
+     * @param int    $tenantId     The tenant the membership belongs to.
+     */
+    private function provisionProfileForUser(
+        string $email,
+        string $passwordHash,
+        int $roleId,
+        int $tenantId
+    ): void {
+        $ownTx = !$this->db->inTransaction();
+        if ($ownTx) {
+            $this->db->beginTransaction();
+        }
+
+        try {
+            // Reuse an existing profile for this globally-unique email, else create one.
+            // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
+            $peStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
+            $peStmt->execute([$email]);
+            $existingProfileId = $peStmt->fetchColumn();
+
+            if ($existingProfileId !== false) {
+                $profileId = (int) $existingProfileId;
+            } else {
+                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                $profStmt = $this->db->prepare(
+                    'INSERT INTO profiles
+                         (display_name, password_hash, two_factor_enabled,
+                          two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+                     VALUES (?, ?, false, 0, 0, NOW(), NOW())'
+                );
+                $profStmt->execute([$this->localPart($email), $passwordHash]);
+                $profileId = (int) $this->db->lastInsertId();
+
+                // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2)
+                $this->db->prepare(
+                    'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+                     VALUES (?, ?, true, true, NOW())'
+                )->execute([$profileId, $email]);
+            }
+
+            // ACTIVE membership for this tenant (idempotent via UNIQUE(profile_id, tenant_id)).
+            // @tenant-guard-ignore: membership provisioning during user creation (ADR 0005 §6)
+            $this->db->prepare(
+                "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+                 VALUES (?, ?, ?, NULL, 'active', NOW())
+                 ON CONFLICT (profile_id, tenant_id) DO NOTHING"
+            )->execute([$profileId, $tenantId, $roleId]);
+
+            if ($ownTx) {
+                $this->db->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /** Local-part (before @) of an email, used as the profile display name. */
+    private function localPart(string $email): string
+    {
+        $at = strrpos($email, '@');
+        return $at !== false ? substr($email, 0, $at) : $email;
+    }
+
+    /**
+     * @return array<string, mixed> Public-shaped user record.
      */
     private function fetchPublicUser(int $id): array
     {

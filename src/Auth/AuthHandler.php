@@ -297,7 +297,14 @@ class AuthHandler
             return Response::error('Email and password are required', 401);
         }
 
-        $email    = $body['email'];
+        // Normalize the submitted email BEFORE the lookup. Migration 035 and the
+        // seeder store LOWER(TRIM(email)) in profile_emails (email is globally
+        // UNIQUE, case-folded). Querying with the raw submitted value would 401 a
+        // user who typed a mixed-case/whitespace-padded address that logged in
+        // fine pre-rewrite. Normalize identically here so the case-insensitive
+        // contract is preserved. The original is retained only for audit display.
+        $rawEmail = $body['email'];
+        $email    = is_string($rawEmail) ? self::normalizeEmail($rawEmail) : '';
         $password = $body['password'];
         $ip       = $this->clientIp($request);
 
@@ -321,24 +328,37 @@ class AuthHandler
         if ($profileEmailRow === false) {
             // No profile_email row: email is not registered in the profile model.
             $this->audit('auth.login.failure', $request, null, null, [
-                'email'  => is_string($email) ? $email : null,
+                'email'  => $email,
                 'reason' => 'profile_not_found',
             ]);
             $this->loginThrottle?->recordFailure(null, $ip);
             return Response::error('Invalid credentials', 401);
         }
 
+        $profileId = (int) $profileEmailRow['profile_id'];
+
         // Unverified emails must never authenticate (ADR 0005 §2).
-        if (!(bool) $profileEmailRow['verified']) {
-            $this->audit('auth.login.failure', $request, null, null, [
-                'email'  => is_string($email) ? $email : null,
+        //
+        // Use dbTruthy(), NOT (bool)/empty(): on PostgreSQL `verified` comes back
+        // as the string "f", and (bool)"f" === true, which would SKIP this guard
+        // and let unverified emails in on production Postgres (the SQLite tests
+        // never caught it because SQLite returns 0/1).
+        //
+        // Return a GENERIC 401 "Invalid credentials" (NOT a distinct 403
+        // "not verified"): a verification-specific error is a user-enumeration
+        // oracle — it reveals that the email is registered but unverified, vs the
+        // 401 for an unknown email. The "please verify your email" prompt belongs
+        // in the registration/verification flow, not the login error. Throttle is
+        // keyed on the resolved profileId (the email IS registered) so repeated
+        // probes of a known-but-unverified account are rate-limited per profile.
+        if (!self::dbTruthy($profileEmailRow['verified'])) {
+            $this->audit('auth.login.failure', $request, null, $profileId, [
+                'email'  => $email,
                 'reason' => 'email_not_verified',
             ]);
-            $this->loginThrottle?->recordFailure(null, $ip);
-            return Response::error('Email address is not verified', 403);
+            $this->loginThrottle?->recordFailure($profileId, $ip);
+            return Response::error('Invalid credentials', 401);
         }
-
-        $profileId = (int) $profileEmailRow['profile_id'];
 
         // WC-0abcc29f: throttle check keyed on the profile id.
         if ($this->loginThrottle !== null && $this->loginThrottle->isThrottled($profileId, null)) {
@@ -360,7 +380,7 @@ class AuthHandler
         if ($profile === false) {
             // Should not happen: profile_email FK should keep the profile alive.
             $this->audit('auth.login.failure', $request, null, null, [
-                'email'  => is_string($email) ? $email : null,
+                'email'  => $email,
                 'reason' => 'profile_row_missing',
             ]);
             $this->loginThrottle?->recordFailure($profileId, $ip);
@@ -369,42 +389,54 @@ class AuthHandler
 
         if (!password_verify((string) $password, (string) $profile['password_hash'])) {
             $this->audit('auth.login.failure', $request, null, $profileId, [
-                'email'  => is_string($email) ? $email : null,
+                'email'  => $email,
                 'reason' => 'invalid_password',
             ]);
             $this->loginThrottle?->recordFailure($profileId, $ip);
             return Response::error('Invalid credentials', 401);
         }
 
+        // ── Step 4: resolve active memberships (ADR 0005 §6) ─────────────────
+        // Zero → refuse; exactly one → log in directly (INCLUDING a single
+        // tenant-0 membership: that is the legitimate system admin, not an
+        // escalation); many → prompt for selection (never auto-pick, so tenant 0
+        // is never silently preferred over a real tenant).
+        $memberships = $this->listActiveMemberships($profileId);
+
+        if ($memberships === []) {
+            // Zero active memberships (none, or all suspended/invited). Return a
+            // GENERIC 401 rather than a distinct status: a membership-specific
+            // error is a user-enumeration oracle.
+            $this->loginThrottle?->recordFailure($profileId, $ip);
+            return Response::error('Invalid credentials', 401);
+        }
+
         // ── Step 3: 2FA challenge (secret lives on the profile) ──────────────
-        if (!empty($profile['two_factor_enabled'])) {
-            // First factor passed; second factor still required.
-            // The temp token carries the profile_id and the pre-selected
-            // active_tenant_id so completeTwoFaLogin() can skip the membership
-            // resolution a second time.  The active_tenant_id is resolved below
-            // and stored in the temp token's claims.
-
-            // ── Step 4 (inline for 2FA): resolve memberships ─────────────────
-            $activeTenantId2fa = $this->resolveActiveTenantId($profileId);
-            if ($activeTenantId2fa === null) {
-                // Zero active memberships.
-                return Response::error('No active membership', 403);
-            }
-
-            // Look up the legacy users row to carry legacy claims in temp token.
-            $legacyRow2fa = $this->fetchLegacyUserRow((string) $email, $activeTenantId2fa);
-
+        // dbTruthy(), NOT !empty(): on Postgres two_factor_enabled is the string
+        // "f" for false, which !empty() treats as true (same class of bug as the
+        // verified guard above). 2FA is resolved BEFORE tenant selection: the
+        // second factor proves identity; tenant choice (if multiple) happens after
+        // 2FA completes. The temp token carries the pre-selected active_tenant_id
+        // ONLY when exactly one membership exists; with multiple, completeTwoFaLogin
+        // returns the selection prompt.
+        if (self::dbTruthy($profile['two_factor_enabled'] ?? false)) {
             $tempClaims = [
-                'profile_id'       => $profileId,
-                'active_tenant_id' => $activeTenantId2fa,
-                'email'            => is_string($email) ? $email : '',
+                'profile_id' => $profileId,
+                'email'      => $email,
             ];
-            if ($legacyRow2fa !== null) {
-                $tempClaims['user_id']   = (int) $legacyRow2fa['id'];
-                $tempClaims['tenant_id'] = $activeTenantId2fa;
+            if (count($memberships) === 1) {
+                $only = $memberships[0]['tenant_id'];
+                $tempClaims['active_tenant_id'] = $only;
+                $legacyRow2fa = $this->fetchLegacyUserRow($email, $only);
+                if ($legacyRow2fa !== null) {
+                    $tempClaims['user_id']   = (int) $legacyRow2fa['id'];
+                    $tempClaims['tenant_id'] = $only;
+                }
+                $this->audit('auth.login.2fa_required', $request, $only, $profileId);
+            } else {
+                // Multiple: tenant selection deferred to after 2FA completion.
+                $this->audit('auth.login.2fa_required', $request, null, $profileId);
             }
-
-            $this->audit('auth.login.2fa_required', $request, $activeTenantId2fa, $profileId);
 
             // Short-lived 'temp' token (5 min) — not epoch-checked (wrong type).
             CookieManager::setTempToken(
@@ -415,24 +447,132 @@ class AuthHandler
             return Response::json(['requires_2fa' => true], 202);
         }
 
-        // ── Step 4: resolve active memberships and pick active_tenant_id ─────
-        $activeTenantId = $this->resolveActiveTenantId($profileId);
-        if ($activeTenantId === null) {
-            // Zero active memberships (or all suspended/invited).
-            return Response::error('No active membership', 403);
+        // ── Step 5: single membership → log in directly; multiple → prompt ───
+        if (count($memberships) > 1) {
+            return $this->requireTenantSelection($profileId, $email, $memberships);
         }
 
-        // ── Step 5: look up the legacy users row (dual-claim window) ─────────
-        // The users row in the resolved active tenant carries role_id and the
-        // legacy epoch. When no users row exists (profile-only post-cutover) we
-        // fall back gracefully to profile epoch and omit legacy claims.
-        $legacyRow = $this->fetchLegacyUserRow((string) $email, $activeTenantId);
+        // Exactly one selectable membership: issue the session directly.
+        $activeTenantId = $memberships[0]['tenant_id'];
+        $this->loginThrottle?->clearUser($profileId);
+        return $this->issueSessionForProfile(
+            $profileId,
+            $activeTenantId,
+            $email,
+            (int) ($profile['token_epoch'] ?? 0),
+            $request
+        );
+    }
 
-        // Role name: prefer the legacy users row; fall back to a placeholder
-        // (the role is resolved from memberships post-cutover, but that rework
-        // is a later step — do not expand scope here).
-        $roleName  = '';
-        $tokenEpoch = (int) ($profile['token_epoch'] ?? 0);
+    /**
+     * POST /api/auth/select-tenant — ADR 0005 §6 tenant selection completion.
+     *
+     * The login step returns { requires_tenant_selection: true, memberships:[…] }
+     * and issues NO session; instead it sets a short-lived selection cookie
+     * binding the profile. This endpoint takes the chosen tenant_id, RE-VALIDATES
+     * that the caller still holds an ACTIVE membership in that REAL tenant (never
+     * tenant 0), and only then mints the session JWT. The selection token binds
+     * the two calls so a caller can never select a tenant they don't belong to,
+     * and can never escalate to system authority.
+     *
+     * @param Request              $request HTTP request with { tenant_id } in body.
+     * @param array<string, mixed> $params  Unused route params.
+     * @return Response Session (200) on success, or 400/401 on invalid selection.
+     */
+    public function handleSelectTenant(Request $request, array $params = []): Response
+    {
+        $token = CookieManager::getTenantSelectionToken();
+        if ($token === null) {
+            return Response::error('No pending tenant selection', 401);
+        }
+
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null
+            || ($claims['type'] ?? null) !== 'tenant_select'
+            || !isset($claims['profile_id']) || !is_numeric($claims['profile_id'])
+        ) {
+            return Response::error('Invalid or expired selection token', 401);
+        }
+
+        $profileId = (int) $claims['profile_id'];
+        $email     = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+
+        $body = JsonBody::parsed($request);
+        if (!isset($body['tenant_id']) || !is_numeric($body['tenant_id'])) {
+            return Response::error('tenant_id is required', 400);
+        }
+        $tenantId = (int) $body['tenant_id'];
+
+        // Re-validate: the caller MUST still hold an active membership in this
+        // REAL tenant (hasActiveMembershipInTenant excludes tenant 0). This is the
+        // authorization gate — never trust the submitted tenant_id alone.
+        if (!$this->hasActiveMembershipInTenant($profileId, $tenantId)) {
+            return Response::error('Invalid tenant selection', 401);
+        }
+
+        // Re-read the profile epoch (the selection token is short-lived but the
+        // session must carry the current epoch).
+        $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
+
+        CookieManager::clearTenantSelectionToken();
+        $this->loginThrottle?->clearUser($profileId);
+
+        return $this->issueSessionForProfile($profileId, $tenantId, $email, $tokenEpoch, $request);
+    }
+
+    /**
+     * Build the tenant-selection prompt response (ADR 0005 §6, multi-membership).
+     *
+     * Issues NO session. Sets a short-lived (5-min) selection cookie binding the
+     * profile so POST /api/auth/select-tenant can complete the login, and returns
+     * the selectable memberships for the UI.
+     *
+     * @param list<array{tenant_id:int, tenant_name:string, role:string}> $memberships
+     */
+    private function requireTenantSelection(int $profileId, string $email, array $memberships): Response
+    {
+        CookieManager::setTenantSelectionToken(
+            $this->jwtParser->create(
+                ['profile_id' => $profileId, 'email' => $email],
+                300,
+                'tenant_select'
+            ),
+            300
+        );
+
+        return Response::json([
+            'requires_tenant_selection' => true,
+            'memberships'               => $memberships,
+        ], 200);
+    }
+
+    /**
+     * Mint the access + refresh session for a resolved (profile, tenant) pair and
+     * set the auth cookies. Shared by the single-membership login path, the
+     * post-2FA completion, and the tenant-selection endpoint so token/claim
+     * semantics (dual-claim window) are identical across all three.
+     *
+     * Callers MUST have already authorised (profile_id, tenantId): this method
+     * does not re-check membership.
+     *
+     * @param int         $profileId       Authenticated profile.
+     * @param int         $activeTenantId  The resolved (authorised, real) tenant.
+     * @param string      $email           Normalised email for claims/response.
+     * @param int         $profileEpoch    Fallback epoch when no legacy users row.
+     * @param Request     $request         For audit context.
+     */
+    private function issueSessionForProfile(
+        int $profileId,
+        int $activeTenantId,
+        string $email,
+        int $profileEpoch,
+        Request $request
+    ): Response {
+        // Legacy users row (dual-claim window): carries role_id + legacy epoch.
+        $legacyRow = $this->fetchLegacyUserRow($email, $activeTenantId);
+
+        $roleName   = '';
+        $tokenEpoch = $profileEpoch;
         if ($legacyRow !== null) {
             // @tenant-guard-ignore: role-name lookup by globally-unique role id (SERIAL PK)
             $roleStmt = $this->db->prepare('SELECT name FROM roles WHERE id = ?');
@@ -441,23 +581,15 @@ class AuthHandler
             if ($roleRow !== false) {
                 $roleName = (string) $roleRow['name'];
             }
-            // During the dual window, epoch is still stored on users (see
-            // TokenValidator::isTokenEpochCurrent — dual tokens are validated
-            // against users.token_epoch).
             $tokenEpoch = (int) ($legacyRow['token_epoch'] ?? 0);
         }
 
-        // ── Issue tokens ─────────────────────────────────────────────────────
-        // Always include the new identity claims (profile_id / active_tenant_id).
-        // During the dual-claim window also include legacy claims when a users
-        // row exists, so existing validators/sessions are unaffected.
         $newClaims = [
             'profile_id'       => $profileId,
             'active_tenant_id' => $activeTenantId,
         ];
-
         $baseClaims = [
-            'email'       => is_string($email) ? $email : '',
+            'email'       => $email,
             'role'        => $roleName,
             'token_epoch' => $tokenEpoch,
         ];
@@ -465,18 +597,10 @@ class AuthHandler
             $baseClaims['user_id']   = (int) $legacyRow['id'];
             $baseClaims['tenant_id'] = $activeTenantId;
         }
-
-        // Merge: new claims first so they are never shadowed by legacy keys.
         $allClaims = $newClaims + $baseClaims;
 
-        $accessToken  = $this->jwtParser->create($allClaims, 900, 'access');   // 15 min
-        $refreshToken = $this->jwtParser->create($allClaims, 604800, 'refresh'); // 7 days
-
-        CookieManager::setAccessToken($accessToken, 900);
-        CookieManager::setRefreshToken($refreshToken, 604800);
-
-        // WC-0abcc29f: successful login clears per-profile failure counter.
-        $this->loginThrottle?->clearUser($profileId);
+        CookieManager::setAccessToken($this->jwtParser->create($allClaims, 900, 'access'), 900);
+        CookieManager::setRefreshToken($this->jwtParser->create($allClaims, 604800, 'refresh'), 604800);
 
         $this->audit('auth.login.success', $request, $activeTenantId, $profileId);
 
@@ -485,7 +609,7 @@ class AuthHandler
         return Response::json([
             'user' => [
                 'id'        => $userId,
-                'email'     => is_string($email) ? $email : '',
+                'email'     => $email,
                 'role'      => $roleName,
                 'tenant_id' => $activeTenantId,
             ]
@@ -493,43 +617,82 @@ class AuthHandler
     }
 
     /**
-     * Resolve the active_tenant_id for a profile by its memberships (ADR 0005 §6).
+     * List the profile's active memberships (ADR 0005 §6).
      *
-     * Algorithm:
-     *  - Filter memberships to status = 'active' only.
-     *  - Zero active rows → return null (caller must refuse login).
-     *  - Exactly one active row → return its tenant_id.
-     *  - Multiple active rows → return the LOWEST tenant_id as a deterministic
-     *    default (the tenant-switcher, a later step, lets the user change it).
-     *    Rationale: lowest id is stable, reproducible across machines, and
-     *    requires no extra configuration — consistent with ADR 0005 §6.
+     * Returns one row per active membership, each as {tenant_id, tenant_name,
+     * role}, ordered by tenant_id ASC for a stable UI.
+     *
+     * SYSTEM TENANT (id 0): tenant 0 is the LEGITIMATE home of the system admin
+     * (system@whity.local, seeded by migration 036 with its ONLY membership in
+     * tenant 0). It is therefore NOT filtered out here — a single tenant-0
+     * membership is a valid login that yields correct system authority.
+     *
+     * The escalation the review flagged is a MULTI-membership profile where a
+     * naive "lowest tenant_id" auto-pick would silently prefer 0 over a real
+     * tenant. That is closed at the CALL SITE, not here: a profile with >1 active
+     * membership is ALWAYS sent through the §6 selection prompt (no auto-pick at
+     * all), so tenant 0 can never be silently minted for a multi-membership user.
+     * The genuine integrity guard (don't grant tenant-0 memberships to non-admins)
+     * belongs at membership CREATION — see the follow-up note on
+     * MembershipRepository::insert.
      *
      * @tenant-guard-ignore: login flow — enumerates all tenant memberships for one profile (ADR 0005 §6)
      *
      * @param int $profileId The profile whose memberships to query.
-     * @return int|null The selected active_tenant_id, or null when none.
+     * @return list<array{tenant_id:int, tenant_name:string, role:string}>
      */
-    private function resolveActiveTenantId(int $profileId): ?int
+    private function listActiveMemberships(int $profileId): array
     {
         try {
             // @tenant-guard-ignore: login flow — enumerates all tenant memberships for one profile (ADR 0005 §6)
             $stmt = $this->db->prepare(
-                "SELECT tenant_id FROM memberships
-                 WHERE profile_id = ? AND status = 'active'
-                 ORDER BY tenant_id ASC
-                 LIMIT 2"
+                "SELECT m.tenant_id, t.name AS tenant_name, r.name AS role
+                 FROM memberships m
+                 JOIN tenants t ON t.id = m.tenant_id
+                 LEFT JOIN roles r ON r.id = m.role_id
+                 WHERE m.profile_id = ? AND m.status = 'active'
+                 ORDER BY m.tenant_id ASC"
             );
             $stmt->execute([$profileId]);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            if (empty($rows)) {
-                return null;
+            $out = [];
+            foreach ($rows as $row) {
+                $out[] = [
+                    'tenant_id'   => (int) $row['tenant_id'],
+                    'tenant_name' => (string) ($row['tenant_name'] ?? ''),
+                    'role'        => (string) ($row['role'] ?? ''),
+                ];
             }
-
-            // Exactly one or multiple: the first row (lowest tenant_id) wins.
-            return (int) $rows[0]['tenant_id'];
+            return $out;
         } catch (\Exception) {
-            return null;
+            return [];
+        }
+    }
+
+    /**
+     * True when the profile holds an ACTIVE membership in the given tenant.
+     *
+     * Tenant 0 is allowed here: it is the system admin's legitimate tenant, and
+     * this is an existence check for a tenant the caller EXPLICITLY selected (the
+     * §6 completion). The multi-membership escalation is prevented by requiring an
+     * explicit selection, not by hiding tenant 0.
+     *
+     * @tenant-guard-ignore: login flow — membership existence check for one profile (ADR 0005 §6)
+     */
+    private function hasActiveMembershipInTenant(int $profileId, int $tenantId): bool
+    {
+        try {
+            // @tenant-guard-ignore: login flow — membership existence check (ADR 0005 §6)
+            $stmt = $this->db->prepare(
+                "SELECT 1 FROM memberships
+                 WHERE profile_id = ? AND tenant_id = ? AND status = 'active'
+                 LIMIT 1"
+            );
+            $stmt->execute([$profileId, $tenantId]);
+            return $stmt->fetchColumn() !== false;
+        } catch (\Exception) {
+            return false;
         }
     }
 
@@ -556,6 +719,81 @@ class AuthHandler
         } catch (\Exception) {
             return null;
         }
+    }
+
+    /**
+     * Resolve the profile_id to mirror a self-service password change onto.
+     *
+     * Prefers the validated token's profile_id claim (present for dual-claim and
+     * profile-native tokens); falls back to a profile_emails lookup by the user's
+     * current email when the claim is absent (older dual tokens). Returns null
+     * when no profile can be resolved (pre-migration account with no profile yet
+     * — the users-row bump alone is correct in that case).
+     *
+     * @param array<string, mixed> $claims Validated access-token claims.
+     */
+    private function resolveProfileIdForUpdate(array $claims, string $email): ?int
+    {
+        if (isset($claims['profile_id']) && is_numeric($claims['profile_id'])) {
+            return (int) $claims['profile_id'];
+        }
+
+        if ($email === '') {
+            return null;
+        }
+
+        try {
+            // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
+            $stmt = $this->db->prepare(
+                'SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1'
+            );
+            $stmt->execute([$email]);
+            $profileId = $stmt->fetchColumn();
+
+            return $profileId !== false ? (int) $profileId : null;
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Coerce a DB boolean column to a real bool across drivers.
+     *
+     * CRITICAL: pdo_pgsql returns the STRING "f" for a false boolean, and PHP's
+     * (bool) cast — and empty() — treat the non-empty string "f" as TRUE. Using
+     * a naive `(bool)`/`!empty()` on a Postgres boolean therefore inverts the
+     * guard (e.g. an UNVERIFIED email would be treated as verified). This mirrors
+     * the coercion in migration 035 and {@see RelationRepository::toBool()}:
+     * SQLite yields 0/1 (int), Postgres yields 't'/'f' (string), and an
+     * in-process seed may hand back a native bool — all three are normalised here.
+     *
+     * @param mixed $value Raw column value from a boolean field.
+     */
+    /**
+     * Normalize an email to the stored canonical form: LOWER(TRIM()).
+     *
+     * profile_emails stores case-folded, trimmed addresses (migration 035 +
+     * seeder), and email is globally UNIQUE. Login MUST normalize the submitted
+     * value the same way or a mixed-case/padded address 401s despite matching a
+     * stored profile_email. Kept in one place so the login and any future
+     * verification/registration paths agree on the canonical form.
+     */
+    private static function normalizeEmail(string $email): string
+    {
+        return strtolower(trim($email));
+    }
+
+    private static function dbTruthy(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value)) {
+            return $value !== 0;
+        }
+        $normalised = strtolower(trim((string) $value));
+
+        return !in_array($normalised, ['', '0', 'f', 'false', 'no'], true);
     }
 
     /**
@@ -730,6 +968,30 @@ class AuthHandler
         $this->db->prepare($sql)->execute($updateParams);
 
         if ($passwordChanged) {
+            // Mirror the password change onto the PROFILE model (ADR 0005).
+            //
+            // Epoch (MAJOR-1): a dual-claim token is epoch-checked against
+            // users.token_epoch, but a NEW-CLAIMS-ONLY token (profile_id, no
+            // user_id) — and every token once the legacy users row is pruned — is
+            // checked against profiles.token_epoch. Bumping only users.token_epoch
+            // would leave those sessions alive after a password change. So we bump
+            // BOTH epochs; the profile bump is what actually revokes profile-native
+            // sessions.
+            //
+            // password_hash: login now authenticates against profiles.password_hash
+            // (the #181 fix), so a change that touched only users.password would
+            // leave the OLD password working for login and the NEW one failing.
+            // Keep the profile hash in lock-step with the users row.
+            $profileId = $this->resolveProfileIdForUpdate($claims, (string) $user['email']);
+            if ($profileId !== null) {
+                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                $this->db->prepare(
+                    'UPDATE profiles
+                     SET password_hash = ?, token_epoch = token_epoch + 1, updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?'
+                )->execute([password_hash((string) $body['password'], PASSWORD_BCRYPT), $profileId]);
+            }
+
             // Belt-and-suspenders alongside the epoch bump: explicitly revoke the
             // caller's CURRENT access and refresh jtis so they are rejected even
             // before the epoch check (and regardless of it). Net effect: all of
@@ -1177,12 +1439,24 @@ class AuthHandler
         $auditTenantId            = null;
         $auditActorId             = $throttleId;
 
-        $hasNewClaims = isset($claims['profile_id'], $claims['active_tenant_id'])
-            && is_numeric($claims['profile_id']);
+        // The id to use for backup_codes operations. backup_codes.user_id is an
+        // FK to users.id (migration 035 deliberately did NOT re-point it to
+        // profiles), so this MUST be a legacy users.id — never a profile_id.
+        // Null means "no legacy users row" (profile-native account): backup-code
+        // validation is skipped rather than run against a non-existent user id.
+        $backupCodesUserId        = null;
+
+        // New path is keyed on profile_id ALONE — active_tenant_id may be absent
+        // when the profile has multiple memberships (tenant selection is deferred
+        // to after 2FA completes, ADR 0005 §6).
+        $hasNewClaims = isset($claims['profile_id']) && is_numeric($claims['profile_id']);
 
         if ($hasNewClaims) {
             $profileId      = (int) $claims['profile_id'];
-            $activeTenantId = (int) $claims['active_tenant_id'];
+            // active_tenant_id present only for the single-membership case.
+            $activeTenantId = isset($claims['active_tenant_id']) && is_numeric($claims['active_tenant_id'])
+                ? (int) $claims['active_tenant_id']
+                : null;
             $auditTenantId  = $activeTenantId;
             $auditActorId   = $profileId;
 
@@ -1200,6 +1474,24 @@ class AuthHandler
 
             $twoFactorSecret    = $profRow['two_factor_secret'];
             $backupCodesVersion = (int) ($profRow['two_factor_backup_codes_version'] ?? 0);
+
+            // Resolve the LEGACY users.id for backup-code validation. The temp
+            // token carries user_id when the profile still has a legacy users row
+            // (dual window); prefer it, else look it up by (email, active tenant).
+            // profile_id is NOT interchangeable here: on a profile-native account
+            // (profile_id != any users.id) passing profile_id would validate
+            // against the wrong user's codes or hit an FK violation on rotation.
+            if (isset($claims['user_id']) && is_numeric($claims['user_id'])) {
+                $backupCodesUserId = (int) $claims['user_id'];
+            } elseif ($activeTenantId !== null) {
+                $email2fa = isset($claims['email']) && is_string($claims['email'])
+                    ? $claims['email']
+                    : '';
+                $legacyRow2fa = $email2fa !== ''
+                    ? $this->fetchLegacyUserRow($email2fa, $activeTenantId)
+                    : null;
+                $backupCodesUserId = $legacyRow2fa !== null ? (int) $legacyRow2fa['id'] : null;
+            }
         } else {
             // Backward-compat: legacy temp token (user_id / tenant_id only).
             // This branch can be removed once all in-flight 2FA sessions have
@@ -1213,6 +1505,9 @@ class AuthHandler
 
             $auditTenantId = $tenantId !== null ? (int) $tenantId : null;
             $auditActorId  = (int) $userId;
+            // Legacy path: the temp-token user_id IS the users.id — safe for
+            // backup_codes (which is keyed on users.id).
+            $backupCodesUserId = (int) $userId;
 
             if ($tenantId === null || (int) $tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant / unresolved-context branch
@@ -1252,10 +1547,16 @@ class AuthHandler
             }
         }
 
-        if (!$isValid && $backupCodesVersion > 0) {
+        // Backup-code fallback. Keyed on the LEGACY users.id ($backupCodesUserId),
+        // NOT profile_id/throttleId: backup_codes.user_id is an FK to users.id.
+        // When no legacy users row exists (profile-native account) we cannot run
+        // backup-code validation against a real user id, so it is skipped and the
+        // caller falls through to the invalid-code path (fail closed) rather than
+        // querying with a profile_id that would match the wrong user or none.
+        if (!$isValid && $backupCodesVersion > 0 && $backupCodesUserId !== null) {
             try {
                 $backupCodesService = $this->getBackupCodesService();
-                if ($backupCodesService->validateCode($throttleId, $code, $backupCodesVersion)) {
+                if ($backupCodesService->validateCode($backupCodesUserId, $code, $backupCodesVersion)) {
                     $isValid = true;
                 }
             } catch (\Exception) {
@@ -1307,57 +1608,42 @@ class AuthHandler
             ? $claims['email']
             : '';
 
-        $hasNewClaims = isset($claims['profile_id'], $claims['active_tenant_id'])
-            && is_numeric($claims['profile_id']);
+        $hasNewClaims = isset($claims['profile_id']) && is_numeric($claims['profile_id']);
 
         if ($hasNewClaims) {
-            // New-path temp token: profile_id + active_tenant_id already resolved.
-            $profileId      = (int) $claims['profile_id'];
-            $activeTenantId = (int) $claims['active_tenant_id'];
+            $profileId = (int) $claims['profile_id'];
 
-            // Re-read the profile's current epoch (WC-185).
-            $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
-
-            // Resolve role + legacy epoch from the users row (dual window).
-            $roleName  = '';
-            $legacyRow = $this->fetchLegacyUserRow($email, $activeTenantId);
-            if ($legacyRow !== null) {
-                // @tenant-guard-ignore: role-name lookup by globally-unique role id (SERIAL PK)
-                $roleStmt = $this->db->prepare('SELECT name FROM roles WHERE id = ?');
-                $roleStmt->execute([$legacyRow['role_id']]);
-                $roleRow = $roleStmt->fetch(PDO::FETCH_ASSOC);
-                if ($roleRow !== false) {
-                    $roleName = (string) $roleRow['name'];
+            // active_tenant_id present only for the single-membership case. When
+            // absent, the profile has MULTIPLE memberships: 2FA is now satisfied,
+            // so hand off to tenant selection (ADR 0005 §6) instead of minting a
+            // session for an arbitrary tenant. Re-list to guard against membership
+            // changes since the challenge was issued.
+            if (!isset($claims['active_tenant_id']) || !is_numeric($claims['active_tenant_id'])) {
+                $memberships = $this->listActiveMemberships($profileId);
+                if ($memberships === []) {
+                    return Response::error('Invalid credentials', 401);
                 }
-                // Dual window: epoch lives on users during this transition.
-                $tokenEpoch = $this->currentTokenEpoch(
-                    (int) $legacyRow['id'],
-                    $activeTenantId
-                );
+                if (count($memberships) === 1) {
+                    // Collapsed to one since the challenge: issue directly.
+                    return $this->issueSessionForProfile(
+                        $profileId,
+                        $memberships[0]['tenant_id'],
+                        $email,
+                        $this->currentProfileTokenEpoch($profileId),
+                        new Request('POST', '/api/login/2fa', [])
+                    );
+                }
+                return $this->requireTenantSelection($profileId, $email, $memberships);
             }
 
-            $newClaims  = ['profile_id' => $profileId, 'active_tenant_id' => $activeTenantId];
-            $baseClaims = ['email' => $email, 'role' => $roleName, 'token_epoch' => $tokenEpoch];
-            if ($legacyRow !== null) {
-                $baseClaims['user_id']   = (int) $legacyRow['id'];
-                $baseClaims['tenant_id'] = $activeTenantId;
-            }
-            $allClaims = $newClaims + $baseClaims;
-
-            CookieManager::setAccessToken(
-                $this->jwtParser->create($allClaims, 900, 'access'),
-                900
+            // Single-membership 2FA: active_tenant_id already resolved.
+            return $this->issueSessionForProfile(
+                $profileId,
+                (int) $claims['active_tenant_id'],
+                $email,
+                $this->currentProfileTokenEpoch($profileId),
+                new Request('POST', '/api/login/2fa', [])
             );
-            CookieManager::setRefreshToken(
-                $this->jwtParser->create($allClaims, 604800, 'refresh'),
-                604800
-            );
-
-            $userId = $legacyRow !== null ? (int) $legacyRow['id'] : $profileId;
-
-            return Response::json([
-                'user' => ['id' => $userId, 'email' => $email, 'role' => $roleName]
-            ], 200);
         }
 
         // Backward-compat: legacy temp token (user_id / tenant_id).

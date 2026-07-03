@@ -239,6 +239,66 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
         self::assertSame(0, $epoch, 'An email-only change must NOT bump the token_epoch.');
     }
 
+    /**
+     * MAJOR-1 (WC-c35c4ce0 review): a password change must revoke NEW-CLAIMS
+     * tokens too, not just legacy dual-claim ones.
+     *
+     * A new-claims-only token (profile_id + active_tenant_id, no user_id) is
+     * epoch-checked against profiles.token_epoch. If handleUpdateMe bumped only
+     * users.token_epoch, such a token would survive a password change. This test
+     * mints a new-claims token at the profile's current epoch, changes the
+     * password through the (dual-claim) caller session, and asserts the
+     * new-claims token is subsequently rejected — proving profiles.token_epoch
+     * was also bumped.
+     */
+    public function testPasswordChangeInvalidatesNewClaimsProfileTokens(): void
+    {
+        $this->seedUser(20, 1, 'profile-native@example.com', 'old-password', 2, 0);
+
+        // A NEW-CLAIMS-ONLY token at the profile's current epoch (0). No user_id/
+        // tenant_id, so it is epoch-checked against profiles.token_epoch.
+        $newClaimsToken = $this->mintNewClaimsAccess(20, 1, 'profile-native@example.com', 0);
+        $_COOKIE['access_token'] = $newClaimsToken;
+        self::assertNotNull(
+            $this->validator()->validateAccessToken(),
+            'A new-claims token at the current profile epoch must validate up front.'
+        );
+
+        // Change the password using a dual-claim caller session (the same account).
+        $callerAccess  = $this->mintAccess(20, 1, 'profile-native@example.com', 'user', 0);
+        $callerRefresh = $this->mintRefresh(20, 1, 'profile-native@example.com', 'user', 0);
+        $_COOKIE['access_token']  = $callerAccess;
+        $_COOKIE['refresh_token'] = $callerRefresh;
+
+        $response = $this->handler()->handleUpdateMe(new Request('PATCH', '/api/me', [], (string) json_encode([
+            'password' => 'brand-new-pass',
+            'current_password' => 'old-password',
+        ])));
+        self::assertSame(200, $response->getStatusCode());
+
+        // BOTH epochs must be bumped to 1.
+        $userEpoch = (int) $this->pdo->query('SELECT token_epoch FROM users WHERE id = 20')->fetchColumn();
+        self::assertSame(1, $userEpoch, 'A password change must bump users.token_epoch.');
+        $profileEpoch = (int) $this->pdo->query('SELECT token_epoch FROM profiles WHERE id = 20')->fetchColumn();
+        self::assertSame(1, $profileEpoch, 'A password change must ALSO bump profiles.token_epoch (MAJOR-1).');
+
+        // The new-claims token (profile epoch 0 < stored 1) is now rejected.
+        unset($_COOKIE['refresh_token']);
+        $_COOKIE['access_token'] = $newClaimsToken;
+        self::assertNull(
+            $this->validator()->validateAccessToken(),
+            'A new-claims token minted before the password change must be rejected after the profile epoch bump.'
+        );
+
+        // And the profile password_hash must reflect the NEW password so the
+        // profile-based login (the #181 primary path) works with it.
+        $hash = (string) $this->pdo->query('SELECT password_hash FROM profiles WHERE id = 20')->fetchColumn();
+        self::assertTrue(
+            password_verify('brand-new-pass', $hash),
+            'The profile password_hash must be updated to the new password.'
+        );
+    }
+
     // ==================== epoch claim presence ====================
 
     public function testLoginIssuedTokensCarryTheEpochClaim(): void
@@ -330,6 +390,21 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
             'email' => $email,
             'role' => $role,
             'token_epoch' => $epoch,
+        ], 900, 'access');
+    }
+
+    /**
+     * Mint a NEW-CLAIMS-ONLY access token (profile_id + active_tenant_id, no
+     * legacy user_id/tenant_id), epoch-checked against profiles.token_epoch.
+     */
+    private function mintNewClaimsAccess(int $profileId, int $tenantId, string $email, int $epoch): string
+    {
+        return $this->jwtParser->create([
+            'profile_id'       => $profileId,
+            'active_tenant_id' => $tenantId,
+            'email'            => $email,
+            'role'             => 'user',
+            'token_epoch'      => $epoch,
         ], 900, 'access');
     }
 
