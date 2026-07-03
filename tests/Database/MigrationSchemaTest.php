@@ -959,6 +959,81 @@ final class MigrationSchemaTest extends TestCase
         );
     }
 
+    /**
+     * WC-bc07b6de: migration 037 re-keys permission_delegations.grantor_user_id
+     * to grantor_profile_id (references profiles.id) and backfills grantee_id for
+     * 'profile' grantees. The migration must be present, reversible, and idempotent.
+     */
+    public function testMigration037RekeysDelegationsToProfilesSchema(): void
+    {
+        $sql = $this->readFile('037_rekey_delegations_to_profiles.php');
+
+        // New column grantor_profile_id referencing profiles(id) ON DELETE CASCADE.
+        $this->assertMatchesRegularExpression(
+            '/grantor_profile_id\s+INTEGER\s+NULL\s+REFERENCES\s+profiles\s*\(\s*id\s*\)\s+ON DELETE CASCADE/i',
+            $sql,
+            'migration 037 must add grantor_profile_id INTEGER NULL REFERENCES profiles(id) ON DELETE CASCADE.'
+        );
+
+        // Index for listing by grantor_profile_id.
+        $this->assertMatchesRegularExpression(
+            '/CREATE INDEX IF NOT EXISTS\s+idx_pd_grantor_profile/i',
+            $sql,
+            'migration 037 must create idx_pd_grantor_profile index.'
+        );
+
+        // Reversible: down() drops grantor_profile_id column and its index.
+        $this->assertMatchesRegularExpression(
+            '/idx_pd_grantor_profile/i',
+            $sql,
+            'migration 037 down() must reference idx_pd_grantor_profile for cleanup.'
+        );
+
+        // Both up() and down() declared (already enforced by the generic test, but
+        // explicitly assert the class name resolves to RekeyDelegationsToProfiles).
+        $this->assertStringContainsString(
+            'class RekeyDelegationsToProfiles',
+            $sql,
+            'migration 037 must declare class RekeyDelegationsToProfiles.'
+        );
+
+        // The grantee re-key must flip grantee_type to 'profile' in lock-step with
+        // grantee_id (Blocker 1: leaving 'user' would make rows invisible to the
+        // resolver). The EXECUTING assertion lives in
+        // DelegationRekeyMigrationRealEngineTest; here we pin the source contract.
+        $this->assertMatchesRegularExpression(
+            "/grantee_type\s*=\s*'profile'/i",
+            $sql,
+            "migration 037 must set grantee_type = 'profile' when re-keying user grantees."
+        );
+
+        // The CHECK must be widened to include 'profile'.
+        $this->assertMatchesRegularExpression(
+            "/'role'\s*,\s*'user'\s*,\s*'profile'/i",
+            $sql,
+            "migration 037 must widen the grantee_type CHECK to include 'profile'."
+        );
+
+        // NOT NULL must be enforced on grantor_profile_id (the docblock contract).
+        $this->assertMatchesRegularExpression(
+            '/ALTER\s+COLUMN\s+grantor_profile_id\s+SET\s+NOT\s+NULL/i',
+            $sql,
+            'migration 037 must enforce grantor_profile_id NOT NULL to match its contract.'
+        );
+
+        // The SQLite rename-recreate must re-create migration-014 hot-path indexes.
+        $this->assertStringContainsString(
+            'idx_pd_resolution',
+            $sql,
+            'migration 037 must re-create idx_pd_resolution after the SQLite table rebuild.'
+        );
+        $this->assertStringContainsString(
+            'idx_pd_ou',
+            $sql,
+            'migration 037 must re-create idx_pd_ou after the SQLite table rebuild.'
+        );
+    }
+
     public function testAllMigrationFilesDeclareTheMigrationsNamespace(): void
     {
         foreach (array_keys(self::migrationFileProvider()) as $fileName) {

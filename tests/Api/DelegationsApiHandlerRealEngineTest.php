@@ -60,8 +60,8 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
     {
         $this->pdo->exec("
             INSERT INTO permission_delegations
-                (tenant_id, grantor_user_id, grantee_type, grantee_id, permission, granted_at, revoked_at)
-            VALUES (1, 10, 'user', 11, 'users:read', datetime('now'), datetime('now'))
+                (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, granted_at, revoked_at)
+            VALUES (1, 10, 'profile', 11, 'users:read', datetime('now'), datetime('now'))
         ");
 
         $_GET = ['includeRevoked' => '1'];
@@ -249,10 +249,11 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
     /**
      * @param array<string, mixed> $body
      */
-    private function authedRequest(int $userId, int $tenantId, array $body): Request
+    private function authedRequest(int $profileId, int $tenantId, array $body): Request
     {
         $request = new Request('POST', '/api/delegations', [], (string) json_encode($body));
-        $request->user = (object) ['user_id' => $userId, 'tenant_id' => $tenantId];
+        // ADR 0005: the acting identity is a profile_id.
+        $request->user = (object) ['profile_id' => $profileId, 'tenant_id' => $tenantId];
 
         return $request;
     }
@@ -273,17 +274,29 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
         )->execute([$roleId, $permissionId]);
     }
 
+    /**
+     * Seed a PROFILE with an ACTIVE membership in the tenant carrying the given
+     * role; returns the profile id (WC-bc07b6de: delegations are profile-keyed).
+     * The name is retained for churn minimisation; it now returns a profile id.
+     */
     private function seedUser(string $email, string $roleName, int $tenantId): int
     {
         $roleId = (int) $this->pdo->query("SELECT id FROM roles WHERE name = '{$roleName}'")->fetchColumn();
 
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (?, ?, ?, ?, NOW())'
-        );
-        $stmt->execute([$tenantId, $email, 'x', $roleId]);
+        $this->pdo->prepare(
+            "INSERT INTO profiles
+                 (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version,
+                  token_epoch, created_at, updated_at)
+             VALUES ('', '', false, 0, 0, NOW(), NOW())"
+        )->execute();
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, NULL, 'active', NOW())"
+        )->execute([$profileId, $tenantId, $roleId]);
+
+        return $profileId;
     }
 
     private static function wrapSqlite(PDO $pdo): Database

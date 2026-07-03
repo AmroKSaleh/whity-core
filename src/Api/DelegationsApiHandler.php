@@ -78,6 +78,10 @@ class DelegationsApiHandler
             if ($granteeType !== null && !$this->isValidGranteeType($granteeType)) {
                 return Response::error('Invalid grantee type', 400);
             }
+            // Normalise legacy 'user' → 'profile' at the API boundary.
+            if ($granteeType !== null) {
+                $granteeType = $this->normalizeGranteeType($granteeType);
+            }
 
             $granteeId = isset($query['granteeId']) && is_numeric($query['granteeId'])
                 ? (int) $query['granteeId']
@@ -135,8 +139,8 @@ class DelegationsApiHandler
                 return Response::error('Tenant context is required', 400);
             }
 
-            $grantorUserId = $this->actingUserId($request);
-            if ($grantorUserId === null) {
+            $grantorProfileId = $this->actingUserId($request);
+            if ($grantorProfileId === null) {
                 return Response::error('Authenticated user is required', 401);
             }
 
@@ -144,8 +148,10 @@ class DelegationsApiHandler
 
             $granteeType = isset($body['granteeType']) ? (string) $body['granteeType'] : '';
             if (!$this->isValidGranteeType($granteeType)) {
-                return Response::error('granteeType must be "role" or "user"', 400);
+                return Response::error('granteeType must be "role", "user", or "profile"', 400);
             }
+            // Normalise legacy 'user' → 'profile' at the API boundary.
+            $granteeType = $this->normalizeGranteeType($granteeType);
 
             if (!isset($body['granteeId']) || !is_numeric($body['granteeId'])) {
                 return Response::error('granteeId is required', 400);
@@ -173,7 +179,7 @@ class DelegationsApiHandler
             // Enforce the subset invariant + persist (one row per permission).
             $ids = $this->service->delegate(
                 $tenantId,
-                $grantorUserId,
+                $grantorProfileId,
                 $granteeType,
                 $granteeId,
                 $permissions,
@@ -186,7 +192,7 @@ class DelegationsApiHandler
             $this->log('info', 'Delegation created', [
                 'event' => 'delegations.create',
                 'tenant_id' => $tenantId,
-                'grantor_user_id' => $grantorUserId,
+                'grantor_profile_id' => $grantorProfileId,
                 'grantee_type' => $granteeType,
                 'grantee_id' => $granteeId,
                 'ou_id' => $ouId,
@@ -274,36 +280,45 @@ class DelegationsApiHandler
     }
 
     /**
-     * Whether a grantee (role or user) is visible to the acting tenant.
+     * Whether a grantee (role or profile) is visible to the acting tenant.
      *
-     * Users must belong to the tenant. Roles follow the WC-110 visibility model:
-     * own roles plus global (NULL tenant_id) roles. The system tenant (id 0) sees
-     * every grantee.
+     * Profile grantees must have an active membership in the acting tenant.
+     * Roles follow the WC-110 visibility model: own roles plus global (NULL
+     * tenant_id) roles. The system tenant (id 0) sees every grantee.
      *
-     * @param string $granteeType The grantee discriminator.
-     * @param int    $granteeId   The grantee id.
+     * WC-bc07b6de: grantee_type = 'profile' (was 'user') — the visibility check
+     * now uses the `memberships` table (profile_id + tenant_id) as resolved by
+     * ADR 0005. This closes the deferred TODO from WC-d88de9fa step 5.
+     *
+     * @param string $granteeType The grantee discriminator ('role' or 'profile').
+     * @param int    $granteeId   The grantee id (role_id or profile_id).
      * @param int    $tenantId    The acting tenant.
      * @return bool True when the grantee is visible.
      */
     private function granteeVisible(string $granteeType, int $granteeId, int $tenantId): bool
     {
-        if ($granteeType === DelegationRepository::GRANTEE_USER) {
-            // NOTE (WC-d88de9fa): permission_delegations.grantee_id is still keyed on
-            // users.id (legacy FK; the delegation re-keying to profile_id is step 6 of
-            // the identity rewrite, WC-bc07b6de). The visibility check below therefore
-            // still reads from `users` during the transition window. Once the delegation
-            // grantee FK is re-pointed to profiles, this should become a memberships
-            // lookup (profile_id + tenant_id). Classified as AMBIGUOUS — depends on
-            // delegation FK re-keying in step 6.
+        if ($granteeType === DelegationRepository::GRANTEE_PROFILE) {
+            // Profile grantee: the delegation row stores grantee_id as a
+            // profiles.id, so it MUST be validated consistently as a profile —
+            // never against users.id (that would let a delegation be written with
+            // a grantee_id that is a user_id, i.e. an invalid grantee reference).
+            //
+            // System tenant (id 0) can grant to any existing profile globally;
+            // any other tenant requires the profile to hold an ACTIVE membership
+            // in that tenant.
             if ($tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant (id 0) visibility branch; scoped else-branch binds tenant_id
-                $stmt = $this->db->prepare('SELECT 1 FROM users WHERE id = ?');
+                $stmt = $this->db->prepare('SELECT 1 FROM profiles WHERE id = ?');
                 $stmt->execute([$granteeId]);
-            } else {
-                $stmt = $this->db->prepare('SELECT 1 FROM users WHERE id = ? AND tenant_id = ?');
-                $stmt->execute([$granteeId, $tenantId]);
+                return $stmt->fetchColumn() !== false;
             }
 
+            // Membership-aware: profile must have status='active' in this tenant.
+            $stmt = $this->db->prepare(
+                "SELECT 1 FROM memberships
+                 WHERE profile_id = ? AND tenant_id = ? AND status = 'active'"
+            );
+            $stmt->execute([$granteeId, $tenantId]);
             return $stmt->fetchColumn() !== false;
         }
 
@@ -384,19 +399,46 @@ class DelegationsApiHandler
     }
 
     /**
-     * Whether a grantee type is one of the two legal discriminator values.
+     * Whether a grantee type is one of the legal discriminator values.
+     *
+     * Accepts both the legacy API value ('user') and the new profile-based value
+     * ('profile') during the Phase B dual-window transition so existing API clients
+     * continue to work without immediate changes. Internally both are normalised to
+     * {@see DelegationRepository::GRANTEE_PROFILE} by {@see self::normalizeGranteeType()}.
      */
     private function isValidGranteeType(string $type): bool
     {
         return $type === DelegationRepository::GRANTEE_ROLE
-            || $type === DelegationRepository::GRANTEE_USER;
+            || $type === DelegationRepository::GRANTEE_PROFILE
+            || $type === 'user'; // legacy alias accepted during Phase B
     }
 
     /**
-     * Resolve the acting (authenticated) user id from the request, if present.
+     * Normalise the grantee type from the API surface to the internal discriminator.
+     *
+     * The legacy 'user' discriminator is mapped to {@see DelegationRepository::GRANTEE_PROFILE}
+     * so the database always stores 'profile' regardless of whether the client sent
+     * the old or new value.
+     */
+    private function normalizeGranteeType(string $type): string
+    {
+        if ($type === 'user') {
+            return DelegationRepository::GRANTEE_PROFILE;
+        }
+        return $type;
+    }
+
+    /**
+     * Resolve the acting caller's profile id from the request, if present.
+     *
+     * The new JWT shape (ADR 0005) carries `profile_id`; the legacy shape carries
+     * `user_id`. Both are accepted during the Phase B dual-window transition:
+     * `profile_id` wins when present, `user_id` is the fallback. This allows
+     * existing sessions issued with the old JWT format to continue working until
+     * they expire, while new sessions use the profile-based identity.
      *
      * @param Request $request The incoming request.
-     * @return int|null The user id, or null when unauthenticated/malformed.
+     * @return int|null The profile id (or legacy user id), or null when unauthenticated.
      */
     private function actingUserId(Request $request): ?int
     {
@@ -405,9 +447,10 @@ class DelegationsApiHandler
             return null;
         }
 
-        $userId = $user->user_id ?? null;
+        // Prefer the new profile_id claim; fall back to legacy user_id.
+        $id = $user->profile_id ?? $user->user_id ?? null;
 
-        return is_int($userId) ? $userId : (is_numeric($userId) ? (int) $userId : null);
+        return is_int($id) ? $id : (is_numeric($id) ? (int) $id : null);
     }
 
     /**
@@ -452,21 +495,28 @@ class DelegationsApiHandler
     /**
      * Shape a normalised delegation row into the public camelCase API contract.
      *
+     * WC-bc07b6de: `grantorUserId` is superseded by `grantorProfileId` in the
+     * response shape. `grantorUserId` is kept as a deprecated alias pointing to
+     * the same value so existing clients do not hard-break before they migrate.
+     *
      * @param array<string, mixed> $row Normalised delegation row.
      * @return array<string, mixed> Public representation.
      */
     private function toPublic(array $row): array
     {
+        $grantorId = (int) ($row['grantor_profile_id'] ?? $row['grantor_user_id'] ?? 0);
+
         return [
-            'id' => (int) $row['id'],
-            'tenantId' => (int) $row['tenant_id'],
-            'grantorUserId' => (int) $row['grantor_user_id'],
-            'granteeType' => (string) $row['grantee_type'],
-            'granteeId' => (int) $row['grantee_id'],
-            'permission' => (string) $row['permission'],
-            'ouId' => $row['ou_id'] !== null ? (int) $row['ou_id'] : null,
-            'grantedAt' => $row['granted_at'] !== null ? (string) $row['granted_at'] : null,
-            'revokedAt' => $row['revoked_at'] !== null ? (string) $row['revoked_at'] : null,
+            'id'              => (int) $row['id'],
+            'tenantId'        => (int) $row['tenant_id'],
+            'grantorProfileId' => $grantorId,
+            'grantorUserId'   => $grantorId,  // deprecated alias; kept for client compatibility
+            'granteeType'     => (string) $row['grantee_type'],
+            'granteeId'       => (int) $row['grantee_id'],
+            'permission'      => (string) $row['permission'],
+            'ouId'            => $row['ou_id'] !== null ? (int) $row['ou_id'] : null,
+            'grantedAt'       => $row['granted_at'] !== null ? (string) $row['granted_at'] : null,
+            'revokedAt'       => $row['revoked_at'] !== null ? (string) $row['revoked_at'] : null,
         ];
     }
 

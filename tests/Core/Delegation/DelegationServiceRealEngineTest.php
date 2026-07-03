@@ -19,10 +19,11 @@ use Whity\Database\Database;
  * ({@see DelegationService}, {@see DelegationRepository}) and its integration
  * into {@see RoleChecker}.
  *
- * The schema mirrors the production migrations closely enough to exercise the
- * real SQL: roles/permissions/role_permissions, users, organizational_units,
- * ou_role_assignments, and permission_delegations. A `NOW()` UDF is registered
- * because the production SQL uses PostgreSQL's NOW().
+ * The schema is the full production migration set (SchemaFromMigrations). WC-bc07b6de:
+ * grantor/grantee identities are PROFILES with active memberships (ADR 0005), so the
+ * real SQL exercised is roles/permissions/role_permissions, profiles, memberships,
+ * organizational_units, ou_role_assignments, and permission_delegations. A `NOW()`
+ * UDF is registered because the production SQL uses PostgreSQL's NOW().
  *
  * Real-Postgres parity: `PDO::ATTR_STRINGIFY_FETCHES` is enabled so fetched
  * integers come back as STRINGS exactly as the Postgres PDO driver returns them
@@ -129,14 +130,14 @@ final class DelegationServiceRealEngineTest extends TestCase
         $checker = $this->delegationAwareChecker();
 
         // Before: the grantee (plain user) lacks the permission.
-        $this->assertFalse($checker->hasPermission($granteeId, 'users:read', 1));
+        $this->assertFalse($checker->hasPermissionForProfile($granteeId, 'users:read', 1));
 
         $this->service()->delegate(1, $grantorId, DelegationRepository::GRANTEE_USER, $granteeId, ['users:read'], null);
         RoleChecker::clearCache();
 
         // After: the live delegation grants it.
         $this->assertTrue(
-            $checker->hasPermission($granteeId, 'users:read', 1),
+            $checker->hasPermissionForProfile($granteeId, 'users:read', 1),
             'A live delegation must make hasPermission() return true for the grantee.'
         );
     }
@@ -149,14 +150,14 @@ final class DelegationServiceRealEngineTest extends TestCase
         $userWithRole = $this->seedUser('member@example.com', 'user', 1);
 
         $checker = $this->delegationAwareChecker();
-        $this->assertFalse($checker->hasPermission($userWithRole, 'users:read', 1));
+        $this->assertFalse($checker->hasPermissionForProfile($userWithRole, 'users:read', 1));
 
         // Delegate to the 'user' role (id 2), not to the user directly.
         $this->service()->delegate(1, $grantorId, DelegationRepository::GRANTEE_ROLE, 2, ['users:read'], null);
         RoleChecker::clearCache();
 
         $this->assertTrue(
-            $checker->hasPermission($userWithRole, 'users:read', 1),
+            $checker->hasPermissionForProfile($userWithRole, 'users:read', 1),
             'A role-targeted delegation must reach every user holding that role.'
         );
     }
@@ -172,13 +173,13 @@ final class DelegationServiceRealEngineTest extends TestCase
 
         $ids = $service->delegate(1, $grantorId, DelegationRepository::GRANTEE_USER, $granteeId, ['users:read'], null);
         RoleChecker::clearCache();
-        $this->assertTrue($checker->hasPermission($granteeId, 'users:read', 1));
+        $this->assertTrue($checker->hasPermissionForProfile($granteeId, 'users:read', 1));
 
         $this->assertTrue($service->revoke($ids[0], 1));
         RoleChecker::clearCache();
 
         $this->assertFalse(
-            $checker->hasPermission($granteeId, 'users:read', 1),
+            $checker->hasPermissionForProfile($granteeId, 'users:read', 1),
             'Revoking the delegation must remove the delegated access.'
         );
     }
@@ -200,10 +201,10 @@ final class DelegationServiceRealEngineTest extends TestCase
         $checker = $this->delegationAwareChecker();
 
         // Tenant 1 grantee gets it.
-        $this->assertTrue($checker->hasPermission($granteeT1, 'users:read', 1));
+        $this->assertTrue($checker->hasPermissionForProfile($granteeT1, 'users:read', 1));
         // The tenant-2 user never gets a tenant-1 delegation.
         $this->assertFalse(
-            $checker->hasPermission($granteeT2, 'users:read', 2),
+            $checker->hasPermissionForProfile($granteeT2, 'users:read', 2),
             'A delegation in tenant 1 must not grant anything in tenant 2.'
         );
     }
@@ -249,11 +250,11 @@ final class DelegationServiceRealEngineTest extends TestCase
         $checker = $this->delegationAwareChecker();
 
         $this->assertTrue(
-            $checker->hasPermission($inSubtree, 'users:read', 1),
+            $checker->hasPermissionForProfile($inSubtree, 'users:read', 1),
             'A user within the scoped OU subtree must receive the OU-scoped delegation.'
         );
         $this->assertFalse(
-            $checker->hasPermission($outSubtree, 'users:read', 1),
+            $checker->hasPermissionForProfile($outSubtree, 'users:read', 1),
             'A user outside the scoped OU subtree must NOT receive the OU-scoped delegation.'
         );
     }
@@ -270,7 +271,7 @@ final class DelegationServiceRealEngineTest extends TestCase
         RoleChecker::clearCache();
 
         $this->assertTrue(
-            $this->delegationAwareChecker()->hasPermission($anyUser, 'users:read', 1),
+            $this->delegationAwareChecker()->hasPermissionForProfile($anyUser, 'users:read', 1),
             'A tenant-wide delegation applies to any user in the tenant.'
         );
     }
@@ -309,17 +310,33 @@ final class DelegationServiceRealEngineTest extends TestCase
         )->execute([$roleId, $permissionId]);
     }
 
+    /**
+     * Seed a PROFILE with an ACTIVE membership binding it to the tenant with the
+     * given role (and optional OU). Returns the profile id.
+     *
+     * WC-bc07b6de: delegations are keyed on profiles (ADR 0005). Both grantor and
+     * grantee identities in these tests are profile ids resolved through
+     * memberships — the same model production uses after migration 035/037. The
+     * method name is retained for churn minimisation; it now returns a profile id.
+     */
     private function seedUser(string $email, string $roleName, int $tenantId, ?int $ouId = null): int
     {
         $roleId = (int) $this->pdo->query("SELECT id FROM roles WHERE name = '{$roleName}'")->fetchColumn();
 
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NOW())'
-        );
-        $stmt->execute([$tenantId, $email, 'x', $roleId, $ouId]);
+        $this->pdo->prepare(
+            "INSERT INTO profiles
+                 (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version,
+                  token_epoch, created_at, updated_at)
+             VALUES ('', '', false, 0, 0, NOW(), NOW())"
+        )->execute();
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, ?, 'active', NOW())"
+        )->execute([$profileId, $tenantId, $roleId, $ouId]);
+
+        return $profileId;
     }
 
     private function seedOu(int $id, int $tenantId, ?int $parentId, string $name): void
