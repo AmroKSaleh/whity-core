@@ -36,4 +36,29 @@
             <directory suffix=".php">src</directory>
         </include>
     </source>
+
+    <!--
+      Deterministic initial-account passwords for the test run.
+
+      Many *RealEngineTest classes provision a fresh schema by re-running the
+      production migrations (SchemaFromMigrations). Migrations 010/036 and the
+      Seeder resolve these passwords via InitialPassword::hashFor(); when the
+      env var is absent it generates a RANDOM password and prints a
+      "[whity] No <VAR> set; generated initial password ..." notice to stdout.
+      With nothing set here, every schema build re-emitted that notice, flooding
+      the test output with hundreds of lines. Pinning fixed values silences it
+      and gives the seeded test accounts a known password.
+
+      Values are >=32 chars per the project secret-length rule. `force` is left
+      at its default (false): a real environment value (e.g. a deployment's own
+      secret) is never overridden — these only fill in when otherwise absent.
+      InitialPasswordTest is unaffected: it exercises the generate-and-announce
+      path with its own synthetic INITIAL_TEST_PASSWORD var, self-managed.
+    -->
+    <php>
+        <env name="INITIAL_ADMIN_PASSWORD" value="test_initial_admin_password_min_32_chars"/>
+        <env name="INITIAL_USER_PASSWORD" value="test_initial_user_password_min_32_chars_"/>
+        <env name="INITIAL_SYSTEM_ADMIN_PASSWORD" value="test_initial_system_admin_password_min32"/>
+        <env name="INITIAL_SUPERUSER_PASSWORD" value="test_initial_superuser_password_min_32_c"/>
+    </php>
 </phpunit>
