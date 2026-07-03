@@ -886,12 +886,22 @@ class AuthHandler
         // the active tenant after a switch (WC-f8164c87).
         $activeTenantId = $claims['tenant_id'] ?? $claims['active_tenant_id'] ?? null;
 
+        // Resolve the identity fields for BOTH token shapes. A post-cutover
+        // (new-claims-only) token carries no legacy `user_id` claim — reading it
+        // directly raised an "Undefined array key" warning, so fall back to
+        // `profile_id` (mirrors TokenValidator::extractPrincipal). `email`/`role`
+        // are always present on session tokens but are coalesced defensively so a
+        // minimal token can never fault this read-only endpoint.
+        $userId = $claims['user_id'] ?? $claims['profile_id'] ?? null;
+        $email  = $claims['email'] ?? null;
+        $role   = $claims['role'] ?? null;
+
         // Return user data from token claims
         return Response::json([
             'user' => [
-                'id' => $claims['user_id'],
-                'email' => $claims['email'],
-                'role' => $claims['role'],
+                'id' => $userId,
+                'email' => $email,
+                'role' => $role,
                 'tenant_id' => $activeTenantId,
             ],
             'memberships' => $memberships,
