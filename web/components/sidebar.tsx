@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import type { Membership } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
+import { useToast } from '@/lib/toast-context';
 import { Button } from '@whity/ui/button';
 import {
   DropdownMenu,
@@ -78,6 +79,7 @@ interface TenantSwitcherProps {
 function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitcherProps) {
   const { switchTenant } = useAuth();
   const { refresh: refreshNav } = useNavigation();
+  const { addToast } = useToast();
   const [isSwitching, setIsSwitching] = useState(false);
 
   const activeMembership = memberships.find((m) => m.tenant_id === activeTenantId);
@@ -90,11 +92,17 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
       try {
         await switchTenant(tenantId);
         await refreshNav();
+      } catch (err) {
+        // A 403/401/network failure must not vanish silently: switchTenant()
+        // rejects, the current tenant is unchanged, and we surface it. Prefer
+        // the server's message when present, else a stable fallback.
+        const message = err instanceof Error ? err.message : 'Couldn’t switch tenant';
+        addToast(message, 'error');
       } finally {
         setIsSwitching(false);
       }
     },
-    [activeTenantId, isSwitching, switchTenant, refreshNav],
+    [activeTenantId, isSwitching, switchTenant, refreshNav, addToast],
   );
 
   // 0 or 1 membership — static label only.

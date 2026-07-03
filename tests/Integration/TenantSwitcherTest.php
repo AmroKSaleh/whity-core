@@ -7,6 +7,7 @@ namespace Tests\Integration;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\Audit\AuditLogger;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
@@ -238,6 +239,128 @@ final class TenantSwitcherTest extends TestCase
         $response = $this->handler->handleSwitchTenant($request);
 
         self::assertSame(401, $response->getStatusCode());
+    }
+
+    /**
+     * A VALID legacy-only access token (carries {user_id, tenant_id} but NO
+     * profile_id claim) must be rejected 401 by the switch endpoint.
+     *
+     * The token validates fine (legacy tokens skip the membership guard), so
+     * this exercises the handler's own profile_id null-check path — distinct
+     * from the missing-cookie 401 above. Tenant switching is a profile-scoped
+     * operation; a pre-migration legacy session cannot switch tenants and must
+     * be told so explicitly rather than silently mis-handled.
+     */
+    public function testSwitchWithLegacyOnlyTokenReturns401(): void
+    {
+        // Mint a legacy-shaped token for a real users row (aliceUser@Tenant A).
+        // No profile_id / active_tenant_id — the pre-migration claim shape.
+        $legacyUserId = $this->seedUser('legacy@example.com', self::TENANT_A);
+        $_COOKIE['access_token'] = $this->jwtParser->create([
+            'user_id'     => $legacyUserId,
+            'tenant_id'   => self::TENANT_A,
+            'email'       => 'legacy@example.com',
+            'role'        => 'admin',
+            'token_epoch' => 0,
+        ], 900, 'access');
+
+        $capturedBefore = count($this->jwtParser->captured);
+
+        $request = $this->makeRequest(['tenant_id' => self::TENANT_B]);
+        $response = $this->handler->handleSwitchTenant($request);
+
+        self::assertSame(401, $response->getStatusCode(), 'A legacy-only token cannot switch tenants.');
+        self::assertCount($capturedBefore, $this->jwtParser->captured, 'No token must be minted for a legacy-only switch attempt.');
+    }
+
+    // ── after-switch state ────────────────────────────────────────────────────
+
+    /**
+     * After a successful switch, GET /api/me must report the NEW active tenant.
+     *
+     * The freshly minted token from a switch carries active_tenant_id (and, in
+     * the dual-claim window, a matching legacy tenant_id). handleMe must resolve
+     * the active tenant from either claim shape — a regression here made the
+     * sidebar show "No tenant" for post-cutover tokens (WC-f8164c87 review).
+     */
+    public function testGetMeReportsNewActiveTenantAfterSwitch(): void
+    {
+        // Alice starts in Tenant A, switches to Tenant B.
+        $this->setAccessCookie($this->aliceProfileId, self::TENANT_A);
+        $switchResponse = $this->handler->handleSwitchTenant(
+            $this->makeRequest(['tenant_id' => self::TENANT_B])
+        );
+        self::assertSame(200, $switchResponse->getStatusCode());
+
+        // Simulate the browser presenting the re-minted cookie on the next
+        // request: install the freshly minted access token as the cookie.
+        $minted = $this->jwtParser->lastPayloadOfType('access');
+        self::assertIsArray($minted);
+        $_COOKIE['access_token'] = $this->jwtParser->create($minted, 900, 'access');
+
+        $meResponse = $this->handler->handleMe(new Request('GET', '/api/me', []));
+        self::assertSame(200, $meResponse->getStatusCode());
+
+        $body = json_decode($meResponse->getBody(), true);
+        self::assertIsArray($body);
+        self::assertArrayHasKey('user', $body);
+        self::assertSame(self::TENANT_B, (int) $body['user']['tenant_id'], 'GET /api/me must report the tenant switched TO.');
+    }
+
+    /**
+     * handleMe must resolve the active tenant from a NEW-CLAIMS-ONLY token
+     * (profile_id + active_tenant_id, NO legacy tenant_id) — the post-cutover
+     * shape. Without the active_tenant_id fallback this returned NULL and the
+     * TenantSwitcher could not mark the active tenant.
+     */
+    public function testGetMeResolvesTenantFromNewClaimsOnlyToken(): void
+    {
+        // setAccessCookie mints exactly this shape: profile_id + active_tenant_id,
+        // no legacy user_id/tenant_id claims.
+        $this->setAccessCookie($this->aliceProfileId, self::TENANT_B);
+
+        $meResponse = $this->handler->handleMe(new Request('GET', '/api/me', []));
+        self::assertSame(200, $meResponse->getStatusCode());
+
+        $body = json_decode($meResponse->getBody(), true);
+        self::assertIsArray($body);
+        self::assertSame(
+            self::TENANT_B,
+            (int) $body['user']['tenant_id'],
+            'A new-claims-only token must resolve tenant_id from active_tenant_id.'
+        );
+    }
+
+    /**
+     * A successful switch must emit a DISTINCT audit event ('auth.tenant_switch')
+     * so switches are not indistinguishable from logins ('auth.login.success')
+     * in the audit trail (WC-f8164c87 review).
+     */
+    public function testSwitchEmitsDistinctAuditEvent(): void
+    {
+        // Real AuditLogger writing to the in-memory SQLite audit_log table (the
+        // NOW() UDF is registered by SchemaFromMigrations). Position 7 of the
+        // AuthHandler constructor is the audit logger.
+        $auditLogger = new AuditLogger($this->pdo);
+        $handler = new AuthHandler(
+            $this->pdo,
+            $this->jwtParser,
+            new TokenValidator($this->jwtParser, $this->pdo),
+            null,
+            null,
+            null,
+            $auditLogger,
+        );
+
+        $this->setAccessCookie($this->aliceProfileId, self::TENANT_A);
+        $response = $handler->handleSwitchTenant($this->makeRequest(['tenant_id' => self::TENANT_B]));
+        self::assertSame(200, $response->getStatusCode());
+
+        $stmt = $this->pdo->query('SELECT action FROM audit_log');
+        self::assertNotFalse($stmt);
+        $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        self::assertContains('auth.tenant_switch', $rows, 'A switch must emit auth.tenant_switch.');
+        self::assertNotContains('auth.login.success', $rows, 'A switch must NOT be logged as a login.');
     }
 
     // ── GET /api/me: memberships surface ──────────────────────────────────────

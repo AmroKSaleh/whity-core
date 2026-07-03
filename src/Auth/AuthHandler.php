@@ -598,18 +598,26 @@ class AuthHandler
      * epoch cutover handoff is deferred to the users-table retirement step; do not
      * change the source-of-truth here without that step.
      *
-     * @param int         $profileId       Authenticated profile.
-     * @param int         $activeTenantId  The resolved (authorised) tenant.
-     * @param string      $email           Normalised email for claims/response.
-     * @param int         $profileEpoch    Fallback epoch when no legacy users row.
-     * @param Request     $request         For audit context.
+     * @param int                  $profileId       Authenticated profile.
+     * @param int                  $activeTenantId  The resolved (authorised) tenant.
+     * @param string               $email           Normalised email for claims/response.
+     * @param int                  $profileEpoch    Fallback epoch when no legacy users row.
+     * @param Request              $request         For audit context.
+     * @param string               $auditAction     Audit event name to emit for this session
+     *                                               issuance. Defaults to the login event; the
+     *                                               tenant-switch path passes a distinct event so
+     *                                               switches are not indistinguishable from logins
+     *                                               in the audit trail (WC-f8164c87).
+     * @param array<string, mixed> $auditMetadata   Extra audit metadata to attach to the event.
      */
     private function issueSessionForProfile(
         int $profileId,
         int $activeTenantId,
         string $email,
         int $profileEpoch,
-        Request $request
+        Request $request,
+        string $auditAction = 'auth.login.success',
+        array $auditMetadata = []
     ): Response {
         // Legacy users row (dual-claim window): carries role_id + legacy epoch.
         $legacyRow = $this->fetchLegacyUserRow($email, $activeTenantId);
@@ -645,7 +653,7 @@ class AuthHandler
         CookieManager::setAccessToken($this->jwtParser->create($allClaims, 900, 'access'), 900);
         CookieManager::setRefreshToken($this->jwtParser->create($allClaims, 604800, 'refresh'), 604800);
 
-        $this->audit('auth.login.success', $request, $activeTenantId, $profileId);
+        $this->audit($auditAction, $request, $activeTenantId, $profileId, $auditMetadata);
 
         $userId = $legacyRow !== null ? (int) $legacyRow['id'] : $profileId;
 
@@ -869,13 +877,22 @@ class AuthHandler
             ? $this->listActiveMemberships($profileId)
             : [];
 
+        // Resolve the active tenant for display. Legacy tokens carry `tenant_id`;
+        // post-cutover (new-claims-only) tokens carry `active_tenant_id` and leave
+        // `tenant_id` NULL. Fall back to `active_tenant_id` so the reported active
+        // tenant is correct for BOTH token shapes (mirrors
+        // TokenValidator::extractPrincipal and the auth-context login path) — a
+        // NULL here made the sidebar TenantSwitcher show "No tenant" and never mark
+        // the active tenant after a switch (WC-f8164c87).
+        $activeTenantId = $claims['tenant_id'] ?? $claims['active_tenant_id'] ?? null;
+
         // Return user data from token claims
         return Response::json([
             'user' => [
                 'id' => $claims['user_id'],
                 'email' => $claims['email'],
                 'role' => $claims['role'],
-                'tenant_id' => $claims['tenant_id'],
+                'tenant_id' => $activeTenantId,
             ],
             'memberships' => $memberships,
         ], 200);
@@ -954,7 +971,9 @@ class AuthHandler
             $targetTenantId,
             $email,
             $profileEpoch,
-            $request
+            $request,
+            'auth.tenant_switch',
+            ['to_tenant_id' => $targetTenantId]
         );
     }
 
