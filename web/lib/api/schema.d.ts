@@ -1375,6 +1375,14 @@ export interface components {
                 permissions: string[];
             };
         };
+        MeGetResponse: {
+            user: {
+                id: number;
+                email: string;
+                role: string;
+                tenant_id: number;
+            };
+        };
         MeResponse: {
             user: {
                 id: number;
@@ -4132,13 +4140,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The caller's session identity */
+            /** @description The caller's session identity (includes tenant_id) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MeResponse"];
+                    "application/json": components["schemas"]["MeGetResponse"];
                 };
             };
             /** @description Missing or invalid access token */

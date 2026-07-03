@@ -192,7 +192,9 @@ final class CoreApiSchemas
                 'summary' => 'Return the current authenticated user from the access-token claims',
                 'tags' => ['auth'],
                 'responses' => [
-                    200 => self::jsonResponse('The caller\'s session identity', 'MeResponse'),
+                    // GET (handleMe) returns tenant_id from the token claims;
+                    // PATCH (shapeSelf) does NOT — the two paths have distinct shapes.
+                    200 => self::jsonResponse('The caller\'s session identity (includes tenant_id)', 'MeGetResponse'),
                     401 => self::errorResponse('Missing or invalid access token'),
                 ],
             ],
@@ -1371,7 +1373,15 @@ final class CoreApiSchemas
                 'user' => $sessionUser,
             ], ['user']),
 
-            // GET /api/me — 200 response (AuthHandler::handleMe reads from token claims)
+            // GET /api/me — 200 response. AuthHandler::handleMe() reads directly
+            // from the access-token claims and INCLUDES tenant_id in the user.
+            'MeGetResponse' => self::object([
+                'user' => $sessionUser,
+            ], ['user']),
+
+            // PATCH /api/me — 200 response. AuthHandler::handleUpdateMe() shapes
+            // the row via shapeSelf(), which returns id/email/role ONLY (no
+            // tenant_id) — a genuinely different shape from GET /api/me above.
             'MeResponse' => self::object([
                 'user' => $selfUser,
             ], ['user']),
