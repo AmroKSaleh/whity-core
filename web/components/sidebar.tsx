@@ -7,7 +7,7 @@ import type { Membership } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
 import { useToast } from '@/lib/toast-context';
-import { Button } from '@whity/ui/button';
+import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -15,7 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-} from '@whity/ui/dropdown-menu';
+} from '@amroksaleh/ui/dropdown-menu';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,

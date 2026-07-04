@@ -5,7 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Badge } from '@whity/ui/badge';
+import { Badge } from '@amroksaleh/ui/badge';
 import { IconLock, IconLockOpen } from '@tabler/icons-react';
 import type { McpTool } from './types';
 

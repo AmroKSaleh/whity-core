@@ -7,10 +7,10 @@ import { useToast } from '@/lib/toast-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@whity/ui/button';
-import { Badge } from '@whity/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity/ui/card';
-import { Input } from '@whity/ui/input';
+import { Button } from '@amroksaleh/ui/button';
+import { Badge } from '@amroksaleh/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Input } from '@amroksaleh/ui/input';
 import { IconAlertCircle, IconDeviceFloppy, IconInfoCircle, IconWorld } from '@tabler/icons-react';
 import { BrandingSettings } from '@/components/branding-settings';
 

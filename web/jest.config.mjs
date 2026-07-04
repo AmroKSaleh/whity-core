@@ -11,22 +11,11 @@ const customJestConfig = {
   testEnvironment: 'jest-environment-jsdom',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
-    // packages/ui/src/* lives outside web/ so Jest resolves its imports
-    // starting from packages/ui/ — outside web/node_modules. Pin peer-deps
-    // to web/node_modules so they're found regardless of which file imports them.
-    '^react$': '<rootDir>/node_modules/react',
-    '^react/(.*)$': '<rootDir>/node_modules/react/$1',
-    '^react-dom$': '<rootDir>/node_modules/react-dom',
-    '^react-dom/(.*)$': '<rootDir>/node_modules/react-dom/$1',
-    '^radix-ui$': '<rootDir>/node_modules/radix-ui',
-    '^radix-ui/(.*)$': '<rootDir>/node_modules/radix-ui/$1',
-    '^@radix-ui/(.*)$': '<rootDir>/node_modules/@radix-ui/$1',
-    '^@tabler/icons-react$': '<rootDir>/node_modules/@tabler/icons-react',
-    '^class-variance-authority$': '<rootDir>/node_modules/class-variance-authority',
-    '^clsx$': '<rootDir>/node_modules/clsx',
-    '^tailwind-merge$': '<rootDir>/node_modules/tailwind-merge',
-    '^react-hook-form$': '<rootDir>/node_modules/react-hook-form',
-    '^katex$': '<rootDir>/node_modules/katex',
+    // Peer deps (react, radix, react-hook-form, …) are hoisted to the workspace
+    // root node_modules by npm workspaces, so standard resolution walking up
+    // from web/ (and from packages/ui/src) finds the single shared copy — no
+    // per-package pins needed. (They previously pointed at web/node_modules,
+    // which the hoist emptied.)
   },
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
 };

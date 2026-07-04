@@ -25,9 +25,9 @@ import {
   setBrandingHost,
   type Branding,
 } from '@/lib/api/branding-upload';
-import { Button } from '@whity/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity/ui/card';
-import { Input } from '@whity/ui/input';
+import { Button } from '@amroksaleh/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Input } from '@amroksaleh/ui/input';
 import {
   IconDeviceFloppy,
   IconInfoCircle,

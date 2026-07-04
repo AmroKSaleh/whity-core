@@ -10,16 +10,16 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
-import { Button } from '@whity/ui/button';
+} from '@amroksaleh/ui/dialog';
+import { Button } from '@amroksaleh/ui/button';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@whity/ui/select';
-import { Skeleton } from '@whity/ui/skeleton';
+} from '@amroksaleh/ui/select';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 import type {
   GranteeType,
   OuOption,

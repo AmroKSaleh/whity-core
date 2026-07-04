@@ -6,9 +6,9 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
-import { Button } from '@whity/ui/button';
-import { Input } from '@whity/ui/input';
-import { Skeleton } from '@whity/ui/skeleton';
+import { Button } from '@amroksaleh/ui/button';
+import { Input } from '@amroksaleh/ui/input';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 import {
   IconBinaryTree2,
   IconList,

@@ -10,9 +10,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
-import { Button } from '@whity/ui/button';
-import { Input } from '@whity/ui/input';
+} from '@amroksaleh/ui/dialog';
+import { Button } from '@amroksaleh/ui/button';
+import { Input } from '@amroksaleh/ui/input';
 import {
   Form,
   FormField,
@@ -20,14 +20,14 @@ import {
   FormLabel,
   FormControl,
   FormMessage,
-} from '@whity/ui/form';
+} from '@amroksaleh/ui/form';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@whity/ui/select';
+} from '@amroksaleh/ui/select';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';

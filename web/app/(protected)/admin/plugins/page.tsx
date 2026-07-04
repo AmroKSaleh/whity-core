@@ -11,10 +11,10 @@ import { useNavigation } from '@/lib/navigation-context';
 import { usePluginFeatures } from '@/lib/plugin-features-context';
 import { classifyPluginVersion, type PluginVersionTier } from '@/lib/plugin-version-badge';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@whity/ui/button';
-import { Badge } from '@whity/ui/badge';
+import { Button } from '@amroksaleh/ui/button';
+import { Badge } from '@amroksaleh/ui/badge';
 import { PermissionButton } from '@/components/rbac/permission-button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@whity/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -22,7 +22,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
+} from '@amroksaleh/ui/dialog';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -31,7 +31,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@whity/ui/alert-dialog';
+} from '@amroksaleh/ui/alert-dialog';
 import {
   IconPlug,
   IconReload,

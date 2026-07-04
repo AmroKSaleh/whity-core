@@ -8,7 +8,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@whity/ui/card";
+} from "@amroksaleh/ui/card";
 import { useAuth } from "@/lib/auth-context";
 import {
   IconUsers,
@@ -21,7 +21,7 @@ import {
 } from "@tabler/icons-react";
 
 import { StatsChart } from "@/components/admin/stats-chart";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@whity/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@amroksaleh/ui/tabs";
 
 interface StatsData {
   totals: {

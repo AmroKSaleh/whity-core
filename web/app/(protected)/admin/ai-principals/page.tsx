@@ -8,13 +8,13 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { MCP_TOKENS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
-import { Button } from '@whity/ui/button';
+import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@whity/ui/dropdown-menu';
+} from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { CreateAiPrincipalModal } from './create-modal';
 import { CredentialModal } from './credential-modal';

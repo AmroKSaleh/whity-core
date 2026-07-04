@@ -301,15 +301,21 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          # Single lockfile at the workspace root (npm workspaces).
+          cache-dependency-path: package-lock.json
 
+      # npm workspaces install the whole repo from the root lockfile; the web
+      # scripts below still run with working-directory: web (bins resolve from
+      # the hoisted root node_modules).
       - name: Install dependencies
+        working-directory: .
         run: npm ci
 
       # Fail on a high/critical advisory in an installed npm dependency
       # (WC-232ec317). `--audit-level=high` keeps low/moderate noise out of the
       # gate while still blocking genuinely exploitable supply-chain regressions.
       - name: npm security audit
+        working-directory: .
         run: npm audit --audit-level=high
 
       # The committed lib/api/schema.d.ts must match a fresh generation from
@@ -352,9 +358,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: web/.next/cache
-          key: nextjs-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/**/*.[jt]s', 'web/**/*.[jt]sx') }}
+          key: nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/**/*.[jt]s', 'web/**/*.[jt]sx') }}
           restore-keys: |
-            nextjs-${{ hashFiles('web/package-lock.json') }}-
+            nextjs-${{ hashFiles('package-lock.json') }}-
             nextjs-
 
       - name: Build (production)
@@ -362,3 +368,12 @@ jobs:
 
       - name: Run Jest
         run: npx jest
+
+      # Gate both component galleries so a broken story can't land silently
+      # (WC-3f9b0364). Both workspaces define build-storybook; run from the repo
+      # root so the -w workspace flags resolve.
+      - name: Build Storybook galleries
+        working-directory: .
+        run: |
+          npm run build-storybook -w @amroksaleh/ui
+          npm run build-storybook -w web

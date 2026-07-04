@@ -21,8 +21,8 @@
     "preserveSymlinks": true,
     "paths": {
       "@/*": ["./*"],
-      "@whity/ui": ["./node_modules/@whity/ui/src/index.ts"],
-      "@whity/ui/*": ["./node_modules/@whity/ui/src/*"]
+      "@amroksaleh/ui": ["../packages/ui/src/index.ts"],
+      "@amroksaleh/ui/*": ["../packages/ui/src/*"]
     }
   },
   "include": [

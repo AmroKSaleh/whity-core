@@ -1,6 +1,6 @@
 ﻿import React from 'react';
 import { render } from '@testing-library/react';
-import { MathText } from '@whity/ui/math-text';
+import { MathText } from '@amroksaleh/ui/math-text';
 
 describe('MathText', () => {
   it('renders a valid inline expression without throwing', () => {

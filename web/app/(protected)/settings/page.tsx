@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useAuth } from '@/lib/auth-context';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { ProfileForm } from './profile-form';
 
