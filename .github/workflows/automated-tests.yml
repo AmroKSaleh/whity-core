@@ -368,3 +368,12 @@ jobs:
 
       - name: Run Jest
         run: npx jest
+
+      # Gate both component galleries so a broken story can't land silently
+      # (WC-3f9b0364). Both workspaces define build-storybook; run from the repo
+      # root so the -w workspace flags resolve.
+      - name: Build Storybook galleries
+        working-directory: .
+        run: |
+          npm run build-storybook -w @amroksaleh/ui
+          npm run build-storybook -w web

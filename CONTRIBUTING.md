@@ -128,10 +128,19 @@ than most training data — so always read the relevant guide in
 `web/node_modules/next/dist/docs/` before writing frontend code, as noted in
 [`web/AGENTS.md`](web/AGENTS.md).
 
+The JS side is an **npm workspace** (`web` + the shared UI library
+`packages/ui`, published as `@amroksaleh/ui`). There is a **single lockfile at
+the repo root** — always `npm ci` at the **root**, never inside `web/`. A
+`web/`-level install leaves `web/node_modules/next` absent and Turbopack fails
+with `couldn't find next/package.json`. If you have a stale `web/node_modules`
+from before the workspace migration, delete it and reinstall at the root.
+
 ```bash
-cd web
-npm ci          # clean install from package-lock.json
-npm run dev     # dev server on http://localhost:3000
+npm ci                    # clean install of ALL workspaces, from the repo root
+npm run dev -w web        # dev server on http://localhost:3000
+# Component galleries (Storybook), decoupled from the app:
+npm run storybook -w @amroksaleh/ui   # UI primitives  → :6006
+npm run storybook -w web              # app components → :7007
 ```
 
 The frontend proxies its relative `/api/*` calls to the backend at
