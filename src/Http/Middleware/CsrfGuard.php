@@ -42,11 +42,19 @@ final class CsrfGuard
      */
     // WC-206: auth surface moved to /api/v1/; these paths must match the
     // versioned request path that reaches the middleware.
+    //
+    // WC-ddcd16ad: select-tenant and switch-tenant are listed EXPLICITLY. They
+    // complete/re-mint the session, so the cookie (browser) path must actively
+    // require X-Requested-With, and the token-mode exemption (X-Auth-Mode: token
+    // with no auth cookie) must run for them deterministically — not merely pass
+    // vacuously because no cookie happens to be present.
     private const PROTECTED_POSTS = [
         '/api/v1/login',
         '/api/v1/login/2fa',
         '/api/v1/auth/refresh',
         '/api/v1/auth/logout',
+        '/api/v1/auth/select-tenant',
+        '/api/v1/auth/switch-tenant',
     ];
 
     /**
@@ -90,6 +98,20 @@ final class CsrfGuard
             return $next($request);
         }
 
+        // Token-mode exemption (WC-ddcd16ad): an always-protected POST (login,
+        // refresh, etc.) that carries X-Auth-Mode: token and NO auth cookie is an
+        // explicit native-client request, not a browser form.  A cross-site
+        // attacker cannot forge X-Auth-Mode (custom headers trigger a CORS
+        // preflight that our strict origin allowlist refuses), and without a
+        // cookie there is no ambient credential to steal.  Exempting it keeps
+        // non-browser clients working without requiring X-Requested-With.
+        if ($alwaysProtected && !$this->usesAmbientCookieAuth($request)) {
+            $authModeHeader = $request->getHeader('X-Auth-Mode');
+            if ($authModeHeader !== null && strtolower(trim($authModeHeader)) === 'token') {
+                return $next($request);
+            }
+        }
+
         $value = $request->getHeader(self::HEADER_NAME);
         if ($value !== null && strcasecmp(trim($value), self::REQUIRED_VALUE) === 0) {
             return $next($request);
@@ -101,37 +123,49 @@ final class CsrfGuard
     /**
      * Whether the request authenticates ambiently via an auth cookie.
      *
-     * Requests carrying an Authorization header are NOT ambient: a cross-site
-     * attacker cannot set that header without triggering a CORS preflight, so
-     * CSRF does not apply regardless of which credential the backend prefers.
+     * CSRF attacks exploit ambient credentials — cookies that a browser attaches
+     * automatically to cross-site requests. A well-formed `Authorization: Bearer`
+     * header cannot be set by a cross-site form or an unpreflighted fetch, so a
+     * request that carries a Bearer header AND NO auth cookie is not forgeable
+     * cross-site and is exempt from the custom-header requirement.
+     *
+     * However: when BOTH a Bearer header and an auth cookie are present, the
+     * cookie is ambient — the backend (WC-ddcd16ad) prefers the cookie in that
+     * case — so the request is treated as ambient and the custom header is still
+     * required. This prevents a scenario where an attacker-forged cookie-bearing
+     * request bypasses the guard by also injecting (or spoofing) a Bearer header.
+     *
+     * Precedence rule (WC-ddcd16ad): Bearer-only → not ambient (exempt).
+     *                                Cookie present (with or without Bearer) → ambient (check required).
      *
      * @param Request $request The incoming HTTP request.
-     * @return bool True when an auth cookie is the only credential present.
+     * @return bool True when an auth cookie is present (ambient credential in play).
      */
     private function usesAmbientCookieAuth(Request $request): bool
     {
-        // Only a WELL-FORMED bearer header counts as non-ambient — RBAC falls
-        // back to the cookie on a malformed one, so the exemption must match
-        // RbacMiddleware's extraction exactly.
+        // Check for auth cookies FIRST: if ANY auth cookie is present the request
+        // is ambient regardless of whether a Bearer header is also present.
+        $cookieHeader = $request->getHeader('Cookie');
+        if ($cookieHeader !== null) {
+            foreach (explode(';', $cookieHeader) as $cookie) {
+                $parts = explode('=', trim($cookie), 2);
+                if (
+                    count($parts) === 2
+                    && $parts[1] !== ''
+                    && in_array($parts[0], self::AUTH_COOKIES, true)
+                ) {
+                    return true;
+                }
+            }
+        }
+
+        // No auth cookie. Only a WELL-FORMED bearer header counts as a non-ambient
+        // explicit credential (exempts from CSRF). A missing or malformed one means
+        // the request is unauthenticated — the auth layer will reject it, but the
+        // CSRF guard returns false (no ambient cookie = nothing to protect here).
         $authHeader = $request->getHeader('Authorization');
         if ($authHeader !== null && preg_match('/^Bearer\s+\S+$/', $authHeader) === 1) {
             return false;
-        }
-
-        $cookieHeader = $request->getHeader('Cookie');
-        if ($cookieHeader === null) {
-            return false;
-        }
-
-        foreach (explode(';', $cookieHeader) as $cookie) {
-            $parts = explode('=', trim($cookie), 2);
-            if (
-                count($parts) === 2
-                && $parts[1] !== ''
-                && in_array($parts[0], self::AUTH_COOKIES, true)
-            ) {
-                return true;
-            }
         }
 
         return false;

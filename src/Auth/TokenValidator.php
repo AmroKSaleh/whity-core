@@ -173,6 +173,104 @@ class TokenValidator
     }
 
     /**
+     * Validate a regular session access JWT passed as a Bearer token string.
+     *
+     * This is the non-browser (token mode) equivalent of validateAccessToken():
+     * it applies the SAME validation chain — signature/expiry, type='access',
+     * jti revocation, epoch, split-brain, membership gate — against a raw bearer
+     * string rather than reading the access_token cookie.  The result is the
+     * decoded claims array (identical contract to validateAccessToken()) so all
+     * downstream handlers work unchanged in either auth mode.
+     *
+     * Precedence note (WC-ddcd16ad): callers that need cookie-OR-bearer logic
+     * should call validateAccessToken() first (cookie wins), then this method
+     * as a fallback when the cookie is absent.
+     *
+     * @param string $token Raw bearer token string.
+     * @return array<string, mixed>|null Decoded claims on success, null on any failure.
+     */
+    public function validateAccessTokenFromBearer(string $token): ?array
+    {
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null) {
+            return null;
+        }
+
+        if (($claims['type'] ?? null) !== 'access') {
+            return null;
+        }
+
+        $jti = $claims['jti'] ?? null;
+        if (!is_string($jti) || $jti === '') {
+            return null;
+        }
+
+        if ($this->isTokenRevoked($jti)) {
+            return null;
+        }
+
+        if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
+        if ($this->hasSplitBrainClaims($claims)) {
+            return null;
+        }
+
+        if (!$this->membershipGuard->allows($claims)) {
+            return null;
+        }
+
+        return $claims;
+    }
+
+    /**
+     * Validate a refresh token passed as a Bearer string or body field.
+     *
+     * Used by handleRefresh() in token mode (WC-ddcd16ad): accepts the refresh
+     * token from Authorization: Bearer or a body field when X-Auth-Mode: token
+     * was used at login.  Applies the SAME validation chain as validateRefreshToken()
+     * (type='refresh', jti revocation, epoch, split-brain, membership gate).
+     *
+     * @param string $token Raw token string (not from cookie).
+     * @return array<string, mixed>|null Decoded claims on success, null on any failure.
+     */
+    public function validateRefreshTokenFromString(string $token): ?array
+    {
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null) {
+            return null;
+        }
+
+        if (($claims['type'] ?? null) !== 'refresh') {
+            return null;
+        }
+
+        $jti = $claims['jti'] ?? null;
+        if (!is_string($jti) || $jti === '') {
+            return null;
+        }
+
+        if ($this->isTokenRevoked($jti)) {
+            return null;
+        }
+
+        if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
+        if ($this->hasSplitBrainClaims($claims)) {
+            return null;
+        }
+
+        if (!$this->membershipGuard->allows($claims)) {
+            return null;
+        }
+
+        return $claims;
+    }
+
+    /**
      * Validate an MCP bearer token passed from the Authorization header.
      *
      * Checks: signature + expiry (via JwtParser), type='mcp', aud='mcp',

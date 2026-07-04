@@ -474,8 +474,10 @@ class AuthHandler
         }
 
         // ── Step 5: single membership → log in directly; multiple → prompt ───
+        $tokenMode = self::isTokenMode($request);
+
         if (count($memberships) > 1) {
-            return $this->requireTenantSelection($profileId, $email, $memberships);
+            return $this->requireTenantSelection($profileId, $email, $memberships, $tokenMode);
         }
 
         // Exactly one selectable membership: issue the session directly.
@@ -486,7 +488,8 @@ class AuthHandler
             $activeTenantId,
             $email,
             (int) ($profile['token_epoch'] ?? 0),
-            $request
+            $request,
+            $tokenMode
         );
     }
 
@@ -515,7 +518,19 @@ class AuthHandler
      */
     public function handleSelectTenant(Request $request, array $params = []): Response
     {
-        $token = CookieManager::getTenantSelectionToken();
+        $tokenMode = self::isTokenMode($request);
+
+        // In token mode, accept the selection token from the request body field
+        // `selection_token` (returned by the login step in token mode).
+        // In cookie mode, read it from the tenant_select_token cookie as before.
+        if ($tokenMode) {
+            $body = JsonBody::parsed($request);
+            $rawToken = $body['selection_token'] ?? null;
+            $token = is_string($rawToken) ? $rawToken : null;
+        } else {
+            $token = CookieManager::getTenantSelectionToken();
+        }
+
         if ($token === null) {
             return Response::error('No pending tenant selection', 401);
         }
@@ -548,31 +563,45 @@ class AuthHandler
         // session must carry the current epoch).
         $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
 
-        CookieManager::clearTenantSelectionToken();
+        // Cookie mode only: clear the selection cookie after use.
+        if (!$tokenMode) {
+            CookieManager::clearTenantSelectionToken();
+        }
         $this->loginThrottle?->clearUser($profileId);
 
-        return $this->issueSessionForProfile($profileId, $tenantId, $email, $tokenEpoch, $request);
+        return $this->issueSessionForProfile($profileId, $tenantId, $email, $tokenEpoch, $request, $tokenMode);
     }
 
     /**
      * Build the tenant-selection prompt response (ADR 0005 §6, multi-membership).
      *
-     * Issues NO session. Sets a short-lived (5-min) selection cookie binding the
-     * profile so POST /api/auth/select-tenant can complete the login, and returns
-     * the selectable memberships for the UI.
+     * Issues NO session. When in cookie mode, sets a short-lived (5-min) selection
+     * cookie binding the profile so POST /api/auth/select-tenant can complete the
+     * login. In token mode (WC-ddcd16ad) the selection token is returned in the
+     * JSON body instead of a cookie, so non-browser clients can carry it.
      *
      * @param list<array{tenant_id:int, tenant_name:string, role:string}> $memberships
+     * @param bool $tokenMode When true, return the selection token in the body.
      */
-    private function requireTenantSelection(int $profileId, string $email, array $memberships): Response
+    private function requireTenantSelection(int $profileId, string $email, array $memberships, bool $tokenMode = false): Response
     {
-        CookieManager::setTenantSelectionToken(
-            $this->jwtParser->create(
-                ['profile_id' => $profileId, 'email' => $email],
-                300,
-                'tenant_select'
-            ),
-            300
+        $selectionToken = $this->jwtParser->create(
+            ['profile_id' => $profileId, 'email' => $email],
+            300,
+            'tenant_select'
         );
+
+        if ($tokenMode) {
+            // In token mode, return the selection token in the body — the client
+            // will send it back as X-Selection-Token on the select-tenant endpoint.
+            return Response::json([
+                'requires_tenant_selection' => true,
+                'memberships'               => $memberships,
+                'selection_token'           => $selectionToken,
+            ], 200);
+        }
+
+        CookieManager::setTenantSelectionToken($selectionToken, 300);
 
         return Response::json([
             'requires_tenant_selection' => true,
@@ -581,9 +610,62 @@ class AuthHandler
     }
 
     /**
+     * Resolve validated access-token claims from the request.
+     *
+     * Precedence (WC-ddcd16ad):
+     *   1. Cookie `access_token` — browser context; wins when present.
+     *   2. Authorization: Bearer header — non-browser token-mode context.
+     *
+     * Rationale for cookie-first: CSRF attacks exploit AMBIENT (cookie) credentials;
+     * an explicit Authorization header set by a native client is not forgeable
+     * cross-site (the CORS preflight stops it).  We keep the browser flow identical
+     * by never reading the Bearer header when a cookie is already present.  A
+     * native client that also inadvertently sends a cookie (e.g. a misconfigured
+     * client library) therefore authenticates via the cookie path — this is safe
+     * because cookies are always validated with the same rigour.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return array<string, mixed>|null Decoded claims, or null when no valid token.
+     */
+    private function resolveAccessClaims(Request $request): ?array
+    {
+        // Cookie path — classic browser flow.
+        $fromCookie = $this->tokenValidator->validateAccessToken();
+        if ($fromCookie !== null) {
+            return $fromCookie;
+        }
+
+        // Bearer fallback — token mode / non-browser client.
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
+            return $this->tokenValidator->validateAccessTokenFromBearer($m[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Determine whether the request opts in to token-body mode (WC-ddcd16ad).
+     *
+     * Token mode is signalled by the request header `X-Auth-Mode: token` on the
+     * issuance endpoints (login, select-tenant, switch-tenant, refresh).  When
+     * present, tokens are returned in the JSON body and NO Set-Cookie is emitted.
+     * When absent, the classic cookie flow is used (zero regression for browsers).
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return bool True when the caller has opted in to token-body mode.
+     */
+    private static function isTokenMode(Request $request): bool
+    {
+        $header = $request->getHeader('X-Auth-Mode');
+        return $header !== null && strtolower(trim($header)) === 'token';
+    }
+
+    /**
      * Mint the access + refresh session for a resolved (profile, tenant) pair and
-     * set the auth cookies. Shared by the single-membership login path, the
-     * post-2FA completion, and the tenant-selection endpoint so token/claim
+     * either set the auth cookies (browser mode) or return the tokens in the JSON
+     * body (token mode, WC-ddcd16ad). Shared by the single-membership login path,
+     * the post-2FA completion, and the tenant-selection endpoint so token/claim
      * semantics (dual-claim window) are identical across all three.
      *
      * Callers MUST have already authorised (profile_id, tenantId): this method
@@ -603,6 +685,8 @@ class AuthHandler
      * @param string               $email           Normalised email for claims/response.
      * @param int                  $profileEpoch    Fallback epoch when no legacy users row.
      * @param Request              $request         For audit context.
+     * @param bool                 $tokenMode       When true, return tokens in body (WC-ddcd16ad);
+     *                                               when false, set cookies (classic browser flow).
      * @param string               $auditAction     Audit event name to emit for this session
      *                                               issuance. Defaults to the login event; the
      *                                               tenant-switch path passes a distinct event so
@@ -616,6 +700,7 @@ class AuthHandler
         string $email,
         int $profileEpoch,
         Request $request,
+        bool $tokenMode = false,
         string $auditAction = 'auth.login.success',
         array $auditMetadata = []
     ): Response {
@@ -650,21 +735,41 @@ class AuthHandler
         }
         $allClaims = $newClaims + $baseClaims;
 
-        CookieManager::setAccessToken($this->jwtParser->create($allClaims, 900, 'access'), 900);
-        CookieManager::setRefreshToken($this->jwtParser->create($allClaims, 604800, 'refresh'), 604800);
+        $accessTokenStr  = $this->jwtParser->create($allClaims, 900, 'access');
+        $refreshTokenStr = $this->jwtParser->create($allClaims, 604800, 'refresh');
+
+        if ($tokenMode) {
+            // Token-body mode (WC-ddcd16ad): return tokens in JSON, set NO cookies.
+            // Non-browser clients (KeyHub desktop, service scripts) carry the
+            // access token via Authorization: Bearer on subsequent requests.
+        } else {
+            // Classic browser flow: store tokens in HttpOnly cookies.
+            CookieManager::setAccessToken($accessTokenStr, 900);
+            CookieManager::setRefreshToken($refreshTokenStr, 604800);
+        }
 
         $this->audit($auditAction, $request, $activeTenantId, $profileId, $auditMetadata);
 
         $userId = $legacyRow !== null ? (int) $legacyRow['id'] : $profileId;
 
-        return Response::json([
-            'user' => [
-                'id'        => $userId,
-                'email'     => $email,
-                'role'      => $roleName,
-                'tenant_id' => $activeTenantId,
-            ]
-        ], 200);
+        $userShape = [
+            'id'        => $userId,
+            'email'     => $email,
+            'role'      => $roleName,
+            'tenant_id' => $activeTenantId,
+        ];
+
+        if ($tokenMode) {
+            return Response::json([
+                'access_token'  => $accessTokenStr,
+                'refresh_token' => $refreshTokenStr,
+                'token_type'    => 'Bearer',
+                'expires_in'    => 900,
+                'user'          => $userShape,
+            ], 200);
+        }
+
+        return Response::json(['user' => $userShape], 200);
     }
 
     /**
@@ -860,8 +965,8 @@ class AuthHandler
      */
     public function handleMe(Request $request, array $params = []): Response
     {
-        // Validate access token
-        $claims = $this->tokenValidator->validateAccessToken();
+        // Validate access token (cookie first, Bearer fallback for token-mode clients).
+        $claims = $this->resolveAccessClaims($request);
 
         if ($claims === null) {
             return Response::error('Unauthorized', 401);
@@ -936,7 +1041,9 @@ class AuthHandler
     public function handleSwitchTenant(Request $request, array $params = []): Response
     {
         // Require a full session (validated access token).
-        $claims = $this->tokenValidator->validateAccessToken();
+        // In token mode, fall back to Bearer header when the cookie is absent.
+        $tokenMode = self::isTokenMode($request);
+        $claims = $this->resolveAccessClaims($request);
         if ($claims === null) {
             return Response::error('Unauthorized', 401);
         }
@@ -982,6 +1089,7 @@ class AuthHandler
             $email,
             $profileEpoch,
             $request,
+            $tokenMode,
             'auth.tenant_switch',
             ['to_tenant_id' => $targetTenantId]
         );
@@ -1030,7 +1138,8 @@ class AuthHandler
     public function handleUpdateMe(Request $request, array $params = []): Response
     {
         // Self-only: the acting user comes from the validated token, never the body.
-        $claims = $this->tokenValidator->validateAccessToken();
+        // Cookie-first, then Bearer fallback (WC-ddcd16ad).
+        $claims = $this->resolveAccessClaims($request);
         if ($claims === null) {
             return Response::error('Unauthorized', 401);
         }
@@ -1419,8 +1528,34 @@ class AuthHandler
             return Response::error('Too many attempts', 429);
         }
 
-        // Validate refresh token
-        $claims = $this->tokenValidator->validateRefreshToken();
+        $tokenMode = self::isTokenMode($request);
+
+        // Resolve the refresh token:
+        //  - Cookie mode: read from the refresh_token cookie (classic browser flow).
+        //  - Token mode (WC-ddcd16ad): read from Authorization: Bearer header or
+        //    the body field "refresh_token". Cookie is tried first so a browser
+        //    that accidentally sends both always goes through the cookie path.
+        if ($tokenMode) {
+            // Accept from cookie first (safety), then Bearer, then body.
+            $claims = $this->tokenValidator->validateRefreshToken();
+            if ($claims === null) {
+                $rawToken = null;
+                $authHeader = $request->getHeader('Authorization');
+                if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
+                    $rawToken = $m[1];
+                }
+                if ($rawToken === null) {
+                    $body = JsonBody::parsed($request);
+                    $bodyToken = $body['refresh_token'] ?? null;
+                    $rawToken = is_string($bodyToken) ? $bodyToken : null;
+                }
+                $claims = $rawToken !== null
+                    ? $this->tokenValidator->validateRefreshTokenFromString($rawToken)
+                    : null;
+            }
+        } else {
+            $claims = $this->tokenValidator->validateRefreshToken();
+        }
 
         if ($claims === null) {
             return Response::error('Unauthorized', 401);
@@ -1474,8 +1609,27 @@ class AuthHandler
         }
         $accessToken = $this->jwtParser->create($baseClaims + $identityClaims, 900, 'access'); // 15 minutes
 
-        // Set new access token cookie
+        // Rotation: mint a fresh refresh token so the old one is implicitly
+        // invalidated on the next rotation (the jti is not yet revoked but any
+        // subsequent refresh with the old token will fail the epoch check if the
+        // user's epoch was bumped in the meantime; explicit single-use rotation
+        // is a future hardening task).
+        $newRefreshToken = $this->jwtParser->create($baseClaims + $identityClaims, 604800, 'refresh'); // 7 days
+
+        if ($tokenMode) {
+            // Token-body mode: return new tokens in JSON, set NO cookies.
+            return Response::json([
+                'access_token'  => $accessToken,
+                'refresh_token' => $newRefreshToken,
+                'token_type'    => 'Bearer',
+                'expires_in'    => 900,
+            ], 200);
+        }
+
+        // Cookie mode: set the new access token cookie (classic browser flow).
+        // A new refresh token cookie is also issued to rotate it.
         CookieManager::setAccessToken($accessToken, 900);
+        CookieManager::setRefreshToken($newRefreshToken, 604800);
 
         // Return success response
         return Response::json([
@@ -1500,10 +1654,29 @@ class AuthHandler
      */
     public function handleLogout(Request $request, array $params = []): Response
     {
-        // Revoke whichever auth tokens are present (logout is idempotent, so a
-        // missing or unparseable cookie is simply skipped). Both access and
-        // refresh jtis are recorded in the global revoked_tokens table.
-        foreach ([CookieManager::getAccessToken(), CookieManager::getRefreshToken()] as $token) {
+        // Revoke whichever auth tokens are present, from EITHER auth mode
+        // (WC-ddcd16ad). Logout is idempotent, so any missing or unparseable
+        // token is simply skipped. All jtis are recorded in the global
+        // revoked_tokens table.
+        //
+        // Sources, in order:
+        //  1. Cookie access_token + refresh_token — classic browser flow.
+        //  2. Authorization: Bearer <access> — a token-mode client keeps its
+        //     tokens in memory (no cookies); without this, logout would revoke
+        //     NOTHING and the access token would live for up to 15 min and the
+        //     refresh token for 7 days (revocation contract broken).
+        //  3. `refresh_token` body field — symmetric with handleRefresh's
+        //     token-mode input so the refresh jti is revoked too.
+        // The cookie branch simply no-ops when no cookies are present, so this
+        // handles both modes without a mode flag.
+        $tokens = [
+            CookieManager::getAccessToken(),
+            CookieManager::getRefreshToken(),
+            $this->bearerToken($request),
+            $this->bodyRefreshToken($request),
+        ];
+
+        foreach ($tokens as $token) {
             if ($token === null) {
                 continue;
             }
@@ -1520,7 +1693,7 @@ class AuthHandler
             }
         }
 
-        // Clear both cookies
+        // Clear both cookies (a no-op for token-mode clients that never set them).
         CookieManager::clearAccessToken();
         CookieManager::clearRefreshToken();
 
@@ -1528,6 +1701,34 @@ class AuthHandler
         return Response::json([
             'status' => 'logged out'
         ], 200);
+    }
+
+    /**
+     * Extract a well-formed `Authorization: Bearer <token>` value, or null.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return string|null The bearer token, or null when absent/malformed.
+     */
+    private function bearerToken(Request $request): ?string
+    {
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    /**
+     * Extract a `refresh_token` string from the request body, or null.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return string|null The refresh token, or null when absent/non-string.
+     */
+    private function bodyRefreshToken(Request $request): ?string
+    {
+        $body      = JsonBody::parsed($request);
+        $bodyToken = $body['refresh_token'] ?? null;
+        return is_string($bodyToken) ? $bodyToken : null;
     }
 
     /**
@@ -1743,7 +1944,9 @@ class AuthHandler
         $this->audit('auth.2fa.verify_success', $request, $auditTenantId, $auditActorId);
         $this->audit('auth.login.success', $request, $auditTenantId, $auditActorId, ['second_factor' => true]);
 
-        return $this->completeTwoFaLogin($claims);
+        // Thread the REAL request so token mode (WC-ddcd16ad) is honoured: a 2FA
+        // user sending X-Auth-Mode: token must receive body tokens, not cookies.
+        return $this->completeTwoFaLogin($claims, $request);
     }
 
     /**
@@ -1758,13 +1961,20 @@ class AuthHandler
      * Backward compat: legacy temp tokens (user_id/tenant_id only) are handled
      * by the else-branch below and will continue to work until expired.
      *
-     * @param array<string, mixed> $claims Token claims from temporary token
-     * @return Response User data with tokens set in cookies (200)
+     * Token mode (WC-ddcd16ad): the real request is threaded in so that a 2FA
+     * user opting in via X-Auth-Mode: token receives access+refresh tokens in
+     * the JSON body (no cookies) — exactly like the single-factor login path.
+     *
+     * @param array<string, mixed> $claims  Token claims from temporary token.
+     * @param Request              $request The real /login/2fa request (for token-mode detection).
+     * @return Response User data with tokens in cookies OR body (200)
      */
-    private function completeTwoFaLogin(array $claims): Response
+    private function completeTwoFaLogin(array $claims, Request $request): Response
     {
         // Clear temporary token cookie
         CookieManager::clearTempToken();
+
+        $tokenMode = self::isTokenMode($request);
 
         $email = isset($claims['email']) && is_string($claims['email'])
             ? $claims['email']
@@ -1792,10 +2002,11 @@ class AuthHandler
                         $memberships[0]['tenant_id'],
                         $email,
                         $this->currentProfileTokenEpoch($profileId),
-                        new Request('POST', '/api/login/2fa', [])
+                        $request,
+                        $tokenMode
                     );
                 }
-                return $this->requireTenantSelection($profileId, $email, $memberships);
+                return $this->requireTenantSelection($profileId, $email, $memberships, $tokenMode);
             }
 
             // Single-membership 2FA: active_tenant_id already resolved.
@@ -1804,7 +2015,8 @@ class AuthHandler
                 (int) $claims['active_tenant_id'],
                 $email,
                 $this->currentProfileTokenEpoch($profileId),
-                new Request('POST', '/api/login/2fa', [])
+                $request,
+                $tokenMode
             );
         }
 
@@ -1834,14 +2046,22 @@ class AuthHandler
             'token_epoch' => $tokenEpoch,
         ];
 
-        CookieManager::setAccessToken(
-            $this->jwtParser->create($legacyClaims + $identityClaims, 900, 'access'),
-            900
-        );
-        CookieManager::setRefreshToken(
-            $this->jwtParser->create($legacyClaims + $identityClaims, 604800, 'refresh'),
-            604800
-        );
+        $accessTokenStr  = $this->jwtParser->create($legacyClaims + $identityClaims, 900, 'access');
+        $refreshTokenStr = $this->jwtParser->create($legacyClaims + $identityClaims, 604800, 'refresh');
+
+        if ($tokenMode) {
+            // Token-body mode (WC-ddcd16ad): return tokens in JSON, set NO cookies.
+            return Response::json([
+                'access_token'  => $accessTokenStr,
+                'refresh_token' => $refreshTokenStr,
+                'token_type'    => 'Bearer',
+                'expires_in'    => 900,
+                'user'          => ['id' => $userId, 'email' => $email, 'role' => $roleName],
+            ], 200);
+        }
+
+        CookieManager::setAccessToken($accessTokenStr, 900);
+        CookieManager::setRefreshToken($refreshTokenStr, 604800);
 
         return Response::json([
             'user' => ['id' => $userId, 'email' => $email, 'role' => $roleName]
