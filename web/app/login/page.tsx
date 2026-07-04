@@ -50,6 +50,15 @@ export default function LoginPage() {
   const [twoFactorLoading, setTwoFactorLoading] = useState(false);
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
   const [backupCodeMode, setBackupCodeMode] = useState(false);
+  // Multi-membership tenant selection (ADR 0005 §6): when login resolves to a
+  // profile with 2+ active memberships, the backend returns
+  // { requires_tenant_selection: true, memberships: [...] } WITHOUT minting a
+  // session — the caller must pick a tenant (POST /api/v1/auth/select-tenant)
+  // before a session is issued.
+  const [pendingMemberships, setPendingMemberships] = useState<
+    Array<{ tenant_id: number; tenant_name: string; role: string }> | null
+  >(null);
+  const [selectingTenant, setSelectingTenant] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const twoFactorInputRef = useRef<HTMLInputElement>(null);
   const recoveryCodeInputRef = useRef<HTMLInputElement>(null);
@@ -121,9 +130,18 @@ export default function LoginPage() {
           twoFactorInputRef.current?.focus();
         }, 0);
       } else if (response.ok) {
-        // Login successful - refresh auth state and redirect
-        await refreshAuth();
-        router.push('/dashboard');
+        const data = await response.json().catch(() => ({}));
+        if (data.requires_tenant_selection && Array.isArray(data.memberships)) {
+          // Multi-membership profile: no session minted yet — prompt the user
+          // to choose which tenant to sign in to before completing login.
+          setPendingMemberships(data.memberships);
+          setPassword('');
+          setFieldErrors({});
+        } else {
+          // Single-membership: session cookie already set — redirect in.
+          await refreshAuth();
+          router.push('/dashboard');
+        }
       } else {
         const errorData = await response.json().catch(() => ({}));
         const message =
@@ -142,6 +160,43 @@ export default function LoginPage() {
       addToast(`Login failed: ${message}`, 'error');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSelectTenant = async (tenantId: number) => {
+    setSelectingTenant(true);
+    setLoginError(null);
+    try {
+      const response = await fetch('/api/v1/auth/select-tenant', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // CSRF defense (WC-160): required on the auth POSTs.
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify({ tenant_id: tenantId }),
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        // Session issued for the chosen tenant — redirect in.
+        await refreshAuth();
+        router.push('/dashboard');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        const message =
+          response.status === 403
+            ? 'You are not a member of that workspace.'
+            : errorData.message || 'Could not select workspace';
+        setLoginError(message);
+        addToast(`Workspace selection failed (${response.status}): ${message}`, 'error');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not select workspace';
+      setLoginError(message);
+      addToast(`Workspace selection failed: ${message}`, 'error');
+    } finally {
+      setSelectingTenant(false);
     }
   };
 
@@ -218,12 +273,16 @@ export default function LoginPage() {
           ) : null}
           <CardTitle className="text-2xl">{`Welcome to ${branding.siteName}`}</CardTitle>
           <CardDescription>
-            {requires2fa ? 'Enter your authenticator code' : 'Sign in to your account to continue'}
+            {requires2fa
+              ? 'Enter your authenticator code'
+              : pendingMemberships
+                ? 'Choose a workspace to continue'
+                : 'Sign in to your account to continue'}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {/* LOGIN FORM */}
-          {!requires2fa && (
+          {!requires2fa && !pendingMemberships && (
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
               {loginError && (
@@ -296,6 +355,50 @@ export default function LoginPage() {
                 {buttonText}
               </Button>
             </form>
+          )}
+
+          {/* TENANT SELECTION (multi-membership) */}
+          {pendingMemberships && !requires2fa && (
+            <div className="space-y-4">
+              {loginError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{loginError}</AlertDescription>
+                </Alert>
+              )}
+              <p className="text-sm text-muted-foreground text-center">
+                Your account has access to multiple workspaces. Choose one to continue.
+              </p>
+              <div className="space-y-2">
+                {pendingMemberships.map((m) => (
+                  <Button
+                    key={m.tenant_id}
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-between"
+                    disabled={selectingTenant}
+                    onClick={() => handleSelectTenant(m.tenant_id)}
+                  >
+                    <span>{m.tenant_name}</span>
+                    <span className="text-xs text-muted-foreground capitalize">{m.role}</span>
+                  </Button>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                disabled={selectingTenant}
+                onClick={() => {
+                  setPendingMemberships(null);
+                  setEmail('');
+                  setPassword('');
+                  setLoginError(null);
+                  setTimeout(() => emailInputRef.current?.focus(), 0);
+                }}
+              >
+                Back to login
+              </Button>
+            </div>
           )}
 
           {/* 2FA FORM */}
