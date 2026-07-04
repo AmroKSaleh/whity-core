@@ -167,9 +167,11 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          # Single lockfile at the workspace root (npm workspaces).
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        working-directory: .
         run: npm ci
 
       # The committed lib/api/schema.d.ts must match a fresh generation from

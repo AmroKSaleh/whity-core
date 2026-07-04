@@ -104,10 +104,14 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          # Single lockfile at the workspace root (npm workspaces).
+          cache-dependency-path: package-lock.json
 
+      # npm workspaces install from the root lockfile; the Playwright steps below
+      # still run with working-directory: web (bins resolve from the hoisted root
+      # node_modules and the config is loaded from web/).
       - name: Install dependencies
-        working-directory: web
+        working-directory: .
         run: npm ci
 
       # Playwright browser binaries are versioned by the @playwright/test
