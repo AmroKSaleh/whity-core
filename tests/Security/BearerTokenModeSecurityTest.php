@@ -365,8 +365,73 @@ class BearerTokenModeSecurityTest extends TestCase
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Logout revocation in token mode (WC-ddcd16ad BLOCKER 2)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Logout in token mode revokes the access token from Authorization: Bearer
+     * AND the refresh token from the body — the revocation contract must hold
+     * for token-mode clients that keep tokens in memory (no cookies). After
+     * logout the access token must be rejected on a protected endpoint and the
+     * refresh token must be rejected on refresh.
+     */
+    public function testTokenModeLogoutRevokesBearerAccessAndBodyRefresh(): void
+    {
+        $tv      = new TokenValidator($this->jwtParser, $this->pdo);
+        $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv);
+
+        $accessToken  = $this->mintAccess(0);
+        $refreshToken = $this->mintRefresh(0);
+        $accessJti    = $this->jtiOf($accessToken);
+        $refreshJti   = $this->jtiOf($refreshToken);
+
+        // Logout with access via Bearer, refresh in body — NO cookies at all.
+        $logoutReq = new Request('POST', '/api/auth/logout', [
+            'Authorization' => 'Bearer ' . $accessToken,
+        ], (string) json_encode(['refresh_token' => $refreshToken]));
+
+        $logoutResp = $handler->handleLogout($logoutReq);
+        $this->assertSame(200, $logoutResp->getStatusCode());
+
+        // Both jtis are revoked in the global table.
+        $this->assertTrue($this->isRevoked($accessJti), 'access jti must be revoked');
+        $this->assertTrue($this->isRevoked($refreshJti), 'refresh jti must be revoked');
+
+        // Revoked access Bearer no longer authenticates a protected endpoint.
+        $meResp = $handler->handleMe(
+            new Request('GET', '/api/me', ['Authorization' => 'Bearer ' . $accessToken])
+        );
+        $this->assertSame(401, $meResp->getStatusCode(), 'Revoked access Bearer must be 401 after logout');
+
+        // Revoked refresh no longer mints a new access token.
+        $refreshResp = $handler->handleRefresh(
+            new Request('POST', '/api/auth/refresh', ['X-Auth-Mode' => 'token'],
+                (string) json_encode(['refresh_token' => $refreshToken]))
+        );
+        $this->assertSame(401, $refreshResp->getStatusCode(), 'Revoked refresh must be 401 after logout');
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
+
+    private function isRevoked(string $jti): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT 1 FROM revoked_tokens WHERE jti = ? LIMIT 1');
+        $stmt->execute([$jti]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Parse a token and return its jti claim as a string (asserting validity).
+     */
+    private function jtiOf(string $token): string
+    {
+        $claims = $this->jwtParser->parse($token);
+        $this->assertIsArray($claims, 'Token must be a valid JWT');
+        $this->assertArrayHasKey('jti', $claims);
+        return (string) $claims['jti'];
+    }
 
     private function mintAccess(int $epoch): string
     {

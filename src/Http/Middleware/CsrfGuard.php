@@ -42,11 +42,19 @@ final class CsrfGuard
      */
     // WC-206: auth surface moved to /api/v1/; these paths must match the
     // versioned request path that reaches the middleware.
+    //
+    // WC-ddcd16ad: select-tenant and switch-tenant are listed EXPLICITLY. They
+    // complete/re-mint the session, so the cookie (browser) path must actively
+    // require X-Requested-With, and the token-mode exemption (X-Auth-Mode: token
+    // with no auth cookie) must run for them deterministically — not merely pass
+    // vacuously because no cookie happens to be present.
     private const PROTECTED_POSTS = [
         '/api/v1/login',
         '/api/v1/login/2fa',
         '/api/v1/auth/refresh',
         '/api/v1/auth/logout',
+        '/api/v1/auth/select-tenant',
+        '/api/v1/auth/switch-tenant',
     ];
 
     /**

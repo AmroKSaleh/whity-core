@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
+use OTPHP\TOTP;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
+use Whity\Auth\TotpService;
 use Whity\Core\Request;
 use PDO;
 
@@ -48,18 +50,22 @@ class BodyTokenModeTest extends TestCase
     private const MULTI_USER_ID = 43;
     private const TENANT_B_ID = 2;
 
+    // Third user for 2FA token-mode tests (single membership, 2FA enabled).
+    private const TWOFA_EMAIL = 'twofabody@example.com';
+    private const TWOFA_USER_ID = 44;
+
     protected function setUp(): void
     {
         $this->jwtParser = new JwtParser(self::SECRET);
         $this->pdo = $this->makeSchema();
         // Start each test with no auth cookies so cookie-mode is not accidentally
         // triggered on Bearer-only tests.
-        unset($_COOKIE['access_token'], $_COOKIE['refresh_token'], $_COOKIE['tenant_select_token']);
+        unset($_COOKIE['access_token'], $_COOKIE['refresh_token'], $_COOKIE['tenant_select_token'], $_COOKIE['temp_auth_token']);
     }
 
     protected function tearDown(): void
     {
-        unset($_COOKIE['access_token'], $_COOKIE['refresh_token'], $_COOKIE['tenant_select_token']);
+        unset($_COOKIE['access_token'], $_COOKIE['refresh_token'], $_COOKIE['tenant_select_token'], $_COOKIE['temp_auth_token']);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -608,6 +614,229 @@ class BodyTokenModeTest extends TestCase
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Logout in token mode (WC-ddcd16ad BLOCKER 2)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Logout in token mode revokes BOTH the access jti (from Authorization:
+     * Bearer) and the refresh jti (from the body field), so a token-mode
+     * client's tokens stop working immediately — matching the cookie contract.
+     */
+    public function testLogoutInTokenModeRevokesBearerAndBodyTokens(): void
+    {
+        $tv      = new TokenValidator($this->jwtParser, $this->pdo);
+        $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv);
+
+        // Obtain body tokens via token-mode login.
+        $loginData    = $this->json($handler->handle($this->loginRequest(self::EMAIL, true)));
+        $accessToken  = $loginData['access_token'];
+        $refreshToken = $loginData['refresh_token'];
+
+        $accessJti  = $this->jtiOf($accessToken);
+        $refreshJti = $this->jtiOf($refreshToken);
+
+        // Logout: access token via Authorization: Bearer, refresh token in body.
+        $logoutReq = new Request('POST', '/api/auth/logout', [
+            'Authorization' => 'Bearer ' . $accessToken,
+        ], (string) json_encode(['refresh_token' => $refreshToken]));
+
+        $logoutResp = $handler->handleLogout($logoutReq);
+        $this->assertSame(200, $logoutResp->getStatusCode());
+
+        // Both jtis must now be revoked.
+        $this->assertTrue($this->isRevoked($accessJti), 'access jti must be revoked in token-mode logout');
+        $this->assertTrue($this->isRevoked($refreshJti), 'refresh jti must be revoked in token-mode logout');
+
+        // The revoked access token no longer authenticates a protected endpoint.
+        $meResp = $handler->handleMe(
+            new Request('GET', '/api/me', ['Authorization' => 'Bearer ' . $accessToken])
+        );
+        $this->assertSame(401, $meResp->getStatusCode(), 'Revoked access Bearer must be rejected');
+
+        // The revoked refresh token no longer mints a new access token.
+        $refreshResp = $handler->handleRefresh(
+            new Request('POST', '/api/auth/refresh', ['X-Auth-Mode' => 'token'],
+                (string) json_encode(['refresh_token' => $refreshToken]))
+        );
+        $this->assertSame(401, $refreshResp->getStatusCode(), 'Revoked refresh must be rejected');
+    }
+
+    /**
+     * Cookie-mode logout still revokes both cookie tokens (non-regression).
+     */
+    public function testLogoutInCookieModeStillRevokesCookieTokens(): void
+    {
+        $tv      = new TokenValidator($this->jwtParser, $this->pdo);
+        $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv);
+
+        $accessToken  = $this->mintAccess(0);
+        $refreshToken = $this->mintRefresh(0);
+        $accessJti    = $this->jtiOf($accessToken);
+        $refreshJti   = $this->jtiOf($refreshToken);
+
+        $_COOKIE['access_token']  = $accessToken;
+        $_COOKIE['refresh_token'] = $refreshToken;
+
+        $logoutResp = $handler->handleLogout(new Request('POST', '/api/auth/logout', []));
+        $this->assertSame(200, $logoutResp->getStatusCode());
+
+        $this->assertTrue($this->isRevoked($accessJti), 'cookie access jti must be revoked');
+        $this->assertTrue($this->isRevoked($refreshJti), 'cookie refresh jti must be revoked');
+
+        unset($_COOKIE['access_token'], $_COOKIE['refresh_token']);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 2FA login in token mode (WC-ddcd16ad BLOCKER 1)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * A 2FA user completing /login/2fa WITH X-Auth-Mode: token gets access +
+     * refresh tokens in the BODY (not cookies).
+     */
+    public function testTwoFaLoginInTokenModeReturnsTokensInBody(): void
+    {
+        [$handler, $code] = $this->make2faHandlerAndCode();
+
+        // Temp token as the login step would have set (single membership).
+        $tempToken = $this->jwtParser->create([
+            'profile_id'       => self::TWOFA_USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::TWOFA_EMAIL,
+        ], 300, 'temp');
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        $request = new Request('POST', '/api/login/2fa', ['X-Auth-Mode' => 'token'],
+            (string) json_encode(['code' => $code]));
+
+        $response = $handler->handle2fa($request);
+        $this->assertSame(200, $response->getStatusCode());
+
+        $data = $this->json($response);
+        $this->assertArrayHasKey('access_token', $data, '2FA token mode must return access_token in body');
+        $this->assertArrayHasKey('refresh_token', $data, '2FA token mode must return refresh_token in body');
+        $this->assertSame('Bearer', $data['token_type'] ?? null);
+        $this->assertSame(self::TWOFA_EMAIL, $data['user']['email'] ?? null);
+
+        // The returned tokens must be genuine JWTs.
+        $ac = $this->jwtParser->parse($data['access_token']);
+        $this->assertSame('access', $ac['type'] ?? null);
+
+        unset($_COOKIE['temp_auth_token']);
+    }
+
+    /**
+     * A 2FA user completing /login/2fa WITHOUT the header still gets the classic
+     * cookie response (non-regression).
+     */
+    public function testTwoFaLoginInCookieModeReturnsClassicShape(): void
+    {
+        [$handler, $code] = $this->make2faHandlerAndCode();
+
+        $tempToken = $this->jwtParser->create([
+            'profile_id'       => self::TWOFA_USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::TWOFA_EMAIL,
+        ], 300, 'temp');
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        $request = new Request('POST', '/api/login/2fa', [],
+            (string) json_encode(['code' => $code]));
+
+        $response = $handler->handle2fa($request);
+        $this->assertSame(200, $response->getStatusCode());
+
+        $data = $this->json($response);
+        $this->assertArrayHasKey('user', $data);
+        $this->assertArrayNotHasKey('access_token', $data, 'cookie mode must not put token in body');
+        $this->assertArrayNotHasKey('refresh_token', $data, 'cookie mode must not put refresh in body');
+
+        unset($_COOKIE['temp_auth_token']);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // CsrfGuard: select-tenant / switch-tenant are always-protected (WC-ddcd16ad MAJOR)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * A cookie-bearing POST to select-tenant WITHOUT X-Requested-With → 403.
+     */
+    public function testCsrfGuardBlocksCookieSelectTenantWithoutHeader(): void
+    {
+        $this->assertCsrfBlocked('/api/v1/auth/select-tenant', ['Cookie' => 'access_token=sometoken']);
+    }
+
+    /**
+     * A Bearer-only X-Auth-Mode:token POST to select-tenant (no cookie) → allowed.
+     */
+    public function testCsrfGuardAllowsTokenModeSelectTenant(): void
+    {
+        $this->assertCsrfAllowed('/api/v1/auth/select-tenant', [
+            'X-Auth-Mode'   => 'token',
+            'Authorization' => 'Bearer eyJsometoken',
+        ]);
+    }
+
+    /**
+     * A cookie-bearing POST to switch-tenant WITHOUT X-Requested-With → 403.
+     */
+    public function testCsrfGuardBlocksCookieSwitchTenantWithoutHeader(): void
+    {
+        $this->assertCsrfBlocked('/api/v1/auth/switch-tenant', ['Cookie' => 'access_token=sometoken']);
+    }
+
+    /**
+     * A Bearer-only X-Auth-Mode:token POST to switch-tenant (no cookie) → allowed.
+     */
+    public function testCsrfGuardAllowsTokenModeSwitchTenant(): void
+    {
+        $this->assertCsrfAllowed('/api/v1/auth/switch-tenant', [
+            'X-Auth-Mode'   => 'token',
+            'Authorization' => 'Bearer eyJsometoken',
+        ]);
+    }
+
+    /**
+     * Assert the CsrfGuard blocks a POST with the given headers (no X-Requested-With).
+     *
+     * @param array<string, string> $headers
+     */
+    private function assertCsrfBlocked(string $path, array $headers): void
+    {
+        $guard   = new \Whity\Http\Middleware\CsrfGuard();
+        $request = new Request('POST', $path, $headers);
+
+        $passed   = false;
+        $response = $guard->handle($request, function ($r) use (&$passed): \Whity\Sdk\Http\Response {
+            $passed = true;
+            return \Whity\Sdk\Http\Response::json(['ok' => true], 200);
+        });
+
+        $this->assertFalse($passed, "CsrfGuard must block POST to {$path} without X-Requested-With");
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    /**
+     * Assert the CsrfGuard allows a POST with the given headers (no X-Requested-With).
+     *
+     * @param array<string, string> $headers
+     */
+    private function assertCsrfAllowed(string $path, array $headers): void
+    {
+        $guard   = new \Whity\Http\Middleware\CsrfGuard();
+        $request = new Request('POST', $path, $headers);
+
+        $passed   = false;
+        $response = $guard->handle($request, function ($r) use (&$passed): \Whity\Sdk\Http\Response {
+            $passed = true;
+            return \Whity\Sdk\Http\Response::json(['ok' => true], 200);
+        });
+
+        $this->assertTrue($passed, "CsrfGuard must allow token-mode POST to {$path}");
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -623,6 +852,37 @@ class BodyTokenModeTest extends TestCase
             'email'    => $email,
             'password' => self::PASSWORD,
         ]));
+    }
+
+    /**
+     * Build an AuthHandler wired with a TotpService whose key matches the
+     * encrypted secret stored for the 2FA test profile, plus a currently-valid
+     * TOTP code. Returns [handler, code].
+     *
+     * @return array{0: AuthHandler, 1: string}
+     */
+    private function make2faHandlerAndCode(): array
+    {
+        // Deterministic key so the stored secret decrypts on the login path.
+        $totpService = new TotpService(self::SECRET);
+        $plainSecret = $totpService->generateSecret();
+        if ($plainSecret === '') {
+            self::fail('generated TOTP secret must be non-empty');
+        }
+        $encrypted   = $totpService->encryptSecret($plainSecret);
+
+        // Store the encrypted secret + enable 2FA on the profile.
+        $this->pdo->prepare(
+            'UPDATE profiles SET two_factor_enabled = true, two_factor_secret = ?,
+                two_factor_backup_codes_version = 0 WHERE id = ?'
+        )->execute([$encrypted, self::TWOFA_USER_ID]);
+
+        $code = TOTP::create($plainSecret)->now();
+
+        $tv      = new TokenValidator($this->jwtParser, $this->pdo);
+        $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv, null, $totpService);
+
+        return [$handler, $code];
     }
 
     /**
@@ -722,6 +982,50 @@ class BodyTokenModeTest extends TestCase
              VALUES (?, ?, ?, 'active', datetime('now'))"
         )->execute([self::MULTI_USER_ID, self::TENANT_B_ID, self::ROLE_ID]);
 
+        // 2FA single-membership user (self::TWOFA_EMAIL). 2FA is enabled and the
+        // secret is populated per-test by make2faHandlerAndCode().
+        $pdo->prepare(
+            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
+             VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
+        )->execute([self::TWOFA_USER_ID, self::TENANT_ID, self::TWOFA_EMAIL, password_hash(self::PASSWORD, PASSWORD_BCRYPT), self::ROLE_ID]);
+
+        $pdo->prepare(
+            "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, ?, false, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([self::TWOFA_USER_ID, 'twofabody', password_hash(self::PASSWORD, PASSWORD_BCRYPT)]);
+
+        $pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        )->execute([self::TWOFA_USER_ID, self::TWOFA_EMAIL]);
+
+        $pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([self::TWOFA_USER_ID, self::TENANT_ID, self::ROLE_ID]);
+
         return $pdo;
+    }
+
+    /**
+     * Whether a jti has been recorded in the global revoked_tokens table.
+     */
+    private function isRevoked(string $jti): bool
+    {
+        $stmt = $this->pdo->prepare('SELECT 1 FROM revoked_tokens WHERE jti = ? LIMIT 1');
+        $stmt->execute([$jti]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Parse a token and return its jti claim as a string (asserting validity).
+     */
+    private function jtiOf(string $token): string
+    {
+        $claims = $this->jwtParser->parse($token);
+        $this->assertIsArray($claims, 'Token must be a valid JWT');
+        $this->assertArrayHasKey('jti', $claims);
+        return (string) $claims['jti'];
     }
 }
