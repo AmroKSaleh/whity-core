@@ -9,10 +9,10 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from '@whity/ui/sheet';
-import { Button } from '@whity/ui/button';
-import { Badge } from '@whity/ui/badge';
-import { Skeleton } from '@whity/ui/skeleton';
+} from '@amroksaleh/ui/sheet';
+import { Button } from '@amroksaleh/ui/button';
+import { Badge } from '@amroksaleh/ui/badge';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { IconEdit, IconPlus, IconTrash, IconUser, IconUserOff, IconX } from '@tabler/icons-react';
 import type { Person, RelationView } from './types';
 import type { PersonAction } from './relations-view';

@@ -16,14 +16,14 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { cn } from '@/lib/utils';
-import { Button } from '@whity/ui/button';
+import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@whity/ui/dropdown-menu';
+} from '@amroksaleh/ui/dropdown-menu';
 import { IconDotsVertical, IconUser, IconUserOff } from '@tabler/icons-react';
 import type { PersonAction, RelationsGraphProps } from './relations-view';
 import type { Person } from './types';

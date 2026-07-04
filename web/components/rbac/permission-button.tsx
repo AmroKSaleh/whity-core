@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import * as React from 'react';
-import { Button } from '@whity/ui/button';
+import { Button } from '@amroksaleh/ui/button';
 import { useActionPermission } from '@/hooks/useActionPermission';
 
 /**

@@ -5,9 +5,9 @@ import { apiClient } from '@/lib/api-client';
 import type { PluginFeature } from '@/lib/plugin-features';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@whity/ui/button';
-import { Input } from '@whity/ui/input';
-import { Skeleton } from '@whity/ui/skeleton';
+import { Button } from '@amroksaleh/ui/button';
+import { Input } from '@amroksaleh/ui/input';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 import {
   IconAlertTriangle,
   IconMessageCircle,

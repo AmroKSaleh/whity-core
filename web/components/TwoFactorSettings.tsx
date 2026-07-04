@@ -2,9 +2,9 @@
 
 import React, { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { Button } from '@whity/ui/button';
-import { Alert, AlertDescription } from '@whity/ui/alert';
-import { Input } from '@whity/ui/input';
+import { Button } from '@amroksaleh/ui/button';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { Input } from '@amroksaleh/ui/input';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,8 +14,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@whity/ui/alert-dialog';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@whity/ui/dialog';
+} from '@amroksaleh/ui/alert-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@amroksaleh/ui/dialog';
 import { IconCheck } from '@tabler/icons-react';
 import QRCode from 'react-qr-code';
 

@@ -46,26 +46,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Extend Turbopack's filesystem boundary to the monorepo root so that
-  // symlinks in node_modules that point to ../packages/ui are allowed.
+  // Extend Turbopack's filesystem boundary to the workspace root so that the
+  // hoisted root node_modules and the ../packages/ui workspace are in scope.
   outputFileTracingRoot: path.join(__dirname, ".."),
-  transpilePackages: ["@whity/ui"],
-  // Turbopack follows symlinks to real disk paths, so packages/ui/src/* imports
-  // are resolved starting from packages/ui/ — outside web/node_modules. Pin the
-  // peer-deps that Turbopack can't find back to web/node_modules using
-  // project-relative paths (the format turbopack.resolveAlias expects).
-  turbopack: {
-    resolveAlias: {
-      "radix-ui": "./node_modules/radix-ui",
-      "@radix-ui/react-label": "./node_modules/@radix-ui/react-label",
-      "@radix-ui/react-slot": "./node_modules/@radix-ui/react-slot",
-      "@tabler/icons-react": "./node_modules/@tabler/icons-react",
-      "class-variance-authority": "./node_modules/class-variance-authority",
-      "clsx": "./node_modules/clsx",
-      "tailwind-merge": "./node_modules/tailwind-merge",
-      "react-hook-form": "./node_modules/react-hook-form",
-    },
-  },
+  transpilePackages: ["@amroksaleh/ui"],
+  // Peer-dep singletons (react, radix, react-hook-form, …) are guaranteed by
+  // npm workspaces hoisting them to the root node_modules, so the previous
+  // turbopack.resolveAlias pins are no longer needed.
   async headers() {
     return [
       {

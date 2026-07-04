@@ -13,7 +13,7 @@ import type { PluginFeature } from '@/lib/plugin-features';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
-import { Button } from '@whity/ui/button';
+import { Button } from '@amroksaleh/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -21,23 +21,23 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
+} from '@amroksaleh/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@whity/ui/dropdown-menu';
-import { Input } from '@whity/ui/input';
-import { Textarea } from '@whity/ui/textarea';
+} from '@amroksaleh/ui/dropdown-menu';
+import { Input } from '@amroksaleh/ui/input';
+import { Textarea } from '@amroksaleh/ui/textarea';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@whity/ui/select';
-import { Skeleton } from '@whity/ui/skeleton';
+} from '@amroksaleh/ui/select';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 import {
   IconAlertTriangle,
   IconMenu2,

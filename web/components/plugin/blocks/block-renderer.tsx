@@ -46,15 +46,15 @@ import type {
   TextBlock,
   TextInputBlock,
 } from '@/lib/plugin-features';
-import { Input } from '@whity/ui/input';
-import { Textarea } from '@whity/ui/textarea';
+import { Input } from '@amroksaleh/ui/input';
+import { Textarea } from '@amroksaleh/ui/textarea';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@whity/ui/select';
+} from '@amroksaleh/ui/select';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,7 +65,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from '@whity/ui/alert-dialog';
+} from '@amroksaleh/ui/alert-dialog';
 import { PermissionButton } from '@/components/rbac/permission-button';
 import {
   FormProvider,
@@ -77,27 +77,27 @@ import type { ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { usePluginData } from '@/lib/use-plugin-data';
 import { cn } from '@/lib/utils';
-import { Skeleton } from '@whity/ui/skeleton';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 import {
   Alert,
   AlertDescription,
   AlertTitle,
-} from '@whity/ui/alert';
-import { Badge } from '@whity/ui/badge';
-import { Button } from '@whity/ui/button';
+} from '@amroksaleh/ui/alert';
+import { Badge } from '@amroksaleh/ui/badge';
+import { Button } from '@amroksaleh/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@whity/ui/card';
+} from '@amroksaleh/ui/card';
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from '@whity/ui/tabs';
+} from '@amroksaleh/ui/tabs';
 
 /**
  * WC-227: the web renderer for `screen: 'blocks'` plugin features.

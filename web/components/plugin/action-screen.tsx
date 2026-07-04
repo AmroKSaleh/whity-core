@@ -10,9 +10,9 @@ import {
 } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@whity/ui/button';
-import { Input } from '@whity/ui/input';
-import { Textarea } from '@whity/ui/textarea';
+import { Button } from '@amroksaleh/ui/button';
+import { Input } from '@amroksaleh/ui/input';
+import { Textarea } from '@amroksaleh/ui/textarea';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
 /**

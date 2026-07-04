@@ -9,17 +9,17 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
-import { Button } from '@whity/ui/button';
-import { Input } from '@whity/ui/input';
+} from '@amroksaleh/ui/dialog';
+import { Button } from '@amroksaleh/ui/button';
+import { Input } from '@amroksaleh/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@whity/ui/select';
-import { Textarea } from '@whity/ui/textarea';
+} from '@amroksaleh/ui/select';
+import { Textarea } from '@amroksaleh/ui/textarea';
 import type { OU } from './types';
 
 interface CreateOuModalProps {

@@ -4,7 +4,7 @@
  */
 
 import { DataTable, Column } from './data-table';
-import { Button } from '@whity/ui/button';
+import { Button } from '@amroksaleh/ui/button';
 
 // Example 1: User Management Table
 interface User {

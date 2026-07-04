@@ -16,14 +16,14 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { cn } from '@/lib/utils';
-import { Button } from '@whity/ui/button';
+import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@whity/ui/dropdown-menu';
+} from '@amroksaleh/ui/dropdown-menu';
 import { IconDotsVertical } from '@tabler/icons-react';
 import { flattenOuTree, type OuNode } from './ou-tree-util';
 import type { OuAction, OuViewProps } from './ou-view';

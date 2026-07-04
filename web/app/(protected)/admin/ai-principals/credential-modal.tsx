@@ -9,9 +9,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
-import { Button } from '@whity/ui/button';
-import { Alert, AlertDescription } from '@whity/ui/alert';
+} from '@amroksaleh/ui/dialog';
+import { Button } from '@amroksaleh/ui/button';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertCircle, IconCopy, IconCheck } from '@tabler/icons-react';
 import type { NewCredential } from './types';
 

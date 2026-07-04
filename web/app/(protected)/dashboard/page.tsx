@@ -1,8 +1,8 @@
 ﻿'use client';
 
 import { useAuth } from '@/lib/auth-context';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity/ui/card';
-import { Badge } from '@whity/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Badge } from '@amroksaleh/ui/badge';
 
 export default function DashboardPage() {
   const auth = useAuth();

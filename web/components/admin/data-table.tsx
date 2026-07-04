@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { IconChevronUp, IconChevronDown, IconDatabaseOff } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
-import { Skeleton } from '@whity/ui/skeleton';
+import { Skeleton } from '@amroksaleh/ui/skeleton';
 
 /**
  * Column configuration for the data table

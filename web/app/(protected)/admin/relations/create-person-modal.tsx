@@ -9,10 +9,10 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
-import { Button } from '@whity/ui/button';
-import { Input } from '@whity/ui/input';
-import { Textarea } from '@whity/ui/textarea';
+} from '@amroksaleh/ui/dialog';
+import { Button } from '@amroksaleh/ui/button';
+import { Input } from '@amroksaleh/ui/input';
+import { Textarea } from '@amroksaleh/ui/textarea';
 
 interface CreatePersonModalProps {
   isOpen: boolean;

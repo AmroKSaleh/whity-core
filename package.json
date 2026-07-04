@@ -1,0 +1,13 @@
+{
+  "name": "whity-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Whity monorepo — JS workspaces for the web app and shared UI library.",
+  "workspaces": [
+    "web",
+    "packages/*"
+  ],
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
+}

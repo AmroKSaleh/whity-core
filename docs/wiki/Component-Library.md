@@ -610,6 +610,33 @@ Still open:
    `info` (and Toast consumes them), but `Alert` still ships only `default` + `destructive`. Add
    matching success/warning/info `Alert` variants.
 
+## Component playgrounds (Storybook)
+
+Two **decoupled** Storybook galleries let you build and tune components without
+booting the backend, auth, or the full app. Both run on **Storybook 10** and render
+through the same Tailwind v4 + design-token pipeline as production, so output is
+pixel-accurate. A toolbar **light/dark** switch toggles the token set.
+
+| Gallery | Location | Framework | Run |
+|---------|----------|-----------|-----|
+| **UI primitives** (`@amroksaleh/ui`) | `packages/ui/.storybook` | `@storybook/react-vite` | `npm run storybook -w @amroksaleh/ui` → `:6006` |
+| **App components** (`web`) | `web/.storybook` | `@storybook/nextjs-vite` | `npm run storybook -w web` → `:7007` |
+
+- The **primitives** gallery imports the package's own `src/globals.css` and covers every
+  exported component with a variant/state matrix.
+- The **app-components** gallery wraps stories in the real provider stack
+  (Auth/Toast/Branding/Navigation) and mocks `/api/*` with **MSW**
+  (`msw-storybook-addon`; worker at `web/public/mockServiceWorker.js`), so data-driven
+  screens (CRUD/action/blocks, 2FA, branding) render offline. Shared fixtures + request
+  handlers live in `web/.storybook/mocks.ts`.
+
+> [!NOTE]
+> The shared primitives now live in the **`@amroksaleh/ui`** workspace package
+> (`packages/ui/src/`), consumed by `web` via npm workspaces (root `package.json`
+> `workspaces: ["web", "packages/*"]`). A single `npm install` at the repo root installs
+> both. The per-component **Source:** paths above (`web/components/ui/…`) predate this
+> extraction and are being reconciled separately — the package source is authoritative.
+
 ## Related documentation
 
 - [Design-System-Overview](Design-System-Overview.md) — architecture & principles

@@ -9,15 +9,15 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@whity/ui/dialog';
-import { Button } from '@whity/ui/button';
+} from '@amroksaleh/ui/dialog';
+import { Button } from '@amroksaleh/ui/button';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@whity/ui/select';
+} from '@amroksaleh/ui/select';
 import type { Person, RelationshipType } from './types';
 
 /** A user option for relating to an account-holder (resolved to its shadow person). */
