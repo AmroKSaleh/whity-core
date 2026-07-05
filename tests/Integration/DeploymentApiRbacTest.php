@@ -127,9 +127,10 @@ class DeploymentApiRbacTest extends TestCase
     private function tokenFor(int $userId): string
     {
         return $this->jwtParser->create([
-            'user_id'   => $userId,
-            'email'     => "user{$userId}@example.com",
-            'tenant_id' => self::TENANT,
+            'profile_id'       => $userId,
+            'email'            => "user{$userId}@example.com",
+            'active_tenant_id' => self::TENANT,
+            'token_epoch'      => 0,
         ]);
     }
 
@@ -143,9 +144,14 @@ class DeploymentApiRbacTest extends TestCase
         $adminRoleId = (int) $stmt->fetchColumn();
 
         $this->pdo->prepare(
-            'INSERT OR IGNORE INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([$userId, self::TENANT, "admin{$userId}@example.com", 'x', $adminRoleId]);
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([$userId, "admin{$userId}"]);
+
+        $this->pdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$userId, self::TENANT, $adminRoleId]);
     }
 
     /**
@@ -158,9 +164,14 @@ class DeploymentApiRbacTest extends TestCase
         $userRoleId = (int) $stmt->fetchColumn();
 
         $this->pdo->prepare(
-            'INSERT OR IGNORE INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([$userId, self::TENANT, "user{$userId}@example.com", 'x', $userRoleId]);
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([$userId, "user{$userId}"]);
+
+        $this->pdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$userId, self::TENANT, $userRoleId]);
     }
 
     /**
@@ -450,9 +461,14 @@ class DeploymentApiRbacTest extends TestCase
         $adminRoleId = (int) $stmt->fetchColumn();
 
         $tempPdo->prepare(
-            'INSERT OR IGNORE INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([100, 2, 'admin100@example.com', 'x', $adminRoleId]);
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'admin100', 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([100]);
+
+        $tempPdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([100, 2, $adminRoleId]);
 
         // Set tenant 2 in context so RBAC passes, then immediately reset it after
         // the middleware runs (simulate missing tenant for the handler).
@@ -470,9 +486,10 @@ class DeploymentApiRbacTest extends TestCase
         $router2->register('POST', '/api/migrations/rollback', [$handler2, 'rollbackMigration'], 'admin');
 
         $token = $this->jwtParser->create([
-            'user_id'   => 100,
-            'email'     => 'admin100@example.com',
-            'tenant_id' => 2,
+            'profile_id'       => 100,
+            'email'            => 'admin100@example.com',
+            'active_tenant_id' => 2,
+            'token_epoch'      => 0,
         ]);
 
         $match = $router2->match(new Request($method, $path));

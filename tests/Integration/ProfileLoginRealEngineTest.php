@@ -529,13 +529,13 @@ final class ProfileLoginRealEngineTest extends TestCase
         self::assertSame(401, $response->getStatusCode());
     }
 
-    // ── BACKWARD COMPAT (dual-claim window) ────────────────────────────────────────
+    // ── POST-CUTOVER CLAIM SHAPE ───────────────────────────────────────────────────
 
     /**
-     * During the dual-claim window, login must STILL emit legacy {user_id, tenant_id}
-     * claims alongside the new claims so existing sessions remain valid.
+     * Post-cutover (WC-idcut-E): login emits only {profile_id, active_tenant_id}
+     * claims. The dual-claim window is closed — no legacy user_id/tenant_id.
      */
-    public function testLoginEmitsLegacyClaimsDuringDualWindow(): void
+    public function testLoginEmitsProfileIdClaims(): void
     {
         $response = $this->login('alice@corp.com');
         self::assertSame(200, $response->getStatusCode());
@@ -544,29 +544,34 @@ final class ProfileLoginRealEngineTest extends TestCase
         self::assertIsArray($payload);
 
         self::assertArrayHasKey(
-            'user_id',
+            'profile_id',
             $payload,
-            'Legacy user_id must still be present during the dual-claim window.'
+            'Post-cutover access token must carry profile_id.'
         );
         self::assertArrayHasKey(
-            'tenant_id',
+            'active_tenant_id',
             $payload,
-            'Legacy tenant_id must still be present during the dual-claim window.'
+            'Post-cutover access token must carry active_tenant_id.'
+        );
+        self::assertArrayNotHasKey(
+            'user_id',
+            $payload,
+            'Post-cutover token must NOT carry legacy user_id.'
         );
     }
 
     /**
-     * The legacy user_id in the token must match alice's actual users row.
+     * Post-cutover: the profile_id in the token must match alice's profiles row.
      */
-    public function testLegacyUserIdInTokenMatchesUsersRow(): void
+    public function testProfileIdInTokenMatchesProfilesRow(): void
     {
         $response = $this->login('alice@corp.com');
         self::assertSame(200, $response->getStatusCode());
 
         $payload = $this->jwtParser->lastPayloadOfType('access');
         self::assertIsArray($payload);
-        self::assertSame($this->userIdA, $payload['user_id'] ?? null);
-        self::assertSame(self::TENANT_A, $payload['tenant_id'] ?? null);
+        self::assertSame($this->profileIdA, $payload['profile_id'] ?? null);
+        self::assertSame(self::TENANT_A, $payload['active_tenant_id'] ?? null);
     }
 
     // ── /me PATH ──────────────────────────────────────────────────────────────────

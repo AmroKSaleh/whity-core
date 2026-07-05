@@ -72,8 +72,10 @@ final class DispatcherTenantBindingTest extends TestCase
 
     public function testHandle_acceptsSessionAccessToken_whenUserAndEpochValid(): void
     {
+        // Post-cutover: session access tokens carry {profile_id, active_tenant_id}.
+        // The fixture seeds profile id=USER_ID with an active membership in TENANT_ID.
         $accessToken = $this->jwtParser->create(
-            ['user_id' => self::USER_ID, 'tenant_id' => self::TENANT_ID, 'token_epoch' => 0],
+            ['profile_id' => self::USER_ID, 'active_tenant_id' => self::TENANT_ID, 'token_epoch' => 0],
             900,
             'access'
         );

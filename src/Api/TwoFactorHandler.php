@@ -123,23 +123,18 @@ class TwoFactorHandler
      */
     private function readIdentityRow(int $profileId): ?array
     {
-        try {
-            // @tenant-guard-ignore: profiles / profile_emails are sanctioned GLOBAL identity tables (ADR 0005 §1-2)
-            $pStmt = $this->db->prepare(
-                'SELECT p.two_factor_enabled, p.two_factor_backup_codes_version,
-                        pe.email
-                 FROM profiles p
-                 JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
-                 WHERE p.id = ? LIMIT 1'
-            );
-            $pStmt->execute([$profileId]);
-            $row = $pStmt->fetch(PDO::FETCH_ASSOC);
+        // @tenant-guard-ignore: profiles / profile_emails are sanctioned GLOBAL identity tables (ADR 0005 §1-2)
+        $pStmt = $this->db->prepare(
+            'SELECT p.two_factor_enabled, p.two_factor_backup_codes_version,
+                    pe.email
+             FROM profiles p
+             JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
+             WHERE p.id = ? LIMIT 1'
+        );
+        $pStmt->execute([$profileId]);
+        $row = $pStmt->fetch(PDO::FETCH_ASSOC);
 
-            return is_array($row) && $row !== [] ? $row : null;
-        } catch (\Exception $e) {
-            error_log('[TwoFactorHandler] identity read failed: ' . $e->getMessage());
-            return null;
-        }
+        return is_array($row) && $row !== [] ? $row : null;
     }
 
     /**

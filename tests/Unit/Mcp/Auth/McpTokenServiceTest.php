@@ -50,10 +50,11 @@ final class McpTokenServiceTest extends TestCase
         self::assertNotNull($claims);
         self::assertSame('mcp', $claims['type']);
         self::assertSame('mcp', $claims['aud']);
-        // New tokens carry profile_id, not user_id.
+        // Post-cutover: tokens carry profile_id + active_tenant_id (no user_id/tenant_id).
         self::assertSame(self::PROFILE_ID, $claims['profile_id']);
         self::assertArrayNotHasKey('user_id', $claims, 'New MCP tokens must not carry a user_id claim');
-        self::assertSame(self::TENANT_ID, $claims['tenant_id']);
+        self::assertSame(self::TENANT_ID, $claims['active_tenant_id']);
+        self::assertArrayNotHasKey('tenant_id', $claims, 'New MCP tokens must not carry a legacy tenant_id claim');
         self::assertSame(['tools:call'], $claims['scope']);
         self::assertSame('user', $claims['principal_kind']);
     }
@@ -286,29 +287,26 @@ final class McpTokenServiceTest extends TestCase
 
     public function testSessionBearerStillAuthenticatesMcp_dualWindowIntact(): void
     {
-        // Session tokens (type='access') still carry user_id during dual-window.
-        // validateSessionBearerForMcp must still resolve a McpPrincipal from them.
+        // Post-cutover (WC-idcut-E): the dual-claim window is gone. Session access
+        // tokens must carry {profile_id, active_tenant_id}; legacy {user_id, tenant_id}
+        // tokens are rejected. This test verifies that a correctly-shaped session
+        // token is accepted by validateSessionBearerForMcp().
         $validator = new TokenValidator($this->jwtParser, $this->pdo);
 
-        // Seed a user row (epoch-checked in session path).
-        $hash = password_hash('pw', PASSWORD_BCRYPT);
-        $this->pdo->prepare("
-            INSERT INTO users (id, tenant_id, email, password, role_id, token_epoch)
-            VALUES (99, 1, 'session@test.com', ?, 1, 0)
-            ON CONFLICT DO NOTHING
-        ")->execute([$hash]);
-
+        // Use the seeded profile (PROFILE_ID) + its active membership in TENANT_ID.
         $sessionToken = $this->jwtParser->create([
-            'user_id'     => 99,
-            'tenant_id'   => self::TENANT_ID,
-            'token_epoch' => 0,
+            'profile_id'       => self::PROFILE_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'token_epoch'      => 0,
         ], 900, 'access');
 
         $principal = $validator->validateSessionBearerForMcp($sessionToken);
 
         self::assertInstanceOf(McpPrincipal::class, $principal);
         self::assertSame('session', $principal->principalKind);
-        self::assertSame(99, $principal->userId, 'session bearer: userId must be the user_id claim');
+        self::assertSame(self::PROFILE_ID, $principal->userId, 'session bearer: userId must equal profileId post-cutover');
+        self::assertSame(self::PROFILE_ID, $principal->profileId);
+        self::assertSame(self::TENANT_ID, $principal->tenantId);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

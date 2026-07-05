@@ -106,8 +106,8 @@ class AuthFlowTest extends TestCase
 
         $claims = $this->jwtParser->parse($accessToken);
         $this->assertIsArray($claims);
-        $this->assertSame(self::TEST_USER_ID, $claims['user_id']);
-        $this->assertSame(self::TEST_TENANT_ID, $claims['tenant_id']);
+        $this->assertSame(self::TEST_USER_ID, $claims['profile_id']);
+        $this->assertSame(self::TEST_TENANT_ID, $claims['active_tenant_id']);
         $this->assertSame('access', $claims['type']);
         $this->assertArrayHasKey('jti', $claims);
     }
@@ -237,8 +237,8 @@ class AuthFlowTest extends TestCase
     private function mintAccess(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
+            'profile_id' => self::TEST_USER_ID,
+            'active_tenant_id' => self::TEST_TENANT_ID,
             'email' => self::TEST_USER_EMAIL,
             'role' => self::TEST_ROLE_NAME,
             'token_epoch' => $epoch,
@@ -248,8 +248,8 @@ class AuthFlowTest extends TestCase
     private function mintRefresh(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
+            'profile_id' => self::TEST_USER_ID,
+            'active_tenant_id' => self::TEST_TENANT_ID,
             'email' => self::TEST_USER_EMAIL,
             'role' => self::TEST_ROLE_NAME,
             'token_epoch' => $epoch,

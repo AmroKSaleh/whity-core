@@ -153,11 +153,11 @@ class BodyTokenModeTest extends TestCase
 
         // Mint a token with a TTL far enough in the past to exceed the 60s leeway.
         $expiredToken = $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => 0,
+            'profile_id'      => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'           => self::EMAIL,
+            'role'            => self::ROLE_NAME,
+            'token_epoch'     => 0,
         ], -120, 'access'); // 120s past → outside 60s leeway → expired
 
         $request  = new Request('GET', '/api/me', ['Authorization' => 'Bearer ' . $expiredToken]);
@@ -191,7 +191,7 @@ class BodyTokenModeTest extends TestCase
 
         // Mint with epoch 0, then bump the user's epoch to 1 in the DB.
         $staleToken = $this->mintAccess(0);
-        $this->pdo->exec('UPDATE users SET token_epoch = 1 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 1 WHERE id = ' . self::USER_ID);
 
         $request  = new Request('GET', '/api/me', ['Authorization' => 'Bearer ' . $staleToken]);
         $response = $handler->handleMe($request);
@@ -199,7 +199,7 @@ class BodyTokenModeTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
 
         // Reset epoch for subsequent tests.
-        $this->pdo->exec('UPDATE users SET token_epoch = 0 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 0 WHERE id = ' . self::USER_ID);
     }
 
     /**
@@ -238,7 +238,7 @@ class BodyTokenModeTest extends TestCase
 
         // Invalid Bearer (expired) — should be ignored.
         $badBearer = $this->jwtParser->create([
-            'user_id' => self::USER_ID, 'tenant_id' => self::TENANT_ID,
+            'profile_id' => self::USER_ID, 'active_tenant_id' => self::TENANT_ID,
             'email' => self::EMAIL, 'role' => self::ROLE_NAME, 'token_epoch' => 0,
         ], -1, 'access');
 
@@ -361,7 +361,7 @@ class BodyTokenModeTest extends TestCase
 
         $staleRefresh = $this->mintRefresh(0);
         // Bump epoch.
-        $this->pdo->exec('UPDATE users SET token_epoch = 1 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 1 WHERE id = ' . self::USER_ID);
 
         $body    = json_encode(['refresh_token' => $staleRefresh]);
         $request = new Request('POST', '/api/auth/refresh', ['X-Auth-Mode' => 'token'], (string) $body);
@@ -370,7 +370,7 @@ class BodyTokenModeTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
 
         // Reset.
-        $this->pdo->exec('UPDATE users SET token_epoch = 0 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 0 WHERE id = ' . self::USER_ID);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -891,11 +891,11 @@ class BodyTokenModeTest extends TestCase
     private function mintAccess(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => $epoch,
+            'profile_id'      => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'           => self::EMAIL,
+            'role'            => self::ROLE_NAME,
+            'token_epoch'     => $epoch,
         ], 900, 'access');
     }
 
@@ -905,11 +905,11 @@ class BodyTokenModeTest extends TestCase
     private function mintRefresh(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => $epoch,
+            'profile_id'      => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'           => self::EMAIL,
+            'role'            => self::ROLE_NAME,
+            'token_epoch'     => $epoch,
         ], 604800, 'refresh');
     }
 

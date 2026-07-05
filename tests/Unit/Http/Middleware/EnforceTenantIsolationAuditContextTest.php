@@ -74,8 +74,9 @@ final class EnforceTenantIsolationAuditContextTest extends TestCase
     }
 
     /**
-     * A legacy dual-claim token still stamps its user_id (unchanged behaviour):
-     * user_id takes precedence over profile_id when both are present.
+     * A dual-claim token (carrying both profile_id and user_id) stamps profile_id
+     * as the audit actor. Post-cutover, profile_id is the canonical identity
+     * (ADR 0005 §1) and userIdFromPayload() returns profile_id exclusively.
      */
     public function testLegacyTokenStampsUserIdAsAuditActor(): void
     {
@@ -97,9 +98,9 @@ final class EnforceTenantIsolationAuditContextTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         self::assertSame(
-            123,
+            777,
             AuditContext::getActorUserId(),
-            'A dual-claim token must stamp the legacy user_id (123) as the audit actor.'
+            'Post-cutover: userIdFromPayload() returns profile_id (777) as the canonical audit actor.'
         );
     }
 }

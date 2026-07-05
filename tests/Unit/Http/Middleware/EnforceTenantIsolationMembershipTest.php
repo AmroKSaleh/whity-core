@@ -144,14 +144,15 @@ final class EnforceTenantIsolationMembershipTest extends TestCase
 
     public function testLegacyTokenBypassesMembershipGate(): void
     {
-        // No profiles/memberships involvement at all: current behaviour exactly.
+        // Post-cutover (WC-idcut-E): the dual-claim window is gone. Tokens without
+        // {profile_id, active_tenant_id} are rejected at the membership gate with
+        // 401 — there is no longer a legacy pass-through path.
         $response = $this->dispatch([
             'user_id' => 5,
             'tenant_id' => self::TENANT_A,
         ]);
 
-        self::assertSame(200, $response->getStatusCode());
-        self::assertSame(self::TENANT_A, TenantContext::getTenantId());
+        self::assertSame(401, $response->getStatusCode());
     }
 
     public function testMiddlewareWithoutGuardKeepsCurrentBehaviour(): void

@@ -168,9 +168,10 @@ PHP);
     private function authedRequest(int $userId): Request
     {
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => "u{$userId}@example.com",
-            'tenant_id' => self::TENANT,
+            'profile_id'       => $userId,
+            'email'            => "u{$userId}@example.com",
+            'active_tenant_id' => self::TENANT,
+            'token_epoch'      => 0,
         ]);
 
         return new Request('GET', '/api/guarded/things', ['Authorization' => "Bearer {$token}"]);
@@ -200,9 +201,14 @@ PHP);
         }
 
         $this->pdo->prepare(
-            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([$userId, self::TENANT, "u{$userId}@example.com", 'x', $roleId]);
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([$userId, "u{$userId}"]);
+
+        $this->pdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$userId, self::TENANT, $roleId]);
     }
 
     private function makeSchema(): PDO

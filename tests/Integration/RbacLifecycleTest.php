@@ -93,10 +93,10 @@ class RbacLifecycleTest extends TestCase
         $db = $this->createMock(Database::class);
         $db->method('query')->willReturnCallback(
             function (string $sql, array $params) use ($parents, $permsByRole): PDOStatement {
-                // users.role_id lookup (getRoleIdForUser).
-                if (str_contains($sql, 'SELECT role_id FROM users')) {
-                    $userId = $params[':userId'];
-                    return $this->statement(['role_id' => $userId]);
+                // memberships row lookup (getMembershipRow).
+                if (str_contains($sql, 'FROM memberships')) {
+                    $profileId = $params[':profileId'];
+                    return $this->statement(['role_id' => $profileId, 'ou_id' => null, 'status' => 'active']);
                 }
 
                 // roles.parent_id lookup (getParentRoleId).
@@ -166,7 +166,7 @@ class RbacLifecycleTest extends TestCase
         $router->register('GET', '/api/users', static fn(): Response => new Response(200, '[]'), null, null, CorePermissions::USERS_READ);
 
         // user id 2 -> role id 2 (admin) by the fixture convention.
-        $token = $jwtParser->create(['user_id' => 2, 'email' => 'admin@example.com']);
+        $token = $jwtParser->create(['profile_id' => 2, 'active_tenant_id' => self::TENANT, 'email' => 'admin@example.com', 'token_epoch' => 0]);
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $handlerReached = false;
@@ -178,7 +178,7 @@ class RbacLifecycleTest extends TestCase
         $this->assertTrue($handlerReached, 'Admin must reach the route via inherited viewer:users:read');
         $this->assertSame(200, $response->getStatusCode());
         $this->assertNotNull($request->user);
-        $this->assertSame(2, $request->user->user_id);
+        $this->assertSame(2, $request->user->profile_id);
     }
 
     /**
@@ -203,7 +203,7 @@ class RbacLifecycleTest extends TestCase
         $router = new Router('');
         $router->register('DELETE', '/api/users/{id}', static fn(): Response => new Response(204, ''), null, null, CorePermissions::USERS_DELETE);
 
-        $token = $jwtParser->create(['user_id' => 4, 'email' => 'viewer@example.com']);
+        $token = $jwtParser->create(['profile_id' => 4, 'active_tenant_id' => self::TENANT, 'email' => 'viewer@example.com', 'token_epoch' => 0]);
         $request = new Request('DELETE', '/api/users/9', ['Authorization' => "Bearer {$token}"]);
 
         $handlerReached = false;
@@ -239,7 +239,7 @@ class RbacLifecycleTest extends TestCase
         $router->register('POST', '/api/users', static fn(): Response => new Response(201, '{}'), null, null, CorePermissions::USERS_WRITE);
         $router->register('DELETE', '/api/users/{id}', static fn(): Response => new Response(204, ''), null, null, CorePermissions::USERS_DELETE);
 
-        $token = $jwtParser->create(['user_id' => 4, 'email' => 'reader@example.com']);
+        $token = $jwtParser->create(['profile_id' => 4, 'active_tenant_id' => self::TENANT, 'email' => 'reader@example.com', 'token_epoch' => 0]);
 
         // GET is allowed.
         $getReached = false;
@@ -296,8 +296,8 @@ class RbacLifecycleTest extends TestCase
         $db = $this->createMock(Database::class);
         $db->method('query')->willReturnCallback(
             function (string $sql, array $params) use (&$hierarchyQueryCount): PDOStatement {
-                if (str_contains($sql, 'SELECT role_id FROM users')) {
-                    return $this->statement(['role_id' => 4]);
+                if (str_contains($sql, 'FROM memberships')) {
+                    return $this->statement(['role_id' => 4, 'ou_id' => null, 'status' => 'active']);
                 }
                 if (str_contains($sql, 'SELECT parent_id FROM roles')) {
                     $hierarchyQueryCount++;
@@ -315,7 +315,7 @@ class RbacLifecycleTest extends TestCase
         $router = new Router('');
         $router->register('GET', '/api/users', static fn(): Response => new Response(200, '[]'), null, null, CorePermissions::USERS_READ);
 
-        $token = $jwtParser->create(['user_id' => 4, 'email' => 'reader@example.com']);
+        $token = $jwtParser->create(['profile_id' => 4, 'active_tenant_id' => self::TENANT, 'email' => 'reader@example.com', 'token_epoch' => 0]);
 
         $first = $this->dispatch($router, $middleware, new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]), static fn(Request $req): Response => new Response(200, '[]'));
         $this->assertSame(200, $first->getStatusCode());

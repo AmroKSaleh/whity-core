@@ -297,7 +297,8 @@ class EnforceTenantIsolationTest extends TestCase
         $logger = $this->collectingLogger();
         $middleware = new EnforceTenantIsolation($this->mockJwtParser, $logger);
 
-        $payload = ['user_id' => 1, 'tenant_id' => 0, 'email' => 'root@system'];
+        // Post-cutover: system token uses profile_id + active_tenant_id (0 = system tenant).
+        $payload = ['profile_id' => 1, 'active_tenant_id' => 0, 'email' => 'root@system'];
         $this->mockJwtParser->method('parse')->willReturn($payload);
 
         $request = new Request('DELETE', '/api/tenants/7', ['Authorization' => 'Bearer sys.token']);
@@ -323,6 +324,7 @@ class EnforceTenantIsolationTest extends TestCase
         $record = $bypassRecords[0];
         $this->assertSame(0, $record['context']['tenant_id']);
         $this->assertSame(7, $record['context']['resource_tenant_id']);
+        // Post-cutover: userIdFromPayload returns profile_id (1) as the audit actor.
         $this->assertSame(1, $record['context']['user_id']);
         $this->assertArrayHasKey('path', $record['context']);
     }
@@ -505,7 +507,8 @@ class EnforceTenantIsolationTest extends TestCase
         $logger = $this->collectingLogger();
         $middleware = new EnforceTenantIsolation($this->mockJwtParser, $logger);
 
-        $payload = ['user_id' => 5, 'tenant_id' => 1, 'email' => 'a@t1'];
+        // Post-cutover: use profile_id + active_tenant_id claims.
+        $payload = ['profile_id' => 5, 'active_tenant_id' => 1, 'email' => 'a@t1'];
         $this->mockJwtParser->method('parse')->willReturn($payload);
 
         $request = new Request('GET', '/api/resource', [
@@ -526,6 +529,7 @@ class EnforceTenantIsolationTest extends TestCase
         $this->assertCount(1, $denials, 'A refused cross-tenant attempt must be audited');
         $this->assertSame(1, $denials[0]['context']['tenant_id'], 'caller tenant');
         $this->assertSame(2, $denials[0]['context']['resource_tenant_id'], 'declared target');
+        // Post-cutover: userIdFromPayload returns profile_id (5) as the audit actor.
         $this->assertSame(5, $denials[0]['context']['user_id']);
         $this->assertArrayHasKey('path', $denials[0]['context']);
     }

@@ -77,9 +77,14 @@ class RbacAuthEdgeCaseTest extends TestCase
                 ->execute([$roleId, $permissionId]);
         }
         $pdo->prepare(
-            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([$userId, self::TENANT, "u{$userId}@example.com", 'x', $roleId]);
+            "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([$userId, "user{$userId}"]);
+
+        $pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$userId, self::TENANT, $roleId]);
 
         return new RoleChecker($this->wrapSqlite($pdo), new PermissionRegistry());
     }
@@ -210,7 +215,7 @@ class RbacAuthEdgeCaseTest extends TestCase
         $jwtParser = new JwtParser(self::SECRET);
         $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting(8, [CorePermissions::USERS_READ]));
 
-        $token = $jwtParser->create(['user_id' => 8, 'email' => 'cookie@example.com']);
+        $token = $jwtParser->create(['profile_id' => 8, 'active_tenant_id' => self::TENANT, 'email' => 'cookie@example.com', 'token_epoch' => 0]);
         $request = new Request(
             'GET',
             '/api/users',
@@ -251,7 +256,7 @@ class RbacAuthEdgeCaseTest extends TestCase
     public function testMalformedHeaderDoesNotFallThroughToValidCookie(): void
     {
         $jwtParser = new JwtParser(self::SECRET);
-        $valid = $jwtParser->create(['user_id' => 10, 'email' => 'mixed@example.com']);
+        $valid = $jwtParser->create(['profile_id' => 10, 'active_tenant_id' => self::TENANT, 'email' => 'mixed@example.com', 'token_epoch' => 0]);
         $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting(10, [CorePermissions::USERS_READ]));
 
         // Malformed header ("Bearer" with no token) is treated as absent, so the
@@ -283,10 +288,12 @@ class RbacAuthEdgeCaseTest extends TestCase
         $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerGranting(11, []));
 
         $token = $jwtParser->create([
-            'user_id' => 11,
+            'profile_id' => 11,
+            'active_tenant_id' => self::TENANT,
             'email' => 'attacker@example.com',
             'role' => 'super_admin',     // forged elevation, must be ignored
             'permissions' => ['users:delete'],
+            'token_epoch' => 0,
         ]);
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
@@ -306,7 +313,7 @@ class RbacAuthEdgeCaseTest extends TestCase
         $jwtParser = new JwtParser(self::SECRET);
         $middleware = new RbacMiddleware($jwtParser, $this->roleCheckerThatMustNotBeQueried());
 
-        $token = $jwtParser->create(['user_id' => 'not-an-int', 'email' => 'bad@example.com']);
+        $token = $jwtParser->create(['profile_id' => 'not-an-int', 'email' => 'bad@example.com']);
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $handlerReached = null;

@@ -216,9 +216,9 @@ class WorkerLoopAuditSurvivalTest extends TestCase
 
         $jwtParser = $this->createMock(JwtParser::class);
         $jwtParser->method('parse')->willReturn([
-            'user_id' => 9,
-            'tenant_id' => 1,
-            'email' => 'svc@t1',
+            'profile_id'       => 9,
+            'active_tenant_id' => 1,
+            'email'            => 'svc@t1',
         ]);
         $isolation = new EnforceTenantIsolation($jwtParser, $logger);
 
