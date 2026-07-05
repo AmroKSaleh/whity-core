@@ -110,7 +110,7 @@ final class NavigationApiHandlerRealEngineTest extends TestCase
                 $roleArgs[] = [$userId, $role, $tenantId];
                 return true;
             });
-        $roleChecker->method('hasPermission')
+        $roleChecker->method('hasPermissionForProfile')
             ->willReturnCallback(function (int $userId, string $permission, int $tenantId) use (&$permArgs): bool {
                 $permArgs[] = [$userId, $permission, $tenantId];
                 return true;
@@ -164,7 +164,7 @@ final class NavigationApiHandlerRealEngineTest extends TestCase
         TenantContext::setTenantId(1);
 
         $request = new Request('GET', '/api/navigation');
-        $request->user = (object) ['user_id' => 'not-an-int'];
+        $request->user = (object) ['profile_id' => 'not-an-int'];
 
         $response = $this->handler(['admin'], [])->list($request);
 
@@ -227,7 +227,7 @@ final class NavigationApiHandlerRealEngineTest extends TestCase
             ->willReturnCallback(
                 static fn (int $userId, string $role, int $tenantId): bool => in_array($role, $roles, true)
             );
-        $roleChecker->method('hasPermission')
+        $roleChecker->method('hasPermissionForProfile')
             ->willReturnCallback(
                 static fn (int $userId, string $permission, int $tenantId): bool => in_array($permission, $permissions, true)
             );
@@ -238,7 +238,7 @@ final class NavigationApiHandlerRealEngineTest extends TestCase
     private function authedRequest(int $userId): Request
     {
         $request = new Request('GET', '/api/navigation');
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
 
         return $request;
     }

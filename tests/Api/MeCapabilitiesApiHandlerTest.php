@@ -108,7 +108,7 @@ final class MeCapabilitiesApiHandlerTest extends TestCase
         TenantContext::setTenantId(1);
 
         $request = new Request('GET', '/api/me/capabilities');
-        $request->user = (object) ['user_id' => 'not-an-int'];
+        $request->user = (object) ['profile_id' => 'not-an-int'];
 
         $response = $this->handler(['relations:read'])->list($request);
 
@@ -149,7 +149,7 @@ final class MeCapabilitiesApiHandlerTest extends TestCase
     private function authedRequest(int $userId): Request
     {
         $request = new Request('GET', '/api/me/capabilities');
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
 
         return $request;
     }

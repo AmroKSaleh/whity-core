@@ -242,7 +242,7 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
     private function handler(bool $grant = true): AuditLogApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->willReturn($grant);
+        $roleChecker->method('hasPermissionForProfile')->willReturn($grant);
 
         return new AuditLogApiHandler($this->pdo, $roleChecker);
     }
@@ -253,7 +253,7 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
     private function authedRequest(string $path, int $userId): Request
     {
         $request = new Request('GET', $path);
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
         return $request;
     }
 

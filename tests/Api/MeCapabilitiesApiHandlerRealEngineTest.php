@@ -241,7 +241,7 @@ final class MeCapabilitiesApiHandlerRealEngineTest extends TestCase
     private function authedRequest(int $userId): Request
     {
         $request = new Request('GET', '/api/me/capabilities');
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
 
         return $request;
     }

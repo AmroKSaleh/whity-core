@@ -206,7 +206,7 @@ PHP);
 
         $seen = [];
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')
+        $roleChecker->method('hasPermissionForProfile')
             ->willReturnCallback(function (int $userId, string $permission, int $tenantId) use (&$seen): bool {
                 $seen[] = [$userId, $permission, $tenantId];
                 return true;
@@ -360,7 +360,7 @@ PHP);
         TenantContext::setTenantId(1);
 
         $request = new Request('GET', '/api/frontend/features');
-        $request->user = (object) ['user_id' => 'not-an-int'];
+        $request->user = (object) ['profile_id' => 'not-an-int'];
 
         $response = $this->handler(['featapi:view'])->list($request);
 
@@ -377,7 +377,7 @@ PHP);
     private function handler(array $granted): FrontendFeaturesApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')
+        $roleChecker->method('hasPermissionForProfile')
             ->willReturnCallback(
                 static fn (int $userId, string $permission, int $tenantId): bool => in_array($permission, $granted, true)
             );
@@ -388,7 +388,7 @@ PHP);
     private function authedRequest(int $userId): Request
     {
         $request = new Request('GET', '/api/frontend/features');
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
 
         return $request;
     }
