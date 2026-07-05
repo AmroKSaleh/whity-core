@@ -14,6 +14,13 @@ use Whity\Auth\JwtParser;
  * Issued JTIs are tracked in `mcp_tokens`; revocation inserts the JTI into
  * the shared `revoked_tokens` table, consistent with access/refresh revocation.
  *
+ * After migration 040, mcp_tokens is keyed on profiles.id (profile_id) rather
+ * than users.id. Issued tokens carry `profile_id` in their JWT claims.
+ * The dual-claim window (session bearer via validateSessionBearerForMcp) is
+ * unaffected: session tokens still carry user_id and are resolved by
+ * principalIdsFromClaims(), which falls back to profile_id when user_id is
+ * absent — so both token shapes keep working through step E.
+ *
  * Worker-safe: no static/global state — all state is per-call on the stack.
  */
 final class McpTokenService
@@ -33,18 +40,24 @@ final class McpTokenService
      * @param string   $principalKind Principal kind (default 'user').
      */
     public function issue(
-        int $userId,
+        int $profileId,
         int $tenantId,
         string $name,
         array $scope,
         string $principalKind = 'user',
     ): string {
+        // Emit the new-claims pair {profile_id, active_tenant_id} so the
+        // membership gate can validate the token's declared tenant binding.
+        // Also keep tenant_id for the dual-claim window (principalIdsFromClaims
+        // falls back to it) and to satisfy the split-brain invariant (tenant_id
+        // must equal active_tenant_id when both are present).
         $token = $this->jwtParser->create([
-            'user_id'        => $userId,
-            'tenant_id'      => $tenantId,
-            'aud'            => 'mcp',
-            'principal_kind' => $principalKind,
-            'scope'          => $scope,
+            'profile_id'       => $profileId,
+            'active_tenant_id' => $tenantId,
+            'tenant_id'        => $tenantId,
+            'aud'              => 'mcp',
+            'principal_kind'   => $principalKind,
+            'scope'            => $scope,
         ], self::TOKEN_LIFETIME_SECONDS, 'mcp');
 
         $claims = $this->jwtParser->parse($token);
@@ -53,12 +66,12 @@ final class McpTokenService
         }
 
         $stmt = $this->db->prepare("
-            INSERT INTO mcp_tokens (jti, user_id, tenant_id, name, principal_kind, scope, expires_at)
+            INSERT INTO mcp_tokens (jti, profile_id, tenant_id, name, principal_kind, scope, expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ");
         $stmt->execute([
             $claims['jti'],
-            $userId,
+            $profileId,
             $tenantId,
             $name,
             $principalKind,
@@ -70,16 +83,16 @@ final class McpTokenService
     }
 
     /**
-     * List active (non-expired, non-revoked) MCP tokens for a user + tenant.
+     * List active (non-expired, non-revoked) MCP tokens for a profile + tenant.
      *
      * @return list<array<string, mixed>>
      */
-    public function listForUser(int $userId, int $tenantId): array
+    public function listForUser(int $profileId, int $tenantId): array
     {
         $stmt = $this->db->prepare("
             SELECT t.jti, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
             FROM   mcp_tokens t
-            WHERE  t.user_id = ?
+            WHERE  t.profile_id = ?
               AND  t.tenant_id = ?
               AND  t.expires_at > NOW()
               AND  NOT EXISTS (
@@ -87,7 +100,7 @@ final class McpTokenService
                    )
             ORDER BY t.created_at DESC
         ");
-        $stmt->execute([$userId, $tenantId]);
+        $stmt->execute([$profileId, $tenantId]);
 
         $rows = $stmt->fetchAll();
         if (!is_array($rows)) {
@@ -105,17 +118,17 @@ final class McpTokenService
      * Revoke a token by inserting its JTI into revoked_tokens.
      *
      * Returns false when the JTI does not exist or belongs to a different
-     * user/tenant (authorization guard).
+     * profile/tenant (authorization guard).
      */
-    public function revoke(string $jti, int $userId, int $tenantId): bool
+    public function revoke(string $jti, int $profileId, int $tenantId): bool
     {
-        // Ownership check: only the issuing user + tenant can revoke
+        // Ownership check: only the issuing profile + tenant can revoke
         $stmt = $this->db->prepare("
             SELECT expires_at FROM mcp_tokens
-            WHERE jti = ? AND user_id = ? AND tenant_id = ?
+            WHERE jti = ? AND profile_id = ? AND tenant_id = ?
             LIMIT 1
         ");
-        $stmt->execute([$jti, $userId, $tenantId]);
+        $stmt->execute([$jti, $profileId, $tenantId]);
         $row = $stmt->fetch();
 
         if ($row === false) {

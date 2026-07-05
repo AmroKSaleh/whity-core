@@ -75,7 +75,8 @@ final class TenantOwnedTables
 
         // WC-2686308f (Phase C) — MCP AI-principal token registry (migration 033).
         // Long-lived machine/service tokens scoped to a tenant; tenant isolation
-        // is enforced on listing and revocation by binding user_id + tenant_id.
+        // is enforced on listing and revocation by binding profile_id + tenant_id
+        // (re-keyed from user_id by migration 040).
         'mcp_tokens' => '033_create_mcp_tokens.php',
     ];
 

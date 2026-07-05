@@ -20,13 +20,16 @@ use Whity\Core\Tenant\TenantContext;
  * not the forgiving behaviour of mocked PDO. STRINGIFY_FETCHES is enabled so
  * integer-vs-string comparison bugs surface as they do under PostgreSQL.
  *
+ * After migration 040, mcp_tokens is keyed on profiles.id (profile_id).
+ * Fixture helpers insert profile_id rather than user_id.
+ *
  * Acceptance focus:
  *  - Tenant data isolation: tenant A sees only A's tokens, system tenant (id 0) sees all.
  *  - Revoked tokens are excluded from the listing.
  *  - Expired tokens are excluded from the listing.
  *  - Fail-closed when the tenant context is unresolved.
  *  - Defence-in-depth permission re-check (denied → 403).
- *  - Admin revoke: removes tokens from any user in the tenant; returns 404 for unknown JTI.
+ *  - Admin revoke: removes tokens from any profile in the tenant; returns 404 for unknown JTI.
  *  - Admin revoke: system tenant may revoke tokens from any tenant.
  *  - Admin revoke: regular tenant may not revoke tokens belonging to another tenant.
  */
@@ -39,6 +42,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->pdo = SchemaFromMigrations::make(true);
         $_GET = [];
         TenantContext::reset();
+        $this->seedBaseFixtures();
     }
 
     protected function tearDown(): void
@@ -55,7 +59,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->seedToken('jti-b', 20, 2, 'Bot B');
 
         TenantContext::setTenantId(1);
-        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 10));
+        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 1));
 
         $this->assertSame(200, $response->getStatusCode());
         $body = json_decode($response->getBody(), true);
@@ -85,7 +89,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->revokeToken('jti-revoked');
 
         TenantContext::setTenantId(1);
-        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 10));
+        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 1));
 
         $body = json_decode($response->getBody(), true);
         $this->assertCount(1, $body['data']);
@@ -98,7 +102,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->seedExpiredToken('jti-expired', 10, 1, 'Expired');
 
         TenantContext::setTenantId(1);
-        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 10));
+        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 1));
 
         $body = json_decode($response->getBody(), true);
         $this->assertCount(1, $body['data']);
@@ -109,14 +113,14 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
 
     public function testUnresolvedTenantContextFailsClosed(): void
     {
-        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 10));
+        $response = $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 1));
         $this->assertSame(403, $response->getStatusCode());
     }
 
     public function testPermissionDeniedReturns403ForList(): void
     {
         TenantContext::setTenantId(1);
-        $response = $this->handler(false)->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 10));
+        $response = $this->handler(false)->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 1));
         $this->assertSame(403, $response->getStatusCode());
         $body = json_decode($response->getBody(), true);
         $this->assertSame('mcp:tokens:manage', $body['details']['required']);
@@ -127,7 +131,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->seedToken('jti-a', 10, 1, 'Bot A');
         TenantContext::setTenantId(1);
         $response = $this->handler(false)->revoke(
-            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-a', 10),
+            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-a', 1),
             ['jti' => 'jti-a']
         );
         $this->assertSame(403, $response->getStatusCode());
@@ -143,13 +147,13 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $handler = $this->handler();
 
         $revokeResponse = $handler->revoke(
-            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-a', 10),
+            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-a', 1),
             ['jti' => 'jti-a']
         );
         $this->assertSame(204, $revokeResponse->getStatusCode());
 
         // Verify the token is now excluded from the listing.
-        $listResponse = $handler->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 10));
+        $listResponse = $handler->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 1));
         $body = json_decode($listResponse->getBody(), true);
         $this->assertCount(0, $body['data']);
     }
@@ -158,7 +162,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
     {
         TenantContext::setTenantId(1);
         $response = $this->handler()->revoke(
-            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/nonexistent', 10),
+            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/nonexistent', 1),
             ['jti' => 'nonexistent']
         );
         $this->assertSame(404, $response->getStatusCode());
@@ -170,7 +174,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
 
         TenantContext::setTenantId(1);
         $response = $this->handler()->revoke(
-            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-other', 10),
+            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-other', 1),
             ['jti' => 'jti-other']
         );
         $this->assertSame(404, $response->getStatusCode());
@@ -194,11 +198,8 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->revokeToken('jti-a');
 
         TenantContext::setTenantId(1);
-        // A pre-revoked token is already in revoked_tokens but still in mcp_tokens.
-        // The ownership check passes (mcp_tokens row exists and matches the tenant).
-        // The INSERT … ON CONFLICT DO NOTHING makes the second revoke a no-op.
         $response = $this->handler()->revoke(
-            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-a', 10),
+            $this->authedRequest('DELETE', '/api/admin/mcp/tokens/jti-a', 1),
             ['jti' => 'jti-a']
         );
         $this->assertSame(204, $response->getStatusCode());
@@ -212,13 +213,15 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
 
         TenantContext::setTenantId(1);
         $body = json_decode(
-            $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 10))->getBody(),
+            $this->handler()->list($this->authedRequest('GET', '/api/admin/mcp/tokens', 1))->getBody(),
             true
         );
 
         $entry = $body['data'][0];
         $this->assertArrayHasKey('id', $entry);
         $this->assertArrayHasKey('jti', $entry);
+        $this->assertArrayHasKey('profileId', $entry);
+        // userId is still present (= profileId) for backward compat during the dual-window
         $this->assertArrayHasKey('userId', $entry);
         $this->assertArrayHasKey('tenantId', $entry);
         $this->assertArrayHasKey('name', $entry);
@@ -229,6 +232,8 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->assertIsArray($entry['scope']);
         $this->assertSame('jti-x', $entry['jti']);
         $this->assertSame('Shape Test', $entry['name']);
+        // profileId must equal userId (both come from profile_id column after 040)
+        $this->assertSame($entry['profileId'], $entry['userId']);
     }
 
     // ====================== Helpers ======================
@@ -252,35 +257,64 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * Seed an active token (expires in the future) for the given user and tenant.
+     * Seed base tenants and profiles needed by token fixtures.
+     */
+    private function seedBaseFixtures(): void
+    {
+        $this->pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 'Tenant One') ON CONFLICT DO NOTHING");
+        $this->pdo->exec("INSERT INTO tenants (id, name) VALUES (2, 'Tenant Two') ON CONFLICT DO NOTHING");
+
+        $hash = password_hash('pw', PASSWORD_BCRYPT);
+        // Profile 10 for tenant 1 tokens
+        $this->pdo->prepare("
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+            VALUES (10, 'Profile Ten', ?, false, 0, 0, datetime('now'), datetime('now'))
+            ON CONFLICT DO NOTHING
+        ")->execute([$hash]);
+        // Profile 20 for tenant 2 tokens
+        $this->pdo->prepare("
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+            VALUES (20, 'Profile Twenty', ?, false, 0, 0, datetime('now'), datetime('now'))
+            ON CONFLICT DO NOTHING
+        ")->execute([$hash]);
+    }
+
+    /**
+     * Seed an active token (expires in the future) for the given profile and tenant.
      *
      * @param string[] $scope
      */
     private function seedToken(
         string $jti,
-        int $userId,
+        int $profileId,
         int $tenantId,
         string $name,
         array $scope = ['tools:call'],
         string $principalKind = 'user',
     ): void {
         $stmt = $this->pdo->prepare("
-            INSERT INTO mcp_tokens (jti, user_id, tenant_id, name, principal_kind, scope, expires_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+90 days'), datetime('now'))
+            INSERT INTO mcp_tokens (jti, profile_id, tenant_id, name, principal_kind, scope, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
         ");
-        $stmt->execute([$jti, $userId, $tenantId, $name, $principalKind, json_encode($scope)]);
+        // Compute dates in PHP so both SQLite and PG accept the ISO format.
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+90 days'));
+        $stmt->execute([$jti, $profileId, $tenantId, $name, $principalKind, json_encode($scope), $expiresAt]);
     }
 
     /**
-     * Seed an already-expired token for the given user and tenant.
+     * Seed an already-expired token for the given profile and tenant.
      */
-    private function seedExpiredToken(string $jti, int $userId, int $tenantId, string $name): void
+    private function seedExpiredToken(string $jti, int $profileId, int $tenantId, string $name): void
     {
         $stmt = $this->pdo->prepare("
-            INSERT INTO mcp_tokens (jti, user_id, tenant_id, name, principal_kind, scope, expires_at, created_at)
-            VALUES (?, ?, ?, ?, 'user', '[]', datetime('now', '-1 day'), datetime('now', '-2 days'))
+            INSERT INTO mcp_tokens (jti, profile_id, tenant_id, name, principal_kind, scope, expires_at, created_at)
+            VALUES (?, ?, ?, ?, 'user', '[]', ?, ?)
         ");
-        $stmt->execute([$jti, $userId, $tenantId, $name]);
+        $expiresAt = date('Y-m-d H:i:s', strtotime('-1 day'));
+        $createdAt = date('Y-m-d H:i:s', strtotime('-2 days'));
+        $stmt->execute([$jti, $profileId, $tenantId, $name, $expiresAt, $createdAt]);
     }
 
     /**
@@ -290,9 +324,10 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
     {
         $stmt = $this->pdo->prepare("
             INSERT INTO revoked_tokens (jti, expires_at)
-            VALUES (?, datetime('now', '+90 days'))
+            VALUES (?, ?)
             ON CONFLICT (jti) DO NOTHING
         ");
-        $stmt->execute([$jti]);
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+90 days'));
+        $stmt->execute([$jti, $expiresAt]);
     }
 }

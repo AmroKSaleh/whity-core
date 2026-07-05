@@ -12,12 +12,18 @@ use Whity\Core\Response;
  * HTTP handler for MCP token management endpoints (WC-2686308f).
  *
  *   POST   /api/mcp/tokens          — issue a new MCP token
- *   GET    /api/mcp/tokens          — list active tokens for the current user
+ *   GET    /api/mcp/tokens          — list active tokens for the current profile
  *   DELETE /api/mcp/tokens/{jti}    — revoke a token
  *
  * All endpoints require a valid access token cookie (human user performing
  * the action). The issued MCP tokens are then used as Bearer tokens on
  * POST /mcp (machine-to-machine calls from AI clients).
+ *
+ * After migration 040, issued tokens carry `profile_id` in their JWT claims.
+ * The caller's profile_id is resolved from the session token claims via
+ * `profile_id` (preferred) falling back to `user_id` for the dual-window
+ * period. This is correct: the session token during the dual-window carries
+ * both user_id and profile_id; after step E only profile_id remains.
  */
 final class McpTokenHandler
 {
@@ -62,10 +68,14 @@ final class McpTokenHandler
             }
         }
 
-        $userId   = (int) $claims['user_id'];
-        $tenantId = (int) $claims['tenant_id'];
+        // Prefer profile_id from session token (dual-window: session tokens carry
+        // both user_id and profile_id during the window; post-E only profile_id).
+        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
+            ? $claims['profile_id']
+            : (int) ($claims['user_id'] ?? 0);
+        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
 
-        $token = $this->mcpTokenService->issue($userId, $tenantId, $name, $scope);
+        $token = $this->mcpTokenService->issue($profileId, $tenantId, $name, $scope);
         ['jti' => $jti, 'exp' => $exp] = $this->extractClaims($token);
 
         return new Response(201, (string) json_encode([
@@ -93,10 +103,12 @@ final class McpTokenHandler
             return Response::error('Unauthenticated', 401);
         }
 
-        $userId   = (int) $claims['user_id'];
-        $tenantId = (int) $claims['tenant_id'];
+        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
+            ? $claims['profile_id']
+            : (int) ($claims['user_id'] ?? 0);
+        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
 
-        $tokens = $this->mcpTokenService->listForUser($userId, $tenantId);
+        $tokens = $this->mcpTokenService->listForUser($profileId, $tenantId);
 
         return new Response(200, (string) json_encode(['tokens' => $tokens], JSON_THROW_ON_ERROR), [
             'Content-Type' => 'application/json',
@@ -106,7 +118,7 @@ final class McpTokenHandler
     /**
      * DELETE /api/mcp/tokens/{jti}
      *
-     * Returns 204 on success, 404 if the JTI is unknown or belongs to another user.
+     * Returns 204 on success, 404 if the JTI is unknown or belongs to another profile.
      *
      * @param array<string, mixed> $params
      */
@@ -122,10 +134,12 @@ final class McpTokenHandler
             return Response::error('jti is required', 400);
         }
 
-        $userId   = (int) $claims['user_id'];
-        $tenantId = (int) $claims['tenant_id'];
+        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
+            ? $claims['profile_id']
+            : (int) ($claims['user_id'] ?? 0);
+        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
 
-        if (!$this->mcpTokenService->revoke($jti, $userId, $tenantId)) {
+        if (!$this->mcpTokenService->revoke($jti, $profileId, $tenantId)) {
             return Response::error('Token not found', 404);
         }
 

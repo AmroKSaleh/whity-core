@@ -64,6 +64,9 @@ final class ToolsCallRbacRealEngineTest extends TestCase
     /** @var array<string, int> email => user id */
     private array $userIds = [];
 
+    /** @var array<string, int> email => profile id (for mcp_tokens issuance after migration 040) */
+    private array $profileIds = [];
+
     protected function setUp(): void
     {
         ToolDeriver::clearCache();
@@ -233,43 +236,49 @@ final class ToolsCallRbacRealEngineTest extends TestCase
 
     public function testOuGrant_doesNotLeakToADifferentTenant(): void
     {
-        // Same user, a token forged for tenant B. The OU assignment is scoped to
-        // tenant A, and the user row is read under tenant B (finding no OU), so the
-        // write grant must NOT cross the tenant boundary.
+        // Same profile, token claiming tenant B. The profile has no active membership
+        // in tenant B, so the ActiveTenantMembershipGuard rejects the token at auth
+        // (UNAUTHENTICATED). This is strictly MORE secure than failing at RBAC —
+        // the caller cannot even probe whether the tool exists.
         $tokenB = $this->mcpTokenFor('ou@a.test', self::TENANT_B);
         $r = $this->callTool($tokenB, 'create_widgets', ['name' => 'cross-tenant']);
 
-        self::assertSame(
-            ErrorCode::FORBIDDEN,
+        self::assertArrayHasKey('error', $r, 'cross-tenant token must be rejected');
+        self::assertContains(
             $r['error']['code'],
+            [ErrorCode::UNAUTHENTICATED, ErrorCode::FORBIDDEN],
             'a tenant-A OU grant must not authorize a call made under tenant B',
         );
     }
 
     public function testOuGrant_doesNotLeakToSystemTenant(): void
     {
-        // A forged system-tenant (id 0) token must not silently inherit a regular
-        // tenant's OU grant: RoleChecker resolves grants under tenant 0, where the
-        // tenant-A user row / OU assignment are invisible.
+        // A forged system-tenant (id 0) token: the profile has no membership under
+        // system tenant (id 0), so the membership guard rejects at auth.
+        // RoleChecker under tenant 0 would also find no grants, but the auth gate fires first.
         $token0 = $this->mcpTokenFor('ou@a.test', self::SYSTEM_TENANT);
         $r = $this->callTool($token0, 'create_widgets', ['name' => 'tenant-zero']);
 
-        self::assertSame(ErrorCode::FORBIDDEN, $r['error']['code']);
+        self::assertArrayHasKey('error', $r, 'system-tenant token must be rejected');
+        self::assertContains(
+            $r['error']['code'],
+            [ErrorCode::UNAUTHENTICATED, ErrorCode::FORBIDDEN],
+        );
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
     /**
-     * Issue a real MCP token for a seeded user (resolved by email) bound to the
-     * given tenant id. The tenant id is taken from the argument — NOT the user's
-     * own row — so the cross-tenant tests can mint a token claiming a tenant the
-     * user does not belong to.
+     * Issue a real MCP token for a seeded profile (resolved by email) bound to the
+     * given tenant id. The tenant id is taken from the argument — NOT the profile's
+     * own memberships — so the cross-tenant tests can mint a token claiming a tenant
+     * the profile does not belong to.
      */
     private function mcpTokenFor(string $email, int $tenantId): string
     {
-        $userId = $this->userIds[$email] ?? throw new \RuntimeException("Unseeded user: {$email}");
+        $profileId = $this->profileIds[$email] ?? throw new \RuntimeException("Unseeded profile for: {$email}");
 
-        return $this->tokens->issue($userId, $tenantId, 'test', ['tools:list', 'tools:call']);
+        return $this->tokens->issue($profileId, $tenantId, 'test', ['tools:list', 'tools:call']);
     }
 
     /**
@@ -371,6 +380,8 @@ final class ToolsCallRbacRealEngineTest extends TestCase
         $this->grant('widget_reader', 'widgets:read');
         $this->grant('widget_writer', 'widgets:write');
 
+        // Seed users (for RoleChecker resolution which still reads users table)
+        // AND matching profiles (for mcp_tokens issuance which now uses profile_id).
         $this->userIds['reader@a.test'] = $this->seedUser('reader@a.test', 100, self::TENANT_A, null);
         $this->userIds['writer@a.test'] = $this->seedUser('writer@a.test', 101, self::TENANT_A, null);
         $this->userIds['none@a.test']   = $this->seedUser('none@a.test',   102, self::TENANT_A, null);
@@ -380,6 +391,24 @@ final class ToolsCallRbacRealEngineTest extends TestCase
         $ouId = $this->seedOu('Engineering', self::TENANT_A);
         $this->assignRoleToOu($ouId, 101, self::TENANT_A);
         $this->userIds['ou@a.test'] = $this->seedUser('ou@a.test', 102, self::TENANT_A, $ouId);
+
+        // Seed profiles for each user (after migration 040 mcp_tokens references profiles.id).
+        $this->profileIds['reader@a.test'] = $this->seedProfile($this->userIds['reader@a.test']);
+        $this->profileIds['writer@a.test'] = $this->seedProfile($this->userIds['writer@a.test']);
+        $this->profileIds['none@a.test']   = $this->seedProfile($this->userIds['none@a.test']);
+        $this->profileIds['ou@a.test']     = $this->seedProfile($this->userIds['ou@a.test']);
+
+        // Seed active memberships in TENANT_A so the ActiveTenantMembershipGuard accepts
+        // MCP tokens that carry {profile_id, active_tenant_id=TENANT_A}.
+        // Note: profiles deliberately have NO memberships in TENANT_B or SYSTEM_TENANT —
+        // cross-tenant tokens are rejected at auth (UNAUTHENTICATED), which is MORE
+        // secure than failing at RBAC. The cross-tenant tests below assert this.
+        foreach ($this->profileIds as $profileId) {
+            $this->pdo->prepare("
+                INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+                VALUES (?, ?, 100, 'active', NOW())
+            ")->execute([$profileId, self::TENANT_A]);
+        }
     }
 
     private function grant(string $roleName, string $permission): void
@@ -406,6 +435,22 @@ final class ToolsCallRbacRealEngineTest extends TestCase
              VALUES (?, ?, ?, ?, ?, 0, NOW())'
         );
         $stmt->execute([$tenantId, $email, 'x', $roleId, $ouId]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    /**
+     * Seed a profile for the given user id and return the new profile id.
+     * mcp_tokens is keyed on profiles.id after migration 040.
+     */
+    private function seedProfile(int $userId): int
+    {
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'x', false, 0, 0, NOW(), NOW())"
+        );
+        $stmt->execute(["Profile for user {$userId}"]);
 
         return (int) $this->pdo->lastInsertId();
     }

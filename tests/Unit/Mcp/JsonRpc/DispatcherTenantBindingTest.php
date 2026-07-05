@@ -198,5 +198,22 @@ final class DispatcherTenantBindingTest extends TestCase
         $hash = password_hash('pw', PASSWORD_BCRYPT);
         $this->pdo->prepare("INSERT INTO users (id, tenant_id, email, password, role_id, token_epoch) VALUES (?, ?, 'u@test.com', ?, 1, 0) ON CONFLICT DO NOTHING")
             ->execute([self::USER_ID, self::TENANT_ID, $hash]);
+
+        // After migration 040, McpTokenService.issue() takes profile_id and emits
+        // {profile_id, active_tenant_id} in JWT claims. The membership guard requires
+        // an active membership for the profile in the declared tenant.
+        // Seed profile id=USER_ID (matching) and a membership in TENANT_ID.
+        $this->pdo->prepare("
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+            VALUES (?, 'Test Profile', ?, false, 0, 0, datetime('now'), datetime('now'))
+            ON CONFLICT DO NOTHING
+        ")->execute([self::USER_ID, $hash]);
+
+        $this->pdo->prepare("
+            INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+            VALUES (?, ?, 1, 'active', datetime('now'))
+            ON CONFLICT DO NOTHING
+        ")->execute([self::USER_ID, self::TENANT_ID]);
     }
 }

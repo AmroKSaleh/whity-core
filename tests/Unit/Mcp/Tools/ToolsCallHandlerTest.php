@@ -88,7 +88,7 @@ final class ToolsCallHandlerTest extends TestCase
         $this->roleChecker    = $this->createMock(RoleChecker::class);
         $this->tokenValidator = $this->createMock(TokenValidator::class);
 
-        $principal = new McpPrincipal(self::USER_ID, self::TENANT_ID, 'user', ['tools:call'], 'jti-abc');
+        $principal = new McpPrincipal(self::USER_ID, self::USER_ID, self::TENANT_ID, 'user', ['tools:call'], 'jti-abc');
         $this->tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         $this->handler = new ToolsCallHandler(

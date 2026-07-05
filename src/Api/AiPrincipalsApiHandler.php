@@ -99,7 +99,7 @@ final class AiPrincipalsApiHandler
             $query = $this->parseQueryString($request);
             $p     = PaginationParams::fromQuery($query);
 
-            $listSql  = 'SELECT t.id, t.jti, t.user_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
+            $listSql  = 'SELECT t.id, t.jti, t.profile_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
                  FROM   mcp_tokens t
                  ' . $where . '
                  ORDER BY t.created_at DESC
@@ -205,7 +205,8 @@ final class AiPrincipalsApiHandler
         return [
             'id'            => (int) ($row['id'] ?? 0),
             'jti'           => (string) ($row['jti'] ?? ''),
-            'userId'        => (int) ($row['user_id'] ?? 0),
+            'profileId'     => (int) ($row['profile_id'] ?? 0),
+            'userId'        => (int) ($row['profile_id'] ?? 0),
             'tenantId'      => (int) ($row['tenant_id'] ?? 0),
             'name'          => (string) ($row['name'] ?? ''),
             'principalKind' => (string) ($row['principal_kind'] ?? 'user'),
