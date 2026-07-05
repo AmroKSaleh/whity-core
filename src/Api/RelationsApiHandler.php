@@ -22,14 +22,14 @@ use Whity\Http\PaginationParams;
  * Relations API Handler (WC-65 — Family Relations Management System).
  *
  * Owns the relationship-type vocabulary endpoint, the relation edge create/
- * delete endpoints, and the `users/{id}/relations` sugar that resolves a user to
- * their (auto-provisioned) shadow person. RBAC-gated by the router
+ * delete endpoints, and the `profiles/{id}/relations` endpoint that resolves a
+ * profile to their (auto-provisioned) shadow person. RBAC-gated by the router
  * (`relations:read` for reads, `relations:manage` for writes) and tenant-scoped
  * in every method via {@see TenantContext}.
  *
  * Polymorphism only at the boundary: `POST /api/relations` accepts references
- * that may name a user or a person and resolves each to a person id through
- * {@see RelationResolver} (auto-provisioning user shadows). Storage stays uniform
+ * that may name a profile or a person and resolves each to a person id through
+ * {@see RelationResolver} (auto-provisioning profile shadows). Storage stays uniform
  * `person → person`. Integrity violations surface as typed domain exceptions that
  * this handler translates to safe 4xx responses, never leaking internals.
  *
@@ -110,9 +110,9 @@ class RelationsApiHandler
     /**
      * POST /api/relations — create ONE relation edge from polymorphic references.
      *
-     * Body: `{from: {kind:'user'|'person', id}, to: {kind:'user'|'person', id},
+     * Body: `{from: {kind:'profile'|'person', id}, to: {kind:'profile'|'person', id},
      * relationshipTypeId: int}`. Each ref is resolved to a person id (auto-
-     * provisioning user shadows); the resolver enforces same-tenant, both-exist,
+     * provisioning profile shadows); the resolver enforces same-tenant, both-exist,
      * no-self, no-duplicate and type-exists. ONE edge is inserted; the reciprocal
      * is derived at read time.
      *
@@ -133,7 +133,7 @@ class RelationsApiHandler
             $to = $this->parseRef($body, 'to');
             if ($from === null || $to === null) {
                 return Response::error(
-                    'from and to must each be {kind:"user"|"person", id:int}',
+                    'from and to must each be {kind:"profile"|"person", id:int}',
                     400
                 );
             }
@@ -233,23 +233,23 @@ class RelationsApiHandler
     }
 
     /**
-     * GET /api/users/{id}/relations — sugar: resolve a user → their shadow person
+     * GET /api/profiles/{id}/relations — resolve a profile → their shadow person
      * and return that node's relations (reciprocal-derived).
      *
-     * Read-only: resolves the user's EXISTING shadow person without provisioning one
-     * (a relations:read path must never write). A user with no shadow yet simply has
-     * no relations; a user outside the acting tenant is not-found.
+     * Read-only: resolves the profile's EXISTING shadow person without provisioning
+     * one (a relations:read path must never write). A profile with no shadow yet
+     * simply has no relations; a profile outside the acting tenant is not-found.
      *
      * @param Request              $request The incoming request.
      * @param array<string, mixed> $params  Route params (expects `id`).
      * @return Response JSON relations under `data`, or 404.
      */
-    public function userRelations(Request $request, array $params): Response
+    public function profileRelations(Request $request, array $params): Response
     {
         try {
             $id = $params['id'] ?? null;
             if ($id === null || !is_numeric($id)) {
-                return Response::error('User ID is required', 400);
+                return Response::error('Profile ID is required', 400);
             }
 
             $tenantId = TenantContext::getTenantId();
@@ -257,10 +257,10 @@ class RelationsApiHandler
                 return Response::error('Tenant context is required', 400);
             }
 
-            // Resolve user → EXISTING shadow person WITHOUT provisioning (read path
-            // must not write). Missing / cross-tenant user → 404; a user with no
-            // shadow yet simply has no relations.
-            $personId = $this->resolver->resolveExistingUserPerson((int) $id, $tenantId);
+            // Resolve profile → EXISTING shadow person WITHOUT provisioning (read
+            // path must not write). Missing / cross-tenant profile → 404; a profile
+            // with no shadow yet simply has no relations.
+            $personId = $this->resolver->resolveExistingProfilePerson((int) $id, $tenantId);
             if ($personId === null) {
                 return Response::json([
                     'data' => ['personId' => null, 'relations' => []],
@@ -270,13 +270,13 @@ class RelationsApiHandler
             $relations = $this->relations->listForPerson($personId, $tenantId);
             $mapped = array_map(
                 static fn (array $r): array => [
-                    'relationId'           => (int) $r['relationId'],
-                    'otherPersonId'        => (int) $r['otherPersonId'],
-                    'otherPersonName'      => (string) $r['otherPersonName'],
-                    'otherPersonHasAccount' => $r['otherPersonUserId'] !== null,
-                    'typeId'               => (int) $r['typeId'],
-                    'typeName'             => (string) $r['typeName'],
-                    'direction'            => (string) $r['direction'],
+                    'relationId'            => (int) $r['relationId'],
+                    'otherPersonId'         => (int) $r['otherPersonId'],
+                    'otherPersonName'       => (string) $r['otherPersonName'],
+                    'otherPersonHasAccount' => $r['otherPersonProfileId'] !== null,
+                    'typeId'                => (int) $r['typeId'],
+                    'typeName'              => (string) $r['typeName'],
+                    'direction'             => (string) $r['direction'],
                 ],
                 $relations
             );
@@ -288,10 +288,10 @@ class RelationsApiHandler
                 ],
             ], 200);
         } catch (CrossTenantReferenceException | PersonNotFoundException $e) {
-            return Response::error('User not found', 404);
+            return Response::error('Profile not found', 404);
         } catch (\Exception $e) {
-            $this->log('error', 'Failed to fetch user relations', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
-            return Response::error('Failed to fetch user relations', 500);
+            $this->log('error', 'Failed to fetch profile relations', ['event' => 'relations.error', 'detail' => $e->getMessage()]);
+            return Response::error('Failed to fetch profile relations', 500);
         }
     }
 
@@ -309,7 +309,7 @@ class RelationsApiHandler
         $ref = $body[$key];
 
         $kind = isset($ref['kind']) ? (string) $ref['kind'] : '';
-        if ($kind !== RelationResolver::KIND_USER && $kind !== RelationResolver::KIND_PERSON) {
+        if ($kind !== RelationResolver::KIND_PROFILE && $kind !== RelationResolver::KIND_PERSON) {
             return null;
         }
 

@@ -15,18 +15,18 @@ use Whity\Api\Exception\SelfRelationException;
  * relation integrity rules (WC-65).
  *
  * The `relations` storage is uniformly `person → person`, but the API accepts
- * references that may name a USER or a PERSON. This resolver is the SINGLE place
- * that knows about user-vs-person:
+ * references that may name a PROFILE or a PERSON. This resolver is the SINGLE
+ * place that knows about profile-vs-person:
  *
  *  - A `{kind:'person', id}` reference resolves to that person (tenant-scoped).
- *  - A `{kind:'user', id}` reference resolves to the user's shadow person,
- *    AUTO-PROVISIONING one (display name seeded from the user's email local
- *    part) the first time the user participates in a relation. `persons.user_id`
- *    is UNIQUE, so a user has at most one shadow.
+ *  - A `{kind:'profile', id}` reference resolves to the profile's shadow person,
+ *    AUTO-PROVISIONING one (display name seeded from the profile's primary email)
+ *    the first time the profile participates in a relation. `persons.profile_id`
+ *    is UNIQUE, so a profile has at most one shadow.
  *
- * Cross-tenant safety: a reference to a person/user outside the acting tenant is
- * treated as not-found ({@see PersonNotFoundException}) — a person that exists in
- * another tenant raises {@see CrossTenantReferenceException}, which the handler
+ * Cross-tenant safety: a reference to a person/profile outside the acting tenant
+ * is treated as not-found ({@see PersonNotFoundException}) — a person that exists
+ * in another tenant raises {@see CrossTenantReferenceException}, which the handler
  * also surfaces as 404 so cross-tenant existence is never disclosed.
  *
  * The resolver does NOT open transactions itself; it relies on the shared worker
@@ -37,8 +37,8 @@ class RelationResolver
     /** Reference kind: the id names a row in `persons`. */
     public const KIND_PERSON = 'person';
 
-    /** Reference kind: the id names a platform user (resolve to its shadow person). */
-    public const KIND_USER = 'user';
+    /** Reference kind: the id names a profile (resolve to its shadow person). */
+    public const KIND_PROFILE = 'profile';
 
     private PDO $db;
     private PersonRepository $persons;
@@ -58,14 +58,14 @@ class RelationResolver
 
     /**
      * Resolve a `{kind,id}` reference to a person id within the acting tenant,
-     * auto-provisioning a user's shadow person when needed.
+     * auto-provisioning a profile's shadow person when needed.
      *
-     * @param string $kind     {@see self::KIND_PERSON} or {@see self::KIND_USER}.
-     * @param int    $id       The person id or user id, per the kind.
+     * @param string $kind     {@see self::KIND_PERSON} or {@see self::KIND_PROFILE}.
+     * @param int    $id       The person id or profile id, per the kind.
      * @param int    $tenantId The acting tenant.
      * @return int The resolved person id.
      *
-     * @throws PersonNotFoundException       When the person/user is absent or not visible.
+     * @throws PersonNotFoundException       When the person/profile is absent or not visible.
      * @throws CrossTenantReferenceException When it exists but in another tenant.
      */
     public function resolveRef(string $kind, int $id, int $tenantId): int
@@ -74,7 +74,7 @@ class RelationResolver
             return $this->resolvePerson($id, $tenantId);
         }
 
-        return $this->resolveUser($id, $tenantId);
+        return $this->resolveProfile($id, $tenantId);
     }
 
     /**
@@ -111,73 +111,69 @@ class RelationResolver
     }
 
     /**
-     * Resolve a user id to its shadow person within the acting tenant,
-     * auto-provisioning the shadow when the user has none yet.
+     * Resolve a profile id to its shadow person within the acting tenant,
+     * auto-provisioning the shadow when the profile has none yet.
      *
      * Provisioning is a WRITE, so this is only used on write paths (e.g. creating a
-     * relation). Read paths must use {@see resolveExistingUserPerson()} instead so a
-     * read permission never triggers an insert.
+     * relation). Read paths must use {@see resolveExistingProfilePerson()} instead so
+     * a read permission never triggers an insert.
      *
-     * @throws PersonNotFoundException       When the user is absent / not visible.
-     * @throws CrossTenantReferenceException When the user exists in another tenant.
+     * @throws PersonNotFoundException       When the profile is absent / not visible.
+     * @throws CrossTenantReferenceException When the profile exists in another tenant.
      */
-    private function resolveUser(int $userId, int $tenantId): int
+    private function resolveProfile(int $profileId, int $tenantId): int
     {
-        $user = $this->requireUserVisible($userId, $tenantId);
+        $profile = $this->requireProfileVisible($profileId, $tenantId);
 
-        // The shadow person lives in the user's own tenant (matters for the
-        // system tenant, which acts across tenants but must store the shadow with
-        // the user's real tenant_id so isolation stays correct).
-        $shadowTenant = (int) $user['tenant_id'];
+        // The shadow person lives in the profile's membership tenant (matters for
+        // the system tenant, which acts across tenants but must store the shadow
+        // with the profile's real tenant_id so isolation stays correct).
+        $shadowTenant = (int) $profile['tenant_id'];
 
-        $existing = $this->persons->findByUserId($userId, $shadowTenant);
+        $existing = $this->persons->findByProfileId($profileId, $shadowTenant);
         if ($existing !== null) {
             return (int) $existing['id'];
         }
 
-        // Auto-provision: create the user's invisible shadow person on demand.
-        return $this->persons->insert($shadowTenant, $this->displayNameForUser($user), $userId);
+        // Auto-provision: create the profile's shadow person on demand.
+        return $this->persons->insert($shadowTenant, $this->displayNameForProfile($profile), $profileId);
     }
 
     /**
-     * Resolve a user's EXISTING shadow person WITHOUT provisioning one.
+     * Resolve a profile's EXISTING shadow person WITHOUT provisioning one.
      *
-     * Read-only counterpart to {@see resolveUser()}: returns null when the user has
-     * no shadow yet, so a `relations:read` path can report "no relations" without
-     * performing a write.
+     * Read-only counterpart to {@see resolveProfile()}: returns null when the profile
+     * has no shadow yet, so a `relations:read` path can report "no relations"
+     * without performing a write.
      *
-     * @return int|null The shadow person id, or null when the user has none.
-     * @throws PersonNotFoundException       When the user is absent / not visible.
-     * @throws CrossTenantReferenceException When the user exists in another tenant.
+     * @return int|null The shadow person id, or null when the profile has none.
+     * @throws PersonNotFoundException       When the profile is absent / not visible.
+     * @throws CrossTenantReferenceException When the profile exists in another tenant.
      */
-    public function resolveExistingUserPerson(int $userId, int $tenantId): ?int
+    public function resolveExistingProfilePerson(int $profileId, int $tenantId): ?int
     {
-        $user = $this->requireUserVisible($userId, $tenantId);
-        $existing = $this->persons->findByUserId($userId, (int) $user['tenant_id']);
+        $profile  = $this->requireProfileVisible($profileId, $tenantId);
+        $existing = $this->persons->findByProfileId($profileId, (int) $profile['tenant_id']);
 
         return $existing === null ? null : (int) $existing['id'];
     }
 
     /**
-     * Fetch a user row and assert it is visible to the acting tenant.
+     * Fetch a profile row and assert it is visible to the acting tenant (via
+     * its membership in that tenant).
      *
      * @return array{id: int, tenant_id: int, email: string}
-     * @throws PersonNotFoundException       When the user is absent.
-     * @throws CrossTenantReferenceException When the user exists in another tenant.
+     * @throws PersonNotFoundException       When the profile is absent.
+     * @throws CrossTenantReferenceException When the profile has no membership in the acting tenant.
      */
-    private function requireUserVisible(int $userId, int $tenantId): array
+    private function requireProfileVisible(int $profileId, int $tenantId): array
     {
-        $user = $this->findUser($userId);
-        if ($user === null) {
-            throw PersonNotFoundException::forUser($userId);
+        $profile = $this->findProfile($profileId, $tenantId);
+        if ($profile === null) {
+            throw PersonNotFoundException::forUser($profileId);
         }
 
-        $userTenant = (int) $user['tenant_id'];
-        if ($tenantId !== 0 && $userTenant !== $tenantId) {
-            throw CrossTenantReferenceException::forPerson($userId, $userTenant, $tenantId);
-        }
-
-        return $user;
+        return $profile;
     }
 
     /**
@@ -246,15 +242,44 @@ class RelationResolver
     }
 
     /**
-     * Fetch a user row (id, tenant_id, email) by id, or null when absent.
+     * Fetch a profile row (id, tenant_id, email) by id scoped to the acting
+     * tenant via the memberships table, or null when absent or not a member.
+     *
+     * The tenant_id returned is the membership's tenant_id so the shadow person
+     * is stored under the correct tenant. The system tenant (id 0) resolves
+     * profiles cross-tenant; in that case the first membership is used.
      *
      * @return array{id: int, tenant_id: int, email: string}|null
      */
-    private function findUser(int $userId): ?array
+    private function findProfile(int $profileId, int $tenantId): ?array
     {
-        // @tenant-guard-ignore: deliberate unscoped by-PK read; cross-tenant access is enforced in PHP by requireUserVisible() at the call sites
-        $stmt = $this->db->prepare('SELECT id, tenant_id, email FROM users WHERE id = :id');
-        $stmt->execute([':id' => $userId]);
+        if ($tenantId === 0) {
+            // System tenant: resolve the profile from its first membership.
+            // @tenant-guard-ignore: system tenant (id 0) has no acting tenant to scope to — deliberate cross-tenant by-PK read of the profile's first membership (system-tenant global authority, ADR 0005). The regular-tenant branch below IS tenant-scoped.
+            $stmt = $this->db->prepare(
+                'SELECT p.id, m.tenant_id, pe.email
+                 FROM profiles p
+                 JOIN memberships m ON m.profile_id = p.id
+                 LEFT JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
+                 WHERE p.id = :id
+                 ORDER BY m.tenant_id ASC
+                 LIMIT 1'
+            );
+        } else {
+            // Regular tenant: only return the profile when it holds a membership
+            // in the acting tenant.
+            $stmt = $this->db->prepare(
+                'SELECT p.id, m.tenant_id, pe.email
+                 FROM profiles p
+                 JOIN memberships m ON m.profile_id = p.id AND m.tenant_id = :tenant_id
+                 LEFT JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
+                 WHERE p.id = :id
+                 LIMIT 1'
+            );
+            $stmt->bindValue(':tenant_id', $tenantId);
+        }
+        $stmt->bindValue(':id', $profileId);
+        $stmt->execute();
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($row === false) {
@@ -269,22 +294,23 @@ class RelationResolver
     }
 
     /**
-     * Derive a shadow person's display name from a user row.
+     * Derive a shadow person's display name from a profile row.
      *
-     * Mirrors the OU/users handlers: the `users` table has no `name` column, so
-     * the name is the email local-part (falling back to the full email).
+     * Uses the profile's primary email local-part (falling back to the full
+     * email, then to a generic label). Mirrors the convention used before for
+     * users.
      *
-     * @param array{id: int, tenant_id: int, email: string} $user
+     * @param array{id: int, tenant_id: int, email: string} $profile
      */
-    private function displayNameForUser(array $user): string
+    private function displayNameForProfile(array $profile): string
     {
-        $email = $user['email'];
+        $email = $profile['email'];
         $localPart = strstr($email, '@', true);
 
         if ($localPart !== false && $localPart !== '') {
             return $localPart;
         }
 
-        return $email !== '' ? $email : ('User #' . $user['id']);
+        return $email !== '' ? $email : ('Profile #' . $profile['id']);
     }
 }

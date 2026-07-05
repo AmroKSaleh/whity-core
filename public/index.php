@@ -798,8 +798,8 @@ $router->register('DELETE', '/api/email-domains/{id:\d+}',  [$emailDomainHandler
 // stays null so RbacMiddleware enforces the permission). All routes are
 // tenant-scoped in the handlers: the SYSTEM tenant (id 0) sees all tenants,
 // every other tenant sees only its own. Storage is uniform person→person; the
-// resolver is the only unit that knows about user-vs-person refs and
-// auto-provisions a user's shadow person on demand.
+// resolver is the only unit that knows about profile-vs-person refs and
+// auto-provisions a profile's shadow person on demand.
 $personRepository = new PersonRepository($db->getPdo());
 $relationRepository = new RelationRepository($db->getPdo());
 $relationResolver = new RelationResolver($db->getPdo(), $personRepository, $relationRepository);
@@ -814,7 +814,7 @@ $router->register('PATCH', '/api/persons/{id:\d+}', [$personsHandler, 'update'],
 $router->register('DELETE', '/api/persons/{id:\d+}', [$personsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
 $router->register('GET', '/api/persons/{id:\d+}/relations', [$personsHandler, 'relations'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('GET', '/api/relations', [$relationsHandler, 'listEdges'], null, null, CorePermissions::RELATIONS_READ);
-$router->register('GET', '/api/users/{id:\d+}/relations', [$relationsHandler, 'userRelations'], null, null, CorePermissions::RELATIONS_READ);
+$router->register('GET', '/api/profiles/{id:\d+}/relations', [$relationsHandler, 'profileRelations'], null, null, CorePermissions::RELATIONS_READ);
 $router->register('POST', '/api/relations', [$relationsHandler, 'create'], null, null, CorePermissions::RELATIONS_MANAGE);
 $router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'delete'], null, null, CorePermissions::RELATIONS_MANAGE);
 

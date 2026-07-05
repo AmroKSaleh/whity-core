@@ -22,7 +22,7 @@ use Whity\Core\Relations\RelationResolver;
  *
  * Covers the ADR's testing checklist: reciprocal derivation (Parent reads as
  * Child from the other end; Spouse/Sibling symmetric), self/duplicate/cross-
- * tenant integrity, auto-provision of a user's shadow person (unique user_id),
+ * tenant integrity, auto-provision of a profile's shadow person (unique profile_id),
  * person delete cascade, and full tenant isolation (A vs B vs system).
  */
 final class RelationsRealEngineTest extends TestCase
@@ -187,54 +187,75 @@ final class RelationsRealEngineTest extends TestCase
         );
     }
 
-    // ==================== Auto-provision of a user's shadow person ====================
+    // ==================== Auto-provision of a profile's shadow person ====================
 
-    public function testResolvingAUserAutoProvisionsAShadowPersonOnce(): void
+    public function testResolvingAProfileAutoProvisionsAShadowPersonOnce(): void
     {
-        $userId = RelationsSchema::seedUser($this->pdo, 1, 'dave@example.com');
+        $profileId = RelationsSchema::seedProfile($this->pdo, 1, 'dave@example.com');
 
-        // No person row for the user yet.
-        $this->assertNull($this->persons->findByUserId($userId, 1));
+        // No person row for the profile yet.
+        $this->assertNull($this->persons->findByProfileId($profileId, 1));
 
-        $personId = $this->resolver->resolveRef(RelationResolver::KIND_USER, $userId, 1);
+        $personId = $this->resolver->resolveRef(RelationResolver::KIND_PROFILE, $profileId, 1);
 
         $shadow = $this->persons->findById($personId, 1);
         $this->assertNotNull($shadow);
-        $this->assertSame($userId, $shadow['user_id']);
+        $this->assertSame($profileId, $shadow['profile_id']);
         // Display name seeded from the email local part.
         $this->assertSame('dave', $shadow['display_name']);
 
-        // Resolving again returns the SAME shadow (user_id stays unique).
-        $again = $this->resolver->resolveRef(RelationResolver::KIND_USER, $userId, 1);
+        // Resolving again returns the SAME shadow (profile_id stays unique).
+        $again = $this->resolver->resolveRef(RelationResolver::KIND_PROFILE, $profileId, 1);
         $this->assertSame($personId, $again);
         $this->assertSame(
             1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM persons WHERE user_id = ' . $userId)->fetchColumn(),
-            'A user must have at most one shadow person.'
+            (int) $this->pdo->query('SELECT COUNT(*) FROM persons WHERE profile_id = ' . $profileId)->fetchColumn(),
+            'A profile must have at most one shadow person.'
         );
     }
 
-    public function testUserToPersonRelationAutoProvisionsBothShadows(): void
+    public function testProfileToPersonRelationAutoProvisionsBothShadows(): void
     {
-        $u1 = RelationsSchema::seedUser($this->pdo, 1, 'parent@example.com');
-        $u2 = RelationsSchema::seedUser($this->pdo, 1, 'kid@example.com');
+        $p1 = RelationsSchema::seedProfile($this->pdo, 1, 'parent@example.com');
+        $p2 = RelationsSchema::seedProfile($this->pdo, 1, 'kid@example.com');
 
         $resolved = $this->resolver->resolveRelation(
-            ['kind' => 'user', 'id' => $u1],
-            ['kind' => 'user', 'id' => $u2],
+            ['kind' => 'profile', 'id' => $p1],
+            ['kind' => 'profile', 'id' => $p2],
             RelationsSchema::TYPE_PARENT,
             1
         );
         $this->relations->insert(1, $resolved['fromPersonId'], $resolved['toPersonId'], $resolved['relationshipTypeId']);
 
-        // Both users now have a shadow; the edge reads Parent/Child reciprocally.
-        $parentPerson = $this->persons->findByUserId($u1, 1);
-        $kidPerson = $this->persons->findByUserId($u2, 1);
+        // Both profiles now have a shadow; the edge reads Parent/Child reciprocally.
+        $parentPerson = $this->persons->findByProfileId($p1, 1);
+        $kidPerson    = $this->persons->findByProfileId($p2, 1);
         $this->assertNotNull($parentPerson);
         $this->assertNotNull($kidPerson);
 
         $this->assertSame('Parent', $this->relations->listForPerson((int) $parentPerson['id'], 1)[0]['typeName']);
         $this->assertSame('Child', $this->relations->listForPerson((int) $kidPerson['id'], 1)[0]['typeName']);
+    }
+
+    // ==================== ON DELETE SET NULL on profile delete ====================
+
+    public function testDeletingAProfileSetsPersonProfileIdToNull(): void
+    {
+        $profileId = RelationsSchema::seedProfile($this->pdo, 1, 'test@example.com');
+        $personId  = $this->persons->insert(1, 'test', $profileId);
+
+        // Confirm the link.
+        $before = $this->persons->findById($personId, 1);
+        $this->assertNotNull($before, 'Person row must exist before profile deletion.');
+        $this->assertSame($profileId, $before['profile_id']);
+
+        // Delete the profile — ON DELETE SET NULL must fire.
+        $this->pdo->exec('DELETE FROM profiles WHERE id = ' . $profileId);
+
+        // Person survives but loses its profile link.
+        $after = $this->persons->findById($personId, 1);
+        $this->assertNotNull($after, 'Person row must survive profile deletion.');
+        $this->assertNull($after['profile_id'], 'profile_id must be NULL after profile is deleted (ON DELETE SET NULL).');
     }
 
     // ==================== Person delete cascade ====================

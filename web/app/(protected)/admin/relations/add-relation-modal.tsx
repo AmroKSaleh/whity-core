@@ -20,9 +20,13 @@ import {
 } from '@amroksaleh/ui/select';
 import type { Person, RelationshipType } from './types';
 
-/** A user option for relating to an account-holder (resolved to its shadow person). */
-interface UserOption {
-  id: number;
+/**
+ * An account-holder option for relating to a profile (resolved to its shadow person).
+ * The id is the profile id (not the legacy user id) as required by the backend
+ * `kind:'profile'` reference after WC-idcut-D.
+ */
+interface ProfileOption {
+  profileId: number;
   email: string;
 }
 
@@ -38,12 +42,12 @@ interface AddRelationModalProps {
   types: RelationshipType[];
 }
 
-type TargetKind = 'person' | 'user';
+type TargetKind = 'person' | 'profile';
 
 /**
  * Add a relation from `fromPerson` to a chosen target. The target may be another
- * PERSON or a USER (account-holder); the backend resolves a user to its shadow
- * person. The relationship type is read from `fromPerson`'s perspective and
+ * PERSON or a PROFILE (account-holder); the backend resolves a profile to its
+ * shadow person. The relationship type is read from `fromPerson`'s perspective and
  * stored as a single edge; the reciprocal is derived at read time.
  */
 export function AddRelationModal({
@@ -60,7 +64,7 @@ export function AddRelationModal({
   const [targetKind, setTargetKind] = useState<TargetKind>('person');
   const [targetId, setTargetId] = useState<string>('');
   const [typeId, setTypeId] = useState<string>('');
-  const [users, setUsers] = useState<UserOption[]>([]);
+  const [profiles, setProfiles] = useState<ProfileOption[]>([]);
 
   // Person targets exclude the subject itself (no self-relation).
   const personTargets = useMemo(
@@ -68,10 +72,12 @@ export function AddRelationModal({
     [persons, fromPerson.id]
   );
 
-  // Lazily load the users list the first time the "user" target kind is picked,
-  // so the dialog stays cheap when relating two persons.
+  // Lazily load the profiles list the first time the "profile" target kind is
+  // picked, so the dialog stays cheap when relating two persons. The users API
+  // now returns profileId (the identity anchor) alongside the email so we can
+  // send kind:'profile' to the backend.
   useEffect(() => {
-    if (targetKind !== 'user' || users.length > 0) {
+    if (targetKind !== 'profile' || profiles.length > 0) {
       return;
     }
     let cancelled = false;
@@ -83,19 +89,21 @@ export function AddRelationModal({
         }
         const data = await res.json();
         if (!cancelled) {
-          setUsers(((data.data ?? []) as Array<{ id: number; email: string }>).map((u) => ({
-            id: u.id,
-            email: u.email,
-          })));
+          // Only include users that have a resolved profile_id; users without one
+          // (not yet migrated to the identity model) cannot be auto-provisioned.
+          const options = (data.data ?? [] as Array<{ profileId: number | null; email: string }>)
+            .filter((u: { profileId: number | null; email: string }) => u.profileId !== null)
+            .map((u: { profileId: number; email: string }) => ({ profileId: u.profileId, email: u.email }));
+          setProfiles(options);
         }
       } catch {
-        // Non-fatal: the user picker simply stays empty.
+        // Non-fatal: the profile picker simply stays empty.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [targetKind, users.length, apiClient]);
+  }, [targetKind, profiles.length, apiClient]);
 
   const handleSubmit = async () => {
     if (!targetId || !typeId) {
@@ -108,7 +116,7 @@ export function AddRelationModal({
       const response = await apiClient('/api/v1/relations', {
         method: 'POST',
         body: JSON.stringify({
-          from: { kind: 'person', id: fromPerson.id },
+          from: { kind: 'person' as const, id: fromPerson.id },
           to: { kind: targetKind, id: parseInt(targetId, 10) },
           relationshipTypeId: parseInt(typeId, 10),
         }),
@@ -129,7 +137,7 @@ export function AddRelationModal({
   };
 
   const onTargetKindChange = (value: string) => {
-    setTargetKind(value === 'user' ? 'user' : 'person');
+    setTargetKind(value === 'profile' ? 'profile' : 'person');
     setTargetId('');
   };
 
@@ -173,14 +181,14 @@ export function AddRelationModal({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="person">Relative</SelectItem>
-                  <SelectItem value="user">Account</SelectItem>
+                  <SelectItem value="profile">Account</SelectItem>
                 </SelectContent>
               </Select>
 
               <Select value={targetId} onValueChange={setTargetId} disabled={isLoading}>
                 <SelectTrigger aria-label="Target" className="flex-1">
                   <SelectValue
-                    placeholder={targetKind === 'user' ? 'Select an account' : 'Select a relative'}
+                    placeholder={targetKind === 'profile' ? 'Select an account' : 'Select a relative'}
                   />
                 </SelectTrigger>
                 <SelectContent>
@@ -190,8 +198,8 @@ export function AddRelationModal({
                           {p.displayName}
                         </SelectItem>
                       ))
-                    : users.map((u) => (
-                        <SelectItem key={u.id} value={u.id.toString()}>
+                    : profiles.map((u) => (
+                        <SelectItem key={u.profileId} value={u.profileId.toString()}>
                           {u.email}
                         </SelectItem>
                       ))}

@@ -108,9 +108,11 @@ class UsersApiHandler
 
                 // @tenant-guard-ignore: system-tenant (id 0) lists all users; scoped else-branch binds u.tenant_id = :tenant_id
                 $stmt = $this->db->prepare('
-                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
+                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role,
+                           pe.profile_id
                     FROM users u
                     JOIN roles r ON u.role_id = r.id
+                    LEFT JOIN profile_emails pe ON LOWER(TRIM(pe.email)) = LOWER(TRIM(u.email)) AND pe.is_primary = true
                     ORDER BY u.tenant_id, u.created_at DESC
                     LIMIT :limit OFFSET :offset
                 ');
@@ -125,9 +127,11 @@ class UsersApiHandler
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
                 $stmt = $this->db->prepare('
-                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
+                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role,
+                           pe.profile_id
                     FROM users u
                     JOIN roles r ON u.role_id = r.id
+                    LEFT JOIN profile_emails pe ON LOWER(TRIM(pe.email)) = LOWER(TRIM(u.email)) AND pe.is_primary = true
                     WHERE u.tenant_id = :tenant_id
                     ORDER BY u.created_at DESC
                     LIMIT :limit OFFSET :offset
@@ -179,6 +183,10 @@ class UsersApiHandler
             'tenantId' => (int)($row['tenant_id'] ?? 0),
             'ou_id' => isset($row['ou_id']) && $row['ou_id'] !== null ? (int)$row['ou_id'] : null,
             'createdAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
+            // profileId is the identity anchor for this account (null when no
+            // matching profile_emails record exists yet — callers must treat null
+            // as "account not yet migrated to identity model").
+            'profileId' => isset($row['profile_id']) && $row['profile_id'] !== null ? (int)$row['profile_id'] : null,
         ];
     }
 

@@ -5381,6 +5381,102 @@
                 ]
             }
         },
+        "/api/v1/profiles/{id}/relations": {
+            "get": {
+                "operationId": "get_api_v1_profiles_id_relations",
+                "summary": "Get the person record and relations for a profile",
+                "tags": [
+                    "relations"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The profile's person and relations",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProfileRelationsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/relations": {
             "get": {
                 "operationId": "get_api_v1_relations",
@@ -7798,102 +7894,6 @@
                     }
                 ]
             }
-        },
-        "/api/v1/users/{id}/relations": {
-            "get": {
-                "operationId": "get_api_v1_users_id_relations",
-                "summary": "Get the person record and relations for a user account",
-                "tags": [
-                    "relations"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "The user's person and relations",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/UserRelationsResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad request",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not found",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
         }
     },
     "components": {
@@ -9235,7 +9235,7 @@
                     "displayName": {
                         "type": "string"
                     },
-                    "userId": {
+                    "profileId": {
                         "type": "integer",
                         "nullable": true
                     },
@@ -9427,6 +9427,33 @@
                     "data"
                 ]
             },
+            "ProfileRelationsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "personId": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "relations": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/RelationSummary"
+                                }
+                            }
+                        },
+                        "required": [
+                            "personId",
+                            "relations"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "RefreshResponse": {
                 "type": "object",
                 "properties": {
@@ -9546,7 +9573,7 @@
                     "type": {
                         "type": "string",
                         "enum": [
-                            "user",
+                            "profile",
                             "person"
                         ]
                     },
@@ -10406,33 +10433,6 @@
                 "required": [
                     "data",
                     "pagination"
-                ]
-            },
-            "UserRelationsResponse": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "object",
-                        "properties": {
-                            "personId": {
-                                "type": "integer",
-                                "nullable": true
-                            },
-                            "relations": {
-                                "type": "array",
-                                "items": {
-                                    "$ref": "#/components/schemas/RelationSummary"
-                                }
-                            }
-                        },
-                        "required": [
-                            "personId",
-                            "relations"
-                        ]
-                    }
-                },
-                "required": [
-                    "data"
                 ]
             },
             "UserResponse": {
