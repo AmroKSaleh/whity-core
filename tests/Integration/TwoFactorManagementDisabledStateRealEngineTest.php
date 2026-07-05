@@ -141,11 +141,13 @@ final class TwoFactorManagementDisabledStateRealEngineTest extends TestCase
         );
 
         // And no backup codes may have been inserted.
-        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM backup_codes WHERE user_id = ?');
-        $stmt->execute([self::USER_ID]);
+        // backup_codes is keyed on profile_id after migration 038 (user_id removed);
+        // in this isolated test the table must be empty — the guard refuses before
+        // any INSERT is attempted.
+        $stmt = $this->pdo->query('SELECT COUNT(*) FROM backup_codes');
         self::assertSame(
             0,
-            (int) $stmt->fetchColumn(),
+            (int) ($stmt !== false ? $stmt->fetchColumn() : 0),
             'No backup codes may be inserted for a 2FA-disabled user.'
         );
     }

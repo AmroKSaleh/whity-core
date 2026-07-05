@@ -38,6 +38,7 @@ class TwoFactorFlowTest extends TestCase
     private TotpService $totpService;
     private const TEST_SECRET_KEY = 'test-secret-key-for-2fa-tests-padded-for-hs256-min-32-byte-key';
     private const TEST_USER_ID = 1;
+    private const TEST_PROFILE_ID = 1;
     private const TEST_USER_EMAIL = 'testuser@example.com';
     private const TEST_TENANT_ID = 1;
 
@@ -54,15 +55,22 @@ class TwoFactorFlowTest extends TestCase
     }
 
     /**
-     * Create a valid access token in the cookies
+     * Create a valid access token in the cookies.
+     *
+     * Includes both the legacy {user_id, tenant_id} pair and the new
+     * {profile_id, active_tenant_id} pair so that ActiveTenantMembershipGuard
+     * exercises the membership-check path (profile_id present) and the mock PDO
+     * can satisfy the membership SELECT.
      */
     private function createAccessToken(int $userId = self::TEST_USER_ID): void
     {
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'tenant_id' => self::TEST_TENANT_ID,
-            'email' => self::TEST_USER_EMAIL,
-            'type' => 'access',
+            'user_id'          => $userId,
+            'profile_id'       => self::TEST_PROFILE_ID,
+            'tenant_id'        => self::TEST_TENANT_ID,
+            'active_tenant_id' => self::TEST_TENANT_ID,
+            'email'            => self::TEST_USER_EMAIL,
+            'type'             => 'access',
         ], 3600);
 
         $_COOKIE['access_token'] = $token;
@@ -119,33 +127,33 @@ class TwoFactorFlowTest extends TestCase
                                 $userState[$userId]['two_factor_backup_codes_version'] = $version;
                             }
                         }
-                        // UPDATE backup_codes to invalidate
+                        // UPDATE backup_codes to invalidate (now keyed on profile_id)
                         elseif (strpos($sql, 'UPDATE backup_codes') !== false && strpos($sql, 'used = true') !== false) {
-                            $userId = $params[0] ?? self::TEST_USER_ID;
+                            $profileId = $params[0] ?? self::TEST_PROFILE_ID;
                             $oldVersion = $params[1] ?? 1;
-                            if (isset($backupCodeState[$userId])) {
-                                foreach ($backupCodeState[$userId] as &$code) {
+                            if (isset($backupCodeState[$profileId])) {
+                                foreach ($backupCodeState[$profileId] as &$code) {
                                     if ($code['version'] === $oldVersion) {
                                         $code['used'] = true;
                                     }
                                 }
                             }
                         }
-                        // INSERT backup_codes
+                        // INSERT backup_codes (now keyed on profile_id, migration 038)
                         elseif (strpos($sql, 'INSERT INTO backup_codes') === 0) {
-                            $userId = $params[0] ?? self::TEST_USER_ID;
+                            $profileId = $params[0] ?? self::TEST_PROFILE_ID;
                             $code = $params[1] ?? '';
                             $version = $params[2] ?? 1;
 
-                            if (!isset($backupCodeState[$userId])) {
-                                $backupCodeState[$userId] = [];
+                            if (!isset($backupCodeState[$profileId])) {
+                                $backupCodeState[$profileId] = [];
                             }
 
-                            $backupCodeState[$userId][] = [
-                                'user_id' => $userId,
-                                'code' => $code,
-                                'version' => $version,
-                                'used' => false,
+                            $backupCodeState[$profileId][] = [
+                                'profile_id' => $profileId,
+                                'code'       => $code,
+                                'version'    => $version,
+                                'used'       => false,
                             ];
                         }
 
@@ -154,11 +162,44 @@ class TwoFactorFlowTest extends TestCase
 
                 $stmt->method('fetch')
                     ->willReturnCallback(function() use ($sql, &$userState) {
-                        // SELECT from users - always return the test user data
+                        // SELECT from users - return the test user data
                         if (strpos($sql, 'FROM users') !== false) {
                             return $userState[self::TEST_USER_ID] ?? null;
                         }
+                        // SELECT from profiles - return profile data
+                        if (strpos($sql, 'FROM profiles') !== false) {
+                            return $userState[self::TEST_USER_ID] ?? null;
+                        }
                         return null;
+                    });
+
+                $stmt->method('fetchColumn')
+                    ->willReturnCallback(function() use ($sql) {
+                        // profile_emails lookup (resolveProfileId / legacy path)
+                        if (strpos($sql, 'FROM profile_emails') !== false) {
+                            return self::TEST_PROFILE_ID;
+                        }
+                        // email lookup from users (AuthHandler legacy path)
+                        if (strpos($sql, 'SELECT email FROM users') !== false) {
+                            return self::TEST_USER_EMAIL;
+                        }
+                        // token_epoch epoch-check against users (TokenValidator)
+                        if (strpos($sql, 'token_epoch') !== false && strpos($sql, 'FROM users') !== false) {
+                            return 0;  // epoch 0 — token is always current
+                        }
+                        // token_epoch epoch-check against profiles (TokenValidator)
+                        if (strpos($sql, 'token_epoch') !== false && strpos($sql, 'FROM profiles') !== false) {
+                            return 0;
+                        }
+                        // jti revocation check (revoked_tokens)
+                        if (strpos($sql, 'revoked_tokens') !== false) {
+                            return false;  // token not revoked
+                        }
+                        // membership guard (ActiveTenantMembershipGuard)
+                        if (strpos($sql, 'FROM memberships') !== false) {
+                            return 1;  // active membership exists
+                        }
+                        return false;
                     });
 
                 return $stmt;

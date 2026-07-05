@@ -79,7 +79,7 @@ export async function resetTwoFactorViaDb(email: string): Promise<void> {
     `two_factor_backup_codes_version=0 WHERE email='${email}'; ` +
     `UPDATE profiles SET two_factor_enabled=false, two_factor_secret=NULL, ` +
     `two_factor_backup_codes_version=0 WHERE id=(SELECT profile_id FROM profile_emails WHERE email='${email}'); ` +
-    `DELETE FROM backup_codes WHERE user_id=(SELECT id FROM users WHERE email='${email}');`;
+    `DELETE FROM backup_codes WHERE profile_id=(SELECT profile_id FROM profile_emails WHERE email='${email}');`;
   await execFileAsync('docker', [
     'exec',
     DB_CONTAINER,
