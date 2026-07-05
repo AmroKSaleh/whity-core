@@ -218,6 +218,13 @@ final class AuditLoggerTest extends TestCase
 
     private static function makeSqliteSchema(): PDO
     {
-        return SchemaFromMigrations::make(true);
+        $pdo = SchemaFromMigrations::make(true);
+        // Seed the tenants used by these tests: audit_log.tenant_id has an FK to
+        // tenants (real PG enforces it; SQLite does not). Without these rows the
+        // AuditLogger's write fails-closed (audit must never break the request)
+        // and the row is silently dropped.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES
+            (1, 't1'), (2, 't2'), (3, 't3'), (4, 't4'), (5, 't5'), (7, 't7')");
+        return $pdo;
     }
 }

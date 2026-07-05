@@ -360,6 +360,10 @@ final class DelegationServiceRealEngineTest extends TestCase
 
     private static function makeSqliteSchema(): PDO
     {
-        return SchemaFromMigrations::make(true);
+        $pdo = SchemaFromMigrations::make(true);
+        // Seed tenants referenced by seeded memberships' tenant_id FK
+        // (real PG enforces the constraint; SQLite does not).
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+        return $pdo;
     }
 }
