@@ -12,17 +12,16 @@ use Whity\Auth\TokenValidator;
 use Whity\Core\Identity\MembershipRepository;
 
 /**
- * WC-c35c4ce0 security follow-up (b):
+ * WC-idcut-E: post-cutover token shape — no split-brain possible.
  *
- * When BOTH legacy {user_id, tenant_id} and new {profile_id, active_tenant_id}
- * claims are present in the SAME token, McpPrincipal reads tenant_id while
- * TenantContext reads active_tenant_id. If they differ the caller can "split
- * brain" — declaring tenant A to the membership gate (active_tenant_id) while
- * operating as tenant B in all tenant-scoped queries (tenant_id).
+ * After step E the dual-claim window is closed. No token carries both
+ * {tenant_id} and {active_tenant_id}, so the split-brain invariant
+ * (hasSplitBrainClaims) is deleted from TokenValidator.
  *
- * The fix: TokenValidator must reject any token where
- *   tenant_id !== active_tenant_id
- * when BOTH claims are present (integer-valued).
+ * This file now tests the post-cutover invariants:
+ *  - A valid {profile_id, active_tenant_id} token with membership is accepted.
+ *  - A token missing profile_id or active_tenant_id fails the MCP path.
+ *  - The principalIdsFromClaims resolution uses only profile_id/active_tenant_id.
  *
  * Runs on real SQLite locally and real PostgreSQL in CI (PHPUNIT_PG_DSN).
  */
@@ -38,8 +37,6 @@ final class TokenSplitBrainInvariantRealEngineTest extends TestCase
     private MembershipRepository $memberships;
 
     private int $profileId;
-    private int $userId;
-    private int $userIdB;
 
     protected function setUp(): void
     {
@@ -58,30 +55,11 @@ final class TokenSplitBrainInvariantRealEngineTest extends TestCase
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('SplitBrain', 'x', false, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('PostCutover', 'x', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $this->profileId = (int) $this->pdo->lastInsertId();
 
-        // Legacy users row in tenant A.
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, 'split@example.com', 'x', 1, datetime('now'), 0)"
-        );
-        $stmt->execute([self::TENANT_A]);
-        $this->userId = (int) $this->pdo->lastInsertId();
-
-        // ALSO seed a users row in tenant B with the same email (UNIQUE(tenant_id, email)
-        // allows this), so that the epoch check cannot accidentally catch the split-brain
-        // by failing to find a users row for (userId, TENANT_B).  The test must catch the
-        // split-brain via the explicit invariant, not via epoch-check's fail-closed path.
-        $stmtB = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, 'split@example.com', 'x', 1, datetime('now'), 0)"
-        );
-        $stmtB->execute([self::TENANT_B]);
-        $this->userIdB = (int) $this->pdo->lastInsertId();
-
-        // Active membership in TENANT A only (not B — the split-brain target).
+        // Active membership in TENANT A only.
         $this->memberships->insert($this->profileId, self::TENANT_A, 1);
     }
 
@@ -90,118 +68,122 @@ final class TokenSplitBrainInvariantRealEngineTest extends TestCase
         $_COOKIE = [];
     }
 
-    // ── invariant: tenant_id must equal active_tenant_id when both present ─────────
+    // ── post-cutover: {profile_id, active_tenant_id} only ────────────────────
 
     /**
-     * A well-formed dual-claim token (tenant_id == active_tenant_id) must be accepted.
+     * A well-formed post-cutover token with an active membership is accepted.
      */
-    public function testWellFormedDualClaimTokenIsAccepted(): void
-    {
-        $_COOKIE['access_token'] = $this->mint([
-            'user_id'          => $this->userId,
-            'tenant_id'        => self::TENANT_A,
-            'email'            => 'split@example.com',
-            'role'             => 'admin',
-            'token_epoch'      => 0,
-            'profile_id'       => $this->profileId,
-            'active_tenant_id' => self::TENANT_A, // same as tenant_id ✓
-        ]);
-
-        self::assertIsArray(
-            $this->validator->validateAccessToken(),
-            'A dual-claim token with tenant_id === active_tenant_id must be accepted.'
-        );
-    }
-
-    /**
-     * A split-brain token (tenant_id ≠ active_tenant_id) must be rejected.
-     *
-     * The profile has a membership in tenant A only. The token declares
-     * active_tenant_id = A (passes the membership gate) but tenant_id = B
-     * (which McpPrincipal / TenantContext would read for tenant-scoped queries).
-     *
-     * To ensure the invariant itself is what catches this (not the epoch check
-     * failing-closed on a missing row), we seed a users row in tenant B with
-     * epoch = 0 so the epoch check sees a valid row and would pass.
-     */
-    public function testSplitBrainTokenTenantIdDiffersFromActiveTenantIdIsRejected(): void
-    {
-        // userIdB has a users row in TENANT_B with epoch=0, so the epoch check
-        // for (userIdB, TENANT_B) would PASS — only the explicit invariant stops this.
-        $_COOKIE['access_token'] = $this->mint([
-            'user_id'          => $this->userIdB,  // user row exists in B (epoch 0)
-            'tenant_id'        => self::TENANT_B,  // ← mismatch with active_tenant_id
-            'email'            => 'split@example.com',
-            'role'             => 'admin',
-            'token_epoch'      => 0,
-            'profile_id'       => $this->profileId,
-            'active_tenant_id' => self::TENANT_A,  // ← mismatch with tenant_id
-        ]);
-
-        self::assertNull(
-            $this->validator->validateAccessToken(),
-            'A dual-claim token where tenant_id !== active_tenant_id must be rejected (split-brain).'
-        );
-    }
-
-    /**
-     * A refresh token with the same split-brain mismatch must also be rejected.
-     */
-    public function testSplitBrainRefreshTokenIsRejected(): void
-    {
-        $_COOKIE['refresh_token'] = $this->mint([
-            'user_id'          => $this->userIdB,  // user row exists in B (epoch 0)
-            'tenant_id'        => self::TENANT_B,  // ← mismatch with active_tenant_id
-            'email'            => 'split@example.com',
-            'role'             => 'admin',
-            'token_epoch'      => 0,
-            'profile_id'       => $this->profileId,
-            'active_tenant_id' => self::TENANT_A,  // ← mismatch with tenant_id
-        ], 'refresh', 604800);
-
-        self::assertNull(
-            $this->validator->validateRefreshToken(),
-            'A dual-claim refresh token where tenant_id !== active_tenant_id must be rejected.'
-        );
-    }
-
-    /**
-     * A legacy token (no active_tenant_id) is unaffected by the invariant.
-     */
-    public function testLegacyTokenWithoutActiveTenantIdIsUnaffected(): void
-    {
-        $_COOKIE['access_token'] = $this->mint([
-            'user_id'     => $this->userId,
-            'tenant_id'   => self::TENANT_A,
-            'email'       => 'split@example.com',
-            'role'        => 'admin',
-            'token_epoch' => 0,
-            // no profile_id / active_tenant_id — legacy shape
-        ]);
-
-        self::assertIsArray(
-            $this->validator->validateAccessToken(),
-            'Legacy tokens (no active_tenant_id claim) must not be affected by the invariant.'
-        );
-    }
-
-    /**
-     * A new-claims-only token (profile_id + active_tenant_id, no tenant_id) is
-     * unaffected — the invariant only applies when BOTH legacy and new claims
-     * are present.
-     */
-    public function testNewClaimsOnlyTokenIsUnaffectedByInvariant(): void
+    public function testWellFormedPostCutoverTokenIsAccepted(): void
     {
         $_COOKIE['access_token'] = $this->mint([
             'profile_id'       => $this->profileId,
             'active_tenant_id' => self::TENANT_A,
+            'email'            => 'postcut@example.com',
+            'role'             => 'admin',
             'token_epoch'      => 0,
-            // no user_id / tenant_id — post-cutover shape
         ]);
 
         self::assertIsArray(
             $this->validator->validateAccessToken(),
-            'New-claims-only tokens (no legacy claims) must not be affected by the invariant.'
+            'A {profile_id, active_tenant_id} token with an active membership must be accepted.'
+        );
+    }
+
+    /**
+     * A token for a tenant where the profile has no active membership is rejected.
+     */
+    public function testTokenForUnmemberedTenantIsRejected(): void
+    {
+        // Membership is in TENANT_A; token claims TENANT_B.
+        $_COOKIE['access_token'] = $this->mint([
+            'profile_id'       => $this->profileId,
+            'active_tenant_id' => self::TENANT_B,
+            'email'            => 'postcut@example.com',
+            'role'             => 'admin',
+            'token_epoch'      => 0,
+        ]);
+
+        self::assertNull(
+            $this->validator->validateAccessToken(),
+            'A token claiming a tenant where the profile has no active membership must be rejected.'
+        );
+    }
+
+    /**
+     * A refresh token for a tenant where the profile has no active membership is rejected.
+     */
+    public function testRefreshTokenForUnmemberedTenantIsRejected(): void
+    {
+        $_COOKIE['refresh_token'] = $this->mint([
+            'profile_id'       => $this->profileId,
+            'active_tenant_id' => self::TENANT_B,
+            'email'            => 'postcut@example.com',
+            'role'             => 'admin',
+            'token_epoch'      => 0,
+        ], 'refresh', 604800);
+
+        self::assertNull(
+            $this->validator->validateRefreshToken(),
+            'A refresh token claiming a tenant where the profile has no active membership must be rejected.'
+        );
+    }
+
+    /**
+     * The MCP principal resolution uses profile_id/active_tenant_id exclusively.
+     * A token without profile_id returns null from validateBearerForMcp.
+     */
+    public function testMcpPrincipalUsesProfileIdNotUserId(): void
+    {
+        // Token with ONLY profile_id/active_tenant_id — the post-cutover shape.
+        $token = $this->mint([
+            'profile_id'       => $this->profileId,
+            'active_tenant_id' => self::TENANT_A,
+            'token_epoch'      => 0,
+        ]);
+
+        $principal = $this->validator->validateBearerForMcp($token);
+
+        self::assertNotNull($principal, 'A valid post-cutover session bearer must yield a principal.');
+        self::assertSame($this->profileId, $principal->profileId);
+        self::assertSame($this->profileId, $principal->userId, 'userId == profileId post-cutover.');
+        self::assertSame(self::TENANT_A, $principal->tenantId);
+    }
+
+    /**
+     * A token with no profile_id/active_tenant_id fails the MCP principal path.
+     */
+    public function testMcpPrincipalFailsWithoutProfileId(): void
+    {
+        // No profile_id or active_tenant_id — principalIdsFromClaims returns null.
+        $token = $this->mint([
+            'email'       => 'anon@example.com',
+            'token_epoch' => 0,
+        ]);
+
+        $principal = $this->validator->validateBearerForMcp($token);
+
+        self::assertNull(
+            $principal,
+            'A token without profile_id/active_tenant_id must not yield an MCP principal.'
+        );
+    }
+
+    /**
+     * System tenant (active_tenant_id = 0) bypasses the membership gate —
+     * the invariant that no split-brain is possible still holds because
+     * there is only ONE tenant claim (active_tenant_id).
+     */
+    public function testSystemTenantTokenIsAcceptedWithoutMembership(): void
+    {
+        $_COOKIE['access_token'] = $this->mint([
+            'profile_id'       => $this->profileId,
+            'active_tenant_id' => 0, // system tenant — no membership required
+            'token_epoch'      => 0,
+        ]);
+
+        self::assertIsArray(
+            $this->validator->validateAccessToken(),
+            'System tenant (active_tenant_id = 0) must be accepted without a membership row.'
         );
     }
 

@@ -96,23 +96,13 @@ class RbacMiddleware
             return Response::error('Invalid or expired token', 401);
         }
 
-        // The identity must be present and well-typed. ADR 0005 dual-window: the
-        // new JWT shape carries `profile_id`; the legacy shape carries `user_id`.
-        // Prefer `profile_id` (membership-aware authorization); fall back to
-        // `user_id` (which RoleChecker resolves through the users→profiles mapping
-        // when one exists, else the legacy users-table path).
+        // Post-cutover: profile_id is the canonical identity (ADR 0005 §1).
         $profileId = $payload['profile_id'] ?? null;
-        $userId    = $payload['user_id'] ?? null;
-        $isProfile = is_int($profileId);
-        if (!$isProfile && !is_int($userId)) {
+        if (!is_int($profileId)) {
             return Response::error('Invalid token payload', 401);
         }
 
-        // Authorization is tenant scoped (WC-54): effective roles/permissions
-        // include grants reached through the user's organizational unit, which are
-        // tenant-bound, so the resolved tenant id is required to evaluate them.
-        // EnforceTenantIsolation runs before RBAC and locks the context; an absent
-        // tenant means the request was never tenant-resolved, so fail closed.
+        // Authorization is tenant scoped (WC-54).
         $tenantId = TenantContext::getTenantId();
         if ($tenantId === null) {
             return Response::error('Unresolved tenant context', 401);
@@ -120,21 +110,14 @@ class RbacMiddleware
 
         // Enforce the required role against the authoritative store.
         if ($requiredRole !== null) {
-            $hasRole = $isProfile
-                ? $this->roleChecker->hasRoleForProfile((int) $profileId, $requiredRole, $tenantId)
-                : $this->roleChecker->hasRole((int) $userId, $requiredRole, $tenantId);
-            if (!$hasRole) {
+            if (!$this->roleChecker->hasRoleForProfile($profileId, $requiredRole, $tenantId)) {
                 return $this->forbidden();
             }
         }
 
-        // Enforce the required permission against the authoritative store. The
-        // permission name is echoed back so clients know what they are missing.
+        // Enforce the required permission against the authoritative store.
         if ($requiredPermission !== null) {
-            $hasPermission = $isProfile
-                ? $this->roleChecker->hasPermissionForProfile((int) $profileId, $requiredPermission, $tenantId)
-                : $this->roleChecker->hasPermission((int) $userId, $requiredPermission, $tenantId);
-            if (!$hasPermission) {
+            if (!$this->roleChecker->hasPermissionForProfile($profileId, $requiredPermission, $tenantId)) {
                 return $this->forbidden($requiredPermission);
             }
         }

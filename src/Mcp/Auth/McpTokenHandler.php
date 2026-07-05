@@ -19,11 +19,8 @@ use Whity\Core\Response;
  * the action). The issued MCP tokens are then used as Bearer tokens on
  * POST /mcp (machine-to-machine calls from AI clients).
  *
- * After migration 040, issued tokens carry `profile_id` in their JWT claims.
- * The caller's profile_id is resolved from the session token claims via
- * `profile_id` (preferred) falling back to `user_id` for the dual-window
- * period. This is correct: the session token during the dual-window carries
- * both user_id and profile_id; after step E only profile_id remains.
+ * Post-cutover (step E): session tokens carry only profile_id / active_tenant_id.
+ * The caller's profile_id and tenantId are resolved exclusively from those claims.
  */
 final class McpTokenHandler
 {
@@ -68,12 +65,12 @@ final class McpTokenHandler
             }
         }
 
-        // Prefer profile_id from session token (dual-window: session tokens carry
-        // both user_id and profile_id during the window; post-E only profile_id).
         $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
             ? $claims['profile_id']
-            : (int) ($claims['user_id'] ?? 0);
-        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
+            : 0;
+        $tenantId  = isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id'])
+            ? $claims['active_tenant_id']
+            : 0;
 
         $token = $this->mcpTokenService->issue($profileId, $tenantId, $name, $scope);
         ['jti' => $jti, 'exp' => $exp] = $this->extractClaims($token);
@@ -105,8 +102,10 @@ final class McpTokenHandler
 
         $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
             ? $claims['profile_id']
-            : (int) ($claims['user_id'] ?? 0);
-        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
+            : 0;
+        $tenantId  = isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id'])
+            ? $claims['active_tenant_id']
+            : 0;
 
         $tokens = $this->mcpTokenService->listForUser($profileId, $tenantId);
 
@@ -136,8 +135,10 @@ final class McpTokenHandler
 
         $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
             ? $claims['profile_id']
-            : (int) ($claims['user_id'] ?? 0);
-        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
+            : 0;
+        $tenantId  = isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id'])
+            ? $claims['active_tenant_id']
+            : 0;
 
         if (!$this->mcpTokenService->revoke($jti, $profileId, $tenantId)) {
             return Response::error('Token not found', 404);

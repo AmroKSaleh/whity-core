@@ -46,15 +46,10 @@ final class McpTokenService
         array $scope,
         string $principalKind = 'user',
     ): string {
-        // Emit the new-claims pair {profile_id, active_tenant_id} so the
-        // membership gate can validate the token's declared tenant binding.
-        // Also keep tenant_id for the dual-claim window (principalIdsFromClaims
-        // falls back to it) and to satisfy the split-brain invariant (tenant_id
-        // must equal active_tenant_id when both are present).
+        // Post-cutover: emit only {profile_id, active_tenant_id} — no legacy tenant_id.
         $token = $this->jwtParser->create([
             'profile_id'       => $profileId,
             'active_tenant_id' => $tenantId,
-            'tenant_id'        => $tenantId,
             'aud'              => 'mcp',
             'principal_kind'   => $principalKind,
             'scope'            => $scope,

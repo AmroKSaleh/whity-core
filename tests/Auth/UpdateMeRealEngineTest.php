@@ -16,31 +16,23 @@ use Whity\Core\Request;
  * Real-engine (in-memory SQLite) tests for the self-service profile update
  * endpoint {@see AuthHandler::handleUpdateMe()} (PATCH /api/me, WC-64).
  *
- * Mocked PDO can only pin the request/response contract; it cannot prove a write
- * actually lands in the database nor that the per-tenant uniqueness/scoping SQL
- * behaves under real semantics. These tests drive the handler against a genuine
- * SQL engine seeded with a users/roles schema close to production
- * (UNIQUE(tenant_id, email)), so the persisted row is read back and the security
- * invariants are exercised for real. The pattern mirrors
- * {@see \Tests\Api\UsersApiHandlerRealEngineTest}.
- *
- * Authentication is driven exactly as the live endpoint sees it: the acting user
- * is resolved from a signed access-token JWT placed in the `access_token` cookie
- * (the endpoint is self-only — the id never comes from the request body).
+ * WC-idcut-E: post-cutover. The endpoint reads/writes `profiles` and
+ * `profile_emails` (not `users`). Authentication is via post-cutover access
+ * tokens carrying {profile_id, active_tenant_id}. Epoch bumps go to
+ * `profiles.token_epoch`.
  *
  * Covered invariants:
- *  - self-update of email persists and is scoped to the caller's tenant;
- *  - self-update of password persists a verifiable bcrypt hash (and the user can
- *    authenticate with the new password);
- *  - the endpoint can only ever edit the authenticated user — there is no id in
- *    the body, so a foreign id cannot be targeted, and a token whose user belongs
- *    to another tenant cannot reach across the tenant boundary;
- *  - a wrong/absent current password is rejected with no write;
- *  - email uniqueness is enforced within the tenant.
+ *  - self-update of email persists (profile_emails row);
+ *  - self-update of password persists a verifiable bcrypt hash (profiles.password_hash);
+ *  - password change bumps profiles.token_epoch;
+ *  - the endpoint can only ever edit the authenticated profile;
+ *  - a wrong/absent current_password is rejected with no write;
+ *  - email uniqueness is enforced globally (profile_emails has a UNIQUE(email)).
  */
 final class UpdateMeRealEngineTest extends TestCase
 {
     private const SECRET = 'test-secret-key-for-update-me-padded-for-hs256-min-32-byte-key';
+    private const TENANT = 1;
 
     private PDO $pdo;
     private JwtParser $jwtParser;
@@ -59,10 +51,10 @@ final class UpdateMeRealEngineTest extends TestCase
 
     // ==================== self-update persists ====================
 
-    public function testSelfEmailUpdatePersistsScopedToTenant(): void
+    public function testSelfEmailUpdatePersistsScopedToProfile(): void
     {
-        $this->seedUser(10, 1, 'old@example.com', 'secret-123', 2);
-        $this->authenticateAs(10, 1, 'old@example.com', 'user');
+        $profileId = $this->seedProfile('old@example.com', 'secret-123');
+        $this->authenticateAs($profileId, self::TENANT, 'old@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest(['email' => 'new@example.com', 'current_password' => 'secret-123'])
@@ -70,95 +62,113 @@ final class UpdateMeRealEngineTest extends TestCase
 
         $this->assertSame(200, $response->getStatusCode());
 
-        $email = $this->pdo->query('SELECT email FROM users WHERE id = 10')->fetchColumn();
-        $this->assertSame('new@example.com', $email, 'The new email must be persisted.');
+        // The profile_emails row must carry the new address.
+        $email = $this->pdo->prepare('SELECT email FROM profile_emails WHERE profile_id = ? AND is_primary = true');
+        $email->execute([$profileId]);
+        $this->assertSame('new@example.com', $email->fetchColumn(), 'The new email must be persisted in profile_emails.');
 
         $data = json_decode($response->getBody(), true)['user'];
         $this->assertSame('new@example.com', $data['email']);
-        $this->assertSame(10, $data['id']);
-        $this->assertSame('user', $data['role']);
+        $this->assertSame($profileId, $data['id'], 'id in response must equal profileId (stable).');
         $this->assertArrayNotHasKey('password', $data, 'The password hash must never leak.');
     }
 
     public function testSelfPasswordUpdatePersistsVerifiableBcryptHash(): void
     {
-        $this->seedUser(11, 1, 'pw@example.com', 'old-password', 2);
-        $this->authenticateAs(11, 1, 'pw@example.com', 'user');
+        $profileId = $this->seedProfile('pw@example.com', 'old-password');
+        $this->authenticateAs($profileId, self::TENANT, 'pw@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest([
-                'password' => 'brand-new-pass',
+                'password'         => 'brand-new-pass',
                 'current_password' => 'old-password',
             ])
         );
 
         $this->assertSame(200, $response->getStatusCode());
 
-        $hash = (string) $this->pdo->query('SELECT password FROM users WHERE id = 11')->fetchColumn();
+        $stmt = $this->pdo->prepare('SELECT password_hash FROM profiles WHERE id = ?');
+        $stmt->execute([$profileId]);
+        $hash = (string) $stmt->fetchColumn();
         $this->assertTrue(
             password_verify('brand-new-pass', $hash),
-            'The new password must be persisted as a verifiable bcrypt hash.'
+            'The new password must be persisted as a verifiable bcrypt hash in profiles.'
         );
         $this->assertFalse(
             password_verify('old-password', $hash),
             'The old password must no longer verify.'
         );
-        // The stored value is a hash, never the plaintext.
         $this->assertNotSame('brand-new-pass', $hash);
+    }
+
+    public function testPasswordChangeEpochBumpsProfilesTokenEpoch(): void
+    {
+        $profileId = $this->seedProfile('epoch@example.com', 'old-pw');
+        $this->authenticateAs($profileId, self::TENANT, 'epoch@example.com');
+
+        $response = $this->handler()->handleUpdateMe(
+            $this->jsonRequest(['password' => 'new-password-123', 'current_password' => 'old-pw'])
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $stmt = $this->pdo->prepare('SELECT token_epoch FROM profiles WHERE id = ?');
+        $stmt->execute([$profileId]);
+        $this->assertSame(1, (int) $stmt->fetchColumn(), 'A password change must bump profiles.token_epoch to 1.');
+    }
+
+    public function testEmailOnlyChangeDoesNotBumpEpoch(): void
+    {
+        $profileId = $this->seedProfile('emailonly@example.com', 'secret-123');
+        $this->authenticateAs($profileId, self::TENANT, 'emailonly@example.com');
+
+        $response = $this->handler()->handleUpdateMe(
+            $this->jsonRequest(['email' => 'newemail@example.com', 'current_password' => 'secret-123'])
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+
+        $stmt = $this->pdo->prepare('SELECT token_epoch FROM profiles WHERE id = ?');
+        $stmt->execute([$profileId]);
+        $this->assertSame(0, (int) $stmt->fetchColumn(), 'An email-only change must NOT bump the token_epoch.');
     }
 
     // ==================== self-only authorization ====================
 
-    public function testCannotUpdateAnotherUserEvenWhenIdIsSentInBody(): void
+    public function testCannotUpdateAnotherProfileEvenWhenIdIsSentInBody(): void
     {
-        // Acting user 12; a victim user 99 exists in the same tenant.
-        $this->seedUser(12, 1, 'actor@example.com', 'secret-123', 2);
-        $this->seedUser(99, 1, 'victim@example.com', 'victim-pass', 2);
-        $this->authenticateAs(12, 1, 'actor@example.com', 'user');
+        $actorId  = $this->seedProfile('actor@example.com', 'secret-123');
+        $victimId = $this->seedProfile('victim@example.com', 'victim-pass');
+        $this->authenticateAs($actorId, self::TENANT, 'actor@example.com');
 
         // The endpoint takes no id from the body; an injected `id`/`user_id` must
-        // be ignored and only the acting user (12) may ever change.
+        // be ignored and only the authenticated profile may ever change.
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest([
-                'id' => 99,
-                'user_id' => 99,
-                'email' => 'hijacked@example.com',
+                'id'               => $victimId,
+                'user_id'          => $victimId,
+                'email'            => 'hijacked@example.com',
                 'current_password' => 'secret-123',
             ])
         );
 
         $this->assertSame(200, $response->getStatusCode());
 
-        // The victim is untouched; the actor's own email changed.
+        // The victim's email is untouched.
+        $stmt = $this->pdo->prepare('SELECT email FROM profile_emails WHERE profile_id = ? AND is_primary = true');
+        $stmt->execute([$victimId]);
         $this->assertSame(
             'victim@example.com',
-            $this->pdo->query('SELECT email FROM users WHERE id = 99')->fetchColumn(),
-            'A self-service update must never edit another user.'
+            $stmt->fetchColumn(),
+            'A self-service update must never edit another profile.'
         );
+
+        // The actor's email changed (hijacked@example.com).
+        $stmt->execute([$actorId]);
         $this->assertSame(
             'hijacked@example.com',
-            $this->pdo->query('SELECT email FROM users WHERE id = 12')->fetchColumn(),
-            'Only the authenticated user is updated.'
-        );
-    }
-
-    public function testCannotReachAcrossTenants(): void
-    {
-        // User 40 belongs to tenant 2, but the token claims tenant 1 (a forged or
-        // stale tenant claim). The (id, tenant_id) scoped lookup finds nothing, so
-        // the request is rejected and tenant 2's row is untouched.
-        $this->seedUser(40, 2, 'crosstenant@example.com', 'secret-123', 2);
-        $this->authenticateAs(40, 1, 'crosstenant@example.com', 'user');
-
-        $response = $this->handler()->handleUpdateMe(
-            $this->jsonRequest(['email' => 'moved@example.com', 'current_password' => 'secret-123'])
-        );
-
-        $this->assertSame(401, $response->getStatusCode());
-        $this->assertSame(
-            'crosstenant@example.com',
-            $this->pdo->query('SELECT email FROM users WHERE id = 40')->fetchColumn(),
-            'A token scoped to the wrong tenant must not edit a user in another tenant.'
+            $stmt->fetchColumn(),
+            'Only the authenticated profile is updated.'
         );
     }
 
@@ -176,25 +186,28 @@ final class UpdateMeRealEngineTest extends TestCase
 
     public function testWrongCurrentPasswordIsRejectedWithNoWrite(): void
     {
-        $this->seedUser(20, 1, 'guard@example.com', 'correct-pass', 2);
-        $this->authenticateAs(20, 1, 'guard@example.com', 'user');
+        $profileId = $this->seedProfile('guard@example.com', 'correct-pass');
+        $this->authenticateAs($profileId, self::TENANT, 'guard@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest(['email' => 'changed@example.com', 'current_password' => 'WRONG'])
         );
 
         $this->assertSame(401, $response->getStatusCode());
+
+        $stmt = $this->pdo->prepare('SELECT email FROM profile_emails WHERE profile_id = ? AND is_primary = true');
+        $stmt->execute([$profileId]);
         $this->assertSame(
             'guard@example.com',
-            $this->pdo->query('SELECT email FROM users WHERE id = 20')->fetchColumn(),
+            $stmt->fetchColumn(),
             'A wrong current password must not persist any change.'
         );
     }
 
     public function testMissingCurrentPasswordIsRejected(): void
     {
-        $this->seedUser(21, 1, 'nocur@example.com', 'correct-pass', 2);
-        $this->authenticateAs(21, 1, 'nocur@example.com', 'user');
+        $profileId = $this->seedProfile('nocur@example.com', 'correct-pass');
+        $this->authenticateAs($profileId, self::TENANT, 'nocur@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest(['email' => 'changed@example.com'])
@@ -205,46 +218,31 @@ final class UpdateMeRealEngineTest extends TestCase
 
     // ==================== validation ====================
 
-    public function testEmailUniquenessWithinTenantIsEnforced(): void
+    public function testEmailUniquenessIsGloballyEnforced(): void
     {
-        $this->seedUser(30, 1, 'taken@example.com', 'pw1', 2);
-        $this->seedUser(31, 1, 'me@example.com', 'secret-123', 2);
-        $this->authenticateAs(31, 1, 'me@example.com', 'user');
+        $profileA = $this->seedProfile('taken@example.com', 'pw1');
+        $profileB = $this->seedProfile('me@example.com', 'secret-123');
+        $this->authenticateAs($profileB, self::TENANT, 'me@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest(['email' => 'taken@example.com', 'current_password' => 'secret-123'])
         );
 
         $this->assertSame(409, $response->getStatusCode());
+
+        $stmt = $this->pdo->prepare('SELECT email FROM profile_emails WHERE profile_id = ? AND is_primary = true');
+        $stmt->execute([$profileB]);
         $this->assertSame(
             'me@example.com',
-            $this->pdo->query('SELECT email FROM users WHERE id = 31')->fetchColumn(),
-            'A duplicate email within the tenant must be rejected without change.'
-        );
-    }
-
-    public function testSameEmailInAnotherTenantIsAllowed(): void
-    {
-        // tenant 2 already uses this email; the caller in tenant 1 may take it.
-        $this->seedUser(32, 2, 'shared@example.com', 'pw2', 2);
-        $this->seedUser(33, 1, 'me2@example.com', 'secret-123', 2);
-        $this->authenticateAs(33, 1, 'me2@example.com', 'user');
-
-        $response = $this->handler()->handleUpdateMe(
-            $this->jsonRequest(['email' => 'shared@example.com', 'current_password' => 'secret-123'])
-        );
-
-        $this->assertSame(200, $response->getStatusCode());
-        $this->assertSame(
-            'shared@example.com',
-            $this->pdo->query('SELECT email FROM users WHERE id = 33')->fetchColumn()
+            $stmt->fetchColumn(),
+            'A duplicate email must be rejected without change.'
         );
     }
 
     public function testInvalidEmailFormatIsRejected(): void
     {
-        $this->seedUser(34, 1, 'fmt@example.com', 'secret-123', 2);
-        $this->authenticateAs(34, 1, 'fmt@example.com', 'user');
+        $profileId = $this->seedProfile('fmt@example.com', 'secret-123');
+        $this->authenticateAs($profileId, self::TENANT, 'fmt@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest(['email' => 'not-an-email', 'current_password' => 'secret-123'])
@@ -255,23 +253,25 @@ final class UpdateMeRealEngineTest extends TestCase
 
     public function testTooShortPasswordIsRejected(): void
     {
-        $this->seedUser(35, 1, 'short@example.com', 'secret-123', 2);
-        $this->authenticateAs(35, 1, 'short@example.com', 'user');
+        $profileId = $this->seedProfile('short@example.com', 'secret-123');
+        $this->authenticateAs($profileId, self::TENANT, 'short@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest(['password' => 'short', 'current_password' => 'secret-123'])
         );
 
         $this->assertSame(400, $response->getStatusCode());
-        // Unchanged: the original password still verifies.
-        $hash = (string) $this->pdo->query('SELECT password FROM users WHERE id = 35')->fetchColumn();
-        $this->assertTrue(password_verify('secret-123', $hash));
+
+        // The original password still verifies.
+        $stmt = $this->pdo->prepare('SELECT password_hash FROM profiles WHERE id = ?');
+        $stmt->execute([$profileId]);
+        $this->assertTrue(password_verify('secret-123', (string) $stmt->fetchColumn()));
     }
 
     public function testNoFieldsProvidedIsRejected(): void
     {
-        $this->seedUser(36, 1, 'empty@example.com', 'secret-123', 2);
-        $this->authenticateAs(36, 1, 'empty@example.com', 'user');
+        $profileId = $this->seedProfile('empty@example.com', 'secret-123');
+        $this->authenticateAs($profileId, self::TENANT, 'empty@example.com');
 
         $response = $this->handler()->handleUpdateMe(
             $this->jsonRequest(['current_password' => 'secret-123'])
@@ -284,25 +284,21 @@ final class UpdateMeRealEngineTest extends TestCase
 
     private function handler(): AuthHandler
     {
-        $tokenValidator = new TokenValidator($this->jwtParser, $this->pdo);
-
-        return new AuthHandler($this->pdo, $this->jwtParser, $tokenValidator);
+        return new AuthHandler($this->pdo, $this->jwtParser, new TokenValidator($this->jwtParser, $this->pdo));
     }
 
     /**
-     * Place a valid access-token cookie for the given user, exactly as the live
-     * stack does, so the self-only handler resolves THIS user from the token.
+     * Place a post-cutover access-token cookie for the given profile.
      */
-    private function authenticateAs(int $userId, int $tenantId, string $email, string $role): void
+    private function authenticateAs(int $profileId, int $tenantId, string $email): void
     {
-        $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'tenant_id' => $tenantId,
-            'email' => $email,
-            'role' => $role,
+        $_COOKIE['access_token'] = $this->jwtParser->create([
+            'profile_id'       => $profileId,
+            'active_tenant_id' => $tenantId,
+            'email'            => $email,
+            'role'             => 'user',
+            'token_epoch'      => 0,
         ], 900, 'access');
-
-        $_COOKIE['access_token'] = $token;
     }
 
     /**
@@ -313,23 +309,40 @@ final class UpdateMeRealEngineTest extends TestCase
         return new Request('PATCH', '/api/me', [], (string) json_encode($body));
     }
 
-    private function seedUser(int $id, int $tenantId, string $email, string $plainPassword, int $roleId): void
+    /**
+     * Seed a post-cutover identity: profile + profile_email + active membership.
+     * Returns the profile id.
+     */
+    private function seedProfile(string $email, string $plainPassword, int $epoch = 0): int
     {
+        $hash = password_hash($plainPassword, PASSWORD_BCRYPT);
+
         $stmt = $this->pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at)
-             VALUES (?, ?, ?, ?, ?, datetime('now'))"
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, false, 0, ?, datetime('now'), datetime('now'))"
         );
-        $stmt->execute([$id, $tenantId, $email, password_hash($plainPassword, PASSWORD_BCRYPT), $roleId]);
+        $stmt->execute([$email, $hash, $epoch]);
+        $profileId = (int) $this->pdo->lastInsertId();
+
+        $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        )->execute([$profileId, $email]);
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, 1, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT]);
+
+        return $profileId;
     }
 
-    /**
-     * In-memory SQLite seeded with a users/roles schema mirroring production:
-     * users has the UNIQUE(tenant_id, email) constraint the email-uniqueness
-     * check relies on, and the seeded base roles (admin=1, user=2) so the public
-     * response can resolve the role name.
-     */
     private static function makeSqliteSchema(): PDO
     {
-        return SchemaFromMigrations::make();
+        $pdo = SchemaFromMigrations::make();
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'Tenant A', datetime('now'))");
+        $pdo->exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1, 'admin'), (2, 'user')");
+        return $pdo;
     }
 }

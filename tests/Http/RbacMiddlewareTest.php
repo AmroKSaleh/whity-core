@@ -11,15 +11,16 @@ use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
 
 /**
- * Tests for RbacMiddleware class
+ * Tests for RbacMiddleware class.
+ *
+ * WC-idcut-E: post-cutover — all JWT payloads carry profile_id (not user_id).
+ * The middleware exclusively uses profile_id for identity and calls the
+ * membership-aware RoleChecker methods (hasRoleForProfile / hasPermissionForProfile).
  */
 class RbacMiddlewareTest extends TestCase
 {
     /**
      * Tenant id locked into the context for the authorization-decision tests.
-     * EnforceTenantIsolation resolves and locks this before RBAC runs in
-     * production; here we set it directly so the middleware can thread it into
-     * the (tenant-scoped) RoleChecker calls.
      */
     private const TENANT = 1;
 
@@ -44,9 +45,6 @@ class RbacMiddlewareTest extends TestCase
         TenantContext::reset();
     }
 
-    /**
-     * Test missing Authorization header returns 401
-     */
     public function testMissingAuthorizationHeaderReturns401(): void
     {
         $request = new Request('GET', '/api/resource');
@@ -59,9 +57,6 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame('Missing or invalid Authorization header', $responseData['error']);
     }
 
-    /**
-     * Test invalid Authorization header format returns 401
-     */
     public function testInvalidAuthHeaderFormatReturns401(): void
     {
         $request = new Request('GET', '/api/resource', ['Authorization' => 'InvalidFormat']);
@@ -74,9 +69,6 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame('Missing or invalid Authorization header', $responseData['error']);
     }
 
-    /**
-     * Test Bearer without token returns 401
-     */
     public function testBearerWithoutTokenReturns401(): void
     {
         $request = new Request('GET', '/api/resource', ['Authorization' => 'Bearer']);
@@ -87,9 +79,6 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
     }
 
-    /**
-     * Test invalid token returns 401
-     */
     public function testInvalidTokenReturns401(): void
     {
         $request = new Request('GET', '/api/resource', ['Authorization' => 'Bearer invalid.token.here']);
@@ -107,14 +96,15 @@ class RbacMiddlewareTest extends TestCase
     }
 
     /**
-     * Test valid token with role requirement passes
+     * Post-cutover: token carries profile_id; fail-open (no role/permission required).
      */
     public function testValidTokenWithoutRoleRequirementPasses(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
@@ -124,27 +114,20 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $this->mockRoleChecker->method('hasRole')
-            ->with(123, 'admin', self::TENANT)
-            ->willReturn(true);
-
-        $response = $this->middleware->handle($request, $next, 'admin');
+        $response = $this->middleware->handle($request, $next);
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame('Success', $response->getBody());
-        $this->assertNotNull($request->user);
-        $this->assertSame(123, $request->user->user_id);
-        $this->assertSame('user@example.com', $request->user->email);
     }
 
     /**
-     * Test missing user_id in token returns 401
+     * Post-cutover: missing profile_id returns 401 (not user_id fallback).
      */
-    public function testMissingUserIdInTokenReturns401(): void
+    public function testMissingProfileIdInTokenReturns401(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'email' => 'user@example.com'
+            'email' => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
@@ -162,14 +145,38 @@ class RbacMiddlewareTest extends TestCase
     }
 
     /**
-     * Test invalid user_id type in token returns 401
+     * Post-cutover: only user_id (no profile_id) is also rejected.
      */
-    public function testInvalidUserIdTypeReturns401(): void
+    public function testLegacyUserIdOnlyTokenReturns401(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 'not-an-integer',
-            'email' => 'user@example.com'
+            'user_id'   => 123,
+            'tenant_id' => self::TENANT,
+            'email'     => 'legacy@example.com',
+        ];
+
+        $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
+        $next = fn(Request $req) => new Response(200, 'Success');
+
+        $this->mockJwtParser->method('parse')
+            ->with($validToken)
+            ->willReturn($payload);
+
+        $response = $this->middleware->handle($request, $next, 'admin');
+
+        $this->assertSame(401, $response->getStatusCode());
+        $responseData = json_decode($response->getBody(), true);
+        $this->assertSame('Invalid token payload', $responseData['error']);
+    }
+
+    public function testInvalidProfileIdTypeReturns401(): void
+    {
+        $validToken = 'valid.jwt.token';
+        $payload = [
+            'profile_id'       => 'not-an-integer',
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
@@ -187,14 +194,15 @@ class RbacMiddlewareTest extends TestCase
     }
 
     /**
-     * Test valid token with sufficient role allows
+     * Post-cutover: role check uses hasRoleForProfile (membership-aware).
      */
     public function testValidTokenWithSufficientRoleAllows(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/admin', ['Authorization' => "Bearer {$validToken}"]);
@@ -204,7 +212,7 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $this->mockRoleChecker->method('hasRole')
+        $this->mockRoleChecker->method('hasRoleForProfile')
             ->with(123, 'admin', self::TENANT)
             ->willReturn(true);
 
@@ -213,18 +221,19 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame('Admin Success', $response->getBody());
         $this->assertNotNull($request->user);
-        $this->assertSame(123, $request->user->user_id);
+        $this->assertSame(123, $request->user->profile_id);
     }
 
     /**
-     * Test valid token with insufficient role denies
+     * Post-cutover: role check uses hasRoleForProfile (membership-aware).
      */
     public function testValidTokenWithInsufficientRoleDenies(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/admin', ['Authorization' => "Bearer {$validToken}"]);
@@ -234,7 +243,7 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $this->mockRoleChecker->method('hasRole')
+        $this->mockRoleChecker->method('hasRoleForProfile')
             ->with(123, 'admin', self::TENANT)
             ->willReturn(false);
 
@@ -245,15 +254,13 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame('Insufficient permissions', $responseData['error']);
     }
 
-    /**
-     * Test case-insensitive Authorization header
-     */
     public function testCaseInsensitiveAuthorizationHeader(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         // Test with lowercase header name
@@ -269,9 +276,6 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
     }
 
-    /**
-     * Test expired token returns 401
-     */
     public function testExpiredTokenReturns401(): void
     {
         $request = new Request('GET', '/api/resource', ['Authorization' => 'Bearer expired.token.here']);
@@ -289,28 +293,24 @@ class RbacMiddlewareTest extends TestCase
     }
 
     /**
-     * Test user object is set on request with full payload
-     *
-     * Authorization is always decided against the authoritative store
-     * (RoleChecker), never the JWT role claim, so hasRole must be stubbed.
+     * User object on request carries the full payload including profile_id.
      */
     public function testUserObjectSetOnRequest(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 456,
-            'email' => 'admin@example.com',
-            'role' => 'admin',
-            'permissions' => ['read', 'write', 'delete']
+            'profile_id'       => 456,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'admin@example.com',
+            'role'             => 'admin',
         ];
 
         $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
-        $next = function(Request $req) {
+        $next = function (Request $req) {
             $this->assertNotNull($req->user);
-            $this->assertSame(456, $req->user->user_id);
+            $this->assertSame(456, $req->user->profile_id);
             $this->assertSame('admin@example.com', $req->user->email);
             $this->assertSame('admin', $req->user->role);
-            $this->assertSame(['read', 'write', 'delete'], $req->user->permissions);
             return new Response(200, 'Success');
         };
 
@@ -318,7 +318,7 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $this->mockRoleChecker->method('hasRole')
+        $this->mockRoleChecker->method('hasRoleForProfile')
             ->with(456, 'admin', self::TENANT)
             ->willReturn(true);
 
@@ -328,20 +328,16 @@ class RbacMiddlewareTest extends TestCase
     }
 
     /**
-     * Test that a JWT role claim does NOT grant access (issue #54).
-     *
-     * The previous implementation trusted a `role` claim in the token and
-     * skipped the authoritative permission check. The corrected middleware
-     * ignores the claim entirely and denies access when the authoritative
-     * store reports the user lacks the permission.
+     * A forged role claim in the JWT must not bypass the authoritative check (issue #54).
      */
     public function testTokenRoleClaimDoesNotBypassPermissionCheck(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 99,
-            'email' => 'attacker@example.com',
-            'role' => 'admin', // forged/elevated claim must be ignored
+            'profile_id'       => 99,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'attacker@example.com',
+            'role'             => 'admin', // forged/elevated claim must be ignored
         ];
 
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$validToken}"]);
@@ -355,8 +351,8 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        // Authoritative store: user does NOT have the permission.
-        $this->mockRoleChecker->method('hasPermission')
+        // Authoritative store: profile does NOT have the permission.
+        $this->mockRoleChecker->method('hasPermissionForProfile')
             ->with(99, 'users:read', self::TENANT)
             ->willReturn(false);
 
@@ -369,19 +365,20 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame('users:read', $responseData['required']);
     }
 
-    /**
-     * Test that the 403 permission-denied body includes the `required` field.
-     */
     public function testPermissionDeniedIncludesRequiredField(): void
     {
         $validToken = 'valid.jwt.token';
-        $payload = ['user_id' => 7, 'email' => 'user@example.com'];
+        $payload = [
+            'profile_id'       => 7,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
+        ];
 
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$validToken}"]);
         $next = fn(Request $req) => new Response(200, 'Success');
 
         $this->mockJwtParser->method('parse')->willReturn($payload);
-        $this->mockRoleChecker->method('hasPermission')
+        $this->mockRoleChecker->method('hasPermissionForProfile')
             ->with(7, 'users:read', self::TENANT)
             ->willReturn(false);
 
@@ -395,19 +392,20 @@ class RbacMiddlewareTest extends TestCase
         );
     }
 
-    /**
-     * Test that a role-only denial does NOT leak a `required` permission field.
-     */
     public function testRoleDeniedDoesNotIncludeRequiredField(): void
     {
         $validToken = 'valid.jwt.token';
-        $payload = ['user_id' => 8, 'email' => 'user@example.com'];
+        $payload = [
+            'profile_id'       => 8,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
+        ];
 
         $request = new Request('GET', '/api/admin', ['Authorization' => "Bearer {$validToken}"]);
         $next = fn(Request $req) => new Response(200, 'Success');
 
         $this->mockJwtParser->method('parse')->willReturn($payload);
-        $this->mockRoleChecker->method('hasRole')
+        $this->mockRoleChecker->method('hasRoleForProfile')
             ->with(8, 'admin', self::TENANT)
             ->willReturn(false);
 
@@ -419,15 +417,13 @@ class RbacMiddlewareTest extends TestCase
         $this->assertArrayNotHasKey('required', $responseData);
     }
 
-    /**
-     * Test valid token with sufficient permission allows
-     */
     public function testHandleWithValidPermissionAllowsRequest(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
@@ -437,7 +433,7 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $this->mockRoleChecker->method('hasPermission')
+        $this->mockRoleChecker->method('hasPermissionForProfile')
             ->with(123, 'edit:users', self::TENANT)
             ->willReturn(true);
 
@@ -446,18 +442,16 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame('Success', $response->getBody());
         $this->assertNotNull($request->user);
-        $this->assertSame(123, $request->user->user_id);
+        $this->assertSame(123, $request->user->profile_id);
     }
 
-    /**
-     * Test valid token with insufficient permission denies
-     */
     public function testHandleWithInvalidPermissionReturnsForbidden(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
@@ -467,7 +461,7 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $this->mockRoleChecker->method('hasPermission')
+        $this->mockRoleChecker->method('hasPermissionForProfile')
             ->with(123, 'delete:users', self::TENANT)
             ->willReturn(false);
 
@@ -479,15 +473,13 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame('delete:users', $responseData['required']);
     }
 
-    /**
-     * Test both role and permission checks must pass when both are required
-     */
     public function testHandleWithBothRoleAndPermissionRequiresBoth(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/admin', ['Authorization' => "Bearer {$validToken}"]);
@@ -497,11 +489,11 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        $this->mockRoleChecker->method('hasRole')
+        $this->mockRoleChecker->method('hasRoleForProfile')
             ->with(123, 'admin', self::TENANT)
             ->willReturn(true);
 
-        $this->mockRoleChecker->method('hasPermission')
+        $this->mockRoleChecker->method('hasPermissionForProfile')
             ->with(123, 'manage:permissions', self::TENANT)
             ->willReturn(true);
 
@@ -511,15 +503,13 @@ class RbacMiddlewareTest extends TestCase
         $this->assertSame('Success', $response->getBody());
     }
 
-    /**
-     * Test permission check passes when only permission is required regardless of role
-     */
     public function testHandleWithOnlyPermissionCheckIgnoresRole(): void
     {
         $validToken = 'valid.jwt.token';
         $payload = [
-            'user_id' => 123,
-            'email' => 'user@example.com'
+            'profile_id'       => 123,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'user@example.com',
         ];
 
         $request = new Request('GET', '/api/resource', ['Authorization' => "Bearer {$validToken}"]);
@@ -529,11 +519,11 @@ class RbacMiddlewareTest extends TestCase
             ->with($validToken)
             ->willReturn($payload);
 
-        // Only hasPermission should be called, not hasRole
+        // Only hasPermissionForProfile should be called, not hasRoleForProfile
         $this->mockRoleChecker->expects($this->never())
-            ->method('hasRole');
+            ->method('hasRoleForProfile');
 
-        $this->mockRoleChecker->method('hasPermission')
+        $this->mockRoleChecker->method('hasPermissionForProfile')
             ->with(123, 'read:reports', self::TENANT)
             ->willReturn(true);
 

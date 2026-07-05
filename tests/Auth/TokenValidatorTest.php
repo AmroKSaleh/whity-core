@@ -494,17 +494,25 @@ class TokenValidatorTest extends TestCase
         return $db;
     }
 
+    // ── validateSessionBearerForMcp — post-cutover (profile_id/active_tenant_id) ─
+
     public function testValidateSessionBearerForMcp_returnsPrincipal_onValidAccessToken(): void
     {
         $db        = $this->makeSessionMockDb(revoked: false, storedEpoch: 0);
         $validator = new TokenValidator($this->jwtParser, $db);
 
-        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'token_epoch' => 0], 3600, 'access');
+        // WC-idcut-E: post-cutover claims only.
+        $token = $this->jwtParser->create([
+            'profile_id'       => 42,
+            'active_tenant_id' => 7,
+            'token_epoch'      => 0,
+        ], 3600, 'access');
 
         $result = $validator->validateSessionBearerForMcp($token);
 
         $this->assertInstanceOf(McpPrincipal::class, $result);
-        $this->assertSame(42, $result->userId);
+        $this->assertSame(42, $result->profileId);
+        $this->assertSame(42, $result->userId, 'userId == profileId post-cutover');
         $this->assertSame(7, $result->tenantId);
         $this->assertSame('session', $result->principalKind);
         $this->assertSame(['tools:list', 'tools:call', 'resources:read', 'prompts:list'], $result->scope);
@@ -517,7 +525,11 @@ class TokenValidatorTest extends TestCase
         $validator = new TokenValidator($this->jwtParser, $db);
 
         // type='mcp' must be rejected (wrong type for session path)
-        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'aud' => 'mcp'], 3600, 'mcp');
+        $token = $this->jwtParser->create([
+            'profile_id'       => 42,
+            'active_tenant_id' => 7,
+            'aud'              => 'mcp',
+        ], 3600, 'mcp');
 
         $this->assertNull($validator->validateSessionBearerForMcp($token));
     }
@@ -527,7 +539,10 @@ class TokenValidatorTest extends TestCase
         $db        = $this->makeSessionMockDb();
         $validator = new TokenValidator($this->jwtParser, $db);
 
-        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7], 3600, 'refresh');
+        $token = $this->jwtParser->create([
+            'profile_id'       => 42,
+            'active_tenant_id' => 7,
+        ], 3600, 'refresh');
 
         $this->assertNull($validator->validateSessionBearerForMcp($token));
     }
@@ -537,7 +552,11 @@ class TokenValidatorTest extends TestCase
         $db        = $this->makeSessionMockDb(revoked: true);
         $validator = new TokenValidator($this->jwtParser, $db);
 
-        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'token_epoch' => 0], 3600, 'access');
+        $token = $this->jwtParser->create([
+            'profile_id'       => 42,
+            'active_tenant_id' => 7,
+            'token_epoch'      => 0,
+        ], 3600, 'access');
 
         $this->assertNull($validator->validateSessionBearerForMcp($token));
     }
@@ -548,18 +567,43 @@ class TokenValidatorTest extends TestCase
         $db        = $this->makeSessionMockDb(revoked: false, storedEpoch: 1);
         $validator = new TokenValidator($this->jwtParser, $db);
 
-        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7, 'token_epoch' => 0], 3600, 'access');
+        $token = $this->jwtParser->create([
+            'profile_id'       => 42,
+            'active_tenant_id' => 7,
+            'token_epoch'      => 0,
+        ], 3600, 'access');
 
         $this->assertNull($validator->validateSessionBearerForMcp($token));
     }
 
-    public function testValidateSessionBearerForMcp_returnsNull_onMissingUserId(): void
+    /**
+     * WC-idcut-E: a token without profile_id fails principalIdsFromClaims -> null.
+     */
+    public function testValidateSessionBearerForMcp_returnsNull_onMissingProfileId(): void
     {
         $db        = $this->makeSessionMockDb();
         $validator = new TokenValidator($this->jwtParser, $db);
 
-        // No user_id or tenant_id in payload
+        // No profile_id or active_tenant_id — fails principalIdsFromClaims.
         $token = $this->jwtParser->create(['sub' => 'anon'], 3600, 'access');
+
+        $this->assertNull($validator->validateSessionBearerForMcp($token));
+    }
+
+    /**
+     * WC-idcut-E: legacy-only token (user_id/tenant_id, no profile_id) is rejected.
+     */
+    public function testValidateSessionBearerForMcp_returnsNull_onLegacyClaimsOnly(): void
+    {
+        $db        = $this->makeSessionMockDb();
+        $validator = new TokenValidator($this->jwtParser, $db);
+
+        // Legacy shape — principalIdsFromClaims returns null post-cutover.
+        $token = $this->jwtParser->create([
+            'user_id'   => 42,
+            'tenant_id' => 7,
+            'token_epoch' => 0,
+        ], 3600, 'access');
 
         $this->assertNull($validator->validateSessionBearerForMcp($token));
     }
@@ -569,7 +613,10 @@ class TokenValidatorTest extends TestCase
         $db        = $this->makeSessionMockDb();
         $validator = new TokenValidator($this->jwtParser, $db);
 
-        $token = $this->jwtParser->create(['user_id' => 42, 'tenant_id' => 7], -3600, 'access');
+        $token = $this->jwtParser->create([
+            'profile_id'       => 42,
+            'active_tenant_id' => 7,
+        ], -3600, 'access');
 
         $this->assertNull($validator->validateSessionBearerForMcp($token));
     }
@@ -596,11 +643,14 @@ class TokenValidatorTest extends TestCase
         );
 
         $validator = new TokenValidator($this->jwtParser, $db);
-        $token     = $this->jwtParser->create(
-            ['user_id' => 1, 'tenant_id' => 1, 'principal_kind' => 'user', 'scope' => [], 'aud' => 'mcp'],
-            3600,
-            'mcp'
-        );
+        // Post-cutover MCP token carries profile_id/active_tenant_id only.
+        $token     = $this->jwtParser->create([
+            'profile_id'       => 1,
+            'active_tenant_id' => 1,
+            'principal_kind'   => 'user',
+            'scope'            => [],
+            'aud'              => 'mcp',
+        ], 3600, 'mcp');
 
         $result = $validator->validateBearerForMcp($token);
 
@@ -614,13 +664,19 @@ class TokenValidatorTest extends TestCase
         $db        = $this->makeSessionMockDb(revoked: false, storedEpoch: 0);
         $validator = new TokenValidator($this->jwtParser, $db);
 
-        $token = $this->jwtParser->create(['user_id' => 5, 'tenant_id' => 2, 'token_epoch' => 0], 3600, 'access');
+        // Post-cutover: profile_id/active_tenant_id.
+        $token = $this->jwtParser->create([
+            'profile_id'       => 5,
+            'active_tenant_id' => 2,
+            'token_epoch'      => 0,
+        ], 3600, 'access');
 
         $result = $validator->validateBearerForMcp($token);
 
         $this->assertInstanceOf(McpPrincipal::class, $result);
         $this->assertSame('session', $result->principalKind);
-        $this->assertSame(5, $result->userId);
+        $this->assertSame(5, $result->profileId);
+        $this->assertSame(5, $result->userId, 'userId == profileId post-cutover');
     }
 
     public function testValidateBearerForMcp_returnsNull_onInvalidToken(): void

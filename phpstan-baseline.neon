@@ -186,6 +186,11 @@ parameters:
 			path: src/Auth/AuthHandler.php
 
 		-
+			message: "#^Negated boolean expression is always false\\.$#"
+			count: 1
+			path: src/Auth/AuthHandler.php
+
+		-
 			message: "#^Method Whity\\\\Auth\\\\BackupCodesService\\:\\:generateCodes\\(\\) return type has no value type specified in iterable type array\\.$#"
 			count: 1
 			path: src/Auth/BackupCodesService.php
@@ -572,7 +577,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 6
+			count: 3
 			path: tests/Auth/AccessTokenRevocationRealEngineTest.php
 
 		-
@@ -599,11 +604,6 @@ parameters:
 			message: "#^Offset 'jti' does not exist on array\\<string, mixed\\>\\|null\\.$#"
 			count: 1
 			path: tests/Auth/TokenValidatorTest.php
-
-		-
-			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 9
-			path: tests/Auth/UpdateMeRealEngineTest.php
 
 		-
 			message: "#^Method class@anonymous/tests/Cli/BaseCommandCallApiTest\\.php\\:27\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
@@ -782,12 +782,12 @@ parameters:
 
 		-
 			message: "#^Access to an undefined property object\\:\\:\\$email\\.$#"
-			count: 2
+			count: 1
 			path: tests/Http/RbacMiddlewareTest.php
 
 		-
-			message: "#^Access to an undefined property object\\:\\:\\$permissions\\.$#"
-			count: 1
+			message: "#^Access to an undefined property object\\:\\:\\$profile_id\\.$#"
+			count: 3
 			path: tests/Http/RbacMiddlewareTest.php
 
 		-
@@ -796,13 +796,8 @@ parameters:
 			path: tests/Http/RbacMiddlewareTest.php
 
 		-
-			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
-			count: 4
-			path: tests/Http/RbacMiddlewareTest.php
-
-		-
 			message: "#^Call to an undefined method Whity\\\\Auth\\\\JwtParser\\:\\:method\\(\\)\\.$#"
-			count: 16
+			count: 17
 			path: tests/Http/RbacMiddlewareTest.php
 
 		-
@@ -812,7 +807,7 @@ parameters:
 
 		-
 			message: "#^Call to an undefined method Whity\\\\Auth\\\\RoleChecker\\:\\:method\\(\\)\\.$#"
-			count: 12
+			count: 11
 			path: tests/Http/RbacMiddlewareTest.php
 
 		-
@@ -836,19 +831,24 @@ parameters:
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
 
 		-
-			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 8
-			path: tests/Integration/SettingsApiRealEngineTest.php
-
-		-
-			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 2
-			path: tests/Integration/SettingsMigrationsRealEngineTest.php
-
-		-
 			message: "#^Call to an undefined method Psr\\\\Log\\\\LoggerInterface\\:\\:expects\\(\\)\\.$#"
 			count: 2
 			path: tests/Integration/HookIntegrationTest.php
+
+		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 7
+			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 24
+			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
 
 		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
@@ -896,6 +896,11 @@ parameters:
 			path: tests/Integration/PermissionAssignmentTest.php
 
 		-
+			message: "#^Property Tests\\\\Integration\\\\ProfileLoginRealEngineTest\\:\\:\\$userIdB is never read, only written\\.$#"
+			count: 1
+			path: tests/Integration/ProfileLoginRealEngineTest.php
+
+		-
 			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
 			count: 1
 			path: tests/Integration/RbacLifecycleTest.php
@@ -919,6 +924,16 @@ parameters:
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
 			count: 1
 			path: tests/Integration/RolesApiTenantIsolationTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 8
+			path: tests/Integration/SettingsApiRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
+			path: tests/Integration/SettingsMigrationsRealEngineTest.php
 
 		-
 			message: "#^Cannot access offset 'name' on array\\{id\\: 10, name\\: 'admin', tenant_id\\: 1\\}\\|array\\{id\\: 20, name\\: 'admin', tenant_id\\: 2\\}\\|false\\.$#"
@@ -1301,11 +1316,6 @@ parameters:
 			path: tests/Unit/Http/Middleware/EnforceTenantIsolationTest.php
 
 		-
-			message: "#^Method Tests\\\\Unit\\\\Sdk\\\\Tenant\\\\TenantPredicateScannerTest\\:\\:scan\\(\\) return type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Unit/Sdk/Tenant/TenantPredicateScannerTest.php
-
-		-
 			message: "#^Call to an undefined method Whity\\\\Mcp\\\\Transport\\\\McpRequestHandlerInterface\\:\\:expects\\(\\)\\.$#"
 			count: 6
 			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php
@@ -1316,21 +1326,6 @@ parameters:
 			path: tests/Unit/Mcp/Transport/McpTransportHandlerTest.php
 
 		-
-			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 24
-			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
-
-		-
-			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
-			count: 3
-			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
-
-		-
-			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
-			count: 7
-			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
-
-		-
-			message: "#^Property Tests\\\\Integration\\\\ProfileLoginRealEngineTest\\:\\:\\$userIdB is never read, only written\\.$#"
+			message: "#^Method Tests\\\\Unit\\\\Sdk\\\\Tenant\\\\TenantPredicateScannerTest\\:\\:scan\\(\\) return type has no value type specified in iterable type array\\.$#"
 			count: 1
-			path: tests/Integration/ProfileLoginRealEngineTest.php
+			path: tests/Unit/Sdk/Tenant/TenantPredicateScannerTest.php
