@@ -18,47 +18,65 @@ use PDO;
 /**
  * Users API Handler
  *
- * Handles CRUD operations for users with full validation,
- * password hashing, and error handling.
+ * Handles CRUD operations for the `/api/users` admin endpoint.
  *
- * Role assignment on create (WC-121)
- * ----------------------------------
- * `POST /api/users` resolves the submitted role the SAME way the update path
- * does: the Create User form binds the chosen role as a role NAME (e.g. `admin`)
- * and the handler resolves it to a tenant-visible `roles.id` via
- * {@see self::resolveVisibleRoleId()} (a numeric `role_id` is still accepted for
- * API callers). Previously create read only `role_id` and defaulted to the `user`
- * role, silently dropping the chosen role NAME; now a user created as "admin" is
- * actually created as admin. A supplied-but-unresolvable role is rejected with
- * 404 (matching update); when no role is supplied the user defaults to the global
- * `user` role. The created user is returned via {@see self::toPublicUser()}.
+ * Identity source (WC-f3660e68 — ADR 0005 hard cutover, step F-a)
+ * ---------------------------------------------------------------
+ * This handler is the LAST /api/users CRUD consumer of the legacy per-tenant
+ * `users` table; WC-f3660e68 migrates it to the global-identity model. Identity
+ * (email, password, 2FA) now lives on the GLOBAL `profiles` + `profile_emails`
+ * tables; role/OU/status live on the per-tenant `memberships` row. There is no
+ * longer a `users` row in the read/write path here.
  *
- * Editable fields on update (WC-113)
- * ----------------------------------
- * `PATCH /api/users/{id}` persists the genuinely editable columns of the `users`
- * table: `email`, `password` and the user's primary `role` (the Edit User form
- * binds `role` as a role NAME, which is resolved to a `roles.id` scoped to the
- * tenant before being written to `users.role_id`). Two fields the form also
- * submits are intentionally NOT persisted here:
+ *  - The `id` in every list row, GET/{id}, and returned payload is the
+ *    canonical `profile_id` (`profiles.id`). GET/{id}, PATCH/{id} and
+ *    DELETE/{id} take a profile_id and operate on that profile's membership IN
+ *    THE CURRENT TENANT.
+ *  - A "user" in a tenant IS an ACTIVE membership. `list()` (and its count) is
+ *    the set of profiles with an `active` membership in the tenant, so the
+ *    headline total reconciles EXACTLY with {@see AdminApiHandler::stats()},
+ *    which counts `memberships WHERE tenant_id = :tid AND status = 'active'`
+ *    (system tenant 0: `memberships WHERE status = 'active'` across all tenants).
  *
- *  - `name` is DERIVED from the email local-part — there is no `users.name`
- *    column (see {@see self::toPublicUser()}) — so it is read-only and silently
- *    ignored if sent.
- *  - `tenantId` is intentionally out of scope: moving a user between tenants is a
- *    security-sensitive operation that would breach tenant isolation, so this
- *    endpoint never re-homes a user. A `tenantId` in the body is ignored.
+ * Create (POST /api/users)
+ * ------------------------
+ * "Add a user to this tenant" = find-or-create a PROFILE by email (create
+ * profile + verified primary profile_email + password_hash when the email is
+ * new; REUSE the existing profile when the email already maps to one, since
+ * profile_emails.email is globally unique), then INSERT an ACTIVE membership
+ * (profile_id, tenant_id, role_id, status='active'). An active membership that
+ * already exists for that profile in this tenant is rejected (409). The role is
+ * resolved the same way as update via {@see self::resolveVisibleRoleId()} (a
+ * role NAME as the Create form sends it, or a numeric role_id; absent role
+ * defaults to the global `user` role; an unresolvable/foreign role is 404).
  *
- * Tenant scoping mirrors the other admin handlers: a non-system tenant may edit
- * ONLY its own users (a user outside the tenant is reported as 404); the SYSTEM
- * tenant (id 0) may manage users across all tenants. A resolved role must be
- * visible to the acting tenant (owned by it or a global/NULL-tenant role), so a
- * tenant can never assign one of another tenant's private roles. TenantContext is
- * never bypassed. After a role change the worker-level effective-permission cache
- * is invalidated via {@see RoleChecker::clearCache()} (WC-15), mirroring
- * {@see RolesApiHandler}, so RBAC checks never go stale on a role re-assignment.
+ * Update (PATCH /api/users/{id})
+ * ------------------------------
+ * Updates the membership's `role_id` / `ou_id` for the tenant; email/password
+ * changes update `profile_emails` / `profiles`. `name` is derived/read-only and
+ * `tenantId` is out of scope (both ignored if sent). The membership carries the
+ * tenant predicate on the write itself (defense in depth). A role/OU change
+ * invalidates the worker-level effective-permission cache via
+ * {@see RoleChecker::clearCache()} (WC-15), mirroring {@see RolesApiHandler}.
+ *
+ * Delete (DELETE /api/users/{id})
+ * -------------------------------
+ * Removes the caller-tenant MEMBERSHIP (ends the tenant occupancy), NOT the
+ * global profile — the profile is global and may belong to other tenants.
+ *
+ * Tenant scoping
+ * --------------
+ * Every membership statement carries a parameterised `tenant_id` predicate
+ * (qualified with the alias on joins). The SYSTEM tenant (id 0) acts with
+ * cross-tenant authority: it lists/reads across ALL tenants (unscoped, with a
+ * `@tenant-guard-ignore:` annotation) and may target any tenant's membership on
+ * write, per the pre-cutover contract.
  */
 class UsersApiHandler
 {
+    /** The reserved identifier for the system (cross-tenant authority) tenant. */
+    private const SYSTEM_TENANT_ID = 0;
+
     private PDO $db;
     private HookManager $hookManager;
 
@@ -83,7 +101,14 @@ class UsersApiHandler
     }
 
     /**
-     * GET /api/users - List users for the current tenant (paginated).
+     * GET /api/users - List the users (ACTIVE memberships) of the current tenant.
+     *
+     * A row is a profile with an ACTIVE membership in the tenant (system tenant 0
+     * spans all tenants). Only `status = 'active'` memberships are listed and
+     * counted, so the headline `pagination.total` reconciles EXACTLY with
+     * {@see AdminApiHandler::stats()} (active-membership count). Each row carries
+     * the canonical `profile_id` as `id`, the profile's PRIMARY email, the
+     * membership role name / ou_id / tenant_id / created_at.
      */
     public function list(Request $request): Response
     {
@@ -91,51 +116,48 @@ class UsersApiHandler
             $tenantId = TenantContext::getTenantId();
             $p = PaginationParams::fromPath($request->getPath());
 
-            // DEFERRAL (WC-d88de9fa → WC-f3660e68): this listing (and its count)
-            // intentionally still reads `FROM users`, NOT active memberships. The
-            // users→profiles/memberships migration of this full-CRUD handler is its
-            // own step (WC-f3660e68), so the count basis here (a users row count)
-            // deliberately differs from AdminApiHandler::stats() (which now counts
-            // active memberships). The divergence between /api/users and
-            // /api/admin/stats is documented and expected until WC-f3660e68 lands;
-            // do not migrate it here (mirrors DelegationsApiHandler::granteeVisible).
-            if ($tenantId === 0) {
-                // @tenant-guard-ignore: system-tenant (id 0) lists users across all tenants; scoped else-branch binds u.tenant_id = ?
-                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM users u');
+            if ($tenantId === self::SYSTEM_TENANT_ID) {
+                // @tenant-guard-ignore: system-tenant (id 0) counts active memberships across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
+                $countStmt = $this->db->prepare(
+                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.status = 'active'"
+                );
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                // @tenant-guard-ignore: system-tenant (id 0) lists all users; scoped else-branch binds u.tenant_id = :tenant_id
-                $stmt = $this->db->prepare('
-                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role,
-                           pe.profile_id
-                    FROM users u
-                    JOIN roles r ON u.role_id = r.id
-                    LEFT JOIN profile_emails pe ON LOWER(TRIM(pe.email)) = LOWER(TRIM(u.email)) AND pe.is_primary = true
-                    ORDER BY u.tenant_id, u.created_at DESC
+                // @tenant-guard-ignore: system-tenant (id 0) lists active memberships across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
+                $stmt = $this->db->prepare("
+                    SELECT m.profile_id AS id, pe.email, r.name AS role,
+                           m.tenant_id, m.ou_id, m.created_at, m.status
+                    FROM memberships m
+                    JOIN roles r ON m.role_id = r.id
+                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                    WHERE m.status = 'active'
+                    ORDER BY m.tenant_id, m.created_at DESC
                     LIMIT :limit OFFSET :offset
-                ');
+                ");
                 $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
                 $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
                 $stmt->execute();
             } else {
-                $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM users u WHERE u.tenant_id = :tenant_id');
+                $countStmt = $this->db->prepare(
+                    "SELECT COUNT(*) AS cnt FROM memberships m WHERE m.tenant_id = :tenant_id AND m.status = 'active'"
+                );
                 $countStmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
                 $countStmt->execute();
                 $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
                 $total = $countRow !== false ? (int)($countRow['cnt'] ?? 0) : 0;
 
-                $stmt = $this->db->prepare('
-                    SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role,
-                           pe.profile_id
-                    FROM users u
-                    JOIN roles r ON u.role_id = r.id
-                    LEFT JOIN profile_emails pe ON LOWER(TRIM(pe.email)) = LOWER(TRIM(u.email)) AND pe.is_primary = true
-                    WHERE u.tenant_id = :tenant_id
-                    ORDER BY u.created_at DESC
+                $stmt = $this->db->prepare("
+                    SELECT m.profile_id AS id, pe.email, r.name AS role,
+                           m.tenant_id, m.ou_id, m.created_at, m.status
+                    FROM memberships m
+                    JOIN roles r ON m.role_id = r.id
+                    LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                    WHERE m.tenant_id = :tenant_id AND m.status = 'active'
+                    ORDER BY m.created_at DESC
                     LIMIT :limit OFFSET :offset
-                ');
+                ");
                 $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
                 $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
                 $stmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
@@ -159,16 +181,16 @@ class UsersApiHandler
     }
 
     /**
-     * Map a raw users row to the public API contract consumed by the web UI.
+     * Map a membership/profile row to the public API contract consumed by the UI.
      *
-     * The `users` table has no `name` column, so `name` is derived from the
-     * email local-part to give the Edit User form a non-empty value to pre-fill
-     * (its zod schema marks name required). Snake_case columns are aliased to
-     * the camelCase keys the frontend `User` type binds, and the password hash
-     * is never included.
+     * `id` is the canonical `profile_id`. There is no `name` column in the
+     * identity model, so `name` is derived from the email local-part to give the
+     * Edit User form a non-empty value to pre-fill (its zod schema marks name
+     * required). Snake_case columns are aliased to the camelCase keys the
+     * frontend `User` type binds; the password hash is never included.
      *
-     * @param array<string, mixed> $row Raw row from the users SELECT.
-     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null}
+     * @param array<string, mixed> $row Raw row (id = profile_id, email, role, tenant_id, ou_id, created_at, status).
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null, status: string}
      */
     private function toPublicUser(array $row): array
     {
@@ -176,6 +198,7 @@ class UsersApiHandler
         $localPart = strstr($email, '@', true);
 
         return [
+            // `id` is the canonical profile_id (ADR 0005 hard cutover).
             'id' => (int)($row['id'] ?? 0),
             'name' => $localPart !== false && $localPart !== '' ? $localPart : $email,
             'email' => $email,
@@ -183,29 +206,60 @@ class UsersApiHandler
             'tenantId' => (int)($row['tenant_id'] ?? 0),
             'ou_id' => isset($row['ou_id']) && $row['ou_id'] !== null ? (int)$row['ou_id'] : null,
             'createdAt' => isset($row['created_at']) ? (string)$row['created_at'] : null,
-            // profileId is the identity anchor for this account (null when no
-            // matching profile_emails record exists yet — callers must treat null
-            // as "account not yet migrated to identity model").
-            'profileId' => isset($row['profile_id']) && $row['profile_id'] !== null ? (int)$row['profile_id'] : null,
+            // The membership status (active|invited|suspended). The list only
+            // ever returns 'active', but GET/{id} may surface others.
+            'status' => (string)($row['status'] ?? ''),
         ];
     }
 
     /**
-     * POST /api/users - Create a new user.
+     * GET /api/users/{id} - Read a single user (profile membership) by profile_id.
      *
-     * The Create User form binds the chosen role as a role NAME (e.g. `admin`),
-     * exactly like the Edit form (WC-113); a numeric `role_id` is also accepted
-     * for API callers. The submitted role is resolved to a `roles.id` VISIBLE to
-     * the acting tenant via {@see self::resolveVisibleRoleId()} — the same helper
-     * the update path uses — so a user created as "admin" is actually created as
-     * admin (WC-121, the prior behaviour silently dropped the name and defaulted
-     * to `user`). A role that is supplied but cannot be resolved (unknown name, or
-     * another tenant's private role) is rejected with 404, matching update; when
-     * NO role is supplied the user defaults to the global `user` role.
+     * Tenant-scoped: a non-system tenant reads only a membership in its OWN
+     * tenant (a profile without a membership here is reported as 404); the SYSTEM
+     * tenant (id 0) may read a membership in any tenant.
      *
-     * The created user is returned via {@see self::toPublicUser()} so the response
-     * carries the same shape (`id`/`name`/`email`/`role`/`tenantId`/`createdAt`,
-     * never the password hash) as the list and update endpoints (WC-100/113).
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id` = profile_id).
+     * @return Response JSON user under the `data` key (200) or an error.
+     */
+    public function get(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('User ID is required', 400);
+            }
+
+            $tenantId = TenantContext::getTenantId();
+            $row = $this->fetchMembershipRow((int)$id, $tenantId);
+            if ($row === null) {
+                return Response::error('User not found', 404);
+            }
+
+            return Response::json(['data' => $this->toPublicUser($row)], 200);
+        } catch (\Exception $e) {
+            $this->log('error', 'Failed to fetch user', [
+                'event' => 'users.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to fetch user', 500);
+        }
+    }
+
+    /**
+     * POST /api/users - Add a user to the current tenant.
+     *
+     * Find-or-create a PROFILE by email (create profile + verified primary
+     * profile_email + password_hash when the email is new; reuse the existing
+     * profile when the email already maps to one), then INSERT an ACTIVE
+     * membership binding that profile to the tenant + resolved role. Rejects
+     * (409) when an active membership already exists for that profile in this
+     * tenant. The role is resolved via {@see self::resolveVisibleRoleId()} (name
+     * or numeric id; absent defaults to the global `user` role; an
+     * unresolvable/foreign role is a 404). The SYSTEM tenant (id 0) creates in
+     * the caller's TenantContext per the existing contract.
      *
      * @param Request $request The incoming request.
      * @return Response JSON created user under the `data` key (201) or an error.
@@ -234,89 +288,115 @@ class UsersApiHandler
                 return Response::error('Invalid email format', 400);
             }
 
-            $email = $body['email'];
+            $email = (string)$body['email'];
             $tenantId = TenantContext::getTenantId();
 
-            // Resolve the submitted role. The form sends `role` as a NAME; a
-            // numeric `role_id` is also accepted. When neither is supplied the
-            // user defaults to the global `user` role (matching the historical
-            // default, but resolved rather than hard-coded so the id is always
-            // valid). A supplied-but-unresolvable role is a 404, mirroring the
-            // update path, so the dropdown can never silently downgrade an
-            // unknown/foreign role to `user`.
+            // Resolve the submitted role (a NAME as the Create form sends it, or a
+            // numeric role_id). Absent role defaults to the global `user` role;
+            // a supplied-but-unresolvable/foreign role is 404, mirroring update.
             $roleRef = $body['role'] ?? $body['role_id'] ?? null;
             $roleId = $this->resolveVisibleRoleId($roleRef, $tenantId, $tenantId);
             if ($roleRef !== null && $roleRef !== '' && $roleId === null) {
                 return Response::error('Role not found', 404);
             }
             if ($roleId === null) {
-                // No role supplied: fall back to the global `user` role.
                 $roleId = $this->resolveVisibleRoleId('user', $tenantId, $tenantId);
                 if ($roleId === null) {
                     return Response::error('Default role not found', 500);
                 }
             }
 
-            // Check if email already exists
-            $checkStmt = $this->db->prepare('SELECT id FROM users WHERE email = ? AND tenant_id = ?');
-            $checkStmt->execute([$email, $tenantId]);
-            if ($checkStmt->fetch()) {
-                return Response::error('Email already exists for this tenant', 409);
-            }
-
-            // Dispatch filter hook before creating user
+            // Dispatch filter hook before creating the user (may modify email/role).
             $userData = $this->hookManager->dispatch('user.creating', [
                 'email' => $email,
                 'password' => $body['password'], // Pass plaintext password to hooks
                 'role_id' => $roleId,
             ]);
 
-            // Extract potentially modified data from hook response
-            $email = $userData['email'];
+            $email = (string)$userData['email'];
             $roleId = (int)$userData['role_id'];
-            $password = password_hash($userData['password'], PASSWORD_BCRYPT);
+            $passwordHash = password_hash((string)$userData['password'], PASSWORD_BCRYPT);
 
-            // Insert new user
-            $stmt = $this->db->prepare('
-                INSERT INTO users (email, password, role_id, tenant_id, created_at)
-                VALUES (?, ?, ?, ?, NOW())
-            ');
-            $stmt->execute([$email, $password, $roleId, $tenantId]);
+            $ownTx = !$this->db->inTransaction();
+            if ($ownTx) {
+                $this->db->beginTransaction();
+            }
 
-            $userId = (int)$this->db->lastInsertId();
+            try {
+                // Find-or-create the global profile for this (globally-unique) email.
+                $profileId = $this->findOrCreateProfile($email, $passwordHash);
 
-            // Provision the PROFILE model so the new account can actually log in.
-            // After the WC-c35c4ce0 login rewrite, authentication runs through
-            // profile_emails → profiles → memberships (the #181 fix); a bare
-            // `users` row is NOT login-capable. Every account created here must
-            // therefore get a profile, a verified PRIMARY profile_email, and an
-            // ACTIVE membership in this tenant — mirroring the seeder and
-            // migration 035. Uses the SAME password hash so both the legacy and
-            // profile login paths accept the same credential.
-            $this->provisionProfileForUser($email, $password, (int) $roleId, (int) $tenantId);
+                // Reject when an ACTIVE membership already exists for this profile
+                // in the tenant (a profile may be re-added after being removed, but
+                // never double-added while active).
+                $existing = $this->fetchMembershipRow($profileId, $tenantId);
+                if ($existing !== null && ($existing['status'] ?? '') === 'active') {
+                    if ($ownTx && $this->db->inTransaction()) {
+                        $this->db->rollBack();
+                    }
+                    return Response::error('User already exists for this tenant', 409);
+                }
 
-            // Dispatch synchronous hook after user is created
+                if ($existing !== null) {
+                    // A non-active membership (invited/suspended) exists: promote it
+                    // to active with the resolved role. The predicate is on
+                    // (profile_id, tenant_id).
+                    $upd = $this->db->prepare(
+                        "UPDATE memberships SET status = 'active', role_id = :role_id
+                         WHERE profile_id = :profile_id AND tenant_id = :tenant_id"
+                    );
+                    $upd->execute([
+                        ':role_id' => $roleId,
+                        ':profile_id' => $profileId,
+                        ':tenant_id' => $tenantId,
+                    ]);
+                } else {
+                    $ins = $this->db->prepare(
+                        "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+                         VALUES (:profile_id, :tenant_id, :role_id, NULL, 'active', NOW())"
+                    );
+                    $ins->execute([
+                        ':profile_id' => $profileId,
+                        ':tenant_id' => $tenantId,
+                        ':role_id' => $roleId,
+                    ]);
+                }
+
+                if ($ownTx) {
+                    $this->db->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownTx && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                throw $e;
+            }
+
+            // Dispatch synchronous hook after the user is created. `id` is the
+            // canonical profile_id (ADR 0005 hard cutover).
             $this->hookManager->dispatch('user.created', [
-                'id' => $userId,
+                'id' => $profileId,
                 'email' => $email,
                 'role_id' => $roleId,
-                'tenant_id' => (int)$tenantId
+                'tenant_id' => (int)$tenantId,
             ]);
 
-            // Dispatch asynchronous hook for background tasks
+            // Dispatch asynchronous hook for background tasks.
             $this->hookManager->dispatchAsync('user.created.async', [
-                'id' => $userId,
+                'id' => $profileId,
                 'email' => $email,
             ]);
 
             $this->log('info', 'User created', [
                 'event' => 'users.create',
                 'tenant_id' => $tenantId,
-                'user_id' => $userId,
+                'user_id' => $profileId,
                 'role_id' => $roleId,
             ]);
 
-            return Response::json(['data' => $this->fetchPublicUser($userId)], 201);
+            $row = $this->fetchMembershipRow($profileId, $tenantId);
+
+            return Response::json(['data' => $this->publicUserOrEmpty($row, $profileId, $tenantId)], 201);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to create user', [
                 'event' => 'users.error',
@@ -328,20 +408,19 @@ class UsersApiHandler
     }
 
     /**
-     * PATCH /api/users/{id} - Update a user.
+     * PATCH /api/users/{id} - Update a user (profile membership) by profile_id.
      *
-     * Persists the editable fields the Edit User form offers: `email`, `password`
-     * and `role` (a role NAME resolved to a tenant-visible `roles.id`). `name` is
-     * derived/read-only and `tenantId` is out of scope; both are ignored if sent
-     * (see the class docblock). Tenant-scoped + ownership-checked: a non-system
-     * tenant may only edit its own users (else 404), the SYSTEM tenant (id 0) may
-     * edit across tenants, and an assigned role must be visible to the tenant. A
-     * real change returns the updated user via {@see self::toPublicUser()}; a true
-     * no-op still returns a sensible 200. A role change invalidates the
-     * effective-permission cache.
+     * Persists the editable fields: `email` and `password` on the PROFILE
+     * (profile_emails / profiles); `role` and `ou_id` on the tenant MEMBERSHIP.
+     * `name` is derived/read-only and `tenantId` is out of scope; both are
+     * ignored if sent. Tenant-scoped + ownership-checked: a non-system tenant may
+     * edit ONLY a profile with a membership in its own tenant (else 404), the
+     * SYSTEM tenant (id 0) may edit across tenants, and an assigned role must be
+     * visible to the tenant. A role/OU change invalidates the effective-permission
+     * cache.
      *
      * @param Request              $request The incoming request.
-     * @param array<string, mixed> $params  Route params (expects `id`).
+     * @param array<string, mixed> $params  Route params (expects `id` = profile_id).
      * @return Response JSON updated user under the `data` key (200) or an error.
      */
     public function update(Request $request, array $params): Response
@@ -353,51 +432,49 @@ class UsersApiHandler
             }
 
             $currentTenantId = TenantContext::getTenantId();
-
             $body = JsonBody::parsed($request);
+            $profileId = (int)$id;
 
-            // Tenant ownership: a non-system tenant may only see/edit its OWN
-            // users; the SYSTEM tenant (id 0) may manage users across all tenants.
-            // A user outside the caller's tenant is reported as 404 so tenant
-            // existence is never leaked, mirroring the other admin handlers.
-            if ($currentTenantId === 0) {
-                // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
-                $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ?');
-                $stmt->execute([$id]);
-            } else {
-                $stmt = $this->db->prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?');
-                $stmt->execute([$id, $currentTenantId]);
-            }
-            $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$user) {
+            // Tenant ownership: the membership must exist in the caller's tenant
+            // (the SYSTEM tenant sees across tenants). A profile without a
+            // membership here is reported as 404 so tenant existence never leaks.
+            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+            if ($membership === null) {
                 return Response::error('User not found', 404);
             }
 
-            // The owning tenant of the target row scopes uniqueness/visibility
-            // checks below (relevant when the SYSTEM tenant edits another tenant's
-            // user: validate against THAT tenant, not tenant 0).
-            $ownerTenantId = (int)$user['tenant_id'];
+            // The owning tenant of the target membership scopes role visibility and
+            // email-uniqueness checks (relevant when the SYSTEM tenant edits another
+            // tenant's membership: validate against THAT tenant, not tenant 0).
+            $ownerTenantId = (int)$membership['tenant_id'];
 
-            // Prepare update fields.
-            $updates = [];
-            $params_array = [];
             $roleChanged = false;
             $ouChanged = false;
+            $emailChanged = false;
+            $passwordChanged = false;
+            $newRoleId = null;
+            $newOuId = null;
+            $ouSetNull = false;
+            $newEmail = null;
+            $newPasswordHash = null;
 
-            if (isset($body['email']) && $body['email'] !== $user['email']) {
-                // Check if new email already exists within the owning tenant.
+            // Email change lives on profile_emails (global identity). Enforce the
+            // GLOBAL uniqueness of profile_emails.email (ADR 0005 §2).
+            $currentEmail = (string)($membership['email'] ?? '');
+            if (isset($body['email']) && $body['email'] !== '' && $body['email'] !== $currentEmail) {
+                // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
                 $checkStmt = $this->db->prepare(
-                    'SELECT id FROM users WHERE email = ? AND tenant_id = ? AND id != ?'
+                    'SELECT profile_id FROM profile_emails WHERE email = ? AND profile_id != ?'
                 );
-                $checkStmt->execute([$body['email'], $ownerTenantId, $id]);
+                $checkStmt->execute([$body['email'], $profileId]);
                 if ($checkStmt->fetch()) {
-                    return Response::error('Email already exists for this tenant', 409);
+                    return Response::error('Email already exists', 409);
                 }
-                $updates[] = 'email = ?';
-                $params_array[] = $body['email'];
+                $newEmail = (string)$body['email'];
+                $emailChanged = true;
             }
 
+            // Password change lives on profiles (global identity).
             if (isset($body['password']) && !empty($body['password'])) {
                 try {
                     PasswordPolicy::validate($body['password']);
@@ -405,83 +482,120 @@ class UsersApiHandler
                     $validationError = $e->getMessage();
                     return Response::error($validationError, 400);
                 }
-                $updates[] = 'password = ?';
-                $params_array[] = password_hash($body['password'], PASSWORD_BCRYPT);
+                $newPasswordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
+                $passwordChanged = true;
             }
 
-            // Role assignment. The form binds `role` as a role NAME; a numeric
-            // `role_id` is also accepted for API callers. The resolved role must
-            // be visible to the acting tenant (owned by it, a global/NULL-tenant
-            // role, or — for the SYSTEM tenant — any role) so a tenant can never
-            // assign another tenant's private role.
+            // Role assignment lives on the membership. The resolved role must be
+            // visible to the acting tenant (owned by it, global, or — for the
+            // SYSTEM tenant — any role).
             $roleRef = $body['role'] ?? $body['role_id'] ?? null;
             if ($roleRef !== null && $roleRef !== '') {
-                $newRoleId = $this->resolveVisibleRoleId($roleRef, $currentTenantId, $ownerTenantId);
-                if ($newRoleId === null) {
+                $resolved = $this->resolveVisibleRoleId($roleRef, $currentTenantId, $ownerTenantId);
+                if ($resolved === null) {
                     return Response::error('Role not found', 404);
                 }
-
-                if ($newRoleId !== (int)$user['role_id']) {
-                    $updates[] = 'role_id = ?';
-                    $params_array[] = $newRoleId;
+                if ($resolved !== (int)$membership['role_id']) {
+                    $newRoleId = $resolved;
                     $roleChanged = true;
                 }
             }
 
-            // Support ou_id assignment with tenant validation (scoped to the owning
-            // tenant so it stays correct under SYSTEM-tenant cross-tenant edits).
+            // OU assignment lives on the membership (scoped to the owning tenant).
             if (isset($body['ou_id'])) {
                 $ouId = $body['ou_id'];
-
-                // NULL and 0 are valid (user in root)
                 if ($ouId !== null && $ouId !== 0 && $ouId !== '') {
-                    // SECURITY: ou_id must belong to the user's owning tenant.
-                    $stmtCheckOu = $this->db->prepare('SELECT id FROM organizational_units WHERE id = ? AND tenant_id = ?');
+                    // SECURITY: ou_id must belong to the membership's owning tenant.
+                    $stmtCheckOu = $this->db->prepare(
+                        'SELECT id FROM organizational_units WHERE id = ? AND tenant_id = ?'
+                    );
                     $stmtCheckOu->execute([$ouId, $ownerTenantId]);
                     if (!$stmtCheckOu->fetch()) {
                         return Response::error('OU does not belong to current tenant', 403);
                     }
-                    // Safe to update ou_id
-                    $updates[] = 'ou_id = ?';
-                    $params_array[] = $ouId;
+                    $newOuId = (int)$ouId;
                     $ouChanged = true;
                 } else {
-                    // Set to NULL (user in root)
-                    $updates[] = 'ou_id = NULL';
+                    $ouSetNull = true;
                     $ouChanged = true;
                 }
             }
 
-            // A true no-op (nothing genuinely changed — e.g. only `name`/`tenantId`
-            // were sent, or the role matched the current one) still returns a
-            // sensible 200 carrying the unchanged record.
-            if (empty($updates)) {
+            // A true no-op (nothing genuinely changed) still returns a sensible 200.
+            if (!$roleChanged && !$ouChanged && !$emailChanged && !$passwordChanged) {
                 $this->log('info', 'User update was a no-op', [
                     'event' => 'users.update.noop',
                     'tenant_id' => $currentTenantId,
-                    'user_id' => (int)$id,
+                    'user_id' => $profileId,
                 ]);
 
-                return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);
+                return Response::json(['data' => $this->toPublicUser($membership)], 200);
             }
 
-            // WC-190: the UPDATE itself carries the tenant predicate, not just the
-            // prior guard SELECT, so a cross-tenant id can never mutate another
-            // tenant's user even if the guard were bypassed (TOCTOU / defense in
-            // depth). The SYSTEM tenant (id 0) edits across tenants by design and
-            // stays unscoped; any other tenant is pinned to the row's OWNING tenant
-            // (which the guard already proved equals the acting tenant).
-            $params_array[] = $id;
-            if ($currentTenantId === 0) {
-                $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ?';
-            } else {
-                $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ? AND tenant_id = ?';
-                $params_array[] = $ownerTenantId;
+            $ownTx = !$this->db->inTransaction();
+            if ($ownTx) {
+                $this->db->beginTransaction();
             }
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute($params_array);
 
-            // A role re-assignment OR an OU-membership change alters the user's
+            try {
+                // Identity writes (global tables).
+                if ($emailChanged && $newEmail !== null) {
+                    // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); scoped to the target profile's PRIMARY email
+                    $this->db->prepare(
+                        'UPDATE profile_emails SET email = ? WHERE profile_id = ? AND is_primary = true'
+                    )->execute([$newEmail, $profileId]);
+                }
+                if ($passwordChanged && $newPasswordHash !== null) {
+                    // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                    $this->db->prepare(
+                        'UPDATE profiles SET password_hash = ?, updated_at = NOW() WHERE id = ?'
+                    )->execute([$newPasswordHash, $profileId]);
+                }
+
+                // Membership writes (tenant-owned). The UPDATE carries the tenant
+                // predicate itself (defense in depth). The SYSTEM tenant (id 0)
+                // edits across tenants and stays unscoped; any other tenant is
+                // pinned to the membership's OWNING tenant (which the guard already
+                // proved equals the acting tenant).
+                $membershipUpdates = [];
+                $membershipParams = [];
+                if ($roleChanged && $newRoleId !== null) {
+                    $membershipUpdates[] = 'role_id = ?';
+                    $membershipParams[] = $newRoleId;
+                }
+                if ($ouChanged) {
+                    if ($ouSetNull) {
+                        $membershipUpdates[] = 'ou_id = NULL';
+                    } else {
+                        $membershipUpdates[] = 'ou_id = ?';
+                        $membershipParams[] = $newOuId;
+                    }
+                }
+
+                if ($membershipUpdates !== []) {
+                    $membershipParams[] = $profileId;
+                    if ($currentTenantId === self::SYSTEM_TENANT_ID) {
+                        $sql = 'UPDATE memberships SET ' . implode(', ', $membershipUpdates)
+                            . ' WHERE profile_id = ?';
+                    } else {
+                        $sql = 'UPDATE memberships SET ' . implode(', ', $membershipUpdates)
+                            . ' WHERE profile_id = ? AND tenant_id = ?';
+                        $membershipParams[] = $ownerTenantId;
+                    }
+                    $this->db->prepare($sql)->execute($membershipParams);
+                }
+
+                if ($ownTx) {
+                    $this->db->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownTx && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                throw $e;
+            }
+
+            // A role re-assignment OR an OU-membership change alters the profile's
             // effective role/permission set (OU roles are inherited, WC-54);
             // invalidate the worker-level cache so RBAC checks are not stale.
             if ($roleChanged || $ouChanged) {
@@ -491,21 +605,23 @@ class UsersApiHandler
             $this->log('info', 'User updated', [
                 'event' => 'users.update',
                 'tenant_id' => $currentTenantId,
-                'user_id' => (int)$id,
+                'user_id' => $profileId,
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
             ]);
 
             // Notify listeners (e.g. the audit trail, WC-34) after a successful
-            // user update. The owning tenant scopes the record.
+            // update. The owning tenant scopes the record.
             $this->hookManager->dispatch('user.updated', [
-                'id' => (int)$id,
+                'id' => $profileId,
                 'tenant_id' => $ownerTenantId,
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
             ]);
 
-            return Response::json(['data' => $this->fetchPublicUser((int)$id)], 200);
+            $row = $this->fetchMembershipRow($profileId, $ownerTenantId);
+
+            return Response::json(['data' => $this->publicUserOrEmpty($row, $profileId, $ownerTenantId)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to update user', [
                 'event' => 'users.error',
@@ -517,31 +633,210 @@ class UsersApiHandler
     }
 
     /**
-     * Resolve a role reference (a role NAME from the Edit form, or a numeric
+     * DELETE /api/users/{id} - Remove a user's membership in the current tenant.
+     *
+     * Ends the caller-tenant MEMBERSHIP; the GLOBAL profile survives (it may
+     * belong to other tenants). Tenant-scoped: a non-system tenant removes only a
+     * membership in its own tenant (a profile without one here is 404); the
+     * SYSTEM tenant (id 0) may remove a membership in any tenant.
+     *
+     * @param Request              $request The incoming request.
+     * @param array<string, mixed> $params  Route params (expects `id` = profile_id).
+     * @return Response JSON confirmation (200) or an error.
+     */
+    public function delete(Request $request, array $params): Response
+    {
+        try {
+            $id = $params['id'] ?? null;
+            if (!$id) {
+                return Response::error('User ID is required', 400);
+            }
+
+            $currentTenantId = TenantContext::getTenantId();
+            $profileId = (int)$id;
+
+            // Guard: the membership must exist in the caller's tenant.
+            $membership = $this->fetchMembershipRow($profileId, $currentTenantId);
+            if ($membership === null) {
+                return Response::error('User not found', 404);
+            }
+            $ownerTenantId = (int)$membership['tenant_id'];
+
+            // Remove the MEMBERSHIP (not the global profile). The DELETE carries
+            // the tenant predicate itself; the SYSTEM tenant edits across tenants
+            // and stays unscoped.
+            if ($currentTenantId === self::SYSTEM_TENANT_ID) {
+                // @tenant-guard-ignore: system-tenant (id 0) removes a membership in any tenant; scoped else-branch binds tenant_id
+                $deleteStmt = $this->db->prepare('DELETE FROM memberships WHERE profile_id = ? AND tenant_id = ?');
+                $deleteStmt->execute([$profileId, $ownerTenantId]);
+            } else {
+                $deleteStmt = $this->db->prepare('DELETE FROM memberships WHERE profile_id = ? AND tenant_id = ?');
+                $deleteStmt->execute([$profileId, $currentTenantId]);
+            }
+
+            // A role/membership removal alters the profile's effective access;
+            // invalidate the worker-level cache.
+            RoleChecker::clearCache();
+
+            // Notify listeners (e.g. the audit trail, WC-34) after removal.
+            $this->hookManager->dispatch('user.deleted', [
+                'id' => $profileId,
+                'tenant_id' => $ownerTenantId,
+            ]);
+
+            return Response::json(['data' => ['id' => $profileId, 'message' => 'User deleted']], 200);
+        } catch (\Exception $e) {
+            $this->log('error', 'Failed to delete user', [
+                'event' => 'users.error',
+                'tenant_id' => TenantContext::getTenantId(),
+                'detail' => $e->getMessage(),
+            ]);
+            return Response::error('Failed to delete user', 500);
+        }
+    }
+
+    /**
+     * Fetch a single membership row (joined to its profile's primary email and
+     * role) for a profile in a tenant, in the public row shape used by
+     * {@see self::toPublicUser()}.
+     *
+     * Tenant-scoped: a non-system tenant is pinned to its own tenant_id; the
+     * SYSTEM tenant (id 0) resolves the profile's membership in ANY tenant
+     * (it targets exactly one membership — the caller supplies a profile_id and
+     * the system tenant has cross-tenant authority; when a profile has
+     * memberships in multiple tenants the most-recent is returned, matching the
+     * cross-tenant "any tenant's membership" contract).
+     *
+     * @return array<string, mixed>|null Public-shaped row, or null when absent.
+     */
+    private function fetchMembershipRow(int $profileId, int $tenantId): ?array
+    {
+        if ($tenantId === self::SYSTEM_TENANT_ID) {
+            // @tenant-guard-ignore: system-tenant (id 0) resolves a profile's membership in any tenant; scoped else-branch binds m.tenant_id = ?
+            $stmt = $this->db->prepare("
+                SELECT m.profile_id AS id, pe.email, r.name AS role,
+                       m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id
+                FROM memberships m
+                JOIN roles r ON m.role_id = r.id
+                LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                WHERE m.profile_id = ?
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$profileId]);
+        } else {
+            $stmt = $this->db->prepare("
+                SELECT m.profile_id AS id, pe.email, r.name AS role,
+                       m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id
+                FROM memberships m
+                JOIN roles r ON m.role_id = r.id
+                LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
+                WHERE m.profile_id = ? AND m.tenant_id = ?
+                LIMIT 1
+            ");
+            $stmt->execute([$profileId, $tenantId]);
+        }
+
+        /** @var array<string, mixed>|false $row */
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Shape a membership row for the response, falling back to a minimal record
+     * when the row could not be re-read (should not happen after a successful
+     * write, but keeps the response contract non-null).
+     *
+     * @param array<string, mixed>|null $row
+     * @return array<string, mixed>
+     */
+    private function publicUserOrEmpty(?array $row, int $profileId, int $tenantId): array
+    {
+        if ($row !== null) {
+            return $this->toPublicUser($row);
+        }
+
+        return [
+            'id' => $profileId,
+            'name' => '',
+            'email' => '',
+            'role' => '',
+            'tenantId' => $tenantId,
+            'ou_id' => null,
+            'createdAt' => null,
+            'status' => '',
+        ];
+    }
+
+    /**
+     * Find the profile that owns a (globally-unique) email, else create a profile
+     * + verified PRIMARY profile_email carrying the given password hash.
+     *
+     * profile_emails.email is globally UNIQUE (ADR 0005 §2), so when the email
+     * already has a profile we REUSE it (the same person added to a second
+     * tenant) and never create a duplicate identity. Must run inside the caller's
+     * transaction so a partial identity can never be persisted.
+     *
+     * @return int The profile id (existing or newly created).
+     */
+    private function findOrCreateProfile(string $email, string $passwordHash): int
+    {
+        // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
+        $peStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
+        $peStmt->execute([$email]);
+        $existingProfileId = $peStmt->fetchColumn();
+
+        if ($existingProfileId !== false) {
+            return (int)$existingProfileId;
+        }
+
+        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+        $profStmt = $this->db->prepare(
+            'INSERT INTO profiles
+                 (display_name, password_hash, two_factor_enabled,
+                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, false, 0, 0, NOW(), NOW())'
+        );
+        $profStmt->execute([$this->localPart($email), $passwordHash]);
+        $profileId = (int)$this->db->lastInsertId();
+
+        // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2)
+        $this->db->prepare(
+            'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, NOW())'
+        )->execute([$profileId, $email]);
+
+        return $profileId;
+    }
+
+    /** Local-part (before @) of an email, used as the profile display name. */
+    private function localPart(string $email): string
+    {
+        $at = strrpos($email, '@');
+        return $at !== false ? substr($email, 0, $at) : $email;
+    }
+
+    /**
+     * Resolve a role reference (a role NAME from the form, or a numeric
      * `roles.id`) to a role id that is VISIBLE to the acting tenant.
      *
      * Visibility mirrors {@see RolesApiHandler}: a role is visible when it is
      * OWNED by the acting tenant (`roles.tenant_id = currentTenant`) OR is a
-     * GLOBAL/system role (`roles.tenant_id IS NULL`, e.g. the seeded base roles).
-     * The SYSTEM tenant (id 0) may assign any role. This prevents a tenant from
-     * assigning another tenant's private role to a user.
+     * GLOBAL/system role (`roles.tenant_id IS NULL`). The SYSTEM tenant (id 0)
+     * may assign any role. This prevents a tenant from assigning another tenant's
+     * private role.
      *
      * @param mixed    $roleRef        Role name string or numeric role id.
      * @param int|null $actingTenantId The resolved acting tenant id (0 = SYSTEM).
-     * @param int      $ownerTenantId  The owning tenant of the target user.
+     * @param int      $ownerTenantId  The owning tenant of the target membership.
      * @return int|null The resolved, visible role id, or null when not found/visible.
      */
     private function resolveVisibleRoleId(mixed $roleRef, ?int $actingTenantId, int $ownerTenantId): ?int
     {
-        // For a tenant-scoped acting context, a role owned by the user's OWNING
-        // tenant (relevant when the SYSTEM tenant edits another tenant's user) or a
-        // global role is visible. For a regular tenant editing its own user the
-        // owning tenant equals the acting tenant.
-        $isSystem = $actingTenantId === 0;
+        $isSystem = $actingTenantId === self::SYSTEM_TENANT_ID;
         $scopeTenantId = $isSystem ? $ownerTenantId : $actingTenantId;
 
-        // Classify the reference: a plain integer / digit string is a role id,
-        // anything else is treated as a role name.
         $byId = is_int($roleRef) || (is_string($roleRef) && $roleRef !== '' && ctype_digit($roleRef));
 
         if ($byId) {
@@ -553,12 +848,10 @@ class UsersApiHandler
         }
 
         if ($isSystem) {
-            // SYSTEM tenant may assign any role regardless of ownership.
             // @tenant-guard-ignore: system-tenant role resolution; scoped else-branch binds (tenant_id = ? OR tenant_id IS NULL)
             $stmt = $this->db->prepare("SELECT id FROM roles WHERE {$column} = ? LIMIT 1");
             $stmt->execute([$value]);
         } else {
-            // Owned-by-tenant OR global (NULL tenant) role only.
             $stmt = $this->db->prepare(
                 "SELECT id FROM roles WHERE {$column} = ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT 1"
             );
@@ -571,131 +864,6 @@ class UsersApiHandler
         }
 
         return (int)$row['id'];
-    }
-
-    /**
-     * Re-read a user by id and shape it into the public API contract.
-     *
-     * Joins roles so the returned `role` reflects any role change just persisted,
-     * and reuses {@see self::toPublicUser()} so the update response matches the
-     * shape the list endpoint and the Edit form consume.
-     *
-     * @param int $id The user id.
-     * @return array{id: int, name: string, email: string, role: string, tenantId: int, createdAt: string|null}
-     */
-    /**
-     * Provision the profile-model identity for a newly-created user so the
-     * account is login-capable under the profile-based auth (WC-c35c4ce0).
-     *
-     * Creates, idempotently:
-     *  - a `profiles` row (global identity) carrying the SAME password hash, when
-     *    no profile already owns this email;
-     *  - a verified PRIMARY `profile_emails` row (the globally-unique login key);
-     *  - an ACTIVE `memberships` row binding the profile to this tenant + role.
-     *
-     * profile_emails.email is globally UNIQUE, so when the email already has a
-     * profile (e.g. the same person added to a second tenant) we REUSE that
-     * profile and only add the tenant membership — never a duplicate identity.
-     * Runs in a transaction so a partial identity can never be persisted.
-     *
-     * @param string $email        The account email (login key).
-     * @param string $passwordHash The already-bcrypt-hashed password.
-     * @param int    $roleId       The tenant role id for the membership.
-     * @param int    $tenantId     The tenant the membership belongs to.
-     */
-    private function provisionProfileForUser(
-        string $email,
-        string $passwordHash,
-        int $roleId,
-        int $tenantId
-    ): void {
-        $ownTx = !$this->db->inTransaction();
-        if ($ownTx) {
-            $this->db->beginTransaction();
-        }
-
-        try {
-            // Reuse an existing profile for this globally-unique email, else create one.
-            // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
-            $peStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
-            $peStmt->execute([$email]);
-            $existingProfileId = $peStmt->fetchColumn();
-
-            if ($existingProfileId !== false) {
-                $profileId = (int) $existingProfileId;
-            } else {
-                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                $profStmt = $this->db->prepare(
-                    'INSERT INTO profiles
-                         (display_name, password_hash, two_factor_enabled,
-                          two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-                     VALUES (?, ?, false, 0, 0, NOW(), NOW())'
-                );
-                $profStmt->execute([$this->localPart($email), $passwordHash]);
-                $profileId = (int) $this->db->lastInsertId();
-
-                // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2)
-                $this->db->prepare(
-                    'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-                     VALUES (?, ?, true, true, NOW())'
-                )->execute([$profileId, $email]);
-            }
-
-            // ACTIVE membership for this tenant (idempotent via UNIQUE(profile_id, tenant_id)).
-            // @tenant-guard-ignore: membership provisioning during user creation (ADR 0005 §6)
-            $this->db->prepare(
-                "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
-                 VALUES (?, ?, ?, NULL, 'active', NOW())
-                 ON CONFLICT (profile_id, tenant_id) DO NOTHING"
-            )->execute([$profileId, $tenantId, $roleId]);
-
-            if ($ownTx) {
-                $this->db->commit();
-            }
-        } catch (\Throwable $e) {
-            if ($ownTx && $this->db->inTransaction()) {
-                $this->db->rollBack();
-            }
-            throw $e;
-        }
-    }
-
-    /** Local-part (before @) of an email, used as the profile display name. */
-    private function localPart(string $email): string
-    {
-        $at = strrpos($email, '@');
-        return $at !== false ? substr($email, 0, $at) : $email;
-    }
-
-    /**
-     * @return array<string, mixed> Public-shaped user record.
-     */
-    private function fetchPublicUser(int $id): array
-    {
-        // @tenant-guard-ignore: by-PK re-read after the scoped guard+write proved this user belongs to the acting tenant
-        $stmt = $this->db->prepare('
-            SELECT u.id, u.email, u.password, u.created_at, u.tenant_id, u.ou_id, r.name as role
-            FROM users u
-            JOIN roles r ON u.role_id = r.id
-            WHERE u.id = ?
-        ');
-        $stmt->execute([$id]);
-
-        /** @var array<string, mixed>|false $row */
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            return [
-                'id' => $id,
-                'name' => '',
-                'email' => '',
-                'role' => '',
-                'tenantId' => 0,
-                'ou_id' => null,
-                'createdAt' => null,
-            ];
-        }
-
-        return $this->toPublicUser($row);
     }
 
     /**
@@ -713,43 +881,5 @@ class UsersApiHandler
         }
 
         $this->logger->log($level, $message, $context);
-    }
-
-    /**
-     * DELETE /api/users/{id} - Delete a user
-     */
-    public function delete(Request $request, array $params): Response
-    {
-        try {
-            $id = $params['id'] ?? null;
-            if (!$id) {
-                return Response::error('User ID is required', 400);
-            }
-
-            $currentTenantId = TenantContext::getTenantId();
-            $stmt = $this->db->prepare('SELECT id FROM users WHERE id = ? AND tenant_id = ?');
-            $stmt->execute([$id, $currentTenantId]);
-            if (!$stmt->fetch()) {
-                return Response::error('User not found', 404);
-            }
-
-            $deleteStmt = $this->db->prepare('DELETE FROM users WHERE id = ? AND tenant_id = ?');
-            $deleteStmt->execute([$id, $currentTenantId]);
-
-            // Notify listeners (e.g. the audit trail, WC-34) after deletion.
-            $this->hookManager->dispatch('user.deleted', [
-                'id' => (int)$id,
-                'tenant_id' => $currentTenantId,
-            ]);
-
-            return Response::json(['data' => ['id' => (int)$id, 'message' => 'User deleted']], 200);
-        } catch (\Exception $e) {
-            $this->log('error', 'Failed to delete user', [
-                'event' => 'users.error',
-                'tenant_id' => TenantContext::getTenantId(),
-                'detail' => $e->getMessage(),
-            ]);
-            return Response::error('Failed to delete user', 500);
-        }
     }
 }

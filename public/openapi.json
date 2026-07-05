@@ -10380,6 +10380,9 @@
                     "createdAt": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "status": {
+                        "type": "string"
                     }
                 },
                 "required": [

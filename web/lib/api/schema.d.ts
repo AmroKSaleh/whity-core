@@ -1815,6 +1815,7 @@ export interface components {
             tenantId: number;
             ou_id?: number | null;
             createdAt: string | null;
+            status?: string;
         };
         UserCreateRequest: {
             email: string;

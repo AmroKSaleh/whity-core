@@ -210,13 +210,28 @@ final class PaginationConventionTest extends TestCase
              VALUES (100, 'editor', 'Editor role', 1, datetime('now'))"
         );
 
-        // 3 users in tenant 1. Use IDs 100+ to avoid conflicting with the
-        // system-admin user (ID 1) seeded by migration 010.
+        // 3 "users" in tenant 1 under the identity model (WC-f3660e68): a user is
+        // a profile with an ACTIVE membership. Seed 3 profiles + primary emails +
+        // active memberships in tenant 1. IDs 100+ avoid the system-admin profile
+        // (id 1) seeded by migration 036.
         $pdo->exec("
-            INSERT INTO users (id, email, password, role_id, tenant_id, created_at) VALUES
-                (100, 'alice@acme.com', 'hash', 1, 1, datetime('now')),
-                (101, 'bob@acme.com',   'hash', 2, 1, datetime('now')),
-                (102, 'carol@acme.com', 'hash', 1, 1, datetime('now'))
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
+                (100, 'alice', 'hash', false, 0, 0, datetime('now'), datetime('now')),
+                (101, 'bob',   'hash', false, 0, 0, datetime('now'), datetime('now')),
+                (102, 'carol', 'hash', false, 0, 0, datetime('now'), datetime('now'))
+        ");
+        $pdo->exec("
+            INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at) VALUES
+                (100, 'alice@acme.com', true, true, datetime('now')),
+                (101, 'bob@acme.com',   true, true, datetime('now')),
+                (102, 'carol@acme.com', true, true, datetime('now'))
+        ");
+        $pdo->exec("
+            INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at) VALUES
+                (100, 1, 1, NULL, 'active', datetime('now')),
+                (101, 1, 2, NULL, 'active', datetime('now')),
+                (102, 1, 1, NULL, 'active', datetime('now'))
         ");
 
         // 3 OUs in tenant 1.

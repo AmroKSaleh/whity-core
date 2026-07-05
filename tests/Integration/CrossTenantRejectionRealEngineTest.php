@@ -79,7 +79,13 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     /** Shared HS256 secret for the real JwtParser/TotpService in 2FA tests (WC-191). */
     private const JWT_SECRET = 'cross-tenant-2fa-test-secret-padded-for-hs256-min-32-byte-key';
 
-    // ==================== users ====================
+    // ==================== users (profiles/memberships, WC-f3660e68) ====================
+    //
+    // Post-cutover the /api/users CRUD sources identity from profiles/profile_emails
+    // and role/OU/status from memberships. The `id` in list rows / on update / on
+    // delete is the canonical profile_id. The fixture seeds profile 101 (email
+    // a1@t1.example, membership in Tenant A) and profile 102 (email b1@t2.example,
+    // membership in Tenant B); profile 101 also has a membership in Tenant B.
 
     public function testUsersListIsTenantScoped(): void
     {
@@ -104,74 +110,143 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertContains('b1@t2.example', $emails, 'The system tenant (id 0) must see all tenants');
     }
 
+    /**
+     * WC-f3660e68: a foreign profile (no membership in Tenant A) is reported 404
+     * on update and Tenant B's membership role is left untouched.
+     */
     public function testTenantCannotUpdateForeignUserAndRowIsUntouched(): void
     {
         TenantContext::setTenantId(self::TENANT_A);
+        // Profile 102 has a membership only in Tenant B (id 102).
         $response = $this->usersHandler()->update(
-            $this->req('PATCH', '/api/users/20', ['email' => 'hijacked@evil.example']),
-            ['id' => '20']
+            $this->req('PATCH', '/api/users/102', ['role' => 'user']),
+            ['id' => '102']
         );
 
-        $this->assertSame(404, $response->getStatusCode(), 'A foreign user must be reported as not found');
-        $this->assertSame(
-            'b1@t2.example',
-            $this->pdo->query('SELECT email FROM users WHERE id = 20')->fetchColumn(),
-            "Tenant B's row must be byte-for-byte untouched after the rejected update"
-        );
-    }
-
-    public function testTenantCannotDeleteForeignUserAndRowSurvives(): void
-    {
-        TenantContext::setTenantId(self::TENANT_A);
-        $response = $this->usersHandler()->delete($this->req('DELETE', '/api/users/20'), ['id' => '20']);
-
-        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(404, $response->getStatusCode(), 'A foreign profile must be reported as not found');
         $this->assertSame(
             1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM users WHERE id = 20')->fetchColumn(),
-            "Tenant B's user must survive a cross-tenant delete attempt"
+            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 102 AND tenant_id = 2')->fetchColumn(),
+            "Tenant B's membership role must be untouched after the rejected update"
         );
     }
 
     /**
-     * WC-190: the legitimate same-tenant user update path is unaffected by the
-     * added `AND tenant_id = ?` predicate on the UPDATE — Tenant A can still edit
-     * its OWN user 10.
+     * WC-f3660e68: delete removes the caller-tenant MEMBERSHIP. A Tenant-A delete
+     * of profile 102 (whose only membership is in Tenant B) is a 404 and Tenant
+     * B's membership survives.
+     */
+    public function testTenantCannotDeleteForeignUserAndRowSurvives(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->usersHandler()->delete($this->req('DELETE', '/api/users/102'), ['id' => '102']);
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE profile_id = 102 AND tenant_id = 2')->fetchColumn(),
+            "Tenant B's membership must survive a cross-tenant delete attempt"
+        );
+    }
+
+    /**
+     * WC-f3660e68: the legitimate same-tenant update path is unaffected — Tenant A
+     * can change its OWN member (profile 101, membership 101) role. The membership
+     * UPDATE carries the tenant predicate.
      */
     public function testTenantCanUpdateOwnUser(): void
     {
         TenantContext::setTenantId(self::TENANT_A);
         $response = $this->usersHandler()->update(
-            $this->req('PATCH', '/api/users/10', ['email' => 'a1-renamed@t1.example']),
-            ['id' => '10']
+            $this->req('PATCH', '/api/users/101', ['role' => 'user']),
+            ['id' => '101']
         );
 
-        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own user update must succeed");
+        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own member update must succeed");
         $this->assertSame(
-            'a1-renamed@t1.example',
-            $this->pdo->query('SELECT email FROM users WHERE id = 10')->fetchColumn(),
-            "Tenant A's own user row must reflect the legitimate same-tenant update"
+            2,
+            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 101 AND tenant_id = 1')->fetchColumn(),
+            "Tenant A's own membership must reflect the legitimate same-tenant role change"
+        );
+        // The Tenant-B membership of the SAME profile is untouched (still role 2 as seeded).
+        $this->assertSame(
+            2,
+            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 101 AND tenant_id = 2')->fetchColumn(),
+            "The profile's Tenant-B membership must not be touched by a Tenant-A edit"
         );
     }
 
     /**
-     * WC-190: the SYSTEM tenant (id 0) edits across tenants by design — the new
-     * user-UPDATE predicate leaves the system path unscoped, so a system-tenant
-     * edit of Tenant B's user still lands.
+     * WC-f3660e68: the SYSTEM tenant (id 0) edits across tenants by design — the
+     * membership UPDATE leaves the system path unscoped, so a system-tenant edit
+     * of Tenant B's membership still lands.
      */
     public function testSystemTenantCanUpdateForeignUser(): void
     {
         TenantContext::setTenantId(self::SYSTEM_TENANT);
         $response = $this->usersHandler()->update(
-            $this->req('PATCH', '/api/users/20', ['email' => 'b1-by-system@t2.example'], self::SYSTEM_TENANT),
-            ['id' => '20']
+            $this->req('PATCH', '/api/users/102', ['role' => 'user'], self::SYSTEM_TENANT),
+            ['id' => '102']
         );
 
-        $this->assertSame(200, $response->getStatusCode(), 'The system tenant must edit any tenant user');
+        $this->assertSame(200, $response->getStatusCode(), 'The system tenant must edit any tenant membership');
         $this->assertSame(
-            'b1-by-system@t2.example',
-            $this->pdo->query('SELECT email FROM users WHERE id = 20')->fetchColumn(),
-            'The system-tenant user UPDATE must remain unscoped and land on the foreign row'
+            2,
+            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 102 AND tenant_id = 2')->fetchColumn(),
+            'The system-tenant membership UPDATE must remain unscoped and land on the foreign row'
+        );
+    }
+
+    /**
+     * WC-f3660e68: create cannot cross tenants — a Tenant-A create adds an ACTIVE
+     * membership only in Tenant A, never in another tenant, and reuses the global
+     * profile if the email is already known.
+     */
+    public function testCreateAddsMembershipOnlyInCallerTenant(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->usersHandler()->create(
+            $this->req('POST', '/api/users', ['email' => 'newbie@t1.example', 'password' => 'secret-123', 'role' => 'user'])
+        );
+
+        $this->assertSame(201, $response->getStatusCode());
+        $profileId = (int) $this->pdo->query("SELECT profile_id FROM profile_emails WHERE email = 'newbie@t1.example'")->fetchColumn();
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 1 AND status = 'active'")->fetchColumn(),
+            'The new member must have an active membership in the caller tenant'
+        );
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM memberships WHERE profile_id = {$profileId} AND tenant_id = 2")->fetchColumn(),
+            'Create must never leak a membership into another tenant'
+        );
+    }
+
+    /**
+     * WC-f3660e68: a Tenant-A create for an email that ALREADY has an active
+     * membership in Tenant A is rejected (409) and no duplicate membership row is
+     * written — while any membership the same profile holds in ANOTHER tenant is
+     * left intact.
+     */
+    public function testCreateRejectsDuplicateActiveMembershipWithoutTouchingOtherTenant(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        // Profile 101 (a1@t1.example) already has an active membership in Tenant A.
+        $response = $this->usersHandler()->create(
+            $this->req('POST', '/api/users', ['email' => 'a1@t1.example', 'password' => 'secret-123', 'role' => 'user'])
+        );
+
+        $this->assertSame(409, $response->getStatusCode(), 'A duplicate active membership must be rejected');
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE profile_id = 101 AND tenant_id = 1')->fetchColumn(),
+            'No duplicate Tenant-A membership may be created'
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE profile_id = 101 AND tenant_id = 2')->fetchColumn(),
+            "The profile's Tenant-B membership must be untouched by the rejected Tenant-A create"
         );
     }
 
