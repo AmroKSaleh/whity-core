@@ -253,9 +253,9 @@ class RelationResolver
      */
     private function findProfile(int $profileId, int $tenantId): ?array
     {
-        // @tenant-guard-ignore: deliberate by-PK read scoped to tenant via memberships; cross-tenant guard enforced by the JOIN
         if ($tenantId === 0) {
             // System tenant: resolve the profile from its first membership.
+            // @tenant-guard-ignore: system tenant (id 0) has no acting tenant to scope to — deliberate cross-tenant by-PK read of the profile's first membership (system-tenant global authority, ADR 0005). The regular-tenant branch below IS tenant-scoped.
             $stmt = $this->db->prepare(
                 'SELECT p.id, m.tenant_id, pe.email
                  FROM profiles p
