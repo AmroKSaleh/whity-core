@@ -211,12 +211,16 @@ final class RelationsApiRbacTest extends TestCase
     /**
      * @return array<string, string>
      */
+    /**
+     * @return array<string, string>
+     */
     private function auth(int $userId, int $tenantId): array
     {
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => "user{$userId}@example.com",
-            'tenant_id' => $tenantId,
+            'profile_id'       => $userId,
+            'email'            => "user{$userId}@example.com",
+            'active_tenant_id' => $tenantId,
+            'token_epoch'      => 0,
         ]);
 
         return ['Authorization' => 'Bearer ' . $token];
@@ -242,10 +246,18 @@ final class RelationsApiRbacTest extends TestCase
                 ->execute([$roleId, $permissionId]);
         }
 
-        $this->pdo->prepare('INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, ?, ?, ?, NULL, NOW())')
-            ->execute([$tenantId, 'u' . $roleId . '@example.com', 'x', $roleId]);
+        $this->pdo->prepare(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )->execute(['u' . $roleId]);
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$profileId, $tenantId, $roleId]);
+
+        return $profileId;
     }
 
     private static function wrapSqlite(PDO $pdo): Database

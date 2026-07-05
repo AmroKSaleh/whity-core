@@ -61,9 +61,13 @@ class RbacCrossTenantDenialTest extends TestCase
     }
 
     /**
-     * Seed a user in a tenant whose dedicated role grants exactly $granted.
+     * Seed a profile + membership in a tenant whose dedicated role grants exactly $granted.
      *
-     * @param array<int, string> $granted permissions granted to the user's role
+     * Post-cutover (WC-idcut-E): RbacMiddleware reads profile_id from the JWT and
+     * calls hasPermissionForProfile() which queries the memberships table. We seed
+     * profiles + memberships instead of (or alongside) the legacy users table.
+     *
+     * @param array<int, string> $granted permissions granted to the profile's membership role
      */
     private function seedUser(int $userId, int $tenantId, array $granted): void
     {
@@ -82,10 +86,18 @@ class RbacCrossTenantDenialTest extends TestCase
             )->execute([$roleId, $permissionId]);
         }
 
+        // Seed a profile row (profiles table, migration 028).
         $this->pdo->prepare(
-            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([$userId, $tenantId, "u{$userId}@example.com", 'x', $roleId]);
+            "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, NOW(), NOW())"
+        )->execute([$userId, "u{$userId}"]);
+
+        // Seed an active membership so hasPermissionForProfile() resolves.
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', NOW())"
+        )->execute([$userId, $tenantId, $roleId]);
     }
 
     private function roleChecker(): RoleChecker
@@ -136,7 +148,7 @@ class RbacCrossTenantDenialTest extends TestCase
         $this->seedUser(200, 2, []);
         $middleware = new RbacMiddleware($jwtParser, $this->roleChecker());
 
-        $token = $jwtParser->create(['user_id' => 200, 'tenant_id' => 2, 'email' => 'b@tenantb.example']);
+        $token = $jwtParser->create(['profile_id' => 200, 'active_tenant_id' => 2, 'email' => 'b@tenantb.example', 'role' => '', 'token_epoch' => 0]);
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $handlerReached = null;
@@ -157,7 +169,7 @@ class RbacCrossTenantDenialTest extends TestCase
         $this->seedUser(200, 2, []);
         $middleware = new RbacMiddleware($jwtParser, $this->roleChecker());
 
-        $token = $jwtParser->create(['user_id' => 100, 'tenant_id' => 1, 'email' => 'a@tenanta.example']);
+        $token = $jwtParser->create(['profile_id' => 100, 'active_tenant_id' => 1, 'email' => 'a@tenanta.example', 'role' => '', 'token_epoch' => 0]);
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $handlerReached = null;
@@ -179,7 +191,7 @@ class RbacCrossTenantDenialTest extends TestCase
         $this->seedUser(200, 2, []);
         $middleware = new RbacMiddleware($jwtParser, $this->roleChecker());
 
-        $token = $jwtParser->create(['user_id' => 200, 'tenant_id' => 2, 'email' => 'b@tenantb.example']);
+        $token = $jwtParser->create(['profile_id' => 200, 'active_tenant_id' => 2, 'email' => 'b@tenantb.example', 'role' => '', 'token_epoch' => 0]);
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $response = $this->dispatch($middleware, 2, $request);
@@ -194,7 +206,7 @@ class RbacCrossTenantDenialTest extends TestCase
         );
 
         $raw = $response->getBody();
-        foreach (['200', 'tenant', 'tenant_id', 'b@tenantb.example', 'sensitive', 'tenant-A-record', 'SELECT', 'role_id', 'user_id'] as $forbidden) {
+        foreach (['200', 'tenant', 'b@tenantb.example', 'sensitive', 'tenant-A-record', 'SELECT', 'role_id', 'user_id'] as $forbidden) {
             $this->assertStringNotContainsStringIgnoringCase(
                 $forbidden,
                 $raw,
@@ -211,7 +223,7 @@ class RbacCrossTenantDenialTest extends TestCase
     {
         $jwtParser = new JwtParser(self::SECRET);
         // Token signed by a different secret -> signature failure -> 401.
-        $foreignToken = (new JwtParser('some-other-secret-padded-for-hs256-min-32-byte-key'))->create(['user_id' => 200, 'tenant_id' => 2]);
+        $foreignToken = (new JwtParser('some-other-secret-padded-for-hs256-min-32-byte-key'))->create(['profile_id' => 200, 'active_tenant_id' => 2]);
         $middleware = new RbacMiddleware($jwtParser, $this->roleChecker());
 
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$foreignToken}"]);

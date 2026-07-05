@@ -146,7 +146,7 @@ class OuRbacTest extends TestCase
     // ==================== Real effective-roles resolution ====================
 
     /**
-     * The REAL {@see RoleChecker::getEffectiveRolesForUser()} unions a user's
+     * The REAL {@see RoleChecker::getEffectiveRolesForProfile()} unions a profile's
      * direct role with the roles assigned to their OU (additive).
      */
     public function testUserWithOuRoleGainsEffectiveRoles(): void
@@ -155,7 +155,7 @@ class OuRbacTest extends TestCase
         $this->assignRoleToOu($ouId, 'editor');
         $userId = $this->seedUser('member@example.com', 'user', ouId: $ouId);
 
-        $effective = $this->roleChecker->getEffectiveRolesForUser($userId, self::TENANT);
+        $effective = $this->roleChecker->getEffectiveRolesForProfile($userId, self::TENANT);
 
         sort($effective);
         $this->assertSame(['editor', 'user'], $effective, 'Effective roles must be the union of direct + OU roles');
@@ -172,7 +172,7 @@ class OuRbacTest extends TestCase
         $this->assignRoleToOuRaw($ouId, 'admin', tenantId: 2); // tenant 2 leak attempt
         $userId = $this->seedUser('member@example.com', 'user', ouId: $ouId);
 
-        $effective = $this->roleChecker->getEffectiveRolesForUser($userId, self::TENANT);
+        $effective = $this->roleChecker->getEffectiveRolesForProfile($userId, self::TENANT);
 
         $this->assertContains('user', $effective);
         $this->assertContains('viewer', $effective, 'Tenant-1 OU role must be present');
@@ -190,10 +190,10 @@ class OuRbacTest extends TestCase
     private function dispatchAdminGated(string $method, string $path, int $userId, ?bool &$handlerCalled = null): Response
     {
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'tenant_id' => self::TENANT,
-            'email' => "u{$userId}@example.com",
-            'exp' => time() + 3600,
+            'profile_id'       => $userId,
+            'active_tenant_id' => self::TENANT,
+            'email'            => "u{$userId}@example.com",
+            'token_epoch'      => 0,
         ]);
         $request = new Request($method, $path, ['Authorization' => "Bearer {$token}"]);
 
@@ -233,10 +233,17 @@ class OuRbacTest extends TestCase
     private function seedUser(string $email, string $roleName, ?int $ouId): int
     {
         $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, ?, ?, ?, ?, NOW())'
-        )->execute([self::TENANT, $email, 'x', $this->roleId($roleName), $ouId]);
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'x', false, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([$email]);
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, ?, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $this->roleId($roleName), $ouId]);
+
+        return $profileId;
     }
 
     private function roleId(string $roleName): int

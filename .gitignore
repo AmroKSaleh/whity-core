@@ -34,3 +34,4 @@ docker-compose.override.yml
 
 # Storybook build output (regenerated; never committed)
 storybook-static/
+phpunit_full.log

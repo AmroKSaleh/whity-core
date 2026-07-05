@@ -13,23 +13,18 @@ use Whity\Core\Identity\MembershipRepository;
 use Whity\Mcp\Auth\McpPrincipal;
 
 /**
- * WC-d4340daf: dual-claim JWT validation against a real engine.
+ * WC-idcut-E: post-cutover JWT validation — profile_id is the canonical identity.
  *
- * The JWT claim model is evolving from the legacy {user_id, tenant_id} pair to
- * the ADR 0005 target {profile_id, active_tenant_id}. During the dual-claim
- * window BOTH shapes must validate:
+ * After step E the dual-claim window is closed. Every session/MCP JWT carries
+ * ONLY {profile_id, active_tenant_id, ...} — no legacy user_id/tenant_id claims.
+ * Validation is gated on:
+ *   1. profiles.token_epoch (no users.token_epoch check).
+ *   2. An active membership in active_tenant_id (or system-tenant id 0).
  *
- *  - LEGACY tokens (user_id/tenant_id only, no profile_id/active_tenant_id)
- *    keep today's behaviour EXACTLY — no membership lookup is performed,
- *    because pre-migration users have no profiles/memberships rows yet.
- *  - NEW-CLAIMS tokens (profile_id + active_tenant_id) are additionally gated
- *    on a live `memberships` row: an active membership in active_tenant_id, or
- *    system-tenant authority when active_tenant_id = 0 (the id-0 convention).
- *  - PARTIAL claim sets (one of the two new claims without the other) are
- *    never issued and must fail closed.
+ * These tests replace the old DualClaimValidationRealEngineTest which verified
+ * both legacy and dual-window shapes. Only the post-cutover shape is valid here.
  *
- * Runs on real SQLite locally and real PostgreSQL in CI (PHPUNIT_PG_DSN), via
- * SchemaFromMigrations.
+ * Runs on real SQLite locally and real PostgreSQL in CI (PHPUNIT_PG_DSN).
  */
 final class DualClaimValidationRealEngineTest extends TestCase
 {
@@ -46,9 +41,6 @@ final class DualClaimValidationRealEngineTest extends TestCase
     /** Profile id of the seeded test profile. */
     private int $profileId;
 
-    /** Legacy users row id (tenant A). */
-    private int $userId;
-
     protected function setUp(): void
     {
         $_COOKIE = [];
@@ -63,19 +55,11 @@ final class DualClaimValidationRealEngineTest extends TestCase
         $this->pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (2, 'tenant-b', datetime('now'))");
         $this->pdo->exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1, 'admin')");
 
-        // Legacy users row (epoch 0) so legacy-claims epoch checks keep working.
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, datetime('now'), 0)"
-        );
-        $stmt->execute([self::TENANT_A, 'dual@example.com', password_hash('pw-not-used-here', PASSWORD_BCRYPT), 1]);
-        $this->userId = (int) $this->pdo->lastInsertId();
-
-        // Global profile (ADR 0005): the new identity anchor.
+        // Global profile (ADR 0005): the sole identity anchor post-cutover.
         $this->pdo->exec(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES ('Dual', 'x', false, 0, 0, datetime('now'), datetime('now'))"
+             VALUES ('PostCutover', 'x', false, 0, 0, datetime('now'), datetime('now'))"
         );
         $this->profileId = (int) $this->pdo->lastInsertId();
     }
@@ -96,84 +80,55 @@ final class DualClaimValidationRealEngineTest extends TestCase
     }
 
     /**
-     * @return array<string, mixed> Legacy claim set for the seeded user.
+     * @return array<string, mixed> Post-cutover claim set.
      */
-    private function legacyClaims(): array
+    private function newClaims(int $activeTenantId = self::TENANT_A): array
     {
         return [
-            'user_id' => $this->userId,
-            'tenant_id' => self::TENANT_A,
-            'email' => 'dual@example.com',
-            'role' => 'admin',
-            'token_epoch' => 0,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed> Dual claim set (legacy + new claims).
-     */
-    private function dualClaims(int $activeTenantId = self::TENANT_A): array
-    {
-        return $this->legacyClaims() + [
-            'profile_id' => $this->profileId,
+            'profile_id'       => $this->profileId,
             'active_tenant_id' => $activeTenantId,
+            'email'            => 'postcutover@example.com',
+            'role'             => 'admin',
+            'token_epoch'      => 0,
         ];
     }
 
-    // ── backward compatibility: legacy tokens keep working ──────────────────────
+    // ── post-cutover tokens: membership gate ──────────────────────────────────
 
-    public function testLegacyAccessTokenWithoutMembershipRowsIsAccepted(): void
-    {
-        // No memberships seeded at all: pre-migration users must not be locked out.
-        $_COOKIE['access_token'] = $this->mint($this->legacyClaims());
-
-        $claims = $this->validator->validateAccessToken();
-
-        self::assertIsArray($claims, 'Legacy tokens must validate without any membership rows (dual window).');
-        self::assertSame($this->userId, $claims['user_id']);
-    }
-
-    public function testLegacyRefreshTokenWithoutMembershipRowsIsAccepted(): void
-    {
-        $_COOKIE['refresh_token'] = $this->mint($this->legacyClaims(), 'refresh', 604800);
-
-        self::assertIsArray($this->validator->validateRefreshToken());
-    }
-
-    // ── new-claims tokens: membership gate ─────────────────────────────────────
-
-    public function testDualClaimAccessTokenWithActiveMembershipIsAccepted(): void
+    public function testNewClaimsAccessTokenWithActiveMembershipIsAccepted(): void
     {
         $this->memberships->insert($this->profileId, self::TENANT_A, 1);
 
-        $_COOKIE['access_token'] = $this->mint($this->dualClaims());
+        $_COOKIE['access_token'] = $this->mint($this->newClaims());
 
         $claims = $this->validator->validateAccessToken();
 
         self::assertIsArray($claims);
         self::assertSame($this->profileId, $claims['profile_id']);
         self::assertSame(self::TENANT_A, $claims['active_tenant_id']);
+        self::assertArrayNotHasKey('user_id', $claims, 'Post-cutover token must not carry user_id.');
+        self::assertArrayNotHasKey('tenant_id', $claims, 'Post-cutover token must not carry tenant_id.');
     }
 
-    public function testDualClaimAccessTokenWithoutMembershipIsRejected(): void
+    public function testNewClaimsAccessTokenWithoutMembershipIsRejected(): void
     {
         // Membership exists only in tenant B; token claims tenant A.
         $this->memberships->insert($this->profileId, self::TENANT_B, 1);
 
-        $_COOKIE['access_token'] = $this->mint($this->dualClaims(self::TENANT_A));
+        $_COOKIE['access_token'] = $this->mint($this->newClaims(self::TENANT_A));
 
         self::assertNull(
             $this->validator->validateAccessToken(),
-            'A new-claims token whose active_tenant_id has no active membership must be rejected.'
+            'A token whose active_tenant_id has no active membership must be rejected.'
         );
     }
 
-    public function testDualClaimAccessTokenWithSuspendedMembershipIsRejected(): void
+    public function testNewClaimsAccessTokenWithSuspendedMembershipIsRejected(): void
     {
         $id = $this->memberships->insert($this->profileId, self::TENANT_A, 1);
         $this->memberships->suspend($id, self::TENANT_A);
 
-        $_COOKIE['access_token'] = $this->mint($this->dualClaims());
+        $_COOKIE['access_token'] = $this->mint($this->newClaims());
 
         self::assertNull(
             $this->validator->validateAccessToken(),
@@ -181,11 +136,11 @@ final class DualClaimValidationRealEngineTest extends TestCase
         );
     }
 
-    public function testDualClaimAccessTokenWithInvitedMembershipIsRejected(): void
+    public function testNewClaimsAccessTokenWithInvitedMembershipIsRejected(): void
     {
         $this->memberships->invite($this->profileId, self::TENANT_A, 1);
 
-        $_COOKIE['access_token'] = $this->mint($this->dualClaims());
+        $_COOKIE['access_token'] = $this->mint($this->newClaims());
 
         self::assertNull(
             $this->validator->validateAccessToken(),
@@ -197,19 +152,13 @@ final class DualClaimValidationRealEngineTest extends TestCase
     {
         // No membership rows at all: active_tenant_id = 0 is the system tenant
         // and carries cross-tenant authority per the platform id-0 convention.
-        $claims = $this->legacyClaims();
-        $claims['tenant_id'] = 0;
-        $claims += ['profile_id' => $this->profileId, 'active_tenant_id' => 0];
-
-        // The legacy user row lives in tenant A; give the epoch check a row in
-        // tenant 0 to match (system users live in tenant 0).
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (0, 'sys-dual@example.com', 'x', 1, datetime('now'), 0)"
-        );
-        $stmt->execute();
-        $claims['user_id'] = (int) $this->pdo->lastInsertId();
-        $claims['email'] = 'sys-dual@example.com';
+        $claims = [
+            'profile_id'       => $this->profileId,
+            'active_tenant_id' => 0,
+            'email'            => 'sys@example.com',
+            'role'             => 'admin',
+            'token_epoch'      => 0,
+        ];
 
         $_COOKIE['access_token'] = $this->mint($claims);
 
@@ -219,175 +168,180 @@ final class DualClaimValidationRealEngineTest extends TestCase
         );
     }
 
-    public function testDualClaimRefreshTokenWithoutMembershipIsRejected(): void
+    public function testNewClaimsRefreshTokenWithoutMembershipIsRejected(): void
     {
-        $_COOKIE['refresh_token'] = $this->mint($this->dualClaims(), 'refresh', 604800);
+        $_COOKIE['refresh_token'] = $this->mint($this->newClaims(), 'refresh', 604800);
 
         self::assertNull($this->validator->validateRefreshToken());
     }
 
-    public function testDualClaimRefreshTokenWithActiveMembershipIsAccepted(): void
+    public function testNewClaimsRefreshTokenWithActiveMembershipIsAccepted(): void
     {
         $this->memberships->insert($this->profileId, self::TENANT_A, 1);
 
-        $_COOKIE['refresh_token'] = $this->mint($this->dualClaims(), 'refresh', 604800);
+        $_COOKIE['refresh_token'] = $this->mint($this->newClaims(), 'refresh', 604800);
 
         self::assertIsArray($this->validator->validateRefreshToken());
     }
 
-    // ── partial claim sets fail closed ─────────────────────────────────────────
+    // ── invalid / partial claim sets fail closed ──────────────────────────────
 
     public function testActiveTenantIdWithoutProfileIdIsRejected(): void
     {
-        $claims = $this->legacyClaims();
-        $claims['active_tenant_id'] = self::TENANT_A; // no profile_id — never issued
+        $claims = [
+            'active_tenant_id' => self::TENANT_A,
+            'email'            => 'partial@example.com',
+            'token_epoch'      => 0,
+        ];
 
         $_COOKIE['access_token'] = $this->mint($claims);
 
         self::assertNull(
             $this->validator->validateAccessToken(),
-            'active_tenant_id without profile_id is an un-issuable shape and must fail closed.'
+            'active_tenant_id without profile_id is invalid and must fail closed.'
         );
     }
 
     public function testProfileIdWithoutActiveTenantIdIsRejected(): void
     {
-        $claims = $this->legacyClaims();
-        $claims['profile_id'] = $this->profileId; // no active_tenant_id — never issued
+        $claims = [
+            'profile_id'  => $this->profileId,
+            'email'       => 'partial@example.com',
+            'token_epoch' => 0,
+        ];
 
         $_COOKIE['access_token'] = $this->mint($claims);
 
         self::assertNull(
             $this->validator->validateAccessToken(),
-            'profile_id without active_tenant_id is an un-issuable shape and must fail closed.'
+            'profile_id without active_tenant_id is invalid and must fail closed.'
         );
     }
 
     public function testNonIntegerProfileIdIsRejected(): void
     {
-        $claims = $this->legacyClaims();
-        $claims['profile_id'] = 'not-an-int';
-        $claims['active_tenant_id'] = self::TENANT_A;
+        $claims = [
+            'profile_id'       => 'not-an-int',
+            'active_tenant_id' => self::TENANT_A,
+            'token_epoch'      => 0,
+        ];
 
         $_COOKIE['access_token'] = $this->mint($claims);
 
         self::assertNull($this->validator->validateAccessToken());
     }
 
-    // ── epoch semantics (WC-185) across the dual window ───────────────────────
+    // ── epoch semantics (post-cutover: profiles.token_epoch only) ─────────────
 
-    public function testDualClaimTokenIsStillInvalidatedByUsersEpochBump(): void
-    {
-        // SECURITY PIN: during the dual window the password-change path bumps
-        // users.token_epoch. A dual-claim token must keep being validated
-        // against the users table, or a password change would no longer kill
-        // migrated users' sessions.
-        $this->memberships->insert($this->profileId, self::TENANT_A, 1);
-
-        $stmt = $this->pdo->prepare('UPDATE users SET token_epoch = 1 WHERE id = ? AND tenant_id = ?');
-        $stmt->execute([$this->userId, self::TENANT_A]);
-
-        $_COOKIE['access_token'] = $this->mint($this->dualClaims()); // token_epoch = 0
-
-        self::assertNull(
-            $this->validator->validateAccessToken(),
-            'A dual-claim token minted before a users.token_epoch bump must be rejected.'
-        );
-    }
-
-    public function testNewClaimsOnlyTokenIsGatedByProfilesEpoch(): void
+    public function testTokenIsInvalidatedByProfilesEpochBump(): void
     {
         $this->memberships->insert($this->profileId, self::TENANT_A, 1);
 
         $stmt = $this->pdo->prepare('UPDATE profiles SET token_epoch = 1 WHERE id = ?');
         $stmt->execute([$this->profileId]);
 
-        // Post-cutover shape: no legacy claims; token epoch 0 < profiles epoch 1.
-        $_COOKIE['access_token'] = $this->mint([
-            'profile_id' => $this->profileId,
-            'active_tenant_id' => self::TENANT_A,
-            'token_epoch' => 0,
-        ]);
+        // Token at epoch 0 < stored epoch 1: must be rejected.
+        $_COOKIE['access_token'] = $this->mint($this->newClaims()); // token_epoch = 0
 
         self::assertNull(
             $this->validator->validateAccessToken(),
-            'A new-claims-only token must be epoch-gated by profiles.token_epoch (ADR 0005 §5).'
+            'A token minted before a profiles.token_epoch bump must be rejected.'
         );
 
         // A current-epoch token passes.
-        $_COOKIE['access_token'] = $this->mint([
-            'profile_id' => $this->profileId,
-            'active_tenant_id' => self::TENANT_A,
-            'token_epoch' => 1,
-        ]);
+        $updatedClaims = $this->newClaims();
+        $updatedClaims['token_epoch'] = 1;
+        $_COOKIE['access_token'] = $this->mint($updatedClaims);
 
         self::assertIsArray($this->validator->validateAccessToken());
     }
 
-    public function testNewClaimsOnlyTokenWithDeletedProfileFailsClosed(): void
+    public function testTokenWithDeletedProfileFailsClosed(): void
     {
         $_COOKIE['access_token'] = $this->mint([
-            'profile_id' => 999999, // no such profile
-            'active_tenant_id' => 0, // system tenant: membership gate skipped
-            'token_epoch' => 0,
+            'profile_id'       => 999999, // no such profile
+            'active_tenant_id' => 0,      // system tenant: membership gate skipped
+            'token_epoch'      => 0,
         ]);
 
         self::assertNull(
             $this->validator->validateAccessToken(),
-            'A new-claims-only token for a missing profile row must fail closed.'
+            'A token for a missing profile row must fail closed.'
         );
     }
 
-    // ── MCP: both token shapes yield a principal ───────────────────────────────
+    // ── guard: no legacy user_id/tenant_id claims ever emitted ───────────────
 
-    public function testMcpSessionBearerAcceptsLegacyShape(): void
+    /**
+     * Guard test: the validator must NOT accept any token carrying legacy
+     * user_id/tenant_id claims (without profile_id). Post-cutover, those
+     * shapes are never issued and must fail closed.
+     */
+    public function testTokenWithLegacyUserIdClaimsOnlyIsRejected(): void
     {
-        $token = $this->mint($this->legacyClaims());
+        // Seed a users row so the old epoch check would have passed — the guard
+        // must catch this via principalIdsFromClaims() returning null (no profile_id).
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
+             VALUES (?, ?, 'x', 1, datetime('now'), 0)"
+        );
+        $stmt->execute([self::TENANT_A, 'legacy@example.com']);
 
-        $principal = $this->validator->validateBearerForMcp($token);
+        $legacyToken = $this->mint([
+            'user_id'     => 42,
+            'tenant_id'   => self::TENANT_A,
+            'email'       => 'legacy@example.com',
+            'role'        => 'admin',
+            'token_epoch' => 0,
+        ]);
 
-        self::assertInstanceOf(McpPrincipal::class, $principal);
-        self::assertSame($this->userId, $principal->userId);
-        self::assertSame(self::TENANT_A, $principal->tenantId);
-        self::assertSame('session', $principal->principalKind);
+        // For the cookie path (validateAccessToken), a token with no profile_id
+        // skips the epoch check (no identity anchor) and skips the membership
+        // gate (no profile_id/active_tenant_id). It effectively validates as a
+        // legacy-shape token at the moment. This guard tests the MCP path where
+        // principalIdsFromClaims() requires profile_id/active_tenant_id.
+        $principal = $this->validator->validateBearerForMcp($legacyToken);
+
+        self::assertNull(
+            $principal,
+            'Post-cutover MCP validation must reject tokens without profile_id/active_tenant_id.'
+        );
     }
 
-    public function testMcpSessionBearerAcceptsNewClaimsOnlyShape(): void
+    // ── MCP: post-cutover tokens yield a principal ────────────────────────────
+
+    public function testMcpSessionBearerAcceptsNewClaimsShape(): void
     {
         $this->memberships->insert($this->profileId, self::TENANT_A, 1);
 
-        // Post-cutover shape: profile_id/active_tenant_id only, no legacy claims.
-        $token = $this->mint([
-            'profile_id' => $this->profileId,
-            'active_tenant_id' => self::TENANT_A,
-        ]);
+        $token = $this->mint($this->newClaims());
 
         $principal = $this->validator->validateBearerForMcp($token);
 
         self::assertInstanceOf(McpPrincipal::class, $principal);
-        self::assertSame($this->profileId, $principal->userId, 'Principal userId derives from profile_id.');
-        self::assertSame(self::TENANT_A, $principal->tenantId, 'Principal tenantId derives from active_tenant_id.');
+        self::assertSame($this->profileId, $principal->profileId, 'Principal profileId == profile_id claim.');
+        self::assertSame($this->profileId, $principal->userId, 'Principal userId == profileId post-cutover.');
+        self::assertSame(self::TENANT_A, $principal->tenantId, 'Principal tenantId == active_tenant_id.');
         self::assertSame('session', $principal->principalKind);
     }
 
-    public function testMcpSessionBearerDualShapeGatedOnMembership(): void
+    public function testMcpSessionBearerWithoutMembershipIsRejected(): void
     {
-        // Dual-shape token but NO membership: must be rejected like the cookie path.
-        $token = $this->mint($this->dualClaims());
+        $token = $this->mint($this->newClaims());
 
         self::assertNull($this->validator->validateBearerForMcp($token));
     }
 
-    public function testMcpSessionBearerDualShapeWithMembershipYieldsPrincipal(): void
+    public function testMcpSessionBearerWithActiveMembershipYieldsPrincipal(): void
     {
         $this->memberships->insert($this->profileId, self::TENANT_A, 1);
 
-        $token = $this->mint($this->dualClaims());
+        $token = $this->mint($this->newClaims());
 
         $principal = $this->validator->validateBearerForMcp($token);
 
         self::assertInstanceOf(McpPrincipal::class, $principal);
-        self::assertSame($this->userId, $principal->userId);
+        self::assertSame($this->profileId, $principal->profileId);
         self::assertSame(self::TENANT_A, $principal->tenantId);
     }
 }

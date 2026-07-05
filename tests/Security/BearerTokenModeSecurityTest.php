@@ -72,13 +72,11 @@ class BearerTokenModeSecurityTest extends TestCase
         $tv      = new TokenValidator($this->jwtParser, $this->pdo);
         $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv);
 
-        // Mint a new-claims token (profile_id + active_tenant_id) so the
+        // Mint a post-cutover token (profile_id + active_tenant_id) so the
         // membership guard actually runs.
         $token = $this->jwtParser->create([
             'profile_id'       => self::USER_ID,
             'active_tenant_id' => self::TENANT_ID,
-            'user_id'          => self::USER_ID,
-            'tenant_id'        => self::TENANT_ID,
             'email'            => self::EMAIL,
             'role'             => self::ROLE_NAME,
             'token_epoch'      => 0,
@@ -133,10 +131,10 @@ class BearerTokenModeSecurityTest extends TestCase
         $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv);
 
         $staleToken = $this->mintAccess(0);
-        // Bump epoch.
+        // Bump epoch on the profiles row (post-cutover: TokenValidator reads from profiles).
         $this->pdo->prepare(
-            'UPDATE users SET token_epoch = 1 WHERE id = ? AND tenant_id = ?'
-        )->execute([self::USER_ID, self::TENANT_ID]);
+            'UPDATE profiles SET token_epoch = 1 WHERE id = ?'
+        )->execute([self::USER_ID]);
 
         $request  = new Request('GET', '/api/me', ['Authorization' => 'Bearer ' . $staleToken]);
         $response = $handler->handleMe($request);
@@ -145,8 +143,8 @@ class BearerTokenModeSecurityTest extends TestCase
 
         // Reset.
         $this->pdo->prepare(
-            'UPDATE users SET token_epoch = 0 WHERE id = ? AND tenant_id = ?'
-        )->execute([self::USER_ID, self::TENANT_ID]);
+            'UPDATE profiles SET token_epoch = 0 WHERE id = ?'
+        )->execute([self::USER_ID]);
     }
 
     /**
@@ -255,9 +253,10 @@ class BearerTokenModeSecurityTest extends TestCase
         $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv);
 
         $staleRefresh = $this->mintRefresh(0);
+        // Bump epoch on the profiles row (post-cutover: TokenValidator reads from profiles).
         $this->pdo->prepare(
-            'UPDATE users SET token_epoch = 1 WHERE id = ? AND tenant_id = ?'
-        )->execute([self::USER_ID, self::TENANT_ID]);
+            'UPDATE profiles SET token_epoch = 1 WHERE id = ?'
+        )->execute([self::USER_ID]);
 
         $body    = json_encode(['refresh_token' => $staleRefresh]);
         $request = new Request('POST', '/api/auth/refresh', ['X-Auth-Mode' => 'token'], (string) $body);
@@ -266,8 +265,8 @@ class BearerTokenModeSecurityTest extends TestCase
         $this->assertSame(401, $response->getStatusCode(), 'Epoch-bumped refresh must be rejected in token mode');
 
         $this->pdo->prepare(
-            'UPDATE users SET token_epoch = 0 WHERE id = ? AND tenant_id = ?'
-        )->execute([self::USER_ID, self::TENANT_ID]);
+            'UPDATE profiles SET token_epoch = 0 WHERE id = ?'
+        )->execute([self::USER_ID]);
     }
 
     /**
@@ -303,12 +302,10 @@ class BearerTokenModeSecurityTest extends TestCase
         $tv      = new TokenValidator($this->jwtParser, $this->pdo);
         $handler = new AuthHandler($this->pdo, $this->jwtParser, $tv);
 
-        // Mint an access token with new claims for the switch-tenant user in Tenant B.
+        // Mint a post-cutover access token for the switch-tenant user in Tenant B.
         $accessToken = $this->jwtParser->create([
             'profile_id'       => self::SWITCH_USER_ID,
             'active_tenant_id' => self::TENANT_B_ID,
-            'user_id'          => self::SWITCH_USER_ID,
-            'tenant_id'        => self::TENANT_B_ID,
             'email'            => self::SWITCH_EMAIL,
             'role'             => self::ROLE_NAME,
             'token_epoch'      => 0,
@@ -346,8 +343,6 @@ class BearerTokenModeSecurityTest extends TestCase
         $accessToken = $this->jwtParser->create([
             'profile_id'       => self::SWITCH_USER_ID,
             'active_tenant_id' => self::TENANT_B_ID,
-            'user_id'          => self::SWITCH_USER_ID,
-            'tenant_id'        => self::TENANT_B_ID,
             'email'            => self::SWITCH_EMAIL,
             'role'             => self::ROLE_NAME,
             'token_epoch'      => 0,
@@ -436,22 +431,22 @@ class BearerTokenModeSecurityTest extends TestCase
     private function mintAccess(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => $epoch,
+            'profile_id'       => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::EMAIL,
+            'role'             => self::ROLE_NAME,
+            'token_epoch'      => $epoch,
         ], 900, 'access');
     }
 
     private function mintRefresh(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => $epoch,
+            'profile_id'       => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::EMAIL,
+            'role'             => self::ROLE_NAME,
+            'token_epoch'      => $epoch,
         ], 604800, 'refresh');
     }
 
@@ -514,7 +509,7 @@ class BearerTokenModeSecurityTest extends TestCase
              VALUES (?, ?, ?, 'active', datetime('now'))"
         )->execute([self::SWITCH_USER_ID, self::TENANT_ID, self::ROLE_ID]);
 
-        // Legacy users row for the switch-tenant user (dual window).
+        // Legacy users row for the switch-tenant user (kept for schema FK compatibility).
         $pdo->prepare(
             "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
              VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"

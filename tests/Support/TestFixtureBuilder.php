@@ -91,20 +91,26 @@ class TestFixtureBuilder
     }
 
     /**
-     * Build a JWT payload fixture
+     * Build a JWT payload fixture.
      *
-     * @param int $userId User ID
-     * @param int $tenantId Tenant ID
+     * Post-cutover (WC-idcut-E, ADR 0005 §1): the canonical claim shape is
+     * {profile_id, active_tenant_id, email, role, token_epoch}. The legacy
+     * {user_id, tenant_id} shape is no longer accepted by TokenValidator /
+     * ActiveTenantMembershipGuard.
+     *
+     * @param int $profileId Profile ID (canonical identity)
+     * @param int $tenantId Active tenant ID
      * @param string $role User role name
      * @return array JWT payload data
      */
-    public static function jwtPayload(int $userId, int $tenantId, string $role = 'admin'): array
+    public static function jwtPayload(int $profileId, int $tenantId, string $role = 'admin'): array
     {
         return [
-            'user_id' => $userId,
-            'tenant_id' => $tenantId,
-            'email' => "user{$userId}@example.com",
+            'profile_id' => $profileId,
+            'active_tenant_id' => $tenantId,
+            'email' => "user{$profileId}@example.com",
             'role' => $role,
+            'token_epoch' => 0,
             'exp' => time() + 3600
         ];
     }

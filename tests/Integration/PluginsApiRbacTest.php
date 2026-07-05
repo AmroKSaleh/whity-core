@@ -198,8 +198,15 @@ class PluginsApiRbacTest extends TestCase
             $pdo->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
                 ->execute([$roleId, $permissionId]);
         }
-        $pdo->prepare('INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, ?, ?, ?, ?, NULL, NOW())')
-            ->execute([$userId, self::TENANT, "user{$userId}@example.com", 'x', $roleId]);
+        $pdo->prepare(
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )->execute([$userId, "user{$userId}"]);
+
+        $pdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$userId, self::TENANT, $roleId]);
 
         $this->roleChecker = new RoleChecker($this->wrapSqlite($pdo), $this->registry);
         $this->middleware = new RbacMiddleware($this->jwtParser, $this->roleChecker);
@@ -208,9 +215,10 @@ class PluginsApiRbacTest extends TestCase
     private function tokenFor(int $userId): string
     {
         return $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => "user{$userId}@example.com",
-            'tenant_id' => self::TENANT,
+            'profile_id'       => $userId,
+            'email'            => "user{$userId}@example.com",
+            'active_tenant_id' => self::TENANT,
+            'token_epoch'      => 0,
         ]);
     }
 

@@ -53,15 +53,14 @@ class AuthHandlerTest extends TestCase
      * Wire the mock PDO to return, in order:
      *   1. profile_emails row  → {profile_id, verified}
      *   2. profiles row        → {id, password_hash, two_factor_enabled, …}
-     *   3. memberships rows    → fetchAll returns [{tenant_id}]
-     *   4. legacy users row    → {id, email, role_id, tenant_id, token_epoch}
-     *   5. roles row           → {name}
+     *   3. memberships rows    → fetchAll returns [{tenant_id, tenant_name, role}]
+     *   4. memberships role    → fetch returns {role} (issueSessionForProfile)
      *
      * @param array<string, mixed>|false $profileEmailRow
      * @param array<string, mixed>|false $profileRow
      * @param list<array<string, mixed>> $membershipRows
-     * @param array<string, mixed>|null  $legacyUserRow   null = no users row (post-cutover)
-     * @param array<string, mixed>|false $roleRow
+     * @param array<string, mixed>|null  $legacyUserRow   unused, kept for call-site compat (ignored post-cutover)
+     * @param array<string, mixed>|false $roleRow         role lookup result for issueSessionForProfile
      */
     private function mockNewLoginSequence(
         mixed $profileEmailRow,
@@ -75,16 +74,24 @@ class AuthHandlerTest extends TestCase
             $this->makeStmt($profileRow),                             // profiles
         ];
 
-        // memberships SELECT … LIMIT 2 uses fetchAll
+        // memberships SELECT … uses fetchAll (listActiveMemberships)
         $membStmt = $this->createMock(PDOStatement::class);
         $membStmt->method('execute')->willReturn(true);
         $membStmt->method('fetchAll')->willReturn($membershipRows);
         $stmts[] = $membStmt;
 
-        if ($legacyUserRow !== null) {
-            $stmts[] = $this->makeStmt($legacyUserRow);               // users (legacy)
-            $stmts[] = $this->makeStmt($roleRow);                     // roles
+        // issueSessionForProfile: role lookup from memberships (fetch)
+        // Derive the role name from the first membership row's 'role' field when
+        // the $roleRow hint is not already in the right shape, or use $roleRow directly.
+        $roleName = '';
+        if (is_array($roleRow) && isset($roleRow['name'])) {
+            $roleName = (string) $roleRow['name'];
+        } elseif (is_array($roleRow) && isset($roleRow['role'])) {
+            $roleName = (string) $roleRow['role'];
+        } elseif ($membershipRows !== []) {
+            $roleName = (string) ($membershipRows[0]['role'] ?? '');
         }
+        $stmts[] = $this->makeStmt(['role' => $roleName]);            // memberships role (issueSessionForProfile)
 
         $this->mockDb->method('prepare')
             ->willReturnOnConsecutiveCalls(...$stmts);
@@ -103,8 +110,8 @@ class AuthHandlerTest extends TestCase
             ['profile_id' => 1, 'verified' => true],
             ['id' => 1, 'password_hash' => $hashedPassword, 'two_factor_enabled' => false,
              'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
-            [['tenant_id' => 1]],
-            ['id' => 1, 'email' => 'admin@whity.local', 'role_id' => 1, 'tenant_id' => 1, 'token_epoch' => 0],
+            [['tenant_id' => 1, 'tenant_name' => 'Default', 'role' => 'admin']],
+            null,
             ['name' => 'admin'],
         );
 
@@ -136,8 +143,8 @@ class AuthHandlerTest extends TestCase
             ['profile_id' => 1, 'verified' => true],
             ['id' => 1, 'password_hash' => $hashedPassword, 'two_factor_enabled' => false,
              'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
-            [['tenant_id' => 1]],
-            ['id' => 1, 'email' => 'user@test.com', 'role_id' => 2, 'tenant_id' => 1, 'token_epoch' => 0],
+            [['tenant_id' => 1, 'tenant_name' => 'Default', 'role' => 'user']],
+            null,
             ['name' => 'user'],
         );
 
@@ -159,9 +166,9 @@ class AuthHandlerTest extends TestCase
             ['profile_id' => 1, 'verified' => true],
             ['id' => 1, 'password_hash' => $correctHash, 'two_factor_enabled' => false,
              'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
-            [],   // memberships — not reached since password check fails first
-            null, // legacy row — not reached
-            false,
+            [],    // memberships — not reached since password check fails first
+            null,  // no legacy row (post-cutover)
+            false, // role row — not reached
         );
 
         $requestBody = json_encode(['email' => 'admin@whity.local', 'password' => 'wrongpassword']);
@@ -203,9 +210,15 @@ class AuthHandlerTest extends TestCase
      */
     public function testHandleMeReturnsUserWithValidAccessToken(): void
     {
+        // Mock DB for listActiveMemberships (called by handleMe)
+        $membStmt = $this->createMock(\PDOStatement::class);
+        $membStmt->method('execute')->willReturn(true);
+        $membStmt->method('fetchAll')->willReturn([]);
+        $this->mockDb->method('prepare')->willReturn($membStmt);
+
         $this->mockTokenValidator->method('validateAccessToken')->willReturn([
-            'user_id' => 1,
-            'tenant_id' => 1,
+            'profile_id' => 1,
+            'active_tenant_id' => 1,
             'email' => 'user@test.com',
             'role' => 'user',
             'jti' => 'test-jti-1',
@@ -265,8 +278,8 @@ class AuthHandlerTest extends TestCase
     public function testHandleRefreshReturnsNewAccessToken(): void
     {
         $this->mockTokenValidator->method('validateRefreshToken')->willReturn([
-            'user_id' => 1,
-            'tenant_id' => 1,
+            'profile_id' => 1,
+            'active_tenant_id' => 1,
             'email' => 'user@test.com',
             'role' => 'user',
             'jti' => 'test-jti-refresh-1',
@@ -275,8 +288,8 @@ class AuthHandlerTest extends TestCase
             'exp' => time() + 604800
         ]);
 
-        // handleRefresh re-reads the user's current epoch (tenant-scoped) before
-        // minting the new access token (WC-185); stub that lookup to return 0.
+        // handleRefresh re-reads the profile's current epoch (profiles.token_epoch)
+        // before minting the new access token (WC-185); stub that lookup to return 0.
         $epochStatement = $this->createMock(PDOStatement::class);
         $epochStatement->method('execute')->willReturn(true);
         $epochStatement->method('fetchColumn')->willReturn('0');
@@ -356,10 +369,11 @@ class AuthHandlerTest extends TestCase
         // Create a real token to test with
         $realAuthHandler = new AuthHandler($this->mockDb, $this->jwtParser);
         $refreshToken = $this->jwtParser->create([
-            'user_id' => 1,
-            'tenant_id' => 1,
+            'profile_id' => 1,
+            'active_tenant_id' => 1,
             'email' => 'user@test.com',
-            'role' => 'user'
+            'role' => 'user',
+            'token_epoch' => 0,
         ], 604800, 'refresh');
 
         $_COOKIE['refresh_token'] = $refreshToken;
@@ -466,8 +480,8 @@ class AuthHandlerTest extends TestCase
             ['profile_id' => 3, 'verified' => true],
             ['id' => 3, 'password_hash' => $hashedPassword, 'two_factor_enabled' => false,
              'two_factor_secret' => null, 'two_factor_backup_codes_version' => 0, 'token_epoch' => 0],
-            [['tenant_id' => 1]],
-            ['id' => 3, 'email' => 'user-no2fa@whity.local', 'role_id' => 2, 'tenant_id' => 1, 'token_epoch' => 0],
+            [['tenant_id' => 1, 'tenant_name' => 'Default', 'role' => 'user']],
+            null,
             ['name' => 'user'],
         );
 
@@ -493,12 +507,13 @@ class AuthHandlerTest extends TestCase
      */
     public function testHandle2faReturns401WithoutCode(): void
     {
-        // Create a temporary token with user_id in claims
+        // Create a temporary token with profile_id in claims (post-cutover shape).
         $tempToken = $this->jwtParser->create([
-            'user_id' => 2,
-            'tenant_id' => 1,
+            'profile_id' => 2,
+            'active_tenant_id' => 1,
             'email' => 'user2fa@whity.local',
-            'role' => 'user'
+            'role' => 'user',
+            'token_epoch' => 0,
         ], 300, 'temp');
 
         // Set temp token in cookie
@@ -525,12 +540,13 @@ class AuthHandlerTest extends TestCase
      */
     public function testHandle2faReturns401WithInvalidCode(): void
     {
-        // Create a temporary token
+        // Create a temporary token (post-cutover shape).
         $tempToken = $this->jwtParser->create([
-            'user_id' => 2,
-            'tenant_id' => 1,
+            'profile_id' => 2,
+            'active_tenant_id' => 1,
             'email' => 'user2fa@whity.local',
-            'role' => 'user'
+            'role' => 'user',
+            'token_epoch' => 0,
         ], 300, 'temp');
 
         $_COOKIE['temp_auth_token'] = $tempToken;

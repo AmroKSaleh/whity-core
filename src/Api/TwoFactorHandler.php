@@ -11,7 +11,6 @@ use Whity\Auth\TotpService;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Audit\AuditLogger;
-use Whity\Core\Tenant\TenantContext;
 use PDO;
 
 /**
@@ -64,25 +63,6 @@ class TwoFactorHandler
     }
 
     /**
-     * Resolve the tenant predicate for self-scoped 2FA user-row statements.
-     *
-     * The authenticated 2FA endpoints run behind EnforceTenantIsolation, so the
-     * request tenant is locked into {@see TenantContext}. A non-system tenant
-     * pins every users read/write to `(id, tenant_id)` so a row is never touched
-     * outside its tenant (defense-in-depth, even though these are keyed on the
-     * caller's own id). The SYSTEM tenant (id 0) — and an unresolved context —
-     * stay unscoped, matching the platform convention used across the admin
-     * handlers (WC-190).
-     *
-     * @return int|null The tenant id to scope on, or null for an unscoped lookup.
-     */
-    private function scopeTenantId(): ?int
-    {
-        $tenantId = TenantContext::getTenantId();
-        return ($tenantId === null || $tenantId === 0) ? null : $tenantId;
-    }
-
-    /**
      * Coerce a DB boolean column to a real bool across drivers.
      *
      * CRITICAL: this codebase's pdo_pgsql returns the STRING "f" for a false
@@ -108,157 +88,87 @@ class TwoFactorHandler
     }
 
     /**
-     * Read 2FA state for a caller from the IDENTITY source (ADR 0005 §1).
+     * Resolve the caller's profile_id from validated access-token claims.
      *
-     * When a profile_id is available in the claims the authoritative IDENTITY
-     * store is `profiles`; otherwise fall back to the legacy `users` row (dual-
-     * window transition). This ensures status/setup/regenerateCodes/disable all
-     * read from the same store that login challenges against (WC-c35c4ce0 rewrote
-     * login to read from profiles, so reading `users` here would cause split-brain).
-     *
-     * Returns an associative array with at least:
-     *   email                         (string)  — from profile_emails (IDENTITY)
-     *   two_factor_enabled            (mixed)   — raw column value (use dbTruthy)
-     *   two_factor_backup_codes_version (int)
-     * or null when neither source resolves the caller.
-     *
-     * @param array<string, mixed> $claims    Validated token claims.
-     * @param int                  $userId    Legacy users.id (for fallback path).
-     * @param int|null             $tenantId  Resolved tenant (null = system/unscoped).
-     * @return array<string, mixed>|null
-     */
-    private function readIdentityRow(array $claims, int $userId, ?int $tenantId): ?array
-    {
-        // Prefer the profile path: resolve profileId, then read from profiles +
-        // profile_emails which is what login reads (ADR 0005 §1-2).
-        $profileId = $this->resolveProfileId($claims, $userId, $tenantId);
-
-        if ($profileId !== null && $profileId > 0) {
-            try {
-                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                $pStmt = $this->db->prepare(
-                    'SELECT p.two_factor_enabled, p.two_factor_backup_codes_version,
-                            pe.email
-                     FROM profiles p
-                     JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
-                     WHERE p.id = ? LIMIT 1'
-                );
-                $pStmt->execute([$profileId]);
-                $row = $pStmt->fetch(PDO::FETCH_ASSOC);
-                if (is_array($row) && $row !== []) {
-                    return $row;
-                }
-            } catch (\Exception) {
-                // Fall through to the legacy path if the profile query fails.
-            }
-        }
-
-        // Legacy fallback: read from the users row (dual-window transition).
-        if ($tenantId === null) {
-            // @tenant-guard-ignore: self-scoped by the caller's own token-derived user id
-            $uStmt = $this->db->prepare(
-                'SELECT email, two_factor_enabled, two_factor_backup_codes_version
-                 FROM users WHERE id = ? LIMIT 1'
-            );
-            $uStmt->execute([$userId]);
-        } else {
-            $uStmt = $this->db->prepare(
-                'SELECT email, two_factor_enabled, two_factor_backup_codes_version
-                 FROM users WHERE id = ? AND tenant_id = ? LIMIT 1'
-            );
-            $uStmt->execute([$userId, $tenantId]);
-        }
-        $row = $uStmt->fetch(PDO::FETCH_ASSOC);
-        return $row !== false ? $row : null;
-    }
-
-    /**
-     * Resolve the caller's profile_id so 2FA state can be mirrored onto the
-     * PROFILE model (ADR 0005). After the WC-c35c4ce0 login rewrite, login reads
-     * two_factor_enabled/secret/backup_codes_version from `profiles`, so a 2FA
-     * change written only to `users` would be invisible to login (no challenge)
-     * — exactly the split-brain the mirror closes. Prefers the token's
-     * profile_id claim; falls back to a profile_emails lookup by the user's email.
+     * Post-cutover (WC-idcut-E): every valid session token carries a positive-int
+     * profile_id (ADR 0005 §1); there is no legacy users.id / email fallback. A
+     * missing or non-positive claim means the caller has no usable identity and
+     * the endpoint answers 401.
      *
      * @param array<string, mixed> $claims Validated access-token claims.
-     * @return int|null The profile id, or null when none can be resolved.
+     * @return int|null The positive profile id, or null when absent/invalid.
      */
-    private function resolveProfileId(array $claims, int $userId, ?int $tenantId): ?int
+    private function resolveProfileId(array $claims): ?int
     {
-        if (isset($claims['profile_id']) && is_numeric($claims['profile_id'])) {
-            return (int) $claims['profile_id'];
-        }
+        $profileId = $claims['profile_id'] ?? null;
 
-        try {
-            // Resolve the user's email, then the globally-unique profile_email.
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped by the caller's own token-derived user id
-                $uStmt = $this->db->prepare('SELECT email FROM users WHERE id = ? LIMIT 1');
-                $uStmt->execute([$userId]);
-            } else {
-                $uStmt = $this->db->prepare('SELECT email FROM users WHERE id = ? AND tenant_id = ? LIMIT 1');
-                $uStmt->execute([$userId, $tenantId]);
-            }
-            $email = $uStmt->fetchColumn();
-            if (!is_string($email) || $email === '') {
-                return null;
-            }
-
-            // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
-            $peStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
-            $peStmt->execute([$email]);
-            $profileId = $peStmt->fetchColumn();
-
-            return (is_int($profileId) || is_string($profileId)) && (int) $profileId > 0
-                ? (int) $profileId
-                : null;
-        } catch (\Exception) {
-            return null;
-        }
+        return is_int($profileId) && $profileId > 0 ? $profileId : null;
     }
 
     /**
-     * Mirror a 2FA state change onto the caller's profile row so the profile-based
-     * login sees it (challenge on login, backup-code version for recovery). Safe
-     * no-op when no profile can be resolved (pre-migration account).
+     * Read 2FA state for a caller from the IDENTITY source (ADR 0005 §1).
      *
-     * @param array<string, mixed> $claims                  Validated token claims.
-     * @param string|null          $encryptedSecretOrNull   Encrypted secret, or null to clear.
-     * @param bool                 $enabled                 New two_factor_enabled value.
-     * @param int|null             $backupCodesVersion       New version, or null to leave unchanged.
+     * Post-cutover the authoritative IDENTITY store is `profiles` + `profile_emails`
+     * — the same store login challenges against. The legacy `users`-table read is
+     * gone (WC-idcut-E).
+     *
+     * Returns an associative array with:
+     *   email                           (string) — from profile_emails (IDENTITY)
+     *   two_factor_enabled              (mixed)  — raw column value (use dbTruthy)
+     *   two_factor_backup_codes_version (int)
+     * or null when the profile cannot be resolved.
+     *
+     * @param int $profileId The caller's positive profile id.
+     * @return array<string, mixed>|null
      */
-    private function mirrorTwoFactorToProfile(
-        array $claims,
-        int $userId,
-        ?int $tenantId,
+    private function readIdentityRow(int $profileId): ?array
+    {
+        // @tenant-guard-ignore: profiles / profile_emails are sanctioned GLOBAL identity tables (ADR 0005 §1-2)
+        $pStmt = $this->db->prepare(
+            'SELECT p.two_factor_enabled, p.two_factor_backup_codes_version,
+                    pe.email
+             FROM profiles p
+             JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
+             WHERE p.id = ? LIMIT 1'
+        );
+        $pStmt->execute([$profileId]);
+        $row = $pStmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) && $row !== [] ? $row : null;
+    }
+
+    /**
+     * Write a 2FA state change onto the caller's PROFILE row (ADR 0005 §1) so the
+     * profile-based login sees it (challenge on login, backup-code version for
+     * recovery). This is the authoritative write post-cutover — there is no
+     * `users`-table write anymore.
+     *
+     * @param int         $profileId              The caller's positive profile id.
+     * @param string|null $encryptedSecretOrNull  Encrypted secret, or null to clear.
+     * @param bool        $enabled                New two_factor_enabled value.
+     * @param int|null    $backupCodesVersion     New version, or null to leave unchanged.
+     */
+    private function writeTwoFactorToProfile(
+        int $profileId,
         ?string $encryptedSecretOrNull,
         bool $enabled,
         ?int $backupCodesVersion
     ): void {
-        $profileId = $this->resolveProfileId($claims, $userId, $tenantId);
-        if ($profileId === null) {
-            return;
-        }
-
-        try {
-            if ($backupCodesVersion !== null) {
-                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                $this->db->prepare(
-                    'UPDATE profiles
-                     SET two_factor_secret = ?, two_factor_enabled = ?,
-                         two_factor_backup_codes_version = ?, updated_at = CURRENT_TIMESTAMP
-                     WHERE id = ?'
-                )->execute([$encryptedSecretOrNull, $enabled ? 1 : 0, $backupCodesVersion, $profileId]);
-            } else {
-                // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                $this->db->prepare(
-                    'UPDATE profiles
-                     SET two_factor_secret = ?, two_factor_enabled = ?, updated_at = CURRENT_TIMESTAMP
-                     WHERE id = ?'
-                )->execute([$encryptedSecretOrNull, $enabled ? 1 : 0, $profileId]);
-            }
-        } catch (\Exception $e) {
-            error_log('[TwoFactorHandler] profile 2FA mirror failed: ' . $e->getMessage());
+        if ($backupCodesVersion !== null) {
+            // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+            $this->db->prepare(
+                'UPDATE profiles
+                 SET two_factor_secret = ?, two_factor_enabled = ?,
+                     two_factor_backup_codes_version = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?'
+            )->execute([$encryptedSecretOrNull, $enabled ? 1 : 0, $backupCodesVersion, $profileId]);
+        } else {
+            // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+            $this->db->prepare(
+                'UPDATE profiles
+                 SET two_factor_secret = ?, two_factor_enabled = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?'
+            )->execute([$encryptedSecretOrNull, $enabled ? 1 : 0, $profileId]);
         }
     }
 
@@ -266,23 +176,27 @@ class TwoFactorHandler
      * Record a 2FA audit entry when an audit logger is configured.
      *
      * The 2FA routes run behind tenant isolation, so the tenant, actor and IP are
-     * resolved from the request-scoped audit context; the acting user is the
+     * resolved from the request-scoped audit context; the acting principal is the
      * target. No secret/code material is ever included.
      *
-     * @param string $action The audit action key (e.g. `auth.2fa.enabled`).
-     * @param int    $userId The acting user id (also the target).
+     * Post-cutover (WC-idcut-E) the acting identity IS the profile_id — the
+     * canonical identity (ADR 0005 §1). The `actor_user_id`/`target_id` audit
+     * keys are retained for schema stability and now carry the profile id.
+     *
+     * @param string $action    The audit action key (e.g. `auth.2fa.enabled`).
+     * @param int    $profileId The acting profile id (also the target).
      * @return void
      */
-    private function audit(string $action, int $userId): void
+    private function audit(string $action, int $profileId): void
     {
         if ($this->auditLogger === null) {
             return;
         }
 
         $this->auditLogger->record($action, [
-            'actor_user_id' => $userId,
+            'actor_user_id' => $profileId,
             'target_type' => 'user',
-            'target_id' => $userId,
+            'target_id' => $profileId,
         ]);
     }
 
@@ -304,18 +218,14 @@ class TwoFactorHandler
                 return Response::error('Unauthorized', 401);
             }
 
-            $userId = $claims['user_id'] ?? null;
-            if (!$userId) {
+            $profileId = $this->resolveProfileId($claims);
+            if ($profileId === null) {
                 return Response::error('Invalid token claims', 401);
             }
 
-            // Get user email for QR code.
-            // IDENTITY data: email and 2FA state are now read from profiles/profile_emails
-            // (ADR 0005 §1-2) via readIdentityRow(), which prefers the profile path
-            // when a profile_id claim is present and falls back to users for dual-window.
-            // WC-191: tenant scoping preserved via scopeTenantId().
-            $tenantId = $this->scopeTenantId();
-            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
+            // Get email for QR code. IDENTITY data (email + 2FA state) is read
+            // from profiles/profile_emails (ADR 0005 §1-2) via readIdentityRow().
+            $user = $this->readIdentityRow($profileId);
 
             if (!$user) {
                 return Response::error('User not found', 404);
@@ -365,8 +275,8 @@ class TwoFactorHandler
                 return Response::error('Unauthorized', 401);
             }
 
-            $userId = $claims['user_id'] ?? null;
-            if (!$userId) {
+            $profileId = $this->resolveProfileId($claims);
+            if ($profileId === null) {
                 return Response::error('Invalid token claims', 401);
             }
 
@@ -385,62 +295,28 @@ class TwoFactorHandler
                 return Response::error('Invalid authentication code', 401);
             }
 
-            // Encrypt and store the secret
+            // Encrypt and store the secret.
             $encryptedSecret = $this->totpService->encryptSecret($secret);
 
-            // Update user: set 2FA enabled and store encrypted secret
-            // WC-191: pin the self write to the caller's tenant (system stays unscoped).
-            $tenantId = $this->scopeTenantId();
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
-                $stmt = $this->db->prepare('
-                    UPDATE users
-                    SET two_factor_secret = ?, two_factor_enabled = true, two_factor_backup_codes_version = 1
-                    WHERE id = ?
-                ');
-                $stmt->execute([$encryptedSecret, $userId]);
-            } else {
-                $stmt = $this->db->prepare('
-                    UPDATE users
-                    SET two_factor_secret = ?, two_factor_enabled = true, two_factor_backup_codes_version = 1
-                    WHERE id = ? AND tenant_id = ?
-                ');
-                $stmt->execute([$encryptedSecret, $userId, $tenantId]);
-            }
+            // Enable 2FA + store the secret on the PROFILE (ADR 0005 §1) — the
+            // authoritative identity store that login challenges against. This
+            // sets two_factor_enabled, the secret, and backup_codes_version = 1.
+            $this->writeTwoFactorToProfile($profileId, $encryptedSecret, true, 1);
 
-            // Generate 15 backup codes
+            // Generate 15 backup codes.
             $codes = $this->backupCodesService->generateCodes(15);
 
-            // Resolve profile_id for backup_codes (migration 038: keyed on
-            // profiles.id, not users.id). Fall back gracefully when not yet
-            // migrated; the insert is skipped so codes are returned but not
-            // persisted — the confirm path protects the caller with the 2FA
-            // mirror that makes login start challenging immediately.
-            $profileId = $this->resolveProfileId($claims, (int) $userId, $tenantId);
-
             // Hash and store backup codes (keyed on profile_id, migration 038).
-            if ($profileId !== null) {
-                foreach ($codes as $code) {
-                    $hashedCode = $this->backupCodesService->hashCode($code);
-                    $insertStmt = $this->db->prepare('
-                        INSERT INTO backup_codes (profile_id, code, version, used)
-                        VALUES (?, ?, ?, false)
-                    ');
-                    $insertStmt->execute([$profileId, $hashedCode, 1]);
-                }
+            foreach ($codes as $code) {
+                $hashedCode = $this->backupCodesService->hashCode($code);
+                $insertStmt = $this->db->prepare('
+                    INSERT INTO backup_codes (profile_id, code, version, used)
+                    VALUES (?, ?, ?, false)
+                ');
+                $insertStmt->execute([$profileId, $hashedCode, 1]);
             }
 
-            // Mirror onto the profile so login challenges for 2FA (ADR 0005).
-            $this->mirrorTwoFactorToProfile(
-                $claims,
-                (int) $userId,
-                $tenantId,
-                $encryptedSecret,
-                true,
-                1
-            );
-
-            $this->audit('auth.2fa.enabled', (int) $userId);
+            $this->audit('auth.2fa.enabled', $profileId);
 
             return Response::json([
                 'backup_codes' => $codes,
@@ -469,67 +345,33 @@ class TwoFactorHandler
                 return Response::error('Unauthorized', 401);
             }
 
-            $userId = $claims['user_id'] ?? null;
-            if (!$userId) {
+            $profileId = $this->resolveProfileId($claims);
+            if ($profileId === null) {
                 return Response::error('Invalid token claims', 401);
             }
 
-            // WC-191: pin the self read/write to the caller's tenant (system stays unscoped).
-            $tenantId = $this->scopeTenantId();
-
-            // Get current version before disabling.
-            // IDENTITY data: backup_codes_version is read from profiles (ADR 0005 §1)
-            // via readIdentityRow(), which prefers the profile path and falls back to
-            // users for the dual-window transition.
-            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
+            // Get current version before disabling. IDENTITY data is read from
+            // profiles (ADR 0005 §1) via readIdentityRow().
+            $user = $this->readIdentityRow($profileId);
 
             if ($user && (int) $user['two_factor_backup_codes_version'] > 0) {
                 // Invalidate all backup codes for this version. backup_codes is
-                // keyed on profile_id (migration 038); resolve it first.
-                // Cast both args to int: under PostgreSQL (and the RealEngine
-                // SQLite harness with STRINGIFY_FETCHES) the version and the
-                // token-derived id come back as strings, but BackupCodesService
-                // is strictly int-typed.
-                $profileIdForCodes = $this->resolveProfileId($claims, (int) $userId, $tenantId);
-                if ($profileIdForCodes !== null) {
-                    $this->backupCodesService->invalidateOldCodes(
-                        $profileIdForCodes,
-                        (int) $user['two_factor_backup_codes_version']
-                    );
-                }
+                // keyed on profile_id (migration 038). Cast the version to int:
+                // under PostgreSQL (and the RealEngine SQLite harness with
+                // STRINGIFY_FETCHES) it comes back as a string, but
+                // BackupCodesService is strictly int-typed.
+                $this->backupCodesService->invalidateOldCodes(
+                    $profileId,
+                    (int) $user['two_factor_backup_codes_version']
+                );
             }
 
-            // Disable 2FA
-            // WC-191: pin the self write to the caller's tenant (system stays unscoped).
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
-                $updateStmt = $this->db->prepare('
-                    UPDATE users
-                    SET two_factor_enabled = false
-                    WHERE id = ?
-                ');
-                $updateStmt->execute([$userId]);
-            } else {
-                $updateStmt = $this->db->prepare('
-                    UPDATE users
-                    SET two_factor_enabled = false
-                    WHERE id = ? AND tenant_id = ?
-                ');
-                $updateStmt->execute([$userId, $tenantId]);
-            }
+            // Disable 2FA on the PROFILE (ADR 0005 §1): clear the secret, flip
+            // enabled off, and reset backup_codes_version to 0 so login stops
+            // challenging immediately.
+            $this->writeTwoFactorToProfile($profileId, null, false, 0);
 
-            // Mirror the disable onto the profile so login stops challenging and
-            // the stale secret is cleared (ADR 0005). Version 0 = no backup codes.
-            $this->mirrorTwoFactorToProfile(
-                $claims,
-                (int) $userId,
-                $tenantId,
-                null,
-                false,
-                0
-            );
-
-            $this->audit('auth.2fa.disabled', (int) $userId);
+            $this->audit('auth.2fa.disabled', $profileId);
 
             return Response::json([
                 'message' => 'Two-factor authentication disabled'
@@ -558,19 +400,13 @@ class TwoFactorHandler
                 return Response::error('Unauthorized', 401);
             }
 
-            $userId = $claims['user_id'] ?? null;
-            if (!$userId) {
+            $profileId = $this->resolveProfileId($claims);
+            if ($profileId === null) {
                 return Response::error('Invalid token claims', 401);
             }
 
-            // WC-191: pin the self read/write to the caller's tenant (system stays unscoped).
-            $tenantId = $this->scopeTenantId();
-
-            // Get user and check if 2FA is enabled.
-            // IDENTITY data: 2FA state is read from profiles (ADR 0005 §1) via
-            // readIdentityRow(), which prefers the profile path when profile_id
-            // is in the claims and falls back to users for dual-window.
-            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
+            // Get 2FA state from profiles (ADR 0005 §1) via readIdentityRow().
+            $user = $this->readIdentityRow($profileId);
 
             if (!$user) {
                 return Response::error('User not found', 404);
@@ -582,73 +418,37 @@ class TwoFactorHandler
                 return Response::error('2FA is not enabled for this user', 400);
             }
 
-            // Get current version
+            // Get current version.
             $oldVersion = (int) $user['two_factor_backup_codes_version'];
             $newVersion = $oldVersion + 1;
 
-            // Resolve profile_id for backup_codes (migration 038: keyed on
-            // profiles.id, not users.id). Used for both invalidation and insertion.
-            $profileId = $this->resolveProfileId($claims, (int) $userId, $tenantId);
+            // Invalidate old codes (backup_codes keyed on profile_id, migration 038).
+            $this->backupCodesService->invalidateOldCodes($profileId, $oldVersion);
 
-            // Invalidate old codes. backup_codes is keyed on profile_id
-            // (migration 038); only run when the profile_id is resolved.
-            if ($profileId !== null) {
-                $this->backupCodesService->invalidateOldCodes($profileId, $oldVersion);
-            }
+            // Bump the version on the PROFILE (ADR 0005 §1) so the login
+            // backup-code path accepts the NEW codes and rejects the old. Secret
+            // and enabled state are unchanged by a regenerate, so only the
+            // version is written here (null secret arg is not passed — we call
+            // the version-only profile write directly).
+            // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+            $this->db->prepare(
+                'UPDATE profiles
+                 SET two_factor_backup_codes_version = ?, updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?'
+            )->execute([$newVersion, $profileId]);
 
-            // Increment version in users table
-            // WC-191: pin the self write to the caller's tenant (system stays unscoped).
-            if ($tenantId === null) {
-                // @tenant-guard-ignore: self-scoped on the caller's own token-derived user id; the tenant-resolved branch additionally binds tenant_id
-                $updateStmt = $this->db->prepare('
-                    UPDATE users
-                    SET two_factor_backup_codes_version = ?
-                    WHERE id = ?
-                ');
-                $updateStmt->execute([$newVersion, $userId]);
-            } else {
-                $updateStmt = $this->db->prepare('
-                    UPDATE users
-                    SET two_factor_backup_codes_version = ?
-                    WHERE id = ? AND tenant_id = ?
-                ');
-                $updateStmt->execute([$newVersion, $userId, $tenantId]);
-            }
-
-            // Mirror the version bump onto the profile so the login backup-code
-            // path (which reads two_factor_backup_codes_version from profiles)
-            // accepts the NEW codes and rejects the old (ADR 0005). Secret and
-            // enabled state are unchanged by a regenerate, so only the version
-            // is written here. $profileId was resolved above for invalidation.
-            if ($profileId !== null) {
-                try {
-                    // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
-                    $this->db->prepare(
-                        'UPDATE profiles
-                         SET two_factor_backup_codes_version = ?, updated_at = CURRENT_TIMESTAMP
-                         WHERE id = ?'
-                    )->execute([$newVersion, $profileId]);
-                } catch (\Exception $e) {
-                    error_log('[TwoFactorHandler] profile backup-code version mirror failed: ' . $e->getMessage());
-                }
-            }
-
-            // Generate 15 new codes
+            // Generate 15 new codes.
             $codes = $this->backupCodesService->generateCodes(15);
 
-            // Hash and store new backup codes with new version (keyed on
-            // profile_id, migration 038). Skip insert when profile is not
-            // yet resolved (pre-migration fallback; the mirror above ensures
-            // login still challenges correctly in that window).
-            if ($profileId !== null) {
-                foreach ($codes as $code) {
-                    $hashedCode = $this->backupCodesService->hashCode($code);
-                    $insertStmt = $this->db->prepare('
-                        INSERT INTO backup_codes (profile_id, code, version, used)
-                        VALUES (?, ?, ?, false)
-                    ');
-                    $insertStmt->execute([$profileId, $hashedCode, $newVersion]);
-                }
+            // Hash and store new backup codes with the new version (keyed on
+            // profile_id, migration 038).
+            foreach ($codes as $code) {
+                $hashedCode = $this->backupCodesService->hashCode($code);
+                $insertStmt = $this->db->prepare('
+                    INSERT INTO backup_codes (profile_id, code, version, used)
+                    VALUES (?, ?, ?, false)
+                ');
+                $insertStmt->execute([$profileId, $hashedCode, $newVersion]);
             }
 
             return Response::json([
@@ -678,30 +478,25 @@ class TwoFactorHandler
                 return Response::error('Unauthorized', 401);
             }
 
-            $userId = $claims['user_id'] ?? null;
-            if (!$userId) {
+            $profileId = $this->resolveProfileId($claims);
+            if ($profileId === null) {
                 return Response::error('Invalid token claims', 401);
             }
 
-            // Get user's 2FA status and backup codes version.
-            // IDENTITY data: 2FA state is now read from profiles (ADR 0005 §1) via
-            // readIdentityRow(), which prefers the profile path and falls back to
-            // users for the dual-window transition. WC-191 tenant scoping preserved.
-            $tenantId = $this->scopeTenantId();
-            $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
+            // Get 2FA status + backup-codes version from profiles (ADR 0005 §1).
+            $user = $this->readIdentityRow($profileId);
 
             if (!$user) {
                 return Response::error('User not found', 404);
             }
 
-            // Get available backup code count for current version only.
-            // backup_codes is keyed on profile_id (migration 038); resolve it
-            // first. Cast to int: under a real engine the version comes back
-            // as a string, but BackupCodesService is strictly int-typed.
-            $profileIdForStatus = $this->resolveProfileId($claims, (int) $userId, $tenantId);
-            $codeCount = ($profileIdForStatus !== null && (int) $user['two_factor_backup_codes_version'] > 0)
+            // Get available backup code count for the current version only.
+            // backup_codes is keyed on profile_id (migration 038). Cast the
+            // version to int: under a real engine it comes back as a string, but
+            // BackupCodesService is strictly int-typed.
+            $codeCount = (int) $user['two_factor_backup_codes_version'] > 0
                 ? $this->backupCodesService->getAvailableCodeCount(
-                    $profileIdForStatus,
+                    $profileId,
                     (int) $user['two_factor_backup_codes_version']
                 )
                 : 0;

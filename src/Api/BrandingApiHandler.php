@@ -260,8 +260,8 @@ final class BrandingApiHandler
             return Response::error('Tenant context is required', 403);
         }
         $actor = $request->user;
-        $userId = is_object($actor) && isset($actor->user_id) && is_int($actor->user_id) ? $actor->user_id : null;
-        if ($userId === null || !$this->roleChecker->hasPermission($userId, $permission, $tenantId)) {
+        $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id) ? $actor->profile_id : null;
+        if ($userId === null || !$this->roleChecker->hasPermissionForProfile($userId, $permission, $tenantId)) {
             return Response::error('Insufficient permissions', 403, ['required' => $permission]);
         }
         return ['tenantId' => $tenantId, 'userId' => $userId];

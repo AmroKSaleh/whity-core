@@ -438,7 +438,7 @@ class DelegationsApiHandler
      * they expire, while new sessions use the profile-based identity.
      *
      * @param Request $request The incoming request.
-     * @return int|null The profile id (or legacy user id), or null when unauthenticated.
+     * @return int|null The acting profile id, or null when unauthenticated.
      */
     private function actingUserId(Request $request): ?int
     {
@@ -447,10 +447,11 @@ class DelegationsApiHandler
             return null;
         }
 
-        // Prefer the new profile_id claim; fall back to legacy user_id.
-        $id = $user->profile_id ?? $user->user_id ?? null;
+        // Post-cutover (WC-idcut-E): identity is profile_id only. The legacy
+        // user_id claim no longer exists on any token, so there is no fallback.
+        $id = $user->profile_id ?? null;
 
-        return is_int($id) ? $id : (is_numeric($id) ? (int) $id : null);
+        return is_int($id) && $id > 0 ? $id : null;
     }
 
     /**

@@ -164,7 +164,7 @@ class TenantWorkerLeakageTest extends TestCase
     public function testStaleLockedContextWouldBlockNextTenantWithoutReset(): void
     {
         $jwt = $this->createMock(JwtParser::class);
-        $jwt->method('parse')->willReturn(['user_id' => 202, 'tenant_id' => self::TENANT_B, 'email' => 'b@t']);
+        $jwt->method('parse')->willReturn(['profile_id' => 202, 'active_tenant_id' => self::TENANT_B, 'email' => 'b@t']);
         $middleware = new EnforceTenantIsolation($jwt);
 
         // Simulate a worker that DID NOT reset after a Tenant A request.
@@ -251,9 +251,11 @@ class TenantWorkerLeakageTest extends TestCase
     private function signedRequest(int $tenantId, int $userId): Request
     {
         $token = (new JwtParser(self::SECRET))->create([
-            'user_id' => $userId,
-            'tenant_id' => $tenantId,
-            'email' => "user{$userId}@example.com",
+            'profile_id'       => $userId,
+            'active_tenant_id' => $tenantId,
+            'email'            => "user{$userId}@example.com",
+            'role'             => '',
+            'token_epoch'      => 0,
         ]);
 
         return new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);

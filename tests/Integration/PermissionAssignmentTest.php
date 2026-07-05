@@ -74,10 +74,10 @@ class PermissionAssignmentTest extends TestCase
         $userId = $this->seedUser($roleId);
 
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => 'admin@example.com',
-            'tenant_id' => self::TENANT,
-            'exp' => time() + 3600,
+            'profile_id'       => $userId,
+            'email'            => 'admin@example.com',
+            'active_tenant_id' => self::TENANT,
+            'token_epoch'      => 0,
         ]);
 
         $request = new Request('POST', '/api/users', ['Authorization' => "Bearer {$token}"]);
@@ -92,7 +92,7 @@ class PermissionAssignmentTest extends TestCase
         $this->assertTrue($handlerCalled, 'Handler should be called when permission is granted');
         $this->assertSame(200, $response->getStatusCode());
         $this->assertNotNull($request->user);
-        $this->assertSame($userId, $request->user->user_id);
+        $this->assertSame($userId, $request->user->profile_id);
         $this->assertSame('admin@example.com', $request->user->email);
     }
 
@@ -108,10 +108,10 @@ class PermissionAssignmentTest extends TestCase
         $userId = $this->seedUser($roleId);
 
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => 'user@example.com',
-            'tenant_id' => self::TENANT,
-            'exp' => time() + 3600,
+            'profile_id'       => $userId,
+            'email'            => 'user@example.com',
+            'active_tenant_id' => self::TENANT,
+            'token_epoch'      => 0,
         ]);
 
         $request = new Request('DELETE', '/api/users/1', ['Authorization' => "Bearer {$token}"]);
@@ -143,10 +143,10 @@ class PermissionAssignmentTest extends TestCase
         $userId = $this->seedUser($roleId);
 
         $token = $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => 'user@example.com',
-            'tenant_id' => self::TENANT,
-            'exp' => time() + 3600,
+            'profile_id'       => $userId,
+            'email'            => 'user@example.com',
+            'active_tenant_id' => self::TENANT,
+            'token_epoch'      => 0,
         ]);
 
         // Before deletion: access works.
@@ -205,13 +205,18 @@ class PermissionAssignmentTest extends TestCase
 
     private function seedUser(int $roleId): int
     {
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, NULL, NOW())'
-        );
-        $stmt->execute([self::TENANT, 'test-user@example.com', 'x', $roleId]);
+        $this->pdo->prepare(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES ('test-user', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )->execute([]);
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $roleId]);
+
+        return $profileId;
     }
 
     private function wrapSqlite(PDO $pdo): Database

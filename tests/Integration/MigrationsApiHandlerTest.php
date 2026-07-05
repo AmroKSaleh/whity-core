@@ -174,9 +174,14 @@ class MigrationsApiHandlerTest extends TestCase
         self::assertIsNotBool($roleId, "Role '{$roleName}' must be seeded by migrations.");
 
         $this->pdo->prepare(
-            'INSERT OR IGNORE INTO users (id, tenant_id, email, password, role_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NOW())'
-        )->execute([$userId, $tenantId, "user{$userId}@example.com", 'x', $roleId]);
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )->execute([$userId, "user{$userId}"]);
+
+        $this->pdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$userId, $tenantId, $roleId]);
     }
 
     /**
@@ -185,9 +190,10 @@ class MigrationsApiHandlerTest extends TestCase
     private function tokenFor(int $userId, int $tenantId = self::TENANT): string
     {
         return $this->jwtParser->create([
-            'user_id'   => $userId,
-            'email'     => "user{$userId}@example.com",
-            'tenant_id' => $tenantId,
+            'profile_id'       => $userId,
+            'email'            => "user{$userId}@example.com",
+            'active_tenant_id' => $tenantId,
+            'token_epoch'      => 0,
         ]);
     }
 

@@ -153,11 +153,11 @@ class BodyTokenModeTest extends TestCase
 
         // Mint a token with a TTL far enough in the past to exceed the 60s leeway.
         $expiredToken = $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => 0,
+            'profile_id'      => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'           => self::EMAIL,
+            'role'            => self::ROLE_NAME,
+            'token_epoch'     => 0,
         ], -120, 'access'); // 120s past → outside 60s leeway → expired
 
         $request  = new Request('GET', '/api/me', ['Authorization' => 'Bearer ' . $expiredToken]);
@@ -191,7 +191,7 @@ class BodyTokenModeTest extends TestCase
 
         // Mint with epoch 0, then bump the user's epoch to 1 in the DB.
         $staleToken = $this->mintAccess(0);
-        $this->pdo->exec('UPDATE users SET token_epoch = 1 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 1 WHERE id = ' . self::USER_ID);
 
         $request  = new Request('GET', '/api/me', ['Authorization' => 'Bearer ' . $staleToken]);
         $response = $handler->handleMe($request);
@@ -199,7 +199,7 @@ class BodyTokenModeTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
 
         // Reset epoch for subsequent tests.
-        $this->pdo->exec('UPDATE users SET token_epoch = 0 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 0 WHERE id = ' . self::USER_ID);
     }
 
     /**
@@ -238,7 +238,7 @@ class BodyTokenModeTest extends TestCase
 
         // Invalid Bearer (expired) — should be ignored.
         $badBearer = $this->jwtParser->create([
-            'user_id' => self::USER_ID, 'tenant_id' => self::TENANT_ID,
+            'profile_id' => self::USER_ID, 'active_tenant_id' => self::TENANT_ID,
             'email' => self::EMAIL, 'role' => self::ROLE_NAME, 'token_epoch' => 0,
         ], -1, 'access');
 
@@ -361,7 +361,7 @@ class BodyTokenModeTest extends TestCase
 
         $staleRefresh = $this->mintRefresh(0);
         // Bump epoch.
-        $this->pdo->exec('UPDATE users SET token_epoch = 1 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 1 WHERE id = ' . self::USER_ID);
 
         $body    = json_encode(['refresh_token' => $staleRefresh]);
         $request = new Request('POST', '/api/auth/refresh', ['X-Auth-Mode' => 'token'], (string) $body);
@@ -370,7 +370,7 @@ class BodyTokenModeTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
 
         // Reset.
-        $this->pdo->exec('UPDATE users SET token_epoch = 0 WHERE id = ' . self::USER_ID . ' AND tenant_id = ' . self::TENANT_ID);
+        $this->pdo->exec('UPDATE profiles SET token_epoch = 0 WHERE id = ' . self::USER_ID);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -754,6 +754,43 @@ class BodyTokenModeTest extends TestCase
         unset($_COOKIE['temp_auth_token']);
     }
 
+    /**
+     * WC-idcut-E: if the single membership named by the 2FA temp token's
+     * active_tenant_id is revoked/suspended DURING the 2FA challenge window,
+     * completing 2FA must FAIL CLOSED (no session minted) rather than trusting
+     * the stale claim. issueSessionForProfile is the chokepoint that enforces
+     * this — critical because for the system tenant (0) the per-request
+     * ActiveTenantMembershipGuard bypasses membership checks, so a stale claim
+     * would otherwise grant lingering authority.
+     */
+    public function testTwoFaLoginFailsClosedWhenMembershipRevokedMidWindow(): void
+    {
+        [$handler, $code] = $this->make2faHandlerAndCode();
+
+        // The single membership is revoked after the temp token was issued.
+        $this->pdo->prepare(
+            "UPDATE memberships SET status = 'suspended' WHERE profile_id = ? AND tenant_id = ?"
+        )->execute([self::TWOFA_USER_ID, self::TENANT_ID]);
+
+        $tempToken = $this->jwtParser->create([
+            'profile_id'       => self::TWOFA_USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::TWOFA_EMAIL,
+        ], 300, 'temp');
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        $request = new Request('POST', '/api/login/2fa', [],
+            (string) json_encode(['code' => $code]));
+
+        $response = $handler->handle2fa($request);
+        $this->assertSame(401, $response->getStatusCode(), $response->getBody());
+
+        $data = $this->json($response);
+        $this->assertArrayNotHasKey('access_token', $data, 'no token may be minted for a revoked membership');
+
+        unset($_COOKIE['temp_auth_token']);
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // CsrfGuard: select-tenant / switch-tenant are always-protected (WC-ddcd16ad MAJOR)
     // ──────────────────────────────────────────────────────────────────────────
@@ -891,11 +928,11 @@ class BodyTokenModeTest extends TestCase
     private function mintAccess(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => $epoch,
+            'profile_id'      => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'           => self::EMAIL,
+            'role'            => self::ROLE_NAME,
+            'token_epoch'     => $epoch,
         ], 900, 'access');
     }
 
@@ -905,11 +942,11 @@ class BodyTokenModeTest extends TestCase
     private function mintRefresh(int $epoch): string
     {
         return $this->jwtParser->create([
-            'user_id'     => self::USER_ID,
-            'tenant_id'   => self::TENANT_ID,
-            'email'       => self::EMAIL,
-            'role'        => self::ROLE_NAME,
-            'token_epoch' => $epoch,
+            'profile_id'      => self::USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'           => self::EMAIL,
+            'role'            => self::ROLE_NAME,
+            'token_epoch'     => $epoch,
         ], 604800, 'refresh');
     }
 

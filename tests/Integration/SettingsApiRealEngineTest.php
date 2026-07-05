@@ -329,7 +329,7 @@ final class SettingsApiRealEngineTest extends TestCase
     private function req(string $method, string $path, ?array $body = null, int $userId = self::USER_FULL, int $tenantId = self::TENANT_A): Request
     {
         $request = new Request($method, $path, [], $body !== null ? (string) json_encode($body) : '');
-        $request->user = (object) ['user_id' => $userId, 'tenant_id' => $tenantId];
+        $request->user = (object) ['profile_id' => $userId, 'active_tenant_id' => $tenantId];
 
         return $request;
     }
@@ -381,14 +381,24 @@ final class SettingsApiRealEngineTest extends TestCase
                 (102, {$writePermId}, datetime('now'))
         ");
 
-        // user 10 = admin (all three settings perms), 11 = reader, 12 = none,
-        // 13 = write-no-manage (settings:read + settings:write only).
+        // Post-cutover: the acting identity is a profile with an ACTIVE
+        // membership carrying the role; hasPermissionForProfile resolves via
+        // memberships. profile 10 = admin (all three settings perms), 11 =
+        // reader, 12 = none, 13 = write-no-manage (settings:read + write only).
         $pdo->exec("
-            INSERT INTO users (id, tenant_id, email, password, role_id, created_at) VALUES
-                (10, 1, 'admin@t1.example',  'x', 1,   datetime('now')),
-                (11, 1, 'reader@t1.example', 'x', 100, datetime('now')),
-                (12, 1, 'none@t1.example',   'x', 101, datetime('now')),
-                (13, 1, 'writer@t1.example', 'x', 102, datetime('now'))
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
+                (10, 'admin',  'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (11, 'reader', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (12, 'none',   'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (13, 'writer', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ");
+        $pdo->exec("
+            INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at) VALUES
+                (10, 1, 1,   'active', datetime('now')),
+                (10, 0, 1,   'active', datetime('now')),
+                (11, 1, 100, 'active', datetime('now')),
+                (12, 1, 101, 'active', datetime('now')),
+                (13, 1, 102, 'active', datetime('now'))
         ");
 
         return $pdo;

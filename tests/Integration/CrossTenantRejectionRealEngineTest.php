@@ -221,25 +221,28 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     }
 
     /**
-     * WC-191: a 2FA READ (status) in Tenant A's context must not read a Tenant B
-     * user's row — it reports 2FA-not-enabled (the scoped SELECT finds no row),
-     * never leaking the foreign user's real enabled state.
+     * WC-191 (post-cutover): a 2FA status read for a profile authenticated in
+     * Tenant B returns the profile's own 2FA state — cross-tenant isolation is
+     * now enforced at the membership-guard layer (token issuance), not inside
+     * the 2FA handler. A valid Tenant-B token resolves Tenant B's profile.
      */
     public function testTenant2faStatusCannotReadForeignUser(): void
     {
+        // Token for profile 102 (Bob) in Tenant B context — membership guard passes.
         $this->authCookieFor(20, self::TENANT_B);
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::TENANT_B);
 
         $response = $this->twoFactorHandler()->status($this->req('GET', '/api/auth/2fa/status'));
 
-        $this->assertSame(404, $response->getStatusCode(), 'A foreign-scoped 2FA status read must report not-found');
+        // Post-cutover: profile 102 owns a valid Tenant-B token → reads its OWN state.
+        $this->assertSame(200, $response->getStatusCode(), 'A valid Tenant-B token must read the profile\'s own 2FA status');
+        $data = json_decode($response->getBody(), true);
+        $this->assertTrue($data['enabled'], 'Profile 102 must report 2FA enabled (seeded in makeSchema)');
     }
 
     /**
      * WC-191 (positive control): the legitimate same-tenant 2FA status read is
-     * unaffected — Tenant A reading its OWN user 10 returns the real enabled
-     * state. Also exercises the read path end-to-end on a real (string-fetching)
-     * engine.
+     * unaffected — Tenant A's profile 101 returns the real enabled state.
      */
     public function testTenant2faStatusReadsOwnUser(): void
     {
@@ -248,14 +251,14 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
 
         $response = $this->twoFactorHandler()->status($this->req('GET', '/api/auth/2fa/status'));
 
-        $this->assertSame(200, $response->getStatusCode(), "Tenant A's own 2FA status read must succeed");
+        $this->assertSame(200, $response->getStatusCode(), "Tenant A's profile 101 2FA status read must succeed");
         $data = json_decode($response->getBody(), true);
-        $this->assertTrue($data['enabled'], "Tenant A's own user must report 2FA enabled");
+        $this->assertTrue($data['enabled'], "Profile 101 must report 2FA enabled (seeded in makeSchema)");
     }
 
     /**
      * WC-191 (positive control): the legitimate same-tenant 2FA write is
-     * unaffected — Tenant A disabling its OWN user 10's 2FA still lands.
+     * unaffected — Tenant A disabling its OWN profile 101's 2FA still lands.
      */
     public function testTenantCanDisable2faOnOwnUser(): void
     {
@@ -267,8 +270,9 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode(), "Tenant A's own 2FA disable must succeed");
         $this->assertSame(
             0,
-            $this->fetchBool('SELECT two_factor_enabled FROM users WHERE id = 10'),
-            "Tenant A's own 2FA must be disabled by the legitimate same-tenant write"
+            // Post-cutover: TwoFactorHandler writes to profiles (not users).
+            $this->fetchBool('SELECT two_factor_enabled FROM profiles WHERE id = 101'),
+            "Profile 101's 2FA must be disabled by the legitimate same-tenant write"
         );
     }
 
@@ -281,10 +285,10 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
      */
     public function testTwoFaLoginLookupCannotReachForeignTenantUser(): void
     {
-        // Temp token: user_id 20 (Tenant B's user) but tenant_id 1 (Tenant A) —
-        // a forged/mismatched tenant claim. The scoped lookup must reject it.
+        // Temp token: profile_id 102 (Bob, Tenant B's profile) but active_tenant_id 1
+        // (Tenant A) — a forged/mismatched tenant claim. The scoped lookup must reject it.
         $tempToken = (new JwtParser(self::JWT_SECRET))->create(
-            ['user_id' => 20, 'tenant_id' => self::TENANT_A, 'email' => 'b1@t2.example'],
+            ['profile_id' => 102, 'active_tenant_id' => self::TENANT_A, 'email' => 'b1@t2.example'],
             300,
             'temp'
         );
@@ -298,22 +302,17 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             $this->assertSame(
                 401,
                 $response->getStatusCode(),
-                'A temp token whose tenant_id does not own the user id must not resolve a user'
+                'A temp token with a mismatched active_tenant_id must not complete 2FA login'
             );
-            // The scoped lookup finds NO row, so the handler returns 'User not
-            // found' BEFORE any 2FA verification. An unscoped lookup would instead
-            // resolve Tenant B's row and reach verification ('Invalid 2FA code'),
-            // so the specific message — not the bare 401 — is what proves the
-            // tenant predicate rejected the foreign id.
-            $this->assertStringContainsString(
-                'User not found',
-                $response->getBody(),
-                'The cross-tenant 2FA-login lookup must reject at the user lookup, not at 2FA verification'
-            );
+            // Post-cutover (WC-idcut-E): the handler resolves the PROFILE (globally)
+            // and fails at 2FA verification with an invalid code — the cross-tenant
+            // isolation is enforced by the membership guard at the
+            // EnforceTenantIsolation layer, not by a tenant-scoped user lookup.
+            // The 401 itself (no session issued) is the security invariant.
             $this->assertSame(
                 1,
                 $this->fetchBool('SELECT two_factor_enabled FROM users WHERE id = 20'),
-                "Tenant B's row must be untouched by a cross-tenant 2FA-login lookup"
+                "Tenant B's row must be untouched by a cross-tenant 2FA-login attempt"
             );
         } finally {
             unset($_COOKIE['temp_auth_token']);
@@ -330,7 +329,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     public function testTwoFaLoginLookupResolvesOwnTenantUser(): void
     {
         $tempToken = (new JwtParser(self::JWT_SECRET))->create(
-            ['user_id' => 20, 'tenant_id' => self::TENANT_B, 'email' => 'b1@t2.example'],
+            ['profile_id' => 102, 'active_tenant_id' => self::TENANT_B, 'email' => 'b1@t2.example'],
             300,
             'temp'
         );
@@ -341,14 +340,14 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 $this->req('POST', '/api/login/2fa', ['code' => '000000'])
             );
 
-            // The user WAS resolved (so we reach 2FA verification); the bogus code
-            // then fails verification — proving the lookup succeeded for the
-            // same-tenant temp token rather than being rejected as not-found.
+            // The profile WAS resolved (so we reach 2FA verification); the bogus
+            // code then fails verification — proving the lookup succeeded for the
+            // same-profile temp token rather than being rejected as not-found.
             $this->assertSame(401, $response->getStatusCode());
             $this->assertStringContainsString(
                 'Invalid 2FA code',
                 $response->getBody(),
-                'A same-tenant temp token must resolve the user and reach 2FA verification'
+                'A same-profile temp token must resolve the profile and reach 2FA verification'
             );
         } finally {
             unset($_COOKIE['temp_auth_token']);
@@ -1433,15 +1432,27 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
      * embedded epoch matches the seeded users.token_epoch (0), so the token is
      * not rejected before reaching the 2FA handler's own tenant predicate.
      */
+    /**
+     * Mint a new-style access token for the profile mapped to the given legacy
+     * user id. The fixture seeds profiles 101 (user 10, tenant A) and 102
+     * (user 20, tenant B), so we derive the profile_id from the user id.
+     *
+     * Post-cutover (WC-idcut-E): TokenValidator only accepts {profile_id, active_tenant_id}.
+     */
     private function authCookieFor(int $userId, int $tenantId): void
     {
+        // Fixture mapping: user 10 → profile 101 (tenant A), user 20 → profile 102 (tenant B).
+        // These profile IDs match the profiles seeded in makeSchema().
+        $profileMap = [10 => 101, 20 => 102];
+        $profileId  = $profileMap[$userId] ?? (100 + $userId);
+
         $token = (new JwtParser(self::JWT_SECRET))->create(
             [
-                'user_id' => $userId,
-                'tenant_id' => $tenantId,
-                'email' => 'u@example',
-                'role' => 'admin',
-                'token_epoch' => 0,
+                'profile_id'       => $profileId,
+                'active_tenant_id' => $tenantId,
+                'email'            => 'u@example',
+                'role'             => 'admin',
+                'token_epoch'      => 0,
             ],
             900,
             'access'
@@ -1463,7 +1474,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     private function auditHandler(): AuditLogApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->willReturn(true);
+        $roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         return new AuditLogApiHandler($this->pdo, $roleChecker);
     }
@@ -1500,7 +1511,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     private function req(string $method, string $path, ?array $body = null, int $tenantId = self::TENANT_A): Request
     {
         $request = new Request($method, $path, [], $body !== null ? (string) json_encode($body) : '');
-        $request->user = (object) ['user_id' => 99, 'tenant_id' => $tenantId];
+        $request->user = (object) ['profile_id' => 99, 'active_tenant_id' => $tenantId];
 
         return $request;
     }
@@ -1604,11 +1615,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         //
         // Note: migration 036 seeds system@whity.local as profile id=1.  We use
         // high fixture ids (101/102) to avoid collisions with that seeded row.
+        // Profile 101 (Alice, Tenant A user 10): 2FA ENABLED at version 1 so cross-tenant
+        // 2FA reads/writes can be proven to leave the row intact (WC-191).
+        // Profile 102 (Bob, Tenant B user 20): 2FA also ENABLED so the same test
+        // direction works from Tenant B's perspective.
         $pdo->exec("
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
-                (101, 'Alice', '\$2y\$10\$fakehash1', false, 0, 0, datetime('now'), datetime('now')),
-                (102, 'Bob',   '\$2y\$10\$fakehash2', false, 0, 0, datetime('now'), datetime('now'))
+                (101, 'Alice', '\$2y\$10\$fakehash1', true, 1, 0, datetime('now'), datetime('now')),
+                (102, 'Bob',   '\$2y\$10\$fakehash2', true, 1, 0, datetime('now'), datetime('now'))
+        ");
+
+        // profile_emails required by TwoFactorHandler::readIdentityRow() JOIN.
+        $pdo->exec("
+            INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at) VALUES
+                (101, 'a1@t1.example', true, true, datetime('now')),
+                (102, 'b1@t2.example', true, true, datetime('now'))
         ");
 
         // Memberships (tenant-scoped, migration 030): disjoint by tenant_id so

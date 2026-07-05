@@ -244,7 +244,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
     private function handler(bool $grant = true): AiPrincipalsApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->willReturn($grant);
+        $roleChecker->method('hasPermissionForProfile')->willReturn($grant);
 
         return new AiPrincipalsApiHandler($this->pdo, $roleChecker);
     }
@@ -252,7 +252,7 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
     private function authedRequest(string $method, string $path, int $userId): Request
     {
         $request = new Request($method, $path);
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
         return $request;
     }
 

@@ -68,8 +68,8 @@ final class NavigationApiHandler
 
             // Fail closed without an authenticated, well-typed acting user.
             $actor = $request->user;
-            $userId = is_object($actor) && isset($actor->user_id) && is_int($actor->user_id)
-                ? $actor->user_id
+            $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+                ? $actor->profile_id
                 : null;
             if ($userId === null) {
                 return Response::error('Authentication required', 403);
@@ -125,7 +125,7 @@ final class NavigationApiHandler
 
         $requiredPermission = $item['requiredPermission'] ?? null;
         if (is_string($requiredPermission) && $requiredPermission !== ''
-            && !$this->roleChecker->hasPermission($userId, $requiredPermission, $tenantId)) {
+            && !$this->roleChecker->hasPermissionForProfile($userId, $requiredPermission, $tenantId)) {
             return false;
         }
 

@@ -10,20 +10,16 @@ namespace Whity\Mcp\Auth;
  * Returned by TokenValidator::validateMcpToken() on success. Immutable by
  * construction — FrankenPHP worker-safe (no static/global state).
  *
- * After migration 040, long-lived MCP tokens are keyed on profiles.id and
- * carry `profile_id` in their JWT claims. The dual-claim window means session
- * bearer tokens (type='access') may still carry `user_id` — for those,
- * `principalIdsFromClaims()` falls back to `user_id` and maps it here as
- * `userId` to keep downstream consumers unchanged during the window.
+ * After migration 040 + step E cutover, MCP tokens carry only profile_id.
+ * Both profileId and userId carry the same value (the profile_id) — userId
+ * is retained to avoid breaking MCP server callers that still read it.
  */
 final readonly class McpPrincipal
 {
     /**
      * @param int      $profileId     Profile the token was issued to (profile_id claim).
-     *                                For session bearer tokens in the dual-claim window,
-     *                                this carries the resolved user_id until step E cuts over.
-     * @param int      $userId        Kept for backward compatibility during the dual-window;
-     *                                equals profileId for new MCP tokens.
+     * @param int      $userId        Alias for profileId — retained for MCP server callers
+     *                                that read it. Both are equal to profile_id post-cutover.
      * @param int      $tenantId      Tenant the token is scoped to.
      * @param string   $principalKind Token principal kind ('user' or 'session').
      * @param string[] $scope         Granted scopes (e.g. ['tools:call']).

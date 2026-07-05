@@ -242,7 +242,7 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
     private function handler(bool $grant = true): AuditLogApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->willReturn($grant);
+        $roleChecker->method('hasPermissionForProfile')->willReturn($grant);
 
         return new AuditLogApiHandler($this->pdo, $roleChecker);
     }
@@ -253,7 +253,7 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
     private function authedRequest(string $path, int $userId): Request
     {
         $request = new Request('GET', $path);
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
         return $request;
     }
 
@@ -281,6 +281,10 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
      */
     private static function makeSqliteSchema(): PDO
     {
-        return SchemaFromMigrations::make(true);
+        $pdo = SchemaFromMigrations::make(true);
+        // Seed the tenants referenced by seeded audit_log rows' tenant_id FK
+        // (real PG enforces the constraint; SQLite does not).
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+        return $pdo;
     }
 }

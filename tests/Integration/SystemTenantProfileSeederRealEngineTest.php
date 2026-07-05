@@ -202,19 +202,17 @@ final class SystemTenantProfileSeederRealEngineTest extends TestCase
     // ── (b) Auth proof: dual-claim JWT carries profile_id + active_tenant_id ──
 
     /**
-     * Prove that the system admin can authenticate via the profile login path.
+     * Prove that the system admin can authenticate via the profile login path
+     * and that the issued JWT carries ONLY new claims post-cutover.
      *
-     * The seeder creates a users row AND profile model rows for
-     * system@whity.local.  After running the seeder, login must issue a JWT
-     * that carries {profile_id, active_tenant_id = 0} (the dual-claim seam from
-     * WC-d4340daf / AuthHandler::identityClaims).
+     * Post-cutover (WC-idcut-E): login emits {profile_id, active_tenant_id} only —
+     * no legacy user_id/tenant_id claims. The dual-claim window is closed.
      */
-    public function testSystemAdminAuthenticationIssuesDualClaimToken(): void
+    public function testSystemAdminAuthenticationIssuesProfileIdClaims(): void
     {
         // The seeder runs AFTER migration 036 (which already created the profile
         // model rows).  Running the seeder is idempotent — it will not duplicate
-        // anything, but it ensures the users row (required by the current login
-        // handler) is also present.
+        // anything, but it ensures the users row is also present.
         ob_start();
         Seeder::seed($this->db);
         ob_end_clean();
@@ -243,8 +241,7 @@ final class SystemTenantProfileSeederRealEngineTest extends TestCase
         $accessPayload = $jwtParser->lastPayloadOfType('access');
         self::assertIsArray($accessPayload, 'An access token must have been minted.');
 
-        // New identity claims (ADR 0005 §5) — the system admin is migrated into
-        // the profile model by migration 036, so the dual-claim window applies.
+        // Post-cutover (WC-idcut-E): only new claims are emitted.
         self::assertArrayHasKey(
             'profile_id',
             $accessPayload,
@@ -256,11 +253,11 @@ final class SystemTenantProfileSeederRealEngineTest extends TestCase
             'Access token active_tenant_id must be 0 (system tenant) for system@whity.local.'
         );
 
-        // Legacy claims are still issued during the dual window.
-        self::assertArrayHasKey(
+        // No legacy claims post-cutover.
+        self::assertArrayNotHasKey(
             'user_id',
             $accessPayload,
-            'Legacy user_id claim must still be present during the dual-claim window.'
+            'Post-cutover token must NOT carry legacy user_id — the dual-claim window is closed.'
         );
     }
 

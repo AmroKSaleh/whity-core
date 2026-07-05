@@ -93,11 +93,11 @@ class JwtSingleDecodeTest extends TestCase
     public function testJwtDecodedExactlyOncePerRequestAcrossPipeline(): void
     {
         $parser = $this->countingParser();
-        $token = $parser->create(['user_id' => 7, 'tenant_id' => 1], 3600, 'access');
+        $token = $parser->create(['profile_id' => 7, 'active_tenant_id' => 1, 'token_epoch' => 0], 3600, 'access');
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
+        $roleChecker->method('hasPermissionForProfile')->with(7, 'users:read', 1)->willReturn(true);
 
         $tenantMiddleware = new EnforceTenantIsolation($parser);
         $rbacMiddleware = new RbacMiddleware($parser, $roleChecker);
@@ -112,7 +112,7 @@ class JwtSingleDecodeTest extends TestCase
         // Both former call sites still resolve claims:
         $this->assertSame(1, TenantContext::getTenantId());
         $this->assertNotNull($request->user);
-        $this->assertSame(7, $request->user->user_id);
+        $this->assertSame(7, $request->user->profile_id);
         // ... from a single decode.
         $this->assertSame(1, $parser->parseCalls, 'JWT must be decoded exactly once per request');
     }
@@ -124,7 +124,7 @@ class JwtSingleDecodeTest extends TestCase
     public function testClaimsAreStashedAsRequestAttribute(): void
     {
         $parser = $this->countingParser();
-        $token = $parser->create(['user_id' => 7, 'tenant_id' => 1], 3600, 'access');
+        $token = $parser->create(['profile_id' => 7, 'active_tenant_id' => 1, 'token_epoch' => 0], 3600, 'access');
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $middleware = new EnforceTenantIsolation($parser);
@@ -133,8 +133,8 @@ class JwtSingleDecodeTest extends TestCase
         $this->assertTrue($request->hasAttribute(Request::ATTR_JWT_CLAIMS));
         $claims = $request->getAttribute(Request::ATTR_JWT_CLAIMS);
         $this->assertIsArray($claims);
-        $this->assertSame(7, $claims['user_id']);
-        $this->assertSame(1, $claims['tenant_id']);
+        $this->assertSame(7, $claims['profile_id']);
+        $this->assertSame(1, $claims['active_tenant_id']);
     }
 
     /**
@@ -146,10 +146,10 @@ class JwtSingleDecodeTest extends TestCase
 
         $parser = $this->countingParser();
         $request = new Request('GET', '/api/users', ['Authorization' => 'Bearer already.validated.token']);
-        $request->setAttribute(Request::ATTR_JWT_CLAIMS, ['user_id' => 7, 'tenant_id' => 1]);
+        $request->setAttribute(Request::ATTR_JWT_CLAIMS, ['profile_id' => 7, 'active_tenant_id' => 1, 'token_epoch' => 0]);
 
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
+        $roleChecker->method('hasPermissionForProfile')->with(7, 'users:read', 1)->willReturn(true);
 
         $middleware = new RbacMiddleware($parser, $roleChecker);
         $response = $middleware->handle(
@@ -172,11 +172,11 @@ class JwtSingleDecodeTest extends TestCase
         TenantContext::setTenantId(1);
 
         $parser = $this->countingParser();
-        $token = $parser->create(['user_id' => 7, 'tenant_id' => 1], 3600, 'access');
+        $token = $parser->create(['profile_id' => 7, 'active_tenant_id' => 1, 'token_epoch' => 0], 3600, 'access');
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
+        $roleChecker->method('hasPermissionForProfile')->with(7, 'users:read', 1)->willReturn(true);
 
         $middleware = new RbacMiddleware($parser, $roleChecker);
         $response = $middleware->handle(
@@ -197,7 +197,7 @@ class JwtSingleDecodeTest extends TestCase
     {
         $parser = $this->countingParser();
         $request = new Request('GET', '/api/users', ['Authorization' => 'Bearer already.validated.token']);
-        $request->setAttribute(Request::ATTR_JWT_CLAIMS, ['user_id' => 7, 'tenant_id' => 5]);
+        $request->setAttribute(Request::ATTR_JWT_CLAIMS, ['profile_id' => 7, 'active_tenant_id' => 5, 'token_epoch' => 0]);
 
         $tenantId = TenantContext::resolve($request, $parser);
 
@@ -242,11 +242,11 @@ class JwtSingleDecodeTest extends TestCase
     public function testKernelPipelineDecodesExactlyOnce(): void
     {
         $parser = $this->countingParser();
-        $token = $parser->create(['user_id' => 7, 'tenant_id' => 1], 3600, 'access');
+        $token = $parser->create(['profile_id' => 7, 'active_tenant_id' => 1, 'token_epoch' => 0], 3600, 'access');
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer {$token}"]);
 
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
+        $roleChecker->method('hasPermissionForProfile')->with(7, 'users:read', 1)->willReturn(true);
 
         $router = new Router('');
         $router->register(
@@ -277,11 +277,11 @@ class JwtSingleDecodeTest extends TestCase
         TenantContext::setTenantId(1);
 
         $parser = $this->countingParser();
-        $token = $parser->create(['user_id' => 7, 'tenant_id' => 1], 3600, 'access');
+        $token = $parser->create(['profile_id' => 7, 'active_tenant_id' => 1, 'token_epoch' => 0], 3600, 'access');
         $request = new Request('GET', '/api/users', ['Authorization' => "Bearer  {$token}"]);
 
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->with(7, 'users:read', 1)->willReturn(true);
+        $roleChecker->method('hasPermissionForProfile')->with(7, 'users:read', 1)->willReturn(true);
 
         $middleware = new RbacMiddleware($parser, $roleChecker);
         $response = $middleware->handle(

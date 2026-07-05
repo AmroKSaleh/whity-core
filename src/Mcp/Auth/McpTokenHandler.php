@@ -19,11 +19,8 @@ use Whity\Core\Response;
  * the action). The issued MCP tokens are then used as Bearer tokens on
  * POST /mcp (machine-to-machine calls from AI clients).
  *
- * After migration 040, issued tokens carry `profile_id` in their JWT claims.
- * The caller's profile_id is resolved from the session token claims via
- * `profile_id` (preferred) falling back to `user_id` for the dual-window
- * period. This is correct: the session token during the dual-window carries
- * both user_id and profile_id; after step E only profile_id remains.
+ * Post-cutover (step E): session tokens carry only profile_id / active_tenant_id.
+ * The caller's profile_id and tenantId are resolved exclusively from those claims.
  */
 final class McpTokenHandler
 {
@@ -68,12 +65,11 @@ final class McpTokenHandler
             }
         }
 
-        // Prefer profile_id from session token (dual-window: session tokens carry
-        // both user_id and profile_id during the window; post-E only profile_id).
-        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
-            ? $claims['profile_id']
-            : (int) ($claims['user_id'] ?? 0);
-        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
+        $identity = $this->requireProfileIdentity($claims);
+        if ($identity === null) {
+            return Response::error('Unauthenticated', 401);
+        }
+        [$profileId, $tenantId] = $identity;
 
         $token = $this->mcpTokenService->issue($profileId, $tenantId, $name, $scope);
         ['jti' => $jti, 'exp' => $exp] = $this->extractClaims($token);
@@ -103,10 +99,11 @@ final class McpTokenHandler
             return Response::error('Unauthenticated', 401);
         }
 
-        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
-            ? $claims['profile_id']
-            : (int) ($claims['user_id'] ?? 0);
-        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
+        $identity = $this->requireProfileIdentity($claims);
+        if ($identity === null) {
+            return Response::error('Unauthenticated', 401);
+        }
+        [$profileId, $tenantId] = $identity;
 
         $tokens = $this->mcpTokenService->listForUser($profileId, $tenantId);
 
@@ -134,16 +131,42 @@ final class McpTokenHandler
             return Response::error('jti is required', 400);
         }
 
-        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
-            ? $claims['profile_id']
-            : (int) ($claims['user_id'] ?? 0);
-        $tenantId  = (int) ($claims['active_tenant_id'] ?? $claims['tenant_id'] ?? 0);
+        $identity = $this->requireProfileIdentity($claims);
+        if ($identity === null) {
+            return Response::error('Unauthenticated', 401);
+        }
+        [$profileId, $tenantId] = $identity;
 
         if (!$this->mcpTokenService->revoke($jti, $profileId, $tenantId)) {
             return Response::error('Token not found', 404);
         }
 
         return new Response(204, '', ['Content-Type' => 'application/json']);
+    }
+
+    /**
+     * Resolve the caller's (profile_id, active_tenant_id) from validated claims.
+     *
+     * Fail closed (WC-idcut-E): post-cutover every session token carries a
+     * positive-int profile_id and an int active_tenant_id. If either is absent or
+     * the wrong type the caller has no usable identity — return null so the
+     * endpoint answers 401 rather than defaulting to 0 (which would have keyed
+     * MCP tokens to the system principal). This mirrors TokenValidator's own
+     * positive-int profile_id gate as defense in depth.
+     *
+     * @param array<string, mixed> $claims Validated access-token claims.
+     * @return array{0: int, 1: int}|null [profileId, tenantId], or null to reject.
+     */
+    private function requireProfileIdentity(array $claims): ?array
+    {
+        $profileId = $claims['profile_id'] ?? null;
+        $tenantId  = $claims['active_tenant_id'] ?? null;
+
+        if (!is_int($profileId) || $profileId <= 0 || !is_int($tenantId) || $tenantId < 0) {
+            return null;
+        }
+
+        return [$profileId, $tenantId];
     }
 
     /**

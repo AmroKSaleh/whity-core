@@ -118,9 +118,14 @@ class RbacRouteEnforcementTest extends TestCase
         }
 
         $this->pdo->prepare(
-            'INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NULL, NOW())'
-        )->execute([$userId, self::TENANT, "u{$userId}@example.com", 'x', $roleId]);
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )->execute([$userId, "u{$userId}"]);
+
+        $this->pdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$userId, self::TENANT, $roleId]);
     }
 
     /**
@@ -129,9 +134,10 @@ class RbacRouteEnforcementTest extends TestCase
     private function tokenFor(int $userId, string $email): string
     {
         return $this->jwtParser->create([
-            'user_id' => $userId,
-            'email' => $email,
-            'tenant_id' => self::TENANT,
+            'profile_id'       => $userId,
+            'email'            => $email,
+            'active_tenant_id' => self::TENANT,
+            'token_epoch'      => 0,
         ]);
     }
 
@@ -163,7 +169,7 @@ class RbacRouteEnforcementTest extends TestCase
         $this->assertTrue($handlerReached, 'Handler should run when the user has users:read');
         $this->assertSame(200, $response->getStatusCode());
         $this->assertNotNull($request->user);
-        $this->assertSame($userId, $request->user->user_id);
+        $this->assertSame($userId, $request->user->profile_id);
     }
 
     /**

@@ -186,7 +186,7 @@ class RolesApiTenantIsolationTest extends TestCase
             CorePermissions::ROLES_WRITE
         );
 
-        $token = $jwtParser->create(['user_id' => 7, 'email' => 'limited@example.com']);
+        $token = $jwtParser->create(['profile_id' => 7, 'email' => 'limited@example.com', 'active_tenant_id' => 1, 'token_epoch' => 0]);
         $request = new Request('POST', '/api/roles', ['Authorization' => "Bearer {$token}"], '{"name":"X"}');
 
         $match = $router->match($request);
@@ -235,7 +235,7 @@ class RolesApiTenantIsolationTest extends TestCase
             CorePermissions::ROLES_WRITE
         );
 
-        $token = $jwtParser->create(['user_id' => 8, 'email' => 'admin@example.com']);
+        $token = $jwtParser->create(['profile_id' => 8, 'email' => 'admin@example.com', 'active_tenant_id' => 1, 'token_epoch' => 0]);
         $request = new Request('POST', '/api/roles', ['Authorization' => "Bearer {$token}"], '{"name":"X"}');
 
         $match = $router->match($request);
@@ -282,8 +282,15 @@ class RolesApiTenantIsolationTest extends TestCase
             $pdo->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
                 ->execute([$roleId, $permissionId]);
         }
-        $pdo->prepare('INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, 1, ?, ?, ?, NULL, NOW())')
-            ->execute([$userId, "u{$userId}@example.com", 'x', $roleId]);
+        $pdo->prepare(
+            "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )->execute([$userId, "u{$userId}"]);
+
+        $pdo->prepare(
+            "INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, 1, ?, 'active', datetime('now'))"
+        )->execute([$userId, $roleId]);
 
         $db = Database::withFactory(static fn (): PDO => $pdo);
         $db->setMaxLifetimeSeconds(86400);

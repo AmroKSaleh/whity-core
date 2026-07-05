@@ -126,7 +126,7 @@ final class AuditLogRbacTest extends TestCase
     private function dispatch(Request $request, bool $granted, callable $handler): Response
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->willReturnCallback(
+        $roleChecker->method('hasPermissionForProfile')->willReturnCallback(
             static fn (int $userId, string $permission, int $tenantId): bool =>
                 $granted && $permission === CorePermissions::AUDIT_READ
         );
@@ -151,8 +151,9 @@ final class AuditLogRbacTest extends TestCase
     private function tokenFor(int $userId): string
     {
         return $this->jwtParser->create([
-            'user_id' => $userId,
-            'tenant_id' => self::TENANT_ID,
+            'profile_id' => $userId,
+            'active_tenant_id' => self::TENANT_ID,
+            'token_epoch' => 0,
             'email' => 'admin@example.com',
         ]);
     }

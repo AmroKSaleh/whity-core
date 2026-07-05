@@ -441,6 +441,10 @@ final class UsersApiHandlerRealEngineTest extends TestCase
     {
         $pdo = SchemaFromMigrations::make();
 
+        // Seed tenants referenced by seeded users' tenant_id FK (real PG enforces
+        // the constraint; SQLite does not).
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+
         // moderator is not a migration-seeded role; insert it for these tests.
         $pdo->exec("INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES (3, 'moderator', '', NULL, datetime('now'))");
 

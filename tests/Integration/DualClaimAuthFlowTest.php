@@ -46,15 +46,19 @@ final class ClaimCapturingJwtParser extends JwtParser
 }
 
 /**
- * WC-d4340daf: dual-claim issuance and refresh re-mint (ADR 0005 §5).
+ * WC-idcut-E: post-cutover auth flow — single claim set only.
  *
- * During the dual-claim window the auth endpoints mint tokens that carry BOTH
- * the legacy {user_id, tenant_id} claims and the new {profile_id,
- * active_tenant_id} claims — but only when the login identity actually resolves
- * to a profile with an active membership (or system tenant 0). Pre-migration
- * users (no profiles/profile_emails/memberships rows yet — the users→profiles
- * data migration is the NEXT task) keep receiving legacy-only tokens so the
- * membership gate in TokenValidator can never brick them.
+ * After step E the dual-claim window is closed. Session/MCP JWTs carry ONLY
+ * {profile_id, active_tenant_id, email, role, token_epoch}.
+ * Legacy {user_id, tenant_id} claims are never emitted.
+ *
+ * This file tests the post-cutover shape:
+ *  - Login mints ONLY profile_id/active_tenant_id (no user_id/tenant_id).
+ *  - id in the response equals profileId (stable across tenant switches).
+ *  - A suspended membership is refused login (generic 401).
+ *  - An account with no profile_email row is refused (401).
+ *  - Refresh re-mints with profile_id/active_tenant_id only.
+ *  - Refresh is refused after membership suspension.
  *
  * Runs on real SQLite locally and real PostgreSQL in CI (PHPUNIT_PG_DSN).
  */
@@ -64,8 +68,7 @@ final class DualClaimAuthFlowTest extends TestCase
     private const PASSWORD = 'testpassword123';
     private const TENANT_ID = 1;
 
-    private const MIGRATED_EMAIL = 'migrated@example.com';
-    private const LEGACY_EMAIL = 'legacy@example.com';
+    private const MIGRATED_EMAIL  = 'migrated@example.com';
     private const SUSPENDED_EMAIL = 'suspended@example.com';
 
     private PDO $pdo;
@@ -73,9 +76,7 @@ final class DualClaimAuthFlowTest extends TestCase
     private AuthHandler $handler;
     private MembershipRepository $memberships;
 
-    private int $migratedUserId;
     private int $migratedProfileId;
-    private int $legacyUserId;
     private int $suspendedProfileId;
 
     protected function setUp(): void
@@ -94,16 +95,11 @@ final class DualClaimAuthFlowTest extends TestCase
         $this->pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'tenant-a', datetime('now'))");
         $this->pdo->exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1, 'admin')");
 
-        // A "migrated" user: users row + profile + globally-unique email + active membership.
-        $this->migratedUserId = $this->seedUser(self::MIGRATED_EMAIL);
+        // A fully migrated user: profile + globally-unique email + active membership.
         $this->migratedProfileId = $this->seedProfile('Migrated', self::MIGRATED_EMAIL);
         $this->memberships->insert($this->migratedProfileId, self::TENANT_ID, 1);
 
-        // A pre-migration "legacy" user: users row only, no identity rows at all.
-        $this->legacyUserId = $this->seedUser(self::LEGACY_EMAIL);
-
         // A migrated-but-suspended user: profile exists, membership suspended.
-        $this->seedUser(self::SUSPENDED_EMAIL);
         $this->suspendedProfileId = $this->seedProfile('Suspended', self::SUSPENDED_EMAIL);
         $suspendedMembershipId = $this->memberships->insert($this->suspendedProfileId, self::TENANT_ID, 1);
         $this->memberships->suspend($suspendedMembershipId, self::TENANT_ID);
@@ -116,7 +112,11 @@ final class DualClaimAuthFlowTest extends TestCase
 
     // ── issuance: login ────────────────────────────────────────────────────────
 
-    public function testLoginMintsDualClaimTokensForMigratedUser(): void
+    /**
+     * Post-cutover: login mints ONLY {profile_id, active_tenant_id}.
+     * No legacy user_id/tenant_id claims must be present.
+     */
+    public function testLoginMintsNewClaimsOnlyForMigratedUser(): void
     {
         $response = $this->login(self::MIGRATED_EMAIL);
         self::assertSame(200, $response->getStatusCode());
@@ -125,45 +125,47 @@ final class DualClaimAuthFlowTest extends TestCase
             $payload = $this->jwtParser->lastPayloadOfType($type);
             self::assertIsArray($payload, "A {$type} token must have been minted.");
 
-            // New claims (ADR 0005 §5).
+            // New claims are present.
             self::assertSame($this->migratedProfileId, $payload['profile_id'] ?? null, "{$type}: profile_id");
             self::assertSame(self::TENANT_ID, $payload['active_tenant_id'] ?? null, "{$type}: active_tenant_id");
 
-            // Legacy claims are STILL issued during the dual window.
-            self::assertSame($this->migratedUserId, $payload['user_id'] ?? null, "{$type}: legacy user_id");
-            self::assertSame(self::TENANT_ID, $payload['tenant_id'] ?? null, "{$type}: legacy tenant_id");
+            // Legacy claims must NOT be present.
+            self::assertArrayNotHasKey('user_id', $payload, "{$type}: must not carry user_id");
+            self::assertArrayNotHasKey('tenant_id', $payload, "{$type}: must not carry tenant_id");
         }
     }
 
     /**
-     * WC-c35c4ce0: the login rewrite authenticates via profile_email (globally
-     * unique).  A "legacy" user — i.e. a users row with no profile_email row —
-     * cannot log in via the new path: the profile_email lookup returns nothing
-     * and the handler responds 401 (email not registered in the profile model).
-     *
-     * This is the intended behaviour after the auth rewrite: unmigrated accounts
-     * must be migrated (migration 035) before they can log in again.  During the
-     * dual-claim window ALL deployed users will have been migrated by migration
-     * 035, so this case should not arise in production.
+     * The `id` field in the login response must equal profileId — stable across
+     * tenant switches (this was the stable-id-across-switch bug that step E fixes).
      */
-    public function testLoginRejectsUnmigratedUserWithNoProfileEmail(): void
+    public function testLoginResponseIdEqualsProfileId(): void
     {
-        $response = $this->login(self::LEGACY_EMAIL);
+        $response = $this->login(self::MIGRATED_EMAIL);
+        self::assertSame(200, $response->getStatusCode());
 
-        // The new login path finds no profile_email row → 401 (not 200).
+        $body = json_decode($response->getBody(), true);
+        self::assertIsArray($body);
+        self::assertSame($this->migratedProfileId, $body['user']['id'] ?? null);
+    }
+
+    /**
+     * An account with no profile_email row cannot log in post-cutover.
+     * (profile_email lookup returns nothing → 401.)
+     */
+    public function testLoginRejectsAccountWithNoProfileEmail(): void
+    {
+        $response = $this->login('norecord@example.com');
+
         self::assertSame(
             401,
             $response->getStatusCode(),
-            'A users-only (unmigrated) account with no profile_email row must be refused (email not found).'
+            'An account with no profile_email row must be refused (email not found).'
         );
     }
 
     /**
-     * WC-c35c4ce0: a profile whose only membership is suspended must be refused
-     * login.  The old code returned 200 with legacy-only claims; the new code is
-     * strict. Post-review (MAJOR-2) the status is a GENERIC 401 rather than a
-     * distinct "No active membership" 403, so the response is not a
-     * user-enumeration oracle.
+     * A profile whose only membership is suspended must be refused login (generic 401).
      */
     public function testLoginRejectsSuspendedMembership(): void
     {
@@ -176,9 +178,11 @@ final class DualClaimAuthFlowTest extends TestCase
         );
     }
 
-    public function testIssuedDualClaimTokenValidates(): void
+    /**
+     * End-to-end: what login mints must pass the validator's membership gate.
+     */
+    public function testIssuedNewClaimsTokenValidates(): void
     {
-        // End-to-end: what login mints must pass the validator's membership gate.
         $this->login(self::MIGRATED_EMAIL);
         $payload = $this->jwtParser->lastPayloadOfType('access');
         self::assertIsArray($payload);
@@ -190,18 +194,19 @@ final class DualClaimAuthFlowTest extends TestCase
         self::assertIsArray($validator->validateAccessToken());
     }
 
-    // ── refresh: re-mint with the same claim model ─────────────────────────────
+    // ── refresh: re-mint with new claims only ──────────────────────────────────
 
-    public function testRefreshRemintsDualClaimsFromDualRefreshToken(): void
+    /**
+     * Refresh re-mints with profile_id/active_tenant_id only — no legacy claims.
+     */
+    public function testRefreshRemintsNewClaimsOnly(): void
     {
         $_COOKIE['refresh_token'] = $this->jwtParser->create([
-            'user_id' => $this->migratedUserId,
-            'tenant_id' => self::TENANT_ID,
-            'email' => self::MIGRATED_EMAIL,
-            'role' => 'admin',
-            'token_epoch' => 0,
-            'profile_id' => $this->migratedProfileId,
+            'profile_id'       => $this->migratedProfileId,
             'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::MIGRATED_EMAIL,
+            'role'             => 'admin',
+            'token_epoch'      => 0,
         ], 604800, 'refresh');
 
         $response = $this->handler->handleRefresh(new Request('POST', '/api/auth/refresh', []));
@@ -211,62 +216,21 @@ final class DualClaimAuthFlowTest extends TestCase
         self::assertIsArray($payload);
         self::assertSame($this->migratedProfileId, $payload['profile_id'] ?? null);
         self::assertSame(self::TENANT_ID, $payload['active_tenant_id'] ?? null);
-        self::assertSame($this->migratedUserId, $payload['user_id'] ?? null, 'Legacy claims survive the re-mint.');
+        self::assertArrayNotHasKey('user_id', $payload, 'Refresh must not re-emit user_id');
+        self::assertArrayNotHasKey('tenant_id', $payload, 'Refresh must not re-emit tenant_id');
     }
 
-    public function testRefreshUpgradesLegacyRefreshTokenOnceMigrated(): void
-    {
-        // Old refresh token minted BEFORE the claim change; the user has since
-        // gained a profile + membership. The re-minted access token upgrades.
-        $_COOKIE['refresh_token'] = $this->jwtParser->create([
-            'user_id' => $this->migratedUserId,
-            'tenant_id' => self::TENANT_ID,
-            'email' => self::MIGRATED_EMAIL,
-            'role' => 'admin',
-            'token_epoch' => 0,
-        ], 604800, 'refresh');
-
-        $response = $this->handler->handleRefresh(new Request('POST', '/api/auth/refresh', []));
-        self::assertSame(200, $response->getStatusCode());
-
-        $payload = $this->jwtParser->lastPayloadOfType('access');
-        self::assertIsArray($payload);
-        self::assertSame($this->migratedProfileId, $payload['profile_id'] ?? null);
-        self::assertSame(self::TENANT_ID, $payload['active_tenant_id'] ?? null);
-    }
-
-    public function testRefreshKeepsLegacyOnlyForUnmigratedUser(): void
+    /**
+     * Refresh is refused after the active membership is suspended.
+     */
+    public function testRefreshRejectsAfterMembershipSuspension(): void
     {
         $_COOKIE['refresh_token'] = $this->jwtParser->create([
-            'user_id' => $this->legacyUserId,
-            'tenant_id' => self::TENANT_ID,
-            'email' => self::LEGACY_EMAIL,
-            'role' => 'admin',
-            'token_epoch' => 0,
-        ], 604800, 'refresh');
-
-        $response = $this->handler->handleRefresh(new Request('POST', '/api/auth/refresh', []));
-        self::assertSame(200, $response->getStatusCode());
-
-        $payload = $this->jwtParser->lastPayloadOfType('access');
-        self::assertIsArray($payload);
-        self::assertArrayNotHasKey('profile_id', $payload);
-        self::assertArrayNotHasKey('active_tenant_id', $payload);
-    }
-
-    public function testRefreshRejectsDualTokenAfterMembershipSuspension(): void
-    {
-        // Token was minted while the membership was active; the membership is
-        // then suspended — the refresh must be refused (revocation-by-membership,
-        // ADR 0005 §5) without waiting for token expiry.
-        $_COOKIE['refresh_token'] = $this->jwtParser->create([
-            'user_id' => $this->migratedUserId,
-            'tenant_id' => self::TENANT_ID,
-            'email' => self::MIGRATED_EMAIL,
-            'role' => 'admin',
-            'token_epoch' => 0,
-            'profile_id' => $this->migratedProfileId,
+            'profile_id'       => $this->migratedProfileId,
             'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::MIGRATED_EMAIL,
+            'role'             => 'admin',
+            'token_epoch'      => 0,
         ], 604800, 'refresh');
 
         $membership = $this->memberships->findByProfile($this->migratedProfileId, self::TENANT_ID);
@@ -282,27 +246,11 @@ final class DualClaimAuthFlowTest extends TestCase
     private function login(string $email): \Whity\Core\Response
     {
         $request = new Request('POST', '/api/login', [], (string) json_encode([
-            'email' => $email,
+            'email'    => $email,
             'password' => self::PASSWORD,
         ]));
 
         return $this->handler->handle($request);
-    }
-
-    private function seedUser(string $email): int
-    {
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, datetime('now'), 0)"
-        );
-        $stmt->execute([
-            self::TENANT_ID,
-            $email,
-            password_hash(self::PASSWORD, PASSWORD_BCRYPT),
-            1,
-        ]);
-
-        return (int) $this->pdo->lastInsertId();
     }
 
     private function seedProfile(string $displayName, string $email): int

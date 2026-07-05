@@ -215,7 +215,7 @@ class EnforceTenantIsolation
             try {
                 $this->membershipGuard->assert($payload);
             } catch (\Whity\Auth\Exception\InvalidMembershipException $e) {
-                $claimedTenant = $payload['active_tenant_id'] ?? $payload['tenant_id'] ?? null;
+                $claimedTenant = $payload['active_tenant_id'] ?? null;
                 $this->logger->warning('Tenant isolation: active tenant membership refused', [
                     'event' => 'tenant_isolation.membership_denied',
                     'http_status' => $e->httpStatus,
@@ -363,9 +363,10 @@ class EnforceTenantIsolation
     /**
      * Extract the acting user id from a decoded JWT payload, if present.
      *
+     * Post-cutover: profile_id is the canonical actor identity (ADR 0005 §1).
+     *
      * @param array<string, mixed>|null $payload The decoded JWT payload.
-     * @return int|null The integer user_id claim (profile_id for post-cutover
-     *                  tokens that carry no legacy user_id), or null when absent.
+     * @return int|null The profile_id, or null when absent.
      */
     private function userIdFromPayload(?array $payload): ?int
     {
@@ -373,12 +374,7 @@ class EnforceTenantIsolation
             return null;
         }
 
-        if (isset($payload['user_id']) && is_int($payload['user_id'])) {
-            return $payload['user_id'];
-        }
-
-        // Post-cutover tokens (WC-d4340daf) identify the actor by profile_id
-        // only — fall back so audit records never lose the acting identity.
+        // Post-cutover: profile_id is the canonical actor identity (ADR 0005 §1).
         if (isset($payload['profile_id']) && is_int($payload['profile_id'])) {
             return $payload['profile_id'];
         }

@@ -64,10 +64,10 @@ final class AiPrincipalsApiHandler
             }
 
             $actor  = $request->user;
-            $userId = is_object($actor) && isset($actor->user_id) && is_int($actor->user_id)
-                ? $actor->user_id
+            $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+                ? $actor->profile_id
                 : null;
-            if ($userId === null || !$this->roleChecker->hasPermission($userId, CorePermissions::MCP_TOKENS_MANAGE, $tenantId)) {
+            if ($userId === null || !$this->roleChecker->hasPermissionForProfile($userId, CorePermissions::MCP_TOKENS_MANAGE, $tenantId)) {
                 return Response::error('Insufficient permissions', 403, ['required' => CorePermissions::MCP_TOKENS_MANAGE]);
             }
 
@@ -144,10 +144,10 @@ final class AiPrincipalsApiHandler
             }
 
             $actor  = $request->user;
-            $userId = is_object($actor) && isset($actor->user_id) && is_int($actor->user_id)
-                ? $actor->user_id
+            $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+                ? $actor->profile_id
                 : null;
-            if ($userId === null || !$this->roleChecker->hasPermission($userId, CorePermissions::MCP_TOKENS_MANAGE, $tenantId)) {
+            if ($userId === null || !$this->roleChecker->hasPermissionForProfile($userId, CorePermissions::MCP_TOKENS_MANAGE, $tenantId)) {
                 return Response::error('Insufficient permissions', 403, ['required' => CorePermissions::MCP_TOKENS_MANAGE]);
             }
 

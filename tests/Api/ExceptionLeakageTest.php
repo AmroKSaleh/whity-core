@@ -94,7 +94,7 @@ final class ExceptionLeakageTest extends TestCase
     public function testTwoFactorSetupDoesNotLeakExceptionMessage(): void
     {
         $tokenValidator = $this->createMock(TokenValidator::class);
-        $tokenValidator->method('validateAccessToken')->willReturn(['user_id' => 1]);
+        $tokenValidator->method('validateAccessToken')->willReturn(['profile_id' => 1]);
 
         $handler = new TwoFactorHandler(
             $this->throwingPdo(),

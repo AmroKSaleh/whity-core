@@ -327,7 +327,7 @@ final class FrontendFeaturesBlocksTest extends TestCase
         };
 
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')
+        $roleChecker->method('hasPermissionForProfile')
             ->willReturnCallback(
                 static fn (int $userId, string $permission, int $tenantId): bool => in_array($permission, $granted, true)
             );
@@ -338,7 +338,7 @@ final class FrontendFeaturesBlocksTest extends TestCase
     private function authedRequest(int $userId): Request
     {
         $request = new Request('GET', '/api/frontend/features');
-        $request->user = (object) ['user_id' => $userId];
+        $request->user = (object) ['profile_id' => $userId];
 
         return $request;
     }
