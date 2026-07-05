@@ -107,8 +107,8 @@ final class FrontendFeaturesApiHandler
 
             // Fail closed without an authenticated, well-typed acting user.
             $actor = $request->user;
-            $userId = is_object($actor) && isset($actor->user_id) && is_int($actor->user_id)
-                ? $actor->user_id
+            $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+                ? $actor->profile_id
                 : null;
             if ($userId === null) {
                 return Response::error('Authentication required', 403);
@@ -124,7 +124,7 @@ final class FrontendFeaturesApiHandler
                 }
 
                 // Server-side filtering against the authoritative store.
-                if (!$this->roleChecker->hasPermission($userId, $permission, $tenantId)) {
+                if (!$this->roleChecker->hasPermissionForProfile($userId, $permission, $tenantId)) {
                     continue;
                 }
 
@@ -369,7 +369,7 @@ final class FrontendFeaturesApiHandler
         }
 
         $requiredPermission = $route['requiredPermission'] ?? null;
-        if (is_string($requiredPermission) && !$this->roleChecker->hasPermission($userId, $requiredPermission, $tenantId)) {
+        if (is_string($requiredPermission) && !$this->roleChecker->hasPermissionForProfile($userId, $requiredPermission, $tenantId)) {
             return false;
         }
 
