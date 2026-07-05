@@ -48,7 +48,7 @@ final class ToolsListHandlerTest extends TestCase
         $this->roleChecker    = $this->createMock(RoleChecker::class);
         $this->tokenValidator = $this->createMock(TokenValidator::class);
 
-        $principal = new McpPrincipal(self::USER_ID, self::TENANT_ID, 'user', ['tools:list'], 'jti-tools');
+        $principal = new McpPrincipal(self::USER_ID, self::USER_ID, self::TENANT_ID, 'user', ['tools:list'], 'jti-tools');
         $this->tokenValidator->method('validateBearerForMcp')->willReturn($principal);
 
         $this->handler = new ToolsListHandler(

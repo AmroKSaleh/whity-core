@@ -41,7 +41,7 @@ final class PromptsListHandlerTest extends TestCase
         $this->roleChecker    = $this->createMock(RoleChecker::class);
         $this->tokenValidator = $this->createMock(TokenValidator::class);
 
-        $principal = new McpPrincipal(self::USER_ID, self::TENANT_ID, 'user', ['prompts:list'], 'jti-list');
+        $principal = new McpPrincipal(self::USER_ID, self::USER_ID, self::TENANT_ID, 'user', ['prompts:list'], 'jti-list');
         $this->tokenValidator->method('validateMcpToken')->willReturn($principal);
 
         $this->handler = new PromptsListHandler(

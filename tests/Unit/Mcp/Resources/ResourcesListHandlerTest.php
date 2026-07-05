@@ -50,7 +50,7 @@ final class ResourcesListHandlerTest extends TestCase
         $this->roleChecker     = $this->createMock(RoleChecker::class);
         $this->tokenValidator  = $this->createMock(TokenValidator::class);
 
-        $principal = new McpPrincipal(self::USER_ID, self::TENANT_ID, 'user', ['resources:list'], 'jti-res');
+        $principal = new McpPrincipal(self::USER_ID, self::USER_ID, self::TENANT_ID, 'user', ['resources:list'], 'jti-res');
         $this->tokenValidator->method('validateMcpToken')->willReturn($principal);
 
         $this->handler = new ResourcesListHandler(

@@ -269,7 +269,7 @@ final class DispatcherTest extends TestCase
 
     public function testHandle_throwsMcpRateLimitException_whenRateLimiterExhausted(): void
     {
-        $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-rl');
+        $principal = new McpPrincipal(7, 7, 3, 'user', ['tools:call'], 'jti-rl');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
         $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
@@ -285,7 +285,7 @@ final class DispatcherTest extends TestCase
 
     public function testHandle_resetsTenantContext_whenRateLimitExceptionThrown(): void
     {
-        $principal = new McpPrincipal(7, 3, 'user', [], 'jti-rl2');
+        $principal = new McpPrincipal(7, 7, 3, 'user', [], 'jti-rl2');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
         $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
@@ -307,7 +307,7 @@ final class DispatcherTest extends TestCase
 
     public function testHandle_throwsMcpFeatureDisabledException_whenTenantMcpDisabled(): void
     {
-        $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-fe');
+        $principal = new McpPrincipal(7, 7, 3, 'user', ['tools:call'], 'jti-fe');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
         $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
@@ -325,7 +325,7 @@ final class DispatcherTest extends TestCase
 
     public function testHandle_resetsTenantContext_whenMcpFeatureDisabledExceptionThrown(): void
     {
-        $principal = new McpPrincipal(7, 3, 'user', [], 'jti-fe2');
+        $principal = new McpPrincipal(7, 7, 3, 'user', [], 'jti-fe2');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
         $tokenValidator->method('validateBearerForMcp')->willReturn($principal);
@@ -348,7 +348,7 @@ final class DispatcherTest extends TestCase
 
     public function testHandle_doesNotThrow_whenTenantMcpEnabled(): void
     {
-        $principal = new McpPrincipal(7, 3, 'user', ['tools:call'], 'jti-fe3');
+        $principal = new McpPrincipal(7, 7, 3, 'user', ['tools:call'], 'jti-fe3');
 
         $tokenValidator = $this->createMock(TokenValidator::class);
         $tokenValidator->method('validateBearerForMcp')->willReturn($principal);

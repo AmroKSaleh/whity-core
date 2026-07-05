@@ -321,7 +321,13 @@ class TokenValidator
         if ($ids === null) {
             return null;
         }
-        [$userId, $tenantId] = $ids;
+        [$resolvedId, $tenantId] = $ids;
+
+        // Post-040 MCP tokens carry profile_id; pre-040 (or session-bearer path)
+        // may carry user_id instead. Expose both so callers can read either.
+        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
+            ? $claims['profile_id']
+            : $resolvedId;
 
         $principalKind = $claims['principal_kind'] ?? 'user';
         $scope         = $claims['scope'] ?? [];
@@ -336,7 +342,8 @@ class TokenValidator
 
         /** @var string[] $scope */
         return new McpPrincipal(
-            userId: $userId,
+            profileId: $profileId,
+            userId: $resolvedId,
             tenantId: $tenantId,
             principalKind: $principalKind,
             scope: $scope,
@@ -392,10 +399,17 @@ class TokenValidator
         if ($ids === null) {
             return null;
         }
-        [$userId, $tenantId] = $ids;
+        [$resolvedId, $tenantId] = $ids;
+
+        // Session bearers during the dual-window carry user_id; post-E they will
+        // carry profile_id. Expose both so session-bearer MCP access keeps working.
+        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
+            ? $claims['profile_id']
+            : $resolvedId;
 
         return new McpPrincipal(
-            userId: $userId,
+            profileId: $profileId,
+            userId: $resolvedId,
             tenantId: $tenantId,
             principalKind: 'session',
             scope: ['tools:list', 'tools:call', 'resources:read', 'prompts:list'],
