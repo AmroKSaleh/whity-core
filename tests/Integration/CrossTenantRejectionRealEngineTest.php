@@ -1474,7 +1474,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     private function auditHandler(): AuditLogApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasPermission')->willReturn(true);
+        $roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         return new AuditLogApiHandler($this->pdo, $roleChecker);
     }
@@ -1511,7 +1511,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     private function req(string $method, string $path, ?array $body = null, int $tenantId = self::TENANT_A): Request
     {
         $request = new Request($method, $path, [], $body !== null ? (string) json_encode($body) : '');
-        $request->user = (object) ['user_id' => 99, 'tenant_id' => $tenantId];
+        $request->user = (object) ['profile_id' => 99, 'active_tenant_id' => $tenantId];
 
         return $request;
     }

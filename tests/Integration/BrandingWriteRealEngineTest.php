@@ -107,7 +107,7 @@ final class BrandingWriteRealEngineTest extends TestCase
     {
         TenantContext::setTenantId(self::TENANT_A);
         $req = new Request('POST', '/api/v1/branding/assets/logo_wide', [], '');
-        $req->user = (object) ['user_id' => self::USER_WRITE_NO_MANAGE, 'tenant_id' => self::TENANT_A];
+        $req->user = (object) ['profile_id' => self::USER_WRITE_NO_MANAGE, 'active_tenant_id' => self::TENANT_A];
         $res = $this->handler->uploadTenant($req, ['key' => 'logo_wide']);
         self::assertSame(400, $res->getStatusCode());
     }
@@ -279,14 +279,14 @@ final class BrandingWriteRealEngineTest extends TestCase
         $req = new Request($method, $path, [
             'Content-Type' => "multipart/form-data; boundary={$boundary}",
         ], $body);
-        $req->user = (object) ['user_id' => $userId, 'tenant_id' => self::TENANT_A];
+        $req->user = (object) ['profile_id' => $userId, 'active_tenant_id' => self::TENANT_A];
         return $req;
     }
 
     private function plainReq(string $method, string $path, int $userId): Request
     {
         $req = new Request($method, $path, [], '');
-        $req->user = (object) ['user_id' => $userId, 'tenant_id' => self::TENANT_A];
+        $req->user = (object) ['profile_id' => $userId, 'active_tenant_id' => self::TENANT_A];
         return $req;
     }
 
@@ -294,7 +294,7 @@ final class BrandingWriteRealEngineTest extends TestCase
     private function jsonReq(string $method, string $path, int $userId, array $body): Request
     {
         $req = new Request($method, $path, ['Content-Type' => 'application/json'], (string) json_encode($body));
-        $req->user = (object) ['user_id' => $userId, 'tenant_id' => self::TENANT_A];
+        $req->user = (object) ['profile_id' => $userId, 'active_tenant_id' => self::TENANT_A];
         return $req;
     }
 
@@ -338,12 +338,22 @@ final class BrandingWriteRealEngineTest extends TestCase
                 (102, {$writePermId}, datetime('now'))
         ");
 
+        // Post-cutover: the acting identity is a profile with an ACTIVE
+        // membership carrying the role; hasPermissionForProfile resolves via
+        // memberships. Profile ids match the USER_* constants (10/11/12/13).
         $pdo->exec("
-            INSERT INTO users (id, tenant_id, email, password, role_id, created_at) VALUES
-                (10, 1, 'admin@t1.example',  'x', 1,   datetime('now')),
-                (11, 1, 'reader@t1.example', 'x', 100, datetime('now')),
-                (12, 1, 'none@t1.example',   'x', 101, datetime('now')),
-                (13, 1, 'writer@t1.example', 'x', 102, datetime('now'))
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
+                (10, 'admin',  'x', 0, 0, 0, datetime('now'), datetime('now')),
+                (11, 'reader', 'x', 0, 0, 0, datetime('now'), datetime('now')),
+                (12, 'none',   'x', 0, 0, 0, datetime('now'), datetime('now')),
+                (13, 'writer', 'x', 0, 0, 0, datetime('now'), datetime('now'))
+        ");
+        $pdo->exec("
+            INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at) VALUES
+                (10, 1, 1,   'active', datetime('now')),
+                (11, 1, 100, 'active', datetime('now')),
+                (12, 1, 101, 'active', datetime('now')),
+                (13, 1, 102, 'active', datetime('now'))
         ");
 
         return $pdo;
