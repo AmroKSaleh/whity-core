@@ -754,6 +754,43 @@ class BodyTokenModeTest extends TestCase
         unset($_COOKIE['temp_auth_token']);
     }
 
+    /**
+     * WC-idcut-E: if the single membership named by the 2FA temp token's
+     * active_tenant_id is revoked/suspended DURING the 2FA challenge window,
+     * completing 2FA must FAIL CLOSED (no session minted) rather than trusting
+     * the stale claim. issueSessionForProfile is the chokepoint that enforces
+     * this — critical because for the system tenant (0) the per-request
+     * ActiveTenantMembershipGuard bypasses membership checks, so a stale claim
+     * would otherwise grant lingering authority.
+     */
+    public function testTwoFaLoginFailsClosedWhenMembershipRevokedMidWindow(): void
+    {
+        [$handler, $code] = $this->make2faHandlerAndCode();
+
+        // The single membership is revoked after the temp token was issued.
+        $this->pdo->prepare(
+            "UPDATE memberships SET status = 'suspended' WHERE profile_id = ? AND tenant_id = ?"
+        )->execute([self::TWOFA_USER_ID, self::TENANT_ID]);
+
+        $tempToken = $this->jwtParser->create([
+            'profile_id'       => self::TWOFA_USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::TWOFA_EMAIL,
+        ], 300, 'temp');
+        $_COOKIE['temp_auth_token'] = $tempToken;
+
+        $request = new Request('POST', '/api/login/2fa', [],
+            (string) json_encode(['code' => $code]));
+
+        $response = $handler->handle2fa($request);
+        $this->assertSame(401, $response->getStatusCode(), $response->getBody());
+
+        $data = $this->json($response);
+        $this->assertArrayNotHasKey('access_token', $data, 'no token may be minted for a revoked membership');
+
+        unset($_COOKIE['temp_auth_token']);
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // CsrfGuard: select-tenant / switch-tenant are always-protected (WC-ddcd16ad MAJOR)
     // ──────────────────────────────────────────────────────────────────────────

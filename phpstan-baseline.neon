@@ -186,11 +186,6 @@ parameters:
 			path: src/Auth/AuthHandler.php
 
 		-
-			message: "#^Negated boolean expression is always false\\.$#"
-			count: 1
-			path: src/Auth/AuthHandler.php
-
-		-
 			message: "#^Method Whity\\\\Auth\\\\BackupCodesService\\:\\:generateCodes\\(\\) return type has no value type specified in iterable type array\\.$#"
 			count: 1
 			path: src/Auth/BackupCodesService.php
@@ -596,11 +591,6 @@ parameters:
 			path: tests/Auth/RoleCheckerRealEngineTest.php
 
 		-
-			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
-			count: 1
-			path: tests/Auth/TokenValidatorTest.php
-
-		-
 			message: "#^Offset 'jti' does not exist on array\\<string, mixed\\>\\|null\\.$#"
 			count: 1
 			path: tests/Auth/TokenValidatorTest.php
@@ -771,7 +761,7 @@ parameters:
 			path: tests/Http/JwtSingleDecodeTest.php
 
 		-
-			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			message: "#^Access to an undefined property object\\:\\:\\$profile_id\\.$#"
 			count: 1
 			path: tests/Http/JwtSingleDecodeTest.php
 
@@ -886,7 +876,7 @@ parameters:
 			path: tests/Integration/PermissionAssignmentTest.php
 
 		-
-			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			message: "#^Access to an undefined property object\\:\\:\\$profile_id\\.$#"
 			count: 1
 			path: tests/Integration/PermissionAssignmentTest.php
 
@@ -896,12 +886,17 @@ parameters:
 			path: tests/Integration/PermissionAssignmentTest.php
 
 		-
+			message: "#^Property Tests\\\\Integration\\\\ProfileLoginRealEngineTest\\:\\:\\$userIdA is never read, only written\\.$#"
+			count: 1
+			path: tests/Integration/ProfileLoginRealEngineTest.php
+
+		-
 			message: "#^Property Tests\\\\Integration\\\\ProfileLoginRealEngineTest\\:\\:\\$userIdB is never read, only written\\.$#"
 			count: 1
 			path: tests/Integration/ProfileLoginRealEngineTest.php
 
 		-
-			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			message: "#^Access to an undefined property object\\:\\:\\$profile_id\\.$#"
 			count: 1
 			path: tests/Integration/RbacLifecycleTest.php
 
@@ -911,7 +906,7 @@ parameters:
 			path: tests/Integration/RbacLifecycleTest.php
 
 		-
-			message: "#^Access to an undefined property object\\:\\:\\$user_id\\.$#"
+			message: "#^Access to an undefined property object\\:\\:\\$profile_id\\.$#"
 			count: 1
 			path: tests/Integration/RbacRouteEnforcementTest.php
 
@@ -984,11 +979,6 @@ parameters:
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 2
 			path: tests/Integration/TotpSecretReencryptorTest.php
-
-		-
-			message: "#^Method Tests\\\\Integration\\\\TwoFactorFlowTest\\:\\:createMockPdo\\(\\) has parameter \\$userOverrides with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Integration/TwoFactorFlowTest.php
 
 		-
 			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
@@ -1207,7 +1197,7 @@ parameters:
 
 		-
 			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
-			count: 6
+			count: 7
 			path: tests/Unit/Auth/AuthHandlerTest.php
 
 		-
