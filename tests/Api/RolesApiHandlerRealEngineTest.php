@@ -48,6 +48,18 @@ final class RolesApiHandlerRealEngineTest extends TestCase
     {
         RoleChecker::clearCache();
         $this->pdo = self::makeSqliteSchema();
+        // Seed tenant 1: migration 010 only seeds system tenant id=0.
+        // On PostgreSQL (real-engine PG mode via PHPUNIT_PG_DSN) the FK on
+        // roles.tenant_id is enforced, so any create under tenant 1 fails
+        // unless the tenant row exists. INSERT OR IGNORE is a no-op on SQLite
+        // and translates to ON CONFLICT DO NOTHING on PG via the SchemaFromMigrations
+        // wrapper.
+        $this->pdo->exec(
+            "INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'test-tenant', datetime('now'))"
+        );
+        $this->pdo->exec(
+            "INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (2, 'test-tenant-b', datetime('now'))"
+        );
         MockRequestFactory::setTestTenant(1);
     }
 
@@ -190,14 +202,18 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         )['data'];
         $roleId = (int) $created['id'];
 
-        // A genuine (other) user is assigned the role within the tenant.
+        // A genuine (other) user is assigned the role within the tenant via
+        // users.role_id; this is sufficient for the active-assignment guard now
+        // that user_roles has been dropped by migration 039.
+        // Seed tenant 1 first (migration 010 only seeds system tenant id=0;
+        // on PostgreSQL FK enforcement requires the tenant row to exist).
+        $this->pdo->exec(
+            "INSERT OR IGNORE INTO tenants (id, name, created_at)
+             VALUES (1, 'test-tenant', datetime('now'))"
+        );
         $this->pdo->exec(
             "INSERT INTO users (id, tenant_id, email, password, role_id, created_at)
              VALUES (50, 1, 'real@example.com', 'x', {$roleId}, datetime('now'))"
-        );
-        $this->pdo->exec(
-            "INSERT INTO user_roles (tenant_id, user_id, role_id, created_at)
-             VALUES (1, 50, {$roleId}, datetime('now'))"
         );
 
         $response = $handler->delete(
