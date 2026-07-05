@@ -137,6 +137,7 @@ final class McpTokenHandlerTest extends TestCase
         self::assertSame(201, $response->getStatusCode());
         $body = json_decode($response->getBody(), true);
         $claims = $this->jwtParser->parse((string) $body['token']);
+        self::assertIsArray($claims);
         self::assertSame(self::PROFILE_ID, $claims['profile_id']);
     }
 
@@ -246,19 +247,6 @@ final class McpTokenHandlerTest extends TestCase
     {
         return $this->jwtParser->create([
             'user_id'     => $userId,
-            'tenant_id'   => self::TENANT_ID,
-            'token_epoch' => 0,
-        ], 900, 'access');
-    }
-
-    /**
-     * Mint an access token using the legacy user_id claim with a different user
-     * not in the profiles table — tests the graceful failure path.
-     */
-    private function mintLegacyAccessToken(): string
-    {
-        return $this->jwtParser->create([
-            'user_id'     => 999,
             'tenant_id'   => self::TENANT_ID,
             'token_epoch' => 0,
         ], 900, 'access');
