@@ -395,6 +395,7 @@ final class SettingsApiRealEngineTest extends TestCase
         $pdo->exec("
             INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at) VALUES
                 (10, 1, 1,   'active', datetime('now')),
+                (10, 0, 1,   'active', datetime('now')),
                 (11, 1, 100, 'active', datetime('now')),
                 (12, 1, 101, 'active', datetime('now')),
                 (13, 1, 102, 'active', datetime('now'))
