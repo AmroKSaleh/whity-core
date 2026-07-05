@@ -884,6 +884,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profiles/{id}/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the person record and relations for a profile */
+        get: operations["get_api_v1_profiles_id_relations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/relations": {
         parameters: {
             query?: never;
@@ -1164,23 +1181,6 @@ export interface paths {
         head?: never;
         /** Update a user */
         patch: operations["patch_api_v1_users_id"];
-        trace?: never;
-    };
-    "/api/v1/users/{id}/relations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get the person record and relations for a user account */
-        get: operations["get_api_v1_users_id_relations"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
 }
@@ -1528,7 +1528,7 @@ export interface components {
             id: number;
             tenantId: number;
             displayName: string;
-            userId?: number | null;
+            profileId?: number | null;
             hasAccount: boolean;
             birthDate?: string | null;
             deceased: boolean;
@@ -1577,6 +1577,12 @@ export interface components {
         PluginUploadResponse: {
             data: components["schemas"]["PluginEntry"];
         };
+        ProfileRelationsResponse: {
+            data: {
+                personId: number | null;
+                relations: components["schemas"]["RelationSummary"][];
+            };
+        };
         RefreshResponse: {
             status: string;
         };
@@ -1608,7 +1614,7 @@ export interface components {
         };
         RelationRef: {
             /** @enum {string} */
-            type: "user" | "person";
+            type: "profile" | "person";
             id: number;
         };
         RelationSummary: {
@@ -1818,12 +1824,6 @@ export interface components {
         UserListResponse: {
             data: components["schemas"]["User"][];
             pagination: components["schemas"]["Pagination"];
-        };
-        UserRelationsResponse: {
-            data: {
-                personId: number | null;
-                relations: components["schemas"]["RelationSummary"][];
-            };
         };
         UserResponse: {
             data: components["schemas"]["User"];
@@ -6302,6 +6302,82 @@ export interface operations {
             };
         };
     };
+    get_api_v1_profiles_id_relations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The profile's person and relations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileRelationsResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_relations: {
         parameters: {
             query?: never;
@@ -8290,82 +8366,6 @@ export interface operations {
                 };
             };
             /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    get_api_v1_users_id_relations: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The user's person and relations */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserRelationsResponse"];
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal error */
             500: {
                 headers: {
                     [name: string]: unknown;
