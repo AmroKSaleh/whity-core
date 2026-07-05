@@ -364,6 +364,9 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
     private function makeSchema(): PDO
     {
         $pdo = SchemaFromMigrations::make();
+        // Seed the tenants referenced by seeded users' tenant_id FK (real PG
+        // enforces the constraint; SQLite does not). TENANT_A=1, TENANT_B=2.
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
         // Migrations seed admin(1) and user(2); seed the extra roles used by these tests.
         $pdo->exec("INSERT OR IGNORE INTO roles (id, name, created_at) VALUES
             (3, 'editor', NOW()), (4, 'viewer', NOW())");

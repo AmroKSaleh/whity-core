@@ -58,11 +58,17 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
      */
     public function testFiltersAreReadFromTheGetSuperglobal(): void
     {
-        $this->pdo->exec("
+        // Seed the grantor/grantee profiles referenced by the delegation's FKs
+        // (real PG enforces grantor_profile_id -> profiles.id; SQLite does not).
+        $grantorId = $this->seedUser('grantor@example.com', 'admin', 1);
+        $granteeId = $this->seedUser('grantee@example.com', 'user', 1);
+
+        $stmt = $this->pdo->prepare("
             INSERT INTO permission_delegations
                 (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, granted_at, revoked_at)
-            VALUES (1, 10, 'profile', 11, 'users:read', datetime('now'), datetime('now'))
+            VALUES (1, ?, 'profile', ?, 'users:read', datetime('now'), datetime('now'))
         ");
+        $stmt->execute([$grantorId, $granteeId]);
 
         $_GET = ['includeRevoked' => '1'];
         $response = $this->handler()->list(new Request('GET', '/api/delegations'));
@@ -311,6 +317,10 @@ final class DelegationsApiHandlerRealEngineTest extends TestCase
 
     private static function makeSqliteSchema(): PDO
     {
-        return SchemaFromMigrations::make(true);
+        $pdo = SchemaFromMigrations::make(true);
+        // Seed tenants referenced by seeded memberships' tenant_id FK
+        // (real PG enforces the constraint; SQLite does not).
+        $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
+        return $pdo;
     }
 }

@@ -314,6 +314,12 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES
             (1, 'Tenant A', datetime('now')),
             (2, 'Tenant B', datetime('now'))");
+        // On real PostgreSQL, explicit-id inserts do NOT advance the SERIAL
+        // sequence, so the handler's next auto-id would collide with id=1/2.
+        // Resync the sequence to max(id) so create() gets a fresh id.
+        if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql') {
+            $pdo->exec("SELECT setval(pg_get_serial_sequence('tenants', 'id'), (SELECT MAX(id) FROM tenants))");
+        }
         return $pdo;
     }
 }
