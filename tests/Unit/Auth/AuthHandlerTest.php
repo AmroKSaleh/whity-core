@@ -369,10 +369,11 @@ class AuthHandlerTest extends TestCase
         // Create a real token to test with
         $realAuthHandler = new AuthHandler($this->mockDb, $this->jwtParser);
         $refreshToken = $this->jwtParser->create([
-            'user_id' => 1,
-            'tenant_id' => 1,
+            'profile_id' => 1,
+            'active_tenant_id' => 1,
             'email' => 'user@test.com',
-            'role' => 'user'
+            'role' => 'user',
+            'token_epoch' => 0,
         ], 604800, 'refresh');
 
         $_COOKIE['refresh_token'] = $refreshToken;
@@ -506,12 +507,13 @@ class AuthHandlerTest extends TestCase
      */
     public function testHandle2faReturns401WithoutCode(): void
     {
-        // Create a temporary token with user_id in claims
+        // Create a temporary token with profile_id in claims (post-cutover shape).
         $tempToken = $this->jwtParser->create([
-            'user_id' => 2,
-            'tenant_id' => 1,
+            'profile_id' => 2,
+            'active_tenant_id' => 1,
             'email' => 'user2fa@whity.local',
-            'role' => 'user'
+            'role' => 'user',
+            'token_epoch' => 0,
         ], 300, 'temp');
 
         // Set temp token in cookie
@@ -538,12 +540,13 @@ class AuthHandlerTest extends TestCase
      */
     public function testHandle2faReturns401WithInvalidCode(): void
     {
-        // Create a temporary token
+        // Create a temporary token (post-cutover shape).
         $tempToken = $this->jwtParser->create([
-            'user_id' => 2,
-            'tenant_id' => 1,
+            'profile_id' => 2,
+            'active_tenant_id' => 1,
             'email' => 'user2fa@whity.local',
-            'role' => 'user'
+            'role' => 'user',
+            'token_epoch' => 0,
         ], 300, 'temp');
 
         $_COOKIE['temp_auth_token'] = $tempToken;

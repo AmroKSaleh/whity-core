@@ -88,9 +88,9 @@ final class DispatcherTenantBindingTest extends TestCase
 
     public function testHandle_returnsUnauthenticated_whenAccessTokenUserNotInDb(): void
     {
-        // User 9999 does not exist in the fixture DB — epoch check fails closed.
+        // Profile 9999 does not exist in the fixture DB — epoch check fails closed.
         $accessToken = $this->jwtParser->create(
-            ['user_id' => 9999, 'tenant_id' => self::TENANT_ID, 'token_epoch' => 0],
+            ['profile_id' => 9999, 'active_tenant_id' => self::TENANT_ID, 'token_epoch' => 0],
             900,
             'access'
         );
