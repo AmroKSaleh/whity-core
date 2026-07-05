@@ -361,7 +361,8 @@ class RolesApiHandlerTest extends TestCase
         $listStmt  = $this->statement(false, $rows);
 
         $pdo = $this->createMock(PDO::class);
-        // SYSTEM path uses queries with no bound tenant parameter; both avoid user_roles.
+        // SYSTEM path uses queries with no bound tenant parameter.
+        // user_roles was dropped by migration 039 and is never queried.
         $pdo->expects($this->exactly(2))
             ->method('prepare')
             ->with($this->logicalNot($this->stringContains('user_roles')))
@@ -519,7 +520,7 @@ class RolesApiHandlerTest extends TestCase
         $visibility = $this->statement(['1' => 1]);
         $userCount = $this->statement(['cnt' => 0]);
         $delPerms = $this->statement();
-        $delAssign = $this->statement();
+        // user_roles dropped by migration 039; no deleteUserRolesScoped call.
         $delRole = $this->statement();
 
         $pdo = $this->createMock(PDO::class);
@@ -527,7 +528,6 @@ class RolesApiHandlerTest extends TestCase
             $visibility,
             $userCount,
             $delPerms,
-            $delAssign,
             $delRole
         );
 
@@ -545,7 +545,7 @@ class RolesApiHandlerTest extends TestCase
         $visibility = $this->statement(['1' => 1]);
         $userCount = $this->statement(['cnt' => 0]);
         $delPerms = $this->statement();
-        $delAssign = $this->statement();
+        // user_roles dropped by migration 039; no deleteUserRolesScoped call.
         $delRole = $this->statement();
 
         $pdo = $this->createMock(PDO::class);
@@ -553,7 +553,6 @@ class RolesApiHandlerTest extends TestCase
             $visibility,
             $userCount,
             $delPerms,
-            $delAssign,
             $delRole
         );
 

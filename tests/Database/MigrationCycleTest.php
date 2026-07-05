@@ -30,7 +30,6 @@ final class MigrationCycleTest extends TestCase
         'users',
         'permissions',
         'role_permissions',
-        'user_roles',
         'organizational_units',
         'ou_role_assignments',
         'permission_delegations',
@@ -72,9 +71,6 @@ final class MigrationCycleTest extends TestCase
         $this->assertForeignKeyExists('users', 'tenant_id', 'tenants', 'id');
         $this->assertIndexExistsOn('users', 'tenant_id');
 
-        // user_roles junction wires users and roles together.
-        $this->assertForeignKeyExists('user_roles', 'user_id', 'users', 'id');
-        $this->assertForeignKeyExists('user_roles', 'role_id', 'roles', 'id');
     }
 
     public function testMigrationRunIsIdempotent(): void
@@ -104,7 +100,7 @@ final class MigrationCycleTest extends TestCase
         $this->assertSame(0, $this->migrationCount(), 'All migrations should be rolled back.');
 
         // Structural tables created by reversible migrations must be gone.
-        foreach (['permission_delegations', 'user_roles', 'ou_role_assignments', 'organizational_units', 'permissions', 'role_permissions', 'users', 'roles', 'tenants'] as $table) {
+        foreach (['permission_delegations', 'ou_role_assignments', 'organizational_units', 'permissions', 'role_permissions', 'users', 'roles', 'tenants'] as $table) {
             $this->assertFalse($this->tableExists($table), "Table '{$table}' should be dropped after full rollback.");
         }
     }
@@ -122,7 +118,9 @@ final class MigrationCycleTest extends TestCase
         // Re-applying on the now-clean database must succeed again.
         $this->runMigrate('run');
         $this->assertSame($total, $this->migrationCount());
-        $this->assertTrue($this->tableExists('user_roles'));
+        // user_roles was dropped by migration 039; it must not exist after a full
+        // forward run.
+        $this->assertFalse($this->tableExists('user_roles'), 'user_roles must not exist after migration 039 runs.');
     }
 
     public function testCascadingDeleteRemovesDependentRows(): void
@@ -142,19 +140,13 @@ final class MigrationCycleTest extends TestCase
             [':t' => $tenantId, ':r' => $roleId]
         )->fetch(PDO::FETCH_COLUMN);
 
-        $db->query(
-            'INSERT INTO user_roles (tenant_id, user_id, role_id, created_at) VALUES (:t, :u, :r, NOW())',
-            [':t' => $tenantId, ':u' => $userId, ':r' => $roleId]
-        );
-
-        // Deleting the tenant must cascade to users and their role assignments.
+        // Deleting the tenant must cascade to users.
+        // user_roles was dropped by migration 039 and is no longer tested here.
         $db->query('DELETE FROM tenants WHERE id = :t', [':t' => $tenantId]);
 
         $remainingUsers = (int) $db->query('SELECT COUNT(*) FROM users WHERE id = :u', [':u' => $userId])->fetch(PDO::FETCH_COLUMN);
-        $remainingAssignments = (int) $db->query('SELECT COUNT(*) FROM user_roles WHERE user_id = :u', [':u' => $userId])->fetch(PDO::FETCH_COLUMN);
 
         $this->assertSame(0, $remainingUsers, 'Users should cascade-delete with their tenant.');
-        $this->assertSame(0, $remainingAssignments, 'user_roles should cascade-delete with their user.');
     }
 
     // ---- helpers ---------------------------------------------------------

@@ -507,14 +507,13 @@ class RolesApiHandler
                 'tenant_id' => $tenantId,
             ]);
 
-            // Remove permission grants, tenant assignments, then the role itself.
+            // Remove permission grants, then the role itself.
             // WC-190: every one of these mutating statements carries its own
             // tenant predicate (scoped via the owning role for the junction
-            // tables, directly for user_roles, and on roles itself), so a
-            // cross-tenant id can never delete another tenant's rows even if the
-            // guard SELECT above were bypassed (defense in depth / TOCTOU).
+            // tables and on roles itself), so a cross-tenant id can never delete
+            // another tenant's rows even if the guard SELECT above were bypassed
+            // (defense in depth / TOCTOU).
             $this->deleteRolePermissionsScoped((int)$id, $tenantId);
-            $this->deleteUserRolesScoped((int)$id, $tenantId);
             $this->deleteRoleScoped((int)$id, $tenantId);
 
             // Synchronous post-delete hook.
@@ -761,39 +760,15 @@ class RolesApiHandler
     }
 
     /**
-     * Scoped `DELETE FROM user_roles` for a role's assignments (WC-190).
-     *
-     * `user_roles` DOES carry a `tenant_id` column (migration 012), so the
-     * predicate scopes directly on it. SYSTEM tenant (0) is unscoped; any other
-     * tenant is scoped with `AND tenant_id = ?`; a null tenant deletes nothing.
-     *
-     * @param int      $roleId   The role id whose assignments are removed.
-     * @param int|null $tenantId The acting tenant (0 = SYSTEM).
-     * @return void
-     */
-    protected function deleteUserRolesScoped(int $roleId, ?int $tenantId): void
-    {
-        if ($tenantId === 0) {
-            // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
-            $stmt = $this->db->prepare('DELETE FROM user_roles WHERE role_id = ?');
-            $stmt->execute([$roleId]);
-            return;
-        }
-
-        if ($tenantId === null) {
-            return;
-        }
-
-        $stmt = $this->db->prepare('DELETE FROM user_roles WHERE role_id = ? AND tenant_id = ?');
-        $stmt->execute([$roleId, $tenantId]);
-    }
-
-    /**
      * Whether the role still has users assigned to it.
      *
-     * Counts both the legacy single-role column (`users.role_id`) and the
-     * many-to-many `user_roles` junction so a role in use through either path is
-     * protected. Scoped to the tenant; the SYSTEM tenant (id 0) counts globally.
+     * Counts `memberships.role_id` (the authoritative live signal, ADR 0005 §3)
+     * and the legacy `users.role_id` single-role column (still present until the
+     * users table is retired in a later identity cutover step). Scoped to the
+     * tenant; the SYSTEM tenant (id 0) counts globally.
+     *
+     * Note: `user_roles` is no longer queried — that junction table was dropped
+     * by migration 039.
      *
      * @param int      $roleId   The role id.
      * @param int|null $tenantId The resolved tenant id.
@@ -803,27 +778,24 @@ class RolesApiHandler
     {
         if ($tenantId === 0 || $tenantId === null) {
             // ROLE data: memberships.role_id is the authoritative role assignment
-            // (ADR 0005 §3). Also check the legacy users.role_id column and the
-            // user_roles junction during the transition so roles actively in use via
-            // either the old or new path are both protected.
+            // (ADR 0005 §3). Also check the legacy users.role_id column so roles
+            // actively in use via the old single-role path are protected.
             // @tenant-guard-ignore: system-tenant (id 0) counts references across all tenants; scoped else-branch binds tenant_id in all subqueries
             $stmt = $this->db->prepare('
                 SELECT (
                     (SELECT COUNT(*) FROM memberships WHERE role_id = ?)
                     + (SELECT COUNT(*) FROM users WHERE role_id = ?)
-                    + (SELECT COUNT(*) FROM user_roles WHERE role_id = ?)
                 ) AS cnt
             ');
-            $stmt->execute([$roleId, $roleId, $roleId]);
+            $stmt->execute([$roleId, $roleId]);
         } else {
             $stmt = $this->db->prepare('
                 SELECT (
                     (SELECT COUNT(*) FROM memberships WHERE role_id = ? AND tenant_id = ?)
                     + (SELECT COUNT(*) FROM users WHERE role_id = ? AND tenant_id = ?)
-                    + (SELECT COUNT(*) FROM user_roles WHERE role_id = ? AND tenant_id = ?)
                 ) AS cnt
             ');
-            $stmt->execute([$roleId, $tenantId, $roleId, $tenantId, $roleId, $tenantId]);
+            $stmt->execute([$roleId, $tenantId, $roleId, $tenantId]);
         }
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

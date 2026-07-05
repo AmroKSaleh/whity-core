@@ -70,7 +70,15 @@ final class TenantOwnedTablesTest extends TestCase
 
     /**
      * Re-derive, from the migration SQL, every table whose CREATE TABLE body
-     * declares a `tenant_id` column. Mirrors how the canonical list was built.
+     * declares a `tenant_id` column — minus any table that is later DROPped by
+     * a forward migration `up()` method (e.g. migration 039 drops user_roles).
+     *
+     * Migrations are processed in filename order (the same order the runner uses)
+     * so that a later DROP correctly removes a table a earlier CREATE added.
+     *
+     * Only the `up()` method body is considered — the `down()` method may recreate
+     * a dropped table for rollback purposes, but the live forward schema reflects
+     * `up()` only.
      *
      * @return list<string>
      */
@@ -79,35 +87,86 @@ final class TenantOwnedTablesTest extends TestCase
         $dir = dirname(__DIR__, 4) . '/database/migrations';
         self::assertDirectoryExists($dir);
 
-        $tables = [];
-        foreach (glob($dir . '/*.php') ?: [] as $file) {
-            $sql = file_get_contents($file);
-            if ($sql === false) {
+        $files = glob($dir . '/*.php') ?: [];
+        sort($files); // process in migration order
+
+        $tables  = [];
+        $dropped = [];
+
+        foreach ($files as $file) {
+            $fullSql = file_get_contents($file);
+            if ($fullSql === false) {
                 continue;
             }
 
-            // Locate each `CREATE TABLE [IF NOT EXISTS] <name> (` opener, then
-            // walk its column list to the matching close paren so nested
-            // `REFERENCES tenants(id)` parens don't truncate the body. A table is
-            // tenant-owned when that body declares a `tenant_id <int-type>` column.
+            // Extract only the up() method body so that down() recreations of
+            // dropped tables do not re-add entries to the derived set.
+            $upSql = $this->extractUpMethodBody($fullSql);
+
+            // 1. Accumulate tables with a tenant_id column from CREATE TABLE.
             if (preg_match_all(
                 '/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([A-Za-z_][A-Za-z0-9_]*)["`]?\s*\(/i',
-                $sql,
+                $upSql,
                 $matches,
                 PREG_OFFSET_CAPTURE | PREG_SET_ORDER
             )) {
                 foreach ($matches as $m) {
-                    $table = strtolower($m[1][0]);
+                    $table    = strtolower($m[1][0]);
                     $openParen = $m[0][1] + strlen($m[0][0]) - 1;
-                    $body = $this->balancedParenBody($sql, $openParen);
+                    $body     = $this->balancedParenBody($upSql, $openParen);
                     if (preg_match('/\btenant_id\b\s+(?:INT|INTEGER|BIGINT|SERIAL)/i', $body) === 1) {
                         $tables[$table] = true;
                     }
                 }
             }
+
+            // 2. Track tables dropped by a forward migration.
+            if (preg_match_all(
+                '/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["`]?([A-Za-z_][A-Za-z0-9_]*)["`]?/i',
+                $upSql,
+                $dropMatches
+            )) {
+                foreach ($dropMatches[1] as $droppedTable) {
+                    $dropped[strtolower($droppedTable)] = true;
+                }
+            }
+        }
+
+        // Remove tables that are dropped in a later up() (they are not in the
+        // live forward schema).
+        foreach ($dropped as $droppedTable => $_) {
+            unset($tables[$droppedTable]);
         }
 
         return array_keys($tables);
+    }
+
+    /**
+     * Extract the body of the static up() method from the migration PHP source.
+     * Returns the full file content when extraction is not possible (safe fallback).
+     */
+    private function extractUpMethodBody(string $phpSource): string
+    {
+        // Find `public static function up(...)` and capture its brace-delimited body.
+        if (!preg_match('/public\s+static\s+function\s+up\s*\([^)]*\)\s*:\s*\w+\s*\{/i', $phpSource, $m, PREG_OFFSET_CAPTURE)) {
+            return $phpSource; // fallback: scan the whole file
+        }
+
+        $openBrace = (int) $m[0][1] + strlen($m[0][0]) - 1;
+        $depth     = 0;
+        $len       = strlen($phpSource);
+        for ($i = $openBrace; $i < $len; $i++) {
+            if ($phpSource[$i] === '{') {
+                $depth++;
+            } elseif ($phpSource[$i] === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    return substr($phpSource, $openBrace + 1, $i - $openBrace - 1);
+                }
+            }
+        }
+
+        return $phpSource; // fallback
     }
 
     /**

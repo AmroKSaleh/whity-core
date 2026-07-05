@@ -421,11 +421,8 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 200')->fetchColumn(),
             "Tenant B's role grants must survive a cross-tenant role delete attempt"
         );
-        $this->assertSame(
-            1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
-            "Tenant B's user-role assignments must survive a cross-tenant role delete attempt"
-        );
+        // user_roles was dropped by migration 039; role_permissions isolation is
+        // the relevant junction assertion here.
     }
 
     /**
@@ -434,6 +431,9 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
      * not merely rely on the upstream guard SELECT. We invoke the handler's
      * scoped DELETEs through a thin subclass that skips the guard, simulating an
      * attacker id reaching the write directly, and assert zero foreign rows die.
+     *
+     * user_roles was dropped by migration 039 so only role_permissions and the
+     * role row itself are asserted here.
      */
     public function testScopedJunctionDeletesRejectCrossTenantRoleIdAtTheWriteItself(): void
     {
@@ -446,7 +446,6 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             public function purge(int $roleId, int $tenantId): void
             {
                 $this->deleteRolePermissionsScoped($roleId, $tenantId);
-                $this->deleteUserRolesScoped($roleId, $tenantId);
                 $this->deleteRoleScoped($roleId, $tenantId);
             }
         };
@@ -462,25 +461,21 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             (int) $this->pdo->query('SELECT COUNT(*) FROM role_permissions WHERE role_id = 200')->fetchColumn(),
             'The scoped role_permissions DELETE must not touch a foreign tenant role grants'
         );
-        $this->assertSame(
-            1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
-            'The scoped user_roles DELETE must not touch a foreign tenant assignments'
-        );
     }
 
     /**
      * WC-190: the legitimate same-tenant delete path is unaffected — Tenant A
-     * deleting its OWN role 100 removes the role and ITS grants/assignments,
+     * deleting its OWN role 100 removes the role and ITS grants,
      * while Tenant B's role 200 rows remain untouched.
+     *
+     * user_roles was dropped by migration 039. User 11 carries users.role_id = 2
+     * (global "user" role), so the active-assignment guard does not block the
+     * delete of role 100.
      */
     public function testOwnRoleDeleteRemovesOnlyOwnJunctionRows(): void
     {
         TenantContext::setTenantId(self::TENANT_A);
 
-        // Role 100 has a user assigned (user 11); detach it first so the
-        // active-assignment guard does not 409 the legitimate delete.
-        $this->pdo->exec('DELETE FROM user_roles WHERE role_id = 100');
         $response = $this->rolesHandler()->delete($this->req('DELETE', '/api/roles/100'), ['id' => '100']);
 
         $this->assertSame(200, $response->getStatusCode(), "Tenant A's own role delete must succeed");
@@ -1156,65 +1151,6 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
-    // ==================== user_roles (direct tenant_id scoping) ====================
-
-    /**
-     * WC-8d0083f5: user_roles rows are stamped with tenant_id and must never
-     * be reachable from a foreign tenant's DELETE — tested via the scoped
-     * deleteUserRolesScoped helper that the roles handler uses. A cross-tenant
-     * role id arriving directly at the DELETE must leave Tenant B's row intact.
-     */
-    public function testUserRolesDeleteScopedRejectsForeignTenantRoleId(): void
-    {
-        TenantContext::setTenantId(self::TENANT_A);
-
-        // Invoke the scoped DELETE helper directly, bypassing the upstream guard,
-        // with Tenant B's role id (200) — only Tenant B's tenant_id matches, so
-        // the predicate (role_id = 200 AND tenant_id = TENANT_A) hits zero rows.
-        $handler = new class ($this->pdo, $this->hooks()) extends RolesApiHandler {
-            public function purgeUserRoles(int $roleId, int $tenantId): void
-            {
-                $this->deleteUserRolesScoped($roleId, $tenantId);
-            }
-        };
-        $handler->purgeUserRoles(200, self::TENANT_A);
-
-        $this->assertSame(
-            1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
-            "Tenant B's user_roles row must survive: the tenant_id predicate on the DELETE rejected the foreign role id"
-        );
-    }
-
-    /**
-     * WC-8d0083f5: the same scoped helper deletes Tenant A's OWN row while
-     * leaving Tenant B's row intact — proves the predicate allows legitimate
-     * same-tenant deletes and does not over-scope.
-     */
-    public function testUserRolesDeleteScopedRemovesOwnRowAndLeavesForeignIntact(): void
-    {
-        TenantContext::setTenantId(self::TENANT_A);
-
-        $handler = new class ($this->pdo, $this->hooks()) extends RolesApiHandler {
-            public function purgeUserRoles(int $roleId, int $tenantId): void
-            {
-                $this->deleteUserRolesScoped($roleId, $tenantId);
-            }
-        };
-        $handler->purgeUserRoles(100, self::TENANT_A);
-
-        $this->assertSame(
-            0,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 100')->fetchColumn(),
-            "Tenant A's own user_roles row must be removed by the same-tenant scoped delete"
-        );
-        $this->assertSame(
-            1,
-            (int) $this->pdo->query('SELECT COUNT(*) FROM user_roles WHERE role_id = 200')->fetchColumn(),
-            "Tenant B's user_roles row must be untouched by Tenant A's same-tenant scoped delete"
-        );
-    }
-
     // ==================== role_permissions (tenant-scoped via parent role) ====================
 
     /**
@@ -1623,8 +1559,6 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         // Tenant A user 10 and Tenant B user 20 both have 2FA ENABLED at version
         // 1, so a cross-tenant 2FA read/write can be proven to leave the foreign
         // row's 2FA state byte-for-byte intact (WC-191).
-        // Users must be inserted BEFORE user_roles to satisfy the FK constraint
-        // on PostgreSQL (which enforces FK; SQLite does not by default).
         // Use true/false for BOOLEAN columns so the INSERT is accepted by both
         // PostgreSQL (strict boolean typing) and SQLite (stores as 1/0).
         $pdo->exec("
@@ -1635,11 +1569,7 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (21, 2, 'b2@t2.example', 'x', 2, NULL,       false, 0, datetime('now'))
         ");
 
-        $pdo->exec("
-            INSERT INTO user_roles (user_id, role_id, tenant_id, created_at) VALUES
-                (11, 100, 1, datetime('now')),
-                (21, 200, 2, datetime('now'))
-        ");
+        // user_roles was dropped by migration 039; no fixture rows needed.
 
         $pdo->exec("
             INSERT INTO organizational_units (id, tenant_id, parent_id, name, slug, description, created_at) VALUES

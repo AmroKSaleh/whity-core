@@ -832,7 +832,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 41
+			count: 36
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
 
 		-
