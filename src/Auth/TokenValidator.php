@@ -67,6 +67,15 @@ class TokenValidator
             return null;
         }
 
+        // Defense-in-depth (WC-idcut-E): post-cutover every access token MUST
+        // carry a positive-int profile_id. Reject an absent/zero profile_id up
+        // front so a profile_id=0 token can never reach a downstream handler
+        // and be mistaken for the system principal.
+        $profileId = $claims['profile_id'] ?? null;
+        if (!is_int($profileId) || $profileId <= 0) {
+            return null;
+        }
+
         if ($this->isTokenRevoked($claims['jti'])) {
             return null;
         }
@@ -399,8 +408,9 @@ class TokenValidator
      * Verify the token's epoch is not older than the profile's current epoch.
      *
      * WC-idcut-E: epoch is checked against profiles.token_epoch only.
-     * The legacy users.token_epoch path is removed. A token with no profile_id
-     * claim is exempt from epoch checking (but still subject to signature/exp/jti).
+     * The legacy users.token_epoch path is removed. Post-cutover EVERY valid
+     * token carries a positive-int profile_id; a token missing it (or with a
+     * non-positive value) is rejected outright — it cannot be proven current.
      *
      * `profiles` is a sanctioned GLOBAL identity table (ADR 0005 §1) — keyed by
      * primary key alone. Fails closed on a missing profile row or DB error.
@@ -413,12 +423,14 @@ class TokenValidator
         $tokenEpoch = isset($claims['token_epoch']) ? (int) $claims['token_epoch'] : 0;
         $profileId  = $claims['profile_id'] ?? null;
 
-        if (is_int($profileId)) {
-            return $this->isProfileEpochCurrent($profileId, $tokenEpoch);
+        // Post-cutover (WC-idcut-E): EVERY valid token carries a positive-int
+        // profile_id. A token without one is not epoch-checkable against
+        // profiles.token_epoch, so it can never be proven current — reject it.
+        if (!is_int($profileId) || $profileId <= 0) {
+            return false;
         }
 
-        // No profile_id claim — epoch check does not apply.
-        return true;
+        return $this->isProfileEpochCurrent($profileId, $tokenEpoch);
     }
 
     /**

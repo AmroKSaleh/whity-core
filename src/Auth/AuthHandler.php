@@ -436,12 +436,12 @@ class AuthHandler
         $claims = $this->jwtParser->parse($token);
         if ($claims === null
             || ($claims['type'] ?? null) !== 'tenant_select'
-            || !isset($claims['profile_id']) || !is_numeric($claims['profile_id'])
+            || !isset($claims['profile_id']) || !is_int($claims['profile_id']) || $claims['profile_id'] <= 0
         ) {
             return Response::error('Invalid or expired selection token', 401);
         }
 
-        $profileId = (int) $claims['profile_id'];
+        $profileId = $claims['profile_id'];
         $email     = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
 
         $body = JsonBody::parsed($request);
@@ -859,10 +859,10 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
 
-        // Resolve the profile from the token — only new-claims tokens carry
-        // profile_id; legacy-only tokens cannot switch tenants.
-        $profileId = isset($claims['profile_id']) && is_numeric($claims['profile_id'])
-            ? (int) $claims['profile_id']
+        // Resolve the profile from the token. Post-cutover every session token
+        // carries a positive-int profile_id (is_int, never is_numeric).
+        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id']) && $claims['profile_id'] > 0
+            ? $claims['profile_id']
             : null;
 
         if ($profileId === null) {
@@ -935,11 +935,15 @@ class AuthHandler
      * name is derived from the email local-part (there is no `users.name` column),
      * so it is read-only and any `name` in the body is ignored.
      *
-     * On a successful change the access and refresh cookies are re-issued so the
-     * (possibly new) email is reflected immediately by a subsequent `GET /api/me`,
-     * which reads from token claims. The updated user is returned via the public
-     * shape (id/email/role) and the bcrypt hash is never exposed. A structured
-     * audit record carrying `tenant_id` and the acting `user_id` is logged.
+     * On a successful change the session is re-issued with the fresh epoch so the
+     * (possibly new) email is reflected immediately by a subsequent `GET /api/me`
+     * and the caller is not logged out by their own password change. In cookie
+     * mode the access + refresh cookies are re-set; in token mode (X-Auth-Mode:
+     * token, WC-ddcd16ad) the fresh tokens are returned in the body and NO cookie
+     * is set. On a password change the caller's PRESENTED tokens are revoked —
+     * the Bearer access + body refresh in token mode, or the two cookies in cookie
+     * mode. The updated user is returned via the public shape (id/email/role) and
+     * the bcrypt hash is never exposed. A structured audit record is logged.
      *
      * @param Request              $request HTTP request with optional `email`,
      *                                      `password` and required `current_password`.
@@ -953,6 +957,8 @@ class AuthHandler
         if ($claims === null) {
             return Response::error('Unauthorized', 401);
         }
+
+        $tokenMode = self::isTokenMode($request);
 
         $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
             ? $claims['profile_id']
@@ -1059,11 +1065,22 @@ class AuthHandler
         }
 
         if ($passwordChanged) {
-            // Revoke current session tokens on password change (WC-185).
-            $this->revokeCurrentSessionTokens();
+            // Revoke the caller's CURRENT session tokens on password change
+            // (WC-185). In token mode the presented tokens are the Bearer access
+            // header + the `refresh_token` body field — NOT cookies — so revoke
+            // exactly those; in cookie mode revoke the two auth cookies.
+            if ($tokenMode) {
+                $this->revokeTokens([
+                    $this->bearerToken($request),
+                    $this->bodyRefreshToken($request),
+                ]);
+            } else {
+                $this->revokeCurrentSessionTokens();
+            }
         }
 
-        // Re-issue auth cookies with the fresh epoch.
+        // Re-issue the session with the fresh epoch so the caller is not logged
+        // out by their own password change (the old tokens were just revoked).
         $currentEpoch = $this->currentProfileTokenEpoch($profileId);
         $role = isset($claims['role']) ? (string) $claims['role'] : '';
 
@@ -1077,10 +1094,28 @@ class AuthHandler
 
         $accessToken  = $this->jwtParser->create($newClaims, 900, 'access');
         $refreshToken = $this->jwtParser->create($newClaims, 604800, 'refresh');
-        CookieManager::setAccessToken($accessToken, 900);
-        CookieManager::setRefreshToken($refreshToken, 604800);
 
         $this->logProfileUpdate($activeTenantId, $profileId, $emailProvided, $passwordChanged);
+
+        if ($tokenMode) {
+            // Token-body mode (WC-ddcd16ad): return the fresh tokens in the body,
+            // set NO cookies.
+            return Response::json([
+                'user' => [
+                    'id'    => $profileId,
+                    'email' => $newEmail,
+                    'role'  => $role,
+                ],
+                'access_token'  => $accessToken,
+                'refresh_token' => $refreshToken,
+                'token_type'    => 'Bearer',
+                'expires_in'    => 900,
+            ], 200);
+        }
+
+        // Cookie mode: re-issue both auth cookies with the fresh epoch.
+        CookieManager::setAccessToken($accessToken, 900);
+        CookieManager::setRefreshToken($refreshToken, 604800);
 
         return Response::json(['user' => [
             'id'    => $profileId,
@@ -1133,7 +1168,24 @@ class AuthHandler
      */
     private function revokeCurrentSessionTokens(): void
     {
-        foreach ([CookieManager::getAccessToken(), CookieManager::getRefreshToken()] as $token) {
+        $this->revokeTokens([
+            CookieManager::getAccessToken(),
+            CookieManager::getRefreshToken(),
+        ]);
+    }
+
+    /**
+     * Revoke a set of raw JWT strings by recording each one's jti in the global
+     * revoked_tokens table (WC-185). Nulls and unparseable tokens are skipped.
+     * Used to kill the caller's presented tokens on a password change, from
+     * EITHER auth mode (cookies, or Bearer access + body refresh in token mode).
+     *
+     * @param array<int, string|null> $tokens Raw JWT strings (nulls skipped).
+     * @return void
+     */
+    private function revokeTokens(array $tokens): void
+    {
+        foreach ($tokens as $token) {
             if ($token === null) {
                 continue;
             }
@@ -1262,17 +1314,26 @@ class AuthHandler
         // outlives the refresh token (WC-185).
         //
         // Always use profiles.token_epoch (post-cutover: no legacy users.token_epoch).
-        $profileId = isset($claims['profile_id']) && is_numeric($claims['profile_id'])
-            ? (int) $claims['profile_id']
-            : 0;
+        //
+        // FAIL CLOSED (WC-idcut-E): profile_id and active_tenant_id MUST both be
+        // present as strict positive ints. Defaulting a missing/mistyped claim to
+        // 0 would mint a session with profile_id=0/active_tenant_id=0 — i.e.
+        // SYSTEM-TENANT authority — a privilege escalation. Use is_int (never
+        // is_numeric): a numeric string must not be silently coerced here.
+        $profileId      = $claims['profile_id'] ?? null;
+        $activeTenantId = $claims['active_tenant_id'] ?? null;
+        if (!is_int($profileId) || $profileId <= 0
+            || !is_int($activeTenantId) || $activeTenantId <= 0
+        ) {
+            return Response::error('Unauthorized', 401);
+        }
+
         $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
 
         // Post-cutover: carry ONLY the new claims — never emit legacy user_id/tenant_id.
         $newClaims = [
             'profile_id'       => $profileId,
-            'active_tenant_id' => isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id'])
-                ? $claims['active_tenant_id']
-                : 0,
+            'active_tenant_id' => $activeTenantId,
             'email'       => $claims['email'] ?? '',
             'role'        => $claims['role'] ?? '',
             'token_epoch' => $tokenEpoch,
@@ -1453,12 +1514,13 @@ class AuthHandler
         $code = $body['code'];
 
         // ── Resolve 2FA credentials from the profile ──────────────────────────
-        // Post-cutover: profile_id is required in the temp token (ADR 0005 §1).
-        if (!isset($claims['profile_id']) || !is_numeric($claims['profile_id'])) {
+        // Post-cutover: profile_id is required in the temp token (ADR 0005 §1)
+        // and must be a positive int (is_int, never is_numeric).
+        if (!isset($claims['profile_id']) || !is_int($claims['profile_id']) || $claims['profile_id'] <= 0) {
             return Response::error('Invalid temporary token', 401);
         }
 
-        $profileId      = (int) $claims['profile_id'];
+        $profileId      = $claims['profile_id'];
         // active_tenant_id present only for the single-membership case.
         $activeTenantId = isset($claims['active_tenant_id']) && is_numeric($claims['active_tenant_id'])
             ? (int) $claims['active_tenant_id']

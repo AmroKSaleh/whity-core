@@ -65,12 +65,11 @@ final class McpTokenHandler
             }
         }
 
-        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
-            ? $claims['profile_id']
-            : 0;
-        $tenantId  = isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id'])
-            ? $claims['active_tenant_id']
-            : 0;
+        $identity = $this->requireProfileIdentity($claims);
+        if ($identity === null) {
+            return Response::error('Unauthenticated', 401);
+        }
+        [$profileId, $tenantId] = $identity;
 
         $token = $this->mcpTokenService->issue($profileId, $tenantId, $name, $scope);
         ['jti' => $jti, 'exp' => $exp] = $this->extractClaims($token);
@@ -100,12 +99,11 @@ final class McpTokenHandler
             return Response::error('Unauthenticated', 401);
         }
 
-        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
-            ? $claims['profile_id']
-            : 0;
-        $tenantId  = isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id'])
-            ? $claims['active_tenant_id']
-            : 0;
+        $identity = $this->requireProfileIdentity($claims);
+        if ($identity === null) {
+            return Response::error('Unauthenticated', 401);
+        }
+        [$profileId, $tenantId] = $identity;
 
         $tokens = $this->mcpTokenService->listForUser($profileId, $tenantId);
 
@@ -133,18 +131,42 @@ final class McpTokenHandler
             return Response::error('jti is required', 400);
         }
 
-        $profileId = isset($claims['profile_id']) && is_int($claims['profile_id'])
-            ? $claims['profile_id']
-            : 0;
-        $tenantId  = isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id'])
-            ? $claims['active_tenant_id']
-            : 0;
+        $identity = $this->requireProfileIdentity($claims);
+        if ($identity === null) {
+            return Response::error('Unauthenticated', 401);
+        }
+        [$profileId, $tenantId] = $identity;
 
         if (!$this->mcpTokenService->revoke($jti, $profileId, $tenantId)) {
             return Response::error('Token not found', 404);
         }
 
         return new Response(204, '', ['Content-Type' => 'application/json']);
+    }
+
+    /**
+     * Resolve the caller's (profile_id, active_tenant_id) from validated claims.
+     *
+     * Fail closed (WC-idcut-E): post-cutover every session token carries a
+     * positive-int profile_id and an int active_tenant_id. If either is absent or
+     * the wrong type the caller has no usable identity — return null so the
+     * endpoint answers 401 rather than defaulting to 0 (which would have keyed
+     * MCP tokens to the system principal). This mirrors TokenValidator's own
+     * positive-int profile_id gate as defense in depth.
+     *
+     * @param array<string, mixed> $claims Validated access-token claims.
+     * @return array{0: int, 1: int}|null [profileId, tenantId], or null to reject.
+     */
+    private function requireProfileIdentity(array $claims): ?array
+    {
+        $profileId = $claims['profile_id'] ?? null;
+        $tenantId  = $claims['active_tenant_id'] ?? null;
+
+        if (!is_int($profileId) || $profileId <= 0 || !is_int($tenantId) || $tenantId < 0) {
+            return null;
+        }
+
+        return [$profileId, $tenantId];
     }
 
     /**

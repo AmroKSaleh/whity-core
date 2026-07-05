@@ -153,7 +153,6 @@ final class TwoFactorBackupCodeProfileKeyRealEngineTest extends TestCase
         }
 
         $profileId = $this->seedProfile(self::EMAIL_A, id: 80020, twoFactorEnabled: true);
-        $userId    = $this->seedUserForProfile(self::EMAIL_A, self::TENANT);
         $this->memberships->insert($profileId, self::TENANT, 1);
 
         // Store a backup code keyed on profile_id (migration 038).
@@ -161,13 +160,12 @@ final class TwoFactorBackupCodeProfileKeyRealEngineTest extends TestCase
         $hash    = $service->hashCode(self::BACKUP_CODE);
         $this->insertBackupCode($profileId, $hash, version: 1);
 
-        // Mint the temp token with profile_id (new-claims shape from handle()).
+        // Mint the temp token with the post-cutover {profile_id, active_tenant_id}
+        // shape only — no legacy user_id/tenant_id (WC-idcut-E).
         $tempClaims = [
             'profile_id'       => $profileId,
             'active_tenant_id' => self::TENANT,
             'email'            => self::EMAIL_A,
-            'user_id'          => $userId,
-            'tenant_id'        => self::TENANT,
         ];
         $_COOKIE['temp_auth_token'] = $this->jwtParser->create($tempClaims, 300, 'temp');
 
@@ -238,24 +236,6 @@ final class TwoFactorBackupCodeProfileKeyRealEngineTest extends TestCase
         )->execute([$id, $email]);
 
         return $id;
-    }
-
-    /**
-     * Seed a legacy users row for the given email/tenant (for dual-window tests).
-     */
-    private function seedUserForProfile(string $email, int $tenantId): int
-    {
-        $now = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql' ? 'NOW()' : "datetime('now')";
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, 1, {$now}, 0)"
-            . ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql' ? ' RETURNING id' : '')
-        );
-        $stmt->execute([$tenantId, $email, password_hash(self::PASSWORD, PASSWORD_BCRYPT)]);
-        if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql') {
-            return (int) $stmt->fetchColumn();
-        }
-        return (int) $this->pdo->lastInsertId();
     }
 
     /**

@@ -29,7 +29,7 @@ use Whity\Auth\TotpService;
 class TwoFactorKeyConsistencyTest extends TestCase
 {
     private const TEST_SECRET_KEY = 'test-secret-key-for-integration-tests';
-    private const TEST_USER_ID = 7;
+    private const TEST_PROFILE_ID = 7;
     private const TEST_USER_EMAIL = 'twofa@example.com';
     private const TEST_TENANT_ID = 1;
     private const TEST_ROLE_NAME = 'user';
@@ -74,8 +74,8 @@ class TwoFactorKeyConsistencyTest extends TestCase
 
         // --- Login path: AuthHandler must validate the stored secret with the SAME key. ---
         $tempToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
+            'profile_id' => self::TEST_PROFILE_ID,
+            'active_tenant_id' => self::TEST_TENANT_ID,
             'email' => self::TEST_USER_EMAIL,
         ], 300, 'temp');
         $_COOKIE['temp_auth_token'] = $tempToken;
@@ -115,8 +115,8 @@ class TwoFactorKeyConsistencyTest extends TestCase
         $code = TOTP::create($plainSecret)->now();
 
         $tempToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
+            'profile_id' => self::TEST_PROFILE_ID,
+            'active_tenant_id' => self::TEST_TENANT_ID,
             'email' => self::TEST_USER_EMAIL,
         ], 300, 'temp');
         $_COOKIE['temp_auth_token'] = $tempToken;
@@ -146,8 +146,8 @@ class TwoFactorKeyConsistencyTest extends TestCase
         $hashedBackupCode = password_hash($backupCode, PASSWORD_BCRYPT);
 
         $tempToken = $this->jwtParser->create([
-            'user_id' => self::TEST_USER_ID,
-            'tenant_id' => self::TEST_TENANT_ID,
+            'profile_id' => self::TEST_PROFILE_ID,
+            'active_tenant_id' => self::TEST_TENANT_ID,
             'email' => self::TEST_USER_EMAIL,
         ], 300, 'temp');
         $_COOKIE['temp_auth_token'] = $tempToken;
@@ -179,42 +179,27 @@ class TwoFactorKeyConsistencyTest extends TestCase
         int $backupVersion = 1,
         ?string $hashedBackupCode = null
     ): PDO {
-        $userId = self::TEST_USER_ID;
         $roleName = self::TEST_ROLE_NAME;
-        // A synthetic profile_id for this mock user — the legacy temp-token path
-        // looks up email→profile_id so that backup_codes (migration 038) can be
-        // validated against the correct profile.
-        $profileId = 9001;
+        $profileId = self::TEST_PROFILE_ID;
 
         $mockDb = $this->createMock(PDO::class);
         $mockDb->method('prepare')->willReturnCallback(
-            function (string $sql) use ($encryptedSecret, $backupVersion, $hashedBackupCode, $userId, $roleName, $profileId) {
+            function (string $sql) use ($encryptedSecret, $backupVersion, $hashedBackupCode, $roleName, $profileId) {
                 $stmt = $this->createMock(PDOStatement::class);
                 $stmt->method('execute')->willReturn(true);
 
-                if (str_contains($sql, 'FROM users') && str_contains($sql, 'two_factor_secret')) {
-                    // handle2fa user lookup (legacy path)
+                if (str_contains($sql, 'FROM profiles') && str_contains($sql, 'two_factor_secret')) {
+                    // handle2fa: 2FA-secret lookup from the PROFILE (ADR 0005 §1).
                     $stmt->method('fetch')->willReturn([
-                        'id' => $userId,
-                        'email' => self::TEST_USER_EMAIL,
-                        'role_id' => 2,
-                        'tenant_id' => self::TEST_TENANT_ID,
                         'two_factor_secret' => $encryptedSecret,
                         'two_factor_backup_codes_version' => $backupVersion,
                     ]);
-                    $stmt->method('fetchColumn')->willReturn(false);
-                } elseif (str_contains($sql, 'SELECT email FROM users')) {
-                    // Legacy path: email lookup so we can resolve profile_id
-                    $stmt->method('fetch')->willReturn(false);
-                    $stmt->method('fetchColumn')->willReturn(self::TEST_USER_EMAIL);
-                } elseif (str_contains($sql, 'FROM profile_emails')) {
-                    // Legacy path: email → profile_id lookup (for backup_codes post-038)
-                    $stmt->method('fetch')->willReturn(false);
                     $stmt->method('fetchColumn')->willReturn($profileId);
-                } elseif (str_contains($sql, 'FROM roles') || str_contains($sql, 'role_id FROM users')) {
-                    // completeTwoFaLogin role lookup
-                    $stmt->method('fetch')->willReturn(['name' => $roleName]);
-                    $stmt->method('fetchColumn')->willReturn(false);
+                } elseif (str_contains($sql, 'FROM memberships')) {
+                    // issueSessionForProfile: role resolve from the active membership,
+                    // and the ActiveTenantMembershipGuard membership existence check.
+                    $stmt->method('fetch')->willReturn(['role' => $roleName]);
+                    $stmt->method('fetchColumn')->willReturn(1);
                 } elseif (str_contains($sql, 'FROM backup_codes')) {
                     // BackupCodesService::validateCode lookup (keyed on profile_id post-038)
                     $stmt->method('fetch')->willReturn(
@@ -223,6 +208,10 @@ class TwoFactorKeyConsistencyTest extends TestCase
                             : false
                     );
                     $stmt->method('fetchColumn')->willReturn(false);
+                } elseif (str_contains($sql, 'FROM profiles') && str_contains($sql, 'token_epoch')) {
+                    // currentProfileTokenEpoch / epoch check.
+                    $stmt->method('fetch')->willReturn(false);
+                    $stmt->method('fetchColumn')->willReturn(0);
                 } else {
                     $stmt->method('fetch')->willReturn(false);
                     $stmt->method('fetchColumn')->willReturn(false);

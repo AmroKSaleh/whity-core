@@ -37,7 +37,6 @@ class TwoFactorFlowTest extends TestCase
     private JwtParser $jwtParser;
     private TotpService $totpService;
     private const TEST_SECRET_KEY = 'test-secret-key-for-2fa-tests-padded-for-hs256-min-32-byte-key';
-    private const TEST_USER_ID = 1;
     private const TEST_PROFILE_ID = 1;
     private const TEST_USER_EMAIL = 'testuser@example.com';
     private const TEST_TENANT_ID = 1;
@@ -57,17 +56,14 @@ class TwoFactorFlowTest extends TestCase
     /**
      * Create a valid access token in the cookies.
      *
-     * Includes both the legacy {user_id, tenant_id} pair and the new
-     * {profile_id, active_tenant_id} pair so that ActiveTenantMembershipGuard
-     * exercises the membership-check path (profile_id present) and the mock PDO
-     * can satisfy the membership SELECT.
+     * Post-cutover (WC-idcut-E): the token carries ONLY the {profile_id,
+     * active_tenant_id} pair — no legacy {user_id, tenant_id}. The membership
+     * SELECT is satisfied by the mock PDO so ActiveTenantMembershipGuard passes.
      */
-    private function createAccessToken(int $userId = self::TEST_USER_ID): void
+    private function createAccessToken(): void
     {
         $token = $this->jwtParser->create([
-            'user_id'          => $userId,
             'profile_id'       => self::TEST_PROFILE_ID,
-            'tenant_id'        => self::TEST_TENANT_ID,
             'active_tenant_id' => self::TEST_TENANT_ID,
             'email'            => self::TEST_USER_EMAIL,
             'type'             => 'access',
@@ -77,57 +73,74 @@ class TwoFactorFlowTest extends TestCase
     }
 
     /**
-     * Create a mock PDO with user data
+     * Create a mock PDO with PROFILE 2FA data.
+     *
+     * Post-cutover (WC-idcut-E): TwoFactorHandler reads and writes ONLY the
+     * profiles / profile_emails / backup_codes tables — never `users`. The mock
+     * models the profile row keyed on TEST_PROFILE_ID.
+     *
+     * @param array<string, mixed> $profileOverrides
      */
-    private function createMockPdo(array $userOverrides = []): PDO
+    private function createMockPdo(array $profileOverrides = []): PDO
     {
-        $userData = array_merge([
-            'id' => self::TEST_USER_ID,
+        $profileData = array_merge([
+            'id' => self::TEST_PROFILE_ID,
             'email' => self::TEST_USER_EMAIL,
-            'tenant_id' => self::TEST_TENANT_ID,
             'two_factor_enabled' => false,
             'two_factor_secret' => null,
             'two_factor_backup_codes_version' => 0,
-        ], $userOverrides);
+        ], $profileOverrides);
 
         $mockPdo = $this->createMock(PDO::class);
 
         // Track state changes
-        $userState = [self::TEST_USER_ID => $userData];
+        $profileState = [self::TEST_PROFILE_ID => $profileData];
         $backupCodeState = [];
 
         $mockPdo->method('prepare')
-            ->willReturnCallback(function($sql) use (&$userState, &$backupCodeState) {
+            ->willReturnCallback(function($sql) use (&$profileState, &$backupCodeState) {
                 $stmt = $this->createMock(PDOStatement::class);
 
                 $stmt->method('execute')
-                    ->willReturnCallback(function($params = []) use ($sql, &$userState, &$backupCodeState) {
-                        // UPDATE users for 2FA enable
-                        if (strpos($sql, 'UPDATE users') === 0 && strpos($sql, 'two_factor_secret') !== false) {
+                    ->willReturnCallback(function($params = []) use ($sql, &$profileState, &$backupCodeState) {
+                        // UPDATE profiles: enable path (secret + version = 1).
+                        if (strpos($sql, 'UPDATE profiles') !== false
+                            && strpos($sql, 'two_factor_secret') !== false
+                            && strpos($sql, 'two_factor_backup_codes_version') !== false
+                        ) {
                             $secret = $params[0] ?? null;
-                            $userId = $params[1] ?? self::TEST_USER_ID;
-                            if (isset($userState[$userId])) {
-                                $userState[$userId]['two_factor_secret'] = $secret;
-                                $userState[$userId]['two_factor_enabled'] = true;
-                                $userState[$userId]['two_factor_backup_codes_version'] = 1;
+                            $enabled = (bool) ($params[1] ?? 0);
+                            $version = (int) ($params[2] ?? 0);
+                            $profileId = $params[3] ?? self::TEST_PROFILE_ID;
+                            if (isset($profileState[$profileId])) {
+                                $profileState[$profileId]['two_factor_secret'] = $secret;
+                                $profileState[$profileId]['two_factor_enabled'] = $enabled;
+                                $profileState[$profileId]['two_factor_backup_codes_version'] = $version;
                             }
                         }
-                        // UPDATE users for 2FA disable
-                        elseif (strpos($sql, 'two_factor_enabled = false') !== false) {
-                            $userId = $params[0] ?? self::TEST_USER_ID;
-                            if (isset($userState[$userId])) {
-                                $userState[$userId]['two_factor_enabled'] = false;
+                        // UPDATE profiles: disable path (secret + enabled, no version col).
+                        elseif (strpos($sql, 'UPDATE profiles') !== false
+                            && strpos($sql, 'two_factor_secret') !== false
+                        ) {
+                            $secret = $params[0] ?? null;
+                            $enabled = (bool) ($params[1] ?? 0);
+                            $profileId = $params[2] ?? self::TEST_PROFILE_ID;
+                            if (isset($profileState[$profileId])) {
+                                $profileState[$profileId]['two_factor_secret'] = $secret;
+                                $profileState[$profileId]['two_factor_enabled'] = $enabled;
                             }
                         }
-                        // UPDATE users for version increment
-                        elseif (strpos($sql, 'two_factor_backup_codes_version = ?') !== false) {
-                            $version = $params[0] ?? 1;
-                            $userId = $params[1] ?? self::TEST_USER_ID;
-                            if (isset($userState[$userId])) {
-                                $userState[$userId]['two_factor_backup_codes_version'] = $version;
+                        // UPDATE profiles: version-only bump (regenerate).
+                        elseif (strpos($sql, 'UPDATE profiles') !== false
+                            && strpos($sql, 'two_factor_backup_codes_version = ?') !== false
+                        ) {
+                            $version = (int) ($params[0] ?? 1);
+                            $profileId = $params[1] ?? self::TEST_PROFILE_ID;
+                            if (isset($profileState[$profileId])) {
+                                $profileState[$profileId]['two_factor_backup_codes_version'] = $version;
                             }
                         }
-                        // UPDATE backup_codes to invalidate (now keyed on profile_id)
+                        // UPDATE backup_codes to invalidate (keyed on profile_id).
                         elseif (strpos($sql, 'UPDATE backup_codes') !== false && strpos($sql, 'used = true') !== false) {
                             $profileId = $params[0] ?? self::TEST_PROFILE_ID;
                             $oldVersion = $params[1] ?? 1;
@@ -139,7 +152,7 @@ class TwoFactorFlowTest extends TestCase
                                 }
                             }
                         }
-                        // INSERT backup_codes (now keyed on profile_id, migration 038)
+                        // INSERT backup_codes (keyed on profile_id, migration 038).
                         elseif (strpos($sql, 'INSERT INTO backup_codes') === 0) {
                             $profileId = $params[0] ?? self::TEST_PROFILE_ID;
                             $code = $params[1] ?? '';
@@ -161,35 +174,19 @@ class TwoFactorFlowTest extends TestCase
                     });
 
                 $stmt->method('fetch')
-                    ->willReturnCallback(function() use ($sql, &$userState) {
-                        // SELECT from users - return the test user data
-                        if (strpos($sql, 'FROM users') !== false) {
-                            return $userState[self::TEST_USER_ID] ?? null;
-                        }
-                        // SELECT from profiles - return profile data
+                    ->willReturnCallback(function() use ($sql, &$profileState) {
+                        // readIdentityRow: SELECT ... FROM profiles JOIN profile_emails
                         if (strpos($sql, 'FROM profiles') !== false) {
-                            return $userState[self::TEST_USER_ID] ?? null;
+                            return $profileState[self::TEST_PROFILE_ID] ?? null;
                         }
                         return null;
                     });
 
                 $stmt->method('fetchColumn')
                     ->willReturnCallback(function() use ($sql) {
-                        // profile_emails lookup (resolveProfileId / legacy path)
-                        if (strpos($sql, 'FROM profile_emails') !== false) {
-                            return self::TEST_PROFILE_ID;
-                        }
-                        // email lookup from users (AuthHandler legacy path)
-                        if (strpos($sql, 'SELECT email FROM users') !== false) {
-                            return self::TEST_USER_EMAIL;
-                        }
-                        // token_epoch epoch-check against users (TokenValidator)
-                        if (strpos($sql, 'token_epoch') !== false && strpos($sql, 'FROM users') !== false) {
-                            return 0;  // epoch 0 — token is always current
-                        }
                         // token_epoch epoch-check against profiles (TokenValidator)
                         if (strpos($sql, 'token_epoch') !== false && strpos($sql, 'FROM profiles') !== false) {
-                            return 0;
+                            return 0;  // epoch 0 — token is always current
                         }
                         // jti revocation check (revoked_tokens)
                         if (strpos($sql, 'revoked_tokens') !== false) {

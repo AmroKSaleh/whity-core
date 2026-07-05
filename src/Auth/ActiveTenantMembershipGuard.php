@@ -8,27 +8,26 @@ use PDO;
 use Whity\Auth\Exception\InvalidMembershipException;
 
 /**
- * Membership gate for the new {profile_id, active_tenant_id} JWT claims
+ * Membership gate for the {profile_id, active_tenant_id} JWT claims
  * (WC-d4340daf, ADR 0005 §5).
  *
- * The JWT claim model is migrating from the legacy {user_id, tenant_id} pair to
- * {profile_id, active_tenant_id}. A new-claims token declares which tenant the
- * session is acting in (active_tenant_id); that declaration is only trustworthy
- * when the profile actually holds a LIVE membership there. This guard performs
- * that check:
+ * A token declares which tenant the session is acting in (active_tenant_id);
+ * that declaration is only trustworthy when the profile actually holds a LIVE
+ * membership there. This guard performs that check:
  *
- *  - LEGACY tokens (neither new claim present) pass unchecked — during the
- *    dual-claim window, pre-migration users have no profiles/memberships rows
- *    yet (the users→profiles data migration is the next task in the identity
- *    flow), so the legacy path must keep today's behaviour exactly.
- *  - NEW-CLAIMS tokens (both claims present, integer-valued) require an
- *    `active` memberships row for (profile_id, active_tenant_id) — this is the
+ *  - WC-idcut-E (post-cutover): the dual-claim window is GONE. Every valid
+ *    token carries {profile_id, active_tenant_id}; there is no legacy
+ *    pass-through. A token missing either claim fails closed (401).
+ *  - Tokens with both claims (positive-int profile_id) require an `active`
+ *    memberships row for (profile_id, active_tenant_id) — this is the
  *    mechanism that enforces per-membership suspension without waiting for
  *    token expiry (ADR 0005 §5).
  *  - active_tenant_id = 0 is the SYSTEM tenant: by the platform id-0
  *    convention it carries cross-tenant authority and needs no membership row.
- *  - PARTIAL claim sets (exactly one of the two new claims, or a non-integer
- *    value) are never issued by this codebase and fail closed.
+ *    profile_id, however, must always be a POSITIVE int — profile_id=0 is
+ *    rejected so it can never be paired with active_tenant_id=0 to borrow
+ *    system authority.
+ *  - PARTIAL / non-integer / non-positive-profile claim sets fail closed.
  *
  * Stateless service (per-request instance data only — FrankenPHP worker-safe;
  * no static request state). Callers translate a refusal into a typed HTTP
@@ -85,23 +84,21 @@ final class ActiveTenantMembershipGuard
      */
     public function assert(array $claims): void
     {
-        $hasProfileId = array_key_exists('profile_id', $claims);
-        $hasActiveTenantId = array_key_exists('active_tenant_id', $claims);
-
-        // Legacy token: no new claims at all — the dual-window fallback path.
-        // Behaviour must match the pre-WC-d4340daf validator exactly (no
-        // membership lookup: pre-migration users have no membership rows).
-        if (!$hasProfileId && !$hasActiveTenantId) {
-            return;
-        }
-
-        // Partial or malformed new-claim sets are never issued: fail closed.
+        // Post-cutover (WC-idcut-E): the dual-claim window is gone. EVERY valid
+        // token carries {profile_id, active_tenant_id}. A token with neither
+        // (formerly the legacy pass-through) is invalid and must fail closed —
+        // there is no un-migrated legacy session to accommodate anymore. This
+        // guard is shared by TokenValidator and EnforceTenantIsolation, so
+        // rejecting here correctly refuses such a token in both paths.
         $profileId = $this->intClaim($claims['profile_id'] ?? null);
         $activeTenantId = $this->intClaim($claims['active_tenant_id'] ?? null);
-        if ($profileId === null || $activeTenantId === null) {
+        if ($profileId === null || $activeTenantId === null || $profileId <= 0) {
+            // profile_id must be a POSITIVE int: profile_id=0 is not a real
+            // identity and must never be paired with active_tenant_id=0 to
+            // borrow system-tenant authority (privilege-escalation guard).
             throw new InvalidMembershipException(
                 401,
-                'Partial or non-integer {profile_id, active_tenant_id} claim set'
+                'Missing, non-integer, or non-positive {profile_id, active_tenant_id} claim set'
             );
         }
 

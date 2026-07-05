@@ -14,6 +14,7 @@ use Whity\Auth\CookieManager;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\TotpService;
+use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
 
@@ -36,13 +37,13 @@ use Whity\Core\Tenant\TenantContext;
 final class TwoFactorManagementDisabledStateRealEngineTest extends TestCase
 {
     private const SECRET   = 'wc-c35c4ce0-2fa-mgmt-disabled-test-secret-32b';
-    private const USER_ID  = 4242;
     private const TENANT   = 1;
     private const EMAIL    = 'twofa-disabled@example.com';
 
     private PDO $pdo;
     private JwtParser $jwtParser;
     private TwoFactorHandler $handler;
+    private int $profileId;
 
     protected function setUp(): void
     {
@@ -64,24 +65,37 @@ final class TwoFactorManagementDisabledStateRealEngineTest extends TestCase
         );
         $this->pdo->exec("INSERT OR IGNORE INTO roles (id, name) VALUES (1, 'admin')");
 
-        // A user with 2FA explicitly DISABLED — the false-branch under test.
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, two_factor_enabled,
-                two_factor_secret, two_factor_backup_codes_version, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, 1, false, NULL, 0, datetime('now'), 0)"
+        // Post-cutover (WC-idcut-E): the handler reads/writes profiles only. Seed
+        // a PROFILE with 2FA explicitly DISABLED — the false-branch under test —
+        // plus its globally-unique primary email and an ACTIVE membership so the
+        // token's membership gate passes.
+        $profStmt = $this->pdo->prepare(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                two_factor_secret, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES ('Disabled', ?, false, NULL, 0, 0, datetime('now'), datetime('now'))"
         );
-        $stmt->execute([self::USER_ID, self::TENANT, self::EMAIL, password_hash('pw', PASSWORD_BCRYPT)]);
+        $profStmt->execute([password_hash('pw', PASSWORD_BCRYPT)]);
+        $this->profileId = (int) $this->pdo->lastInsertId();
 
-        // Lock the tenant context the handler's self-scoped writes expect.
+        $emailStmt = $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, datetime('now'))"
+        );
+        $emailStmt->execute([$this->profileId, self::EMAIL]);
+
+        (new MembershipRepository($this->pdo))->insert($this->profileId, self::TENANT, 1);
+
+        // Lock the tenant context the middleware/audit path expects.
         TenantContext::reset();
         TenantContext::setTenantId(self::TENANT);
 
-        // Authenticate the caller.
+        // Authenticate the caller with a post-cutover {profile_id, active_tenant_id} token.
         $_COOKIE['access_token'] = $this->jwtParser->create([
-            'user_id'   => self::USER_ID,
-            'tenant_id' => self::TENANT,
-            'email'     => self::EMAIL,
-            'role'      => 'admin',
+            'profile_id'       => $this->profileId,
+            'active_tenant_id' => self::TENANT,
+            'email'            => self::EMAIL,
+            'role'             => 'admin',
+            'token_epoch'      => 0,
         ], 3600, 'access');
     }
 
