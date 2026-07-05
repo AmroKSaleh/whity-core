@@ -37,7 +37,7 @@ class PersonRepository
      *
      * @param int         $tenantId    The owning tenant.
      * @param string      $displayName The human-readable label (required).
-     * @param int|null    $userId      Optional linked platform user (the shadow link).
+     * @param int|null    $profileId   Optional linked profile (the shadow link).
      * @param string|null $birthDate   Optional birth date (Y-m-d) or null.
      * @param bool        $deceased    Whether the person is deceased.
      * @param string|null $notes       Optional free-text notes.
@@ -46,19 +46,19 @@ class PersonRepository
     public function insert(
         int $tenantId,
         string $displayName,
-        ?int $userId = null,
+        ?int $profileId = null,
         ?string $birthDate = null,
         bool $deceased = false,
         ?string $notes = null
     ): int {
         $stmt = $this->db->prepare(
-            'INSERT INTO persons (tenant_id, display_name, user_id, birth_date, deceased, notes, created_at)
-             VALUES (:tenant_id, :display_name, :user_id, :birth_date, :deceased, :notes, NOW())'
+            'INSERT INTO persons (tenant_id, display_name, profile_id, birth_date, deceased, notes, created_at)
+             VALUES (:tenant_id, :display_name, :profile_id, :birth_date, :deceased, :notes, NOW())'
         );
         $stmt->execute([
             ':tenant_id' => $tenantId,
             ':display_name' => $displayName,
-            ':user_id' => $userId,
+            ':profile_id' => $profileId,
             ':birth_date' => $birthDate,
             ':deceased' => $deceased ? 1 : 0,
             ':notes' => $notes,
@@ -95,26 +95,26 @@ class PersonRepository
     }
 
     /**
-     * Fetch the person row that shadows a given user, scoped to the tenant.
+     * Fetch the person row that shadows a given profile, scoped to the tenant.
      *
-     * Used by {@see RelationResolver} to resolve a `{kind:'user'}` reference to a
+     * Used by {@see RelationResolver} to resolve a `{kind:'profile'}` reference to a
      * person (auto-provisioning one when absent).
      *
-     * @param int $userId   The platform user id.
-     * @param int $tenantId The acting tenant (0 = system).
-     * @return array<string, mixed>|null The normalised row, or null when the user has no person yet.
+     * @param int $profileId The profile id.
+     * @param int $tenantId  The acting tenant (0 = system).
+     * @return array<string, mixed>|null The normalised row, or null when the profile has no person yet.
      */
-    public function findByUserId(int $userId, int $tenantId): ?array
+    public function findByProfileId(int $profileId, int $tenantId): ?array
     {
         if ($tenantId === 0) {
             // @tenant-guard-ignore: system-tenant (id 0) branch; scoped else-branch binds tenant_id
-            $stmt = $this->db->prepare('SELECT * FROM persons WHERE user_id = :user_id');
-            $stmt->execute([':user_id' => $userId]);
+            $stmt = $this->db->prepare('SELECT * FROM persons WHERE profile_id = :profile_id');
+            $stmt->execute([':profile_id' => $profileId]);
         } else {
             $stmt = $this->db->prepare(
-                'SELECT * FROM persons WHERE user_id = :user_id AND tenant_id = :tenant_id'
+                'SELECT * FROM persons WHERE profile_id = :profile_id AND tenant_id = :tenant_id'
             );
-            $stmt->execute([':user_id' => $userId, ':tenant_id' => $tenantId]);
+            $stmt->execute([':profile_id' => $profileId, ':tenant_id' => $tenantId]);
         }
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -319,7 +319,7 @@ class PersonRepository
             'id' => (int) $row['id'],
             'tenant_id' => (int) $row['tenant_id'],
             'display_name' => (string) $row['display_name'],
-            'user_id' => isset($row['user_id']) && $row['user_id'] !== null ? (int) $row['user_id'] : null,
+            'profile_id' => isset($row['profile_id']) && $row['profile_id'] !== null ? (int) $row['profile_id'] : null,
             'birth_date' => isset($row['birth_date']) && $row['birth_date'] !== null
                 ? (string) $row['birth_date']
                 : null,

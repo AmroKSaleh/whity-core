@@ -103,11 +103,11 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
         $this->assertNull($this->personRepo->findById($alice, 1));
     }
 
-    public function testDeletingAUserLinkedPersonIsGuarded(): void
+    public function testDeletingAProfileLinkedPersonIsGuarded(): void
     {
-        $userId = RelationsSchema::seedUser($this->pdo, 1, 'dave@example.com');
-        // A user-linked shadow person (as a write path would provision).
-        $shadowId = $this->personRepo->insert(1, 'dave', $userId);
+        $profileId = RelationsSchema::seedProfile($this->pdo, 1, 'dave@example.com');
+        // A profile-linked shadow person (as a write path would provision).
+        $shadowId = $this->personRepo->insert(1, 'dave', $profileId);
         $shadow = $this->personRepo->findById($shadowId, 1);
         $this->assertNotNull($shadow);
 
@@ -115,14 +115,14 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
             new Request('DELETE', '/api/persons/' . $shadow['id']),
             ['id' => (string) $shadow['id']]
         );
-        $this->assertSame(409, $response->getStatusCode(), 'A user-linked person must not be deletable here.');
+        $this->assertSame(409, $response->getStatusCode(), 'A profile-linked person must not be deletable here.');
         $this->assertNotNull($this->personRepo->findById((int) $shadow['id'], 1), 'The shadow person must survive.');
     }
 
-    public function testUpdatingAUserLinkedPersonIsGuarded(): void
+    public function testUpdatingAProfileLinkedPersonIsGuarded(): void
     {
-        $userId = RelationsSchema::seedUser($this->pdo, 1, 'dave@example.com');
-        $shadowId = $this->personRepo->insert(1, 'dave', $userId);
+        $profileId = RelationsSchema::seedProfile($this->pdo, 1, 'dave@example.com');
+        $shadowId = $this->personRepo->insert(1, 'dave', $profileId);
         $shadow = $this->personRepo->findById($shadowId, 1);
         $this->assertNotNull($shadow);
 
@@ -232,20 +232,20 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
 
     // ==================== Relation create + auto-provision via API ====================
 
-    public function testCreateUserToPersonRelationAutoProvisionsShadow(): void
+    public function testCreateProfileToPersonRelationAutoProvisionsShadow(): void
     {
-        $userId = RelationsSchema::seedUser($this->pdo, 1, 'mum@example.com');
+        $profileId = RelationsSchema::seedProfile($this->pdo, 1, 'mum@example.com');
         $kid = RelationsSchema::seedPerson($this->pdo, 1, 'Kid');
 
         $response = $this->relations->create(new Request('POST', '/api/relations', [], (string) json_encode([
-            'from' => ['kind' => 'user', 'id' => $userId],
+            'from' => ['kind' => 'profile', 'id' => $profileId],
             'to' => ['kind' => 'person', 'id' => $kid],
             'relationshipTypeId' => RelationsSchema::TYPE_PARENT,
         ])));
         $this->assertSame(201, $response->getStatusCode());
 
-        // The user's shadow person now exists and the kid reads "Child of mum".
-        $shadow = $this->personRepo->findByUserId($userId, 1);
+        // The profile's shadow person now exists and the kid reads "Child of mum".
+        $shadow = $this->personRepo->findByProfileId($profileId, 1);
         $this->assertNotNull($shadow);
         $kidRels = $this->relationRepo->listForPerson($kid, 1);
         $this->assertSame('Child', $kidRels[0]['typeName']);
@@ -274,52 +274,52 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
         $this->assertNotNull($this->relationRepo->findById($id, 2), 'The edge must remain for its owner tenant.');
     }
 
-    // ==================== users/{id}/relations sugar ====================
+    // ==================== profiles/{id}/relations sugar ====================
 
-    public function testUserRelationsForUserWithoutShadowDoesNotProvision(): void
+    public function testProfileRelationsForProfileWithoutShadowDoesNotProvision(): void
     {
-        // GET is a relations:read path and must NOT write. A user with no shadow
+        // GET is a relations:read path and must NOT write. A profile with no shadow
         // person yet has no relations, and none is created as a side effect.
-        $userId = RelationsSchema::seedUser($this->pdo, 1, 'dave@example.com');
+        $profileId = RelationsSchema::seedProfile($this->pdo, 1, 'dave@example.com');
 
-        $response = $this->relations->userRelations(
-            new Request('GET', "/api/users/{$userId}/relations"),
-            ['id' => (string) $userId]
+        $response = $this->relations->profileRelations(
+            new Request('GET', "/api/profiles/{$profileId}/relations"),
+            ['id' => (string) $profileId]
         );
         $this->assertSame(200, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
         $this->assertNull($data['personId']);
         $this->assertSame([], $data['relations']);
         $this->assertNull(
-            $this->personRepo->findByUserId($userId, 1),
+            $this->personRepo->findByProfileId($profileId, 1),
             'A relations:read GET must not auto-provision a shadow person (no write on read).'
         );
     }
 
-    public function testUserRelationsForCrossTenantUserIs404(): void
+    public function testProfileRelationsForCrossTenantProfileIs404(): void
     {
-        $userId = RelationsSchema::seedUser($this->pdo, 2, 'foreign@example.com');
+        $profileId = RelationsSchema::seedProfile($this->pdo, 2, 'foreign@example.com');
 
-        $response = $this->relations->userRelations(
-            new Request('GET', "/api/users/{$userId}/relations"),
-            ['id' => (string) $userId]
+        $response = $this->relations->profileRelations(
+            new Request('GET', "/api/profiles/{$profileId}/relations"),
+            ['id' => (string) $profileId]
         );
         $this->assertSame(404, $response->getStatusCode());
     }
 
-    public function testUserRelationsResponseContainsOtherPersonHasAccount(): void
+    public function testProfileRelationsResponseContainsOtherPersonHasAccount(): void
     {
-        // Arrange: two users with a relation between their shadows.
-        $userId1 = RelationsSchema::seedUser($this->pdo, 1, 'alice@example.com');
-        $userId2 = RelationsSchema::seedUser($this->pdo, 1, 'bob@example.com');
+        // Arrange: two profiles with a relation between their shadows.
+        $profileId1 = RelationsSchema::seedProfile($this->pdo, 1, 'alice@example.com');
+        $profileId2 = RelationsSchema::seedProfile($this->pdo, 1, 'bob@example.com');
         // Provision shadows via the write path.
-        $shadow1 = $this->personRepo->insert(1, 'Alice', $userId1);
-        $shadow2 = $this->personRepo->insert(1, 'Bob', $userId2);
+        $shadow1 = $this->personRepo->insert(1, 'Alice', $profileId1);
+        $shadow2 = $this->personRepo->insert(1, 'Bob', $profileId2);
         $this->relationRepo->insert(1, $shadow1, $shadow2, RelationsSchema::TYPE_PARENT);
 
-        $response = $this->relations->userRelations(
-            new Request('GET', "/api/users/{$userId1}/relations"),
-            ['id' => (string) $userId1]
+        $response = $this->relations->profileRelations(
+            new Request('GET', "/api/profiles/{$profileId1}/relations"),
+            ['id' => (string) $profileId1]
         );
         $this->assertSame(200, $response->getStatusCode());
         $data = json_decode($response->getBody(), true)['data'];
@@ -328,8 +328,8 @@ final class RelationsApiHandlerRealEngineTest extends TestCase
         $rel = $data['relations'][0];
         // Field shape must match PersonsApiHandler.toPublicRelation() contract.
         $this->assertArrayHasKey('otherPersonHasAccount', $rel);
-        $this->assertArrayNotHasKey('otherPersonUserId', $rel);
-        $this->assertTrue($rel['otherPersonHasAccount']); // Bob has a user account
+        $this->assertArrayNotHasKey('otherPersonProfileId', $rel);
+        $this->assertTrue($rel['otherPersonHasAccount']); // Bob has a profile account
         $this->assertSame($shadow2, $rel['otherPersonId']);
         $this->assertSame('Bob', $rel['otherPersonName']);
     }

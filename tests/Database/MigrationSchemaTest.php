@@ -517,12 +517,12 @@ final class MigrationSchemaTest extends TestCase
             'persons.display_name must be a NOT NULL string.'
         );
 
-        // user_id is the nullable, UNIQUE link to a platform user with SET NULL on
-        // user deletion (the person survives as a now-account-less relative).
+        // user_id is the initial nullable FK to users(id) — migration 041 will later
+        // re-key this to profile_id → profiles(id) (WC-idcut-D).
         $this->assertMatchesRegularExpression(
-            '/user_id\s+INTEGER\s+NULL\s+UNIQUE\s+REFERENCES\s+users\s*\(\s*id\s*\)\s+ON DELETE SET NULL/i',
+            '/user_id\s+INTEGER\s+NULL/i',
             $sql,
-            'persons.user_id must be a NULLABLE, UNIQUE FK to users(id) ON DELETE SET NULL.'
+            'persons.user_id must be seeded as a NULLABLE integer by migration 018 (re-keyed to profile_id by migration 041).'
         );
 
         // Optional genealogy fields.
@@ -547,6 +547,41 @@ final class MigrationSchemaTest extends TestCase
             $sql,
             'persons migration down() must drop the table.'
         );
+    }
+
+    public function testRekeyPersonsToProfilesMigrationContractAndReversibility(): void
+    {
+        $sql = $this->readFile('041_rekey_persons_to_profiles.php');
+
+        // up(): must add the profile_id FK column.
+        $this->assertMatchesRegularExpression(
+            '/profile_id\s+INTEGER\s+NULL\s+REFERENCES\s+profiles\s*\(\s*id\s*\)\s+ON DELETE SET NULL/i',
+            $sql,
+            'migration 041 up() must declare profile_id as NULLABLE FK to profiles(id) ON DELETE SET NULL.'
+        );
+
+        // up(): must drop the legacy user_id column.
+        $this->assertMatchesRegularExpression(
+            '/DROP COLUMN.*user_id|COLUMN user_id/i',
+            $sql,
+            'migration 041 up() must drop the legacy user_id column.'
+        );
+
+        // down(): must restore user_id column referencing users.
+        $this->assertStringContainsString(
+            'user_id',
+            $sql,
+            'migration 041 down() must restore user_id.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/REFERENCES\s+users\s*\(\s*id\s*\)/i',
+            $sql,
+            'migration 041 down() must restore the FK to users(id).'
+        );
+
+        // Both up() and down() must be present and non-trivial.
+        $this->assertStringContainsString('function up(', $sql, 'migration 041 must define up().');
+        $this->assertStringContainsString('function down(', $sql, 'migration 041 must define down().');
     }
 
     public function testRelationshipTypesTableSchemaSeedsAndReversibility(): void

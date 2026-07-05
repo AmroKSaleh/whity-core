@@ -190,9 +190,9 @@ class PersonsApiHandler
                 return Response::error('Person not found', 404);
             }
 
-            if ($person['user_id'] !== null) {
+            if ($person['profile_id'] !== null) {
                 return Response::error(
-                    'This person is linked to a user account and cannot be edited here',
+                    'This person is linked to a profile account and cannot be edited here',
                     409
                 );
             }
@@ -260,9 +260,9 @@ class PersonsApiHandler
                 return Response::error('Person not found', 404);
             }
 
-            if ($person['user_id'] !== null) {
+            if ($person['profile_id'] !== null) {
                 return Response::error(
-                    'This person is linked to a user account and cannot be deleted here',
+                    'This person is linked to a profile account and cannot be deleted here',
                     409
                 );
             }
@@ -325,8 +325,8 @@ class PersonsApiHandler
             'id' => (int) $row['id'],
             'tenantId' => (int) $row['tenant_id'],
             'displayName' => (string) $row['display_name'],
-            'userId' => $row['user_id'] !== null ? (int) $row['user_id'] : null,
-            'hasAccount' => $row['user_id'] !== null,
+            'profileId' => $row['profile_id'] !== null ? (int) $row['profile_id'] : null,
+            'hasAccount' => $row['profile_id'] !== null,
             'birthDate' => $row['birth_date'] !== null ? (string) $row['birth_date'] : null,
             'deceased' => (bool) $row['deceased'],
             'notes' => $row['notes'] !== null ? (string) $row['notes'] : null,
@@ -348,7 +348,7 @@ class PersonsApiHandler
             'relationId' => (int) $relation['relationId'],
             'otherPersonId' => (int) $relation['otherPersonId'],
             'otherPersonName' => (string) $relation['otherPersonName'],
-            'otherPersonHasAccount' => $relation['otherPersonUserId'] !== null,
+            'otherPersonHasAccount' => $relation['otherPersonProfileId'] !== null,
             'typeId' => (int) $relation['typeId'],
             'typeName' => (string) $relation['typeName'],
             'direction' => (string) $relation['direction'],

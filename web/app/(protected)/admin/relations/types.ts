@@ -30,9 +30,9 @@ export interface Person {
   id: number;
   tenantId: number;
   displayName: string;
-  /** The linked user id, or null for a non-user relative. */
-  userId: number | null;
-  /** True when the person is linked to a user account. */
+  /** The linked profile id, or null for a non-account relative. */
+  profileId: number | null;
+  /** True when the person is linked to a profile account. */
   hasAccount: boolean;
   birthDate: string | null;
   deceased: boolean;

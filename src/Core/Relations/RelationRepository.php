@@ -225,7 +225,7 @@ class RelationRepository
      *     relationId: int,
      *     otherPersonId: int,
      *     otherPersonName: string,
-     *     otherPersonUserId: int|null,
+     *     otherPersonProfileId: int|null,
      *     typeId: int,
      *     typeName: string,
      *     direction: string
@@ -239,7 +239,7 @@ class RelationRepository
             SELECT r.id AS relation_id,
                    p.id AS other_id,
                    p.display_name AS other_name,
-                   p.user_id AS other_user_id,
+                   p.profile_id AS other_profile_id,
                    rt.id AS type_id,
                    rt.name AS type_name,
                    'outgoing' AS direction
@@ -255,7 +255,7 @@ class RelationRepository
             SELECT r.id AS relation_id,
                    p.id AS other_id,
                    p.display_name AS other_name,
-                   p.user_id AS other_user_id,
+                   p.profile_id AS other_profile_id,
                    COALESCE(inv.id, rt.id) AS type_id,
                    COALESCE(inv.name, rt.name) AS type_name,
                    'incoming' AS direction
@@ -301,8 +301,8 @@ class RelationRepository
                 'relationId' => (int) $row['relation_id'],
                 'otherPersonId' => (int) $row['other_id'],
                 'otherPersonName' => (string) $row['other_name'],
-                'otherPersonUserId' => isset($row['other_user_id']) && $row['other_user_id'] !== null
-                    ? (int) $row['other_user_id']
+                'otherPersonProfileId' => isset($row['other_profile_id']) && $row['other_profile_id'] !== null
+                    ? (int) $row['other_profile_id']
                     : null,
                 'typeId' => (int) $row['type_id'],
                 'typeName' => (string) $row['type_name'],

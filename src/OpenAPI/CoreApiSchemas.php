@@ -1016,11 +1016,11 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
-            self::permissionRoute('GET', '/api/users/{id:\d+}/relations', 'relations:read', [
-                'summary' => 'Get the person record and relations for a user account',
+            self::permissionRoute('GET', '/api/profiles/{id:\d+}/relations', 'relations:read', [
+                'summary' => 'Get the person record and relations for a profile',
                 'tags' => ['relations'],
                 'responses' => [
-                    200 => self::jsonResponse('The user\'s person and relations', 'UserRelationsResponse'),
+                    200 => self::jsonResponse('The profile\'s person and relations', 'ProfileRelationsResponse'),
                     400 => self::errorResponse('Bad request'),
                     500 => self::errorResponse('Internal error'),
                 ],
@@ -1803,7 +1803,7 @@ final class CoreApiSchemas
                 'id' => self::int(),
                 'tenantId' => self::int(),
                 'displayName' => self::str(),
-                'userId' => self::int(true),
+                'profileId' => self::int(true),
                 'hasAccount' => self::bool(),
                 'birthDate' => self::str(true),
                 'deceased' => self::bool(),
@@ -1840,15 +1840,15 @@ final class CoreApiSchemas
             ], ['id', 'fromPersonId', 'toPersonId', 'typeId', 'typeName']),
             'RelationEdgeListResponse' => self::paginatedListEnvelope('RelationEdge'),
 
-            // GET /api/users/{id}/relations — inline data envelope (personId may be null)
-            'UserRelationsResponse' => self::dataEnvelope(self::object([
+            // GET /api/profiles/{id}/relations — inline data envelope (personId may be null)
+            'ProfileRelationsResponse' => self::dataEnvelope(self::object([
                 'personId' => self::int(true),
                 'relations' => ['type' => 'array', 'items' => SchemaBuilder::ref('RelationSummary')],
             ], ['personId', 'relations'])),
 
             // Relation create request and response
             'RelationRef' => self::object([
-                'type' => ['type' => 'string', 'enum' => ['user', 'person']],
+                'type' => ['type' => 'string', 'enum' => ['profile', 'person']],
                 'id' => self::int(),
             ], ['type', 'id']),
             'RelationCreateRequest' => self::object([

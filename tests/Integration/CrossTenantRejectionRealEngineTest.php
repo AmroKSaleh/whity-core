@@ -1662,11 +1662,11 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
                 (2, 20, 200, datetime('now'))
         ");
 
-        // persons: two standalone (non-user-linked) persons, one per tenant, so
+        // persons: two standalone (non-profile-linked) persons, one per tenant, so
         // cross-tenant read/write/delete rejection can be proven directly against
         // the PersonRepository. Ids 10/20 mirror the OU/greeting id scheme.
         $pdo->exec("
-            INSERT INTO persons (id, tenant_id, display_name, user_id, deceased, created_at) VALUES
+            INSERT INTO persons (id, tenant_id, display_name, profile_id, deceased, created_at) VALUES
                 (10, 1, 'Alice-A', NULL, false, datetime('now')),
                 (20, 2, 'Bob-B',   NULL, false, datetime('now'))
         ");
