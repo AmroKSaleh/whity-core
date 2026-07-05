@@ -284,7 +284,7 @@ class RolesApiTenantIsolationTest extends TestCase
         }
         $pdo->prepare(
             "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, ?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (?, ?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         )->execute([$userId, "u{$userId}"]);
 
         $pdo->prepare(

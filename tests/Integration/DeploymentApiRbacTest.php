@@ -145,7 +145,7 @@ class DeploymentApiRbacTest extends TestCase
 
         $this->pdo->prepare(
             "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, ?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (?, ?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         )->execute([$userId, "admin{$userId}"]);
 
         $this->pdo->prepare(
@@ -165,7 +165,7 @@ class DeploymentApiRbacTest extends TestCase
 
         $this->pdo->prepare(
             "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, ?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (?, ?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         )->execute([$userId, "user{$userId}"]);
 
         $this->pdo->prepare(
@@ -462,7 +462,7 @@ class DeploymentApiRbacTest extends TestCase
 
         $tempPdo->prepare(
             "INSERT OR IGNORE INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, 'admin100', 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (?, 'admin100', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         )->execute([100]);
 
         $tempPdo->prepare(

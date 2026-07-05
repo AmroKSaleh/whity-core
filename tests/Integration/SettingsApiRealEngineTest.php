@@ -387,10 +387,10 @@ final class SettingsApiRealEngineTest extends TestCase
         // reader, 12 = none, 13 = write-no-manage (settings:read + write only).
         $pdo->exec("
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
-                (10, 'admin',  'x', 0, 0, 0, datetime('now'), datetime('now')),
-                (11, 'reader', 'x', 0, 0, 0, datetime('now'), datetime('now')),
-                (12, 'none',   'x', 0, 0, 0, datetime('now'), datetime('now')),
-                (13, 'writer', 'x', 0, 0, 0, datetime('now'), datetime('now'))
+                (10, 'admin',  'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (11, 'reader', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (12, 'none',   'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (13, 'writer', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ");
         $pdo->exec("
             INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at) VALUES

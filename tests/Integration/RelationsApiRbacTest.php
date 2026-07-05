@@ -248,7 +248,7 @@ final class RelationsApiRbacTest extends TestCase
 
         $this->pdo->prepare(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+             VALUES (?, 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
         )->execute(['u' . $roleId]);
         $profileId = (int) $this->pdo->lastInsertId();
 
