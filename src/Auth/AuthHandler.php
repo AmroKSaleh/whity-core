@@ -1802,11 +1802,11 @@ class AuthHandler
         $auditTenantId            = null;
         $auditActorId             = $throttleId;
 
-        // The id to use for backup_codes operations. backup_codes.user_id is an
-        // FK to users.id (migration 035 deliberately did NOT re-point it to
-        // profiles), so this MUST be a legacy users.id — never a profile_id.
-        // Null means "no legacy users row" (profile-native account): backup-code
-        // validation is skipped rather than run against a non-existent user id.
+        // The id to use for backup_codes operations. backup_codes.profile_id is
+        // an FK to profiles.id (migration 038 re-keyed from users.id).
+        // Null means the profile_id could not be resolved: backup-code
+        // validation is skipped (fail-closed) rather than run against an
+        // unknown id.
         $backupCodesUserId        = null;
 
         // New path is keyed on profile_id ALONE — active_tenant_id may be absent
@@ -1838,23 +1838,9 @@ class AuthHandler
             $twoFactorSecret    = $profRow['two_factor_secret'];
             $backupCodesVersion = (int) ($profRow['two_factor_backup_codes_version'] ?? 0);
 
-            // Resolve the LEGACY users.id for backup-code validation. The temp
-            // token carries user_id when the profile still has a legacy users row
-            // (dual window); prefer it, else look it up by (email, active tenant).
-            // profile_id is NOT interchangeable here: on a profile-native account
-            // (profile_id != any users.id) passing profile_id would validate
-            // against the wrong user's codes or hit an FK violation on rotation.
-            if (isset($claims['user_id']) && is_numeric($claims['user_id'])) {
-                $backupCodesUserId = (int) $claims['user_id'];
-            } elseif ($activeTenantId !== null) {
-                $email2fa = isset($claims['email']) && is_string($claims['email'])
-                    ? $claims['email']
-                    : '';
-                $legacyRow2fa = $email2fa !== ''
-                    ? $this->fetchLegacyUserRow($email2fa, $activeTenantId)
-                    : null;
-                $backupCodesUserId = $legacyRow2fa !== null ? (int) $legacyRow2fa['id'] : null;
-            }
+            // backup_codes is keyed on profile_id (migration 038). Use the
+            // profile_id resolved above directly — no legacy users.id lookup.
+            $backupCodesUserId = $profileId;
         } else {
             // Backward-compat: legacy temp token (user_id / tenant_id only).
             // This branch can be removed once all in-flight 2FA sessions have
@@ -1868,9 +1854,38 @@ class AuthHandler
 
             $auditTenantId = $tenantId !== null ? (int) $tenantId : null;
             $auditActorId  = (int) $userId;
-            // Legacy path: the temp-token user_id IS the users.id — safe for
-            // backup_codes (which is keyed on users.id).
-            $backupCodesUserId = (int) $userId;
+            // Legacy temp token: look up profile_id via profile_emails so we
+            // can use the post-038 backup_codes key (profiles.id). Falls back
+            // to null (backup-code validation skipped) if the user has no
+            // profile yet — the TOTP path still works.
+            $backupCodesUserId = null;
+            try {
+                $email2faLeg = '';
+                if ($tenantId === null || (int) $tenantId === 0) {
+                    // @tenant-guard-ignore: system-tenant / unresolved-context branch
+                    $emailLegStmt = $this->db->prepare('SELECT email FROM users WHERE id = ? LIMIT 1');
+                    $emailLegStmt->execute([$userId]);
+                } else {
+                    $emailLegStmt = $this->db->prepare('SELECT email FROM users WHERE id = ? AND tenant_id = ? LIMIT 1');
+                    $emailLegStmt->execute([$userId, (int) $tenantId]);
+                }
+                $emailLegCol = $emailLegStmt->fetchColumn();
+                if (is_string($emailLegCol) && $emailLegCol !== '') {
+                    $email2faLeg = $emailLegCol;
+                }
+                if ($email2faLeg !== '') {
+                    // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
+                    $peLegStmt = $this->db->prepare('SELECT profile_id FROM profile_emails WHERE email = ? LIMIT 1');
+                    $peLegStmt->execute([$email2faLeg]);
+                    $legPid = $peLegStmt->fetchColumn();
+                    if ($legPid !== false && (int) $legPid > 0) {
+                        $backupCodesUserId = (int) $legPid;
+                    }
+                }
+            } catch (\Exception) {
+                // Profile lookup failed; backup-code validation will be skipped
+                // (fail-closed). TOTP path is unaffected.
+            }
 
             if ($tenantId === null || (int) $tenantId === 0) {
                 // @tenant-guard-ignore: system-tenant / unresolved-context branch
@@ -1910,12 +1925,10 @@ class AuthHandler
             }
         }
 
-        // Backup-code fallback. Keyed on the LEGACY users.id ($backupCodesUserId),
-        // NOT profile_id/throttleId: backup_codes.user_id is an FK to users.id.
-        // When no legacy users row exists (profile-native account) we cannot run
-        // backup-code validation against a real user id, so it is skipped and the
-        // caller falls through to the invalid-code path (fail closed) rather than
-        // querying with a profile_id that would match the wrong user or none.
+        // Backup-code fallback. backup_codes is keyed on profile_id after
+        // migration 038 ($backupCodesUserId holds the resolved profiles.id).
+        // When no profile could be resolved, backup-code validation is skipped
+        // (fail-closed) and the caller falls through to the invalid-code path.
         if (!$isValid && $backupCodesVersion > 0 && $backupCodesUserId !== null) {
             try {
                 $backupCodesService = $this->getBackupCodesService();

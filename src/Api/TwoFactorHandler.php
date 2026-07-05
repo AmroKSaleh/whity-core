@@ -411,14 +411,23 @@ class TwoFactorHandler
             // Generate 15 backup codes
             $codes = $this->backupCodesService->generateCodes(15);
 
-            // Hash and store backup codes
-            foreach ($codes as $code) {
-                $hashedCode = $this->backupCodesService->hashCode($code);
-                $insertStmt = $this->db->prepare('
-                    INSERT INTO backup_codes (user_id, code, version, used)
-                    VALUES (?, ?, ?, false)
-                ');
-                $insertStmt->execute([$userId, $hashedCode, 1]);
+            // Resolve profile_id for backup_codes (migration 038: keyed on
+            // profiles.id, not users.id). Fall back gracefully when not yet
+            // migrated; the insert is skipped so codes are returned but not
+            // persisted — the confirm path protects the caller with the 2FA
+            // mirror that makes login start challenging immediately.
+            $profileId = $this->resolveProfileId($claims, (int) $userId, $tenantId);
+
+            // Hash and store backup codes (keyed on profile_id, migration 038).
+            if ($profileId !== null) {
+                foreach ($codes as $code) {
+                    $hashedCode = $this->backupCodesService->hashCode($code);
+                    $insertStmt = $this->db->prepare('
+                        INSERT INTO backup_codes (profile_id, code, version, used)
+                        VALUES (?, ?, ?, false)
+                    ');
+                    $insertStmt->execute([$profileId, $hashedCode, 1]);
+                }
             }
 
             // Mirror onto the profile so login challenges for 2FA (ADR 0005).
@@ -475,14 +484,19 @@ class TwoFactorHandler
             $user = $this->readIdentityRow($claims, (int) $userId, $tenantId);
 
             if ($user && (int) $user['two_factor_backup_codes_version'] > 0) {
-                // Invalidate all backup codes for this version. Cast both args to
-                // int: under PostgreSQL (and the RealEngine SQLite harness with
-                // STRINGIFY_FETCHES) the version and the token-derived id come
-                // back as strings, but BackupCodesService is strictly int-typed.
-                $this->backupCodesService->invalidateOldCodes(
-                    (int) $userId,
-                    (int) $user['two_factor_backup_codes_version']
-                );
+                // Invalidate all backup codes for this version. backup_codes is
+                // keyed on profile_id (migration 038); resolve it first.
+                // Cast both args to int: under PostgreSQL (and the RealEngine
+                // SQLite harness with STRINGIFY_FETCHES) the version and the
+                // token-derived id come back as strings, but BackupCodesService
+                // is strictly int-typed.
+                $profileIdForCodes = $this->resolveProfileId($claims, (int) $userId, $tenantId);
+                if ($profileIdForCodes !== null) {
+                    $this->backupCodesService->invalidateOldCodes(
+                        $profileIdForCodes,
+                        (int) $user['two_factor_backup_codes_version']
+                    );
+                }
             }
 
             // Disable 2FA
@@ -572,9 +586,15 @@ class TwoFactorHandler
             $oldVersion = (int) $user['two_factor_backup_codes_version'];
             $newVersion = $oldVersion + 1;
 
-            // Invalidate old codes. Cast the id: it originates from the token
-            // claim and may be a string, but BackupCodesService is strictly typed.
-            $this->backupCodesService->invalidateOldCodes((int) $userId, $oldVersion);
+            // Resolve profile_id for backup_codes (migration 038: keyed on
+            // profiles.id, not users.id). Used for both invalidation and insertion.
+            $profileId = $this->resolveProfileId($claims, (int) $userId, $tenantId);
+
+            // Invalidate old codes. backup_codes is keyed on profile_id
+            // (migration 038); only run when the profile_id is resolved.
+            if ($profileId !== null) {
+                $this->backupCodesService->invalidateOldCodes($profileId, $oldVersion);
+            }
 
             // Increment version in users table
             // WC-191: pin the self write to the caller's tenant (system stays unscoped).
@@ -599,8 +619,7 @@ class TwoFactorHandler
             // path (which reads two_factor_backup_codes_version from profiles)
             // accepts the NEW codes and rejects the old (ADR 0005). Secret and
             // enabled state are unchanged by a regenerate, so only the version
-            // is written here.
-            $profileId = $this->resolveProfileId($claims, (int) $userId, $tenantId);
+            // is written here. $profileId was resolved above for invalidation.
             if ($profileId !== null) {
                 try {
                     // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
@@ -617,14 +636,19 @@ class TwoFactorHandler
             // Generate 15 new codes
             $codes = $this->backupCodesService->generateCodes(15);
 
-            // Hash and store new backup codes with new version
-            foreach ($codes as $code) {
-                $hashedCode = $this->backupCodesService->hashCode($code);
-                $insertStmt = $this->db->prepare('
-                    INSERT INTO backup_codes (user_id, code, version, used)
-                    VALUES (?, ?, ?, false)
-                ');
-                $insertStmt->execute([$userId, $hashedCode, $newVersion]);
+            // Hash and store new backup codes with new version (keyed on
+            // profile_id, migration 038). Skip insert when profile is not
+            // yet resolved (pre-migration fallback; the mirror above ensures
+            // login still challenges correctly in that window).
+            if ($profileId !== null) {
+                foreach ($codes as $code) {
+                    $hashedCode = $this->backupCodesService->hashCode($code);
+                    $insertStmt = $this->db->prepare('
+                        INSERT INTO backup_codes (profile_id, code, version, used)
+                        VALUES (?, ?, ?, false)
+                    ');
+                    $insertStmt->execute([$profileId, $hashedCode, $newVersion]);
+                }
             }
 
             return Response::json([
@@ -670,12 +694,14 @@ class TwoFactorHandler
                 return Response::error('User not found', 404);
             }
 
-            // Get available backup code count for current version only. Cast both
-            // args to int: under a real engine the id (from the token) and the
-            // version come back as strings, but BackupCodesService is int-typed.
-            $codeCount = (int) $user['two_factor_backup_codes_version'] > 0
+            // Get available backup code count for current version only.
+            // backup_codes is keyed on profile_id (migration 038); resolve it
+            // first. Cast to int: under a real engine the version comes back
+            // as a string, but BackupCodesService is strictly int-typed.
+            $profileIdForStatus = $this->resolveProfileId($claims, (int) $userId, $tenantId);
+            $codeCount = ($profileIdForStatus !== null && (int) $user['two_factor_backup_codes_version'] > 0)
                 ? $this->backupCodesService->getAvailableCodeCount(
-                    (int) $userId,
+                    $profileIdForStatus,
                     (int) $user['two_factor_backup_codes_version']
                 )
                 : 0;

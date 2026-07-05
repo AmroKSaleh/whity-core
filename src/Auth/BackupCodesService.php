@@ -13,6 +13,9 @@ use Whity\Database\Database;
  * Code format: XXXX-XXXX-XXXX (12 alphanumeric characters with hyphens)
  * Storage: Hashed with bcrypt for security
  * Versioning: Supports invalidating old code sets when user regenerates
+ *
+ * Migration 038 re-keyed backup_codes from users.id to profiles.id.
+ * All methods accept a profile_id (profiles.id) instead of a user_id (users.id).
  */
 class BackupCodesService
 {
@@ -72,27 +75,27 @@ class BackupCodesService
     }
 
     /**
-     * Validate a backup code for a user
+     * Validate a backup code for a profile
      *
      * Checks if the code exists, is unused, and matches the specified version.
      * If valid, marks the code as used.
      *
-     * @param int $userId The user ID
+     * @param int $profileId The profile ID (profiles.id, migration 038)
      * @param string $code The unencrypted backup code to validate
      * @param int $expectedVersion The expected version of the code
      * @return bool True if code is valid and unused, false otherwise
      */
-    public function validateCode(int $userId, string $code, int $expectedVersion): bool
+    public function validateCode(int $profileId, string $code, int $expectedVersion): bool
     {
         try {
             // Query for unused codes with the expected version
             $result = $this->db->query(
                 'SELECT id, code FROM backup_codes
-                 WHERE user_id = :user_id AND version = :version AND used = false
+                 WHERE profile_id = :profile_id AND version = :version AND used = false
                  LIMIT 1',
                 [
-                    'user_id' => $userId,
-                    'version' => $expectedVersion
+                    'profile_id' => $profileId,
+                    'version'    => $expectedVersion
                 ]
             );
 
@@ -125,40 +128,40 @@ class BackupCodesService
      * Marks all codes with a specific version as used.
      * Called when user regenerates backup codes to invalidate the old set.
      *
-     * @param int $userId The user ID
+     * @param int $profileId The profile ID (profiles.id, migration 038)
      * @param int $oldVersion The old version to invalidate
      * @return void
      */
-    public function invalidateOldCodes(int $userId, int $oldVersion): void
+    public function invalidateOldCodes(int $profileId, int $oldVersion): void
     {
         $this->db->query(
             'UPDATE backup_codes SET used = true, used_at = NOW()
-             WHERE user_id = ? AND version = ?',
-            [$userId, $oldVersion]
+             WHERE profile_id = ? AND version = ?',
+            [$profileId, $oldVersion]
         );
     }
 
     /**
-     * Get the count of available (unused) backup codes for a user
+     * Get the count of available (unused) backup codes for a profile
      *
-     * @param int $userId The user ID
+     * @param int $profileId The profile ID (profiles.id, migration 038)
      * @param int $currentVersion The current backup codes version (optional, for filtering)
      * @return int Count of unused backup codes for current version
      */
-    public function getAvailableCodeCount(int $userId, ?int $currentVersion = null): int
+    public function getAvailableCodeCount(int $profileId, ?int $currentVersion = null): int
     {
         try {
             if ($currentVersion !== null) {
                 $result = $this->db->query(
                     'SELECT COUNT(*) as count FROM backup_codes
-                     WHERE user_id = ? AND used = false AND version = ?',
-                    [$userId, $currentVersion]
+                     WHERE profile_id = ? AND used = false AND version = ?',
+                    [$profileId, $currentVersion]
                 );
             } else {
                 $result = $this->db->query(
                     'SELECT COUNT(*) as count FROM backup_codes
-                     WHERE user_id = ? AND used = false',
-                    [$userId]
+                     WHERE profile_id = ? AND used = false',
+                    [$profileId]
                 );
             }
 

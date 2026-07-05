@@ -29,12 +29,12 @@ namespace Whity\Core\Tenant;
  *    with no `tenant_id` column.
  *  - `role_permissions`, `backup_codes` — they carry NO `tenant_id` column and
  *    scope TRANSITIVELY via a parent (`role_permissions` via `roles`,
- *    `backup_codes` via `users.user_id`). They are not directly scannable for a
- *    `tenant_id` predicate; isolation for them is enforced at the parent join /
- *    by the owning user id, not by a column on the row. Listing them as
- *    tenant-owned would force false positives on every correct
- *    `WHERE role_id = ?` / `WHERE user_id = ?` access, so they are intentionally
- *    excluded and covered by their parent's scoping instead.
+ *    `backup_codes` via `profiles.profile_id` after migration 038). They are not
+ *    directly scannable for a `tenant_id` predicate; isolation for them is enforced
+ *    at the parent join / by the owning profile id, not by a column on the row.
+ *    Listing them as tenant-owned would force false positives on every correct
+ *    `WHERE role_id = ?` / `` access, so they are intentionally excluded and
+ *    covered by their parent's scoping instead.
  *  - `revoked_tokens`, `core_schema_migrations` — sanctioned global tables
  *    enumerated in {@see SanctionedGlobalTables}.
  */

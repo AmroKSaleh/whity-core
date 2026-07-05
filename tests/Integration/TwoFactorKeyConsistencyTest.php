@@ -181,15 +181,19 @@ class TwoFactorKeyConsistencyTest extends TestCase
     ): PDO {
         $userId = self::TEST_USER_ID;
         $roleName = self::TEST_ROLE_NAME;
+        // A synthetic profile_id for this mock user — the legacy temp-token path
+        // looks up email→profile_id so that backup_codes (migration 038) can be
+        // validated against the correct profile.
+        $profileId = 9001;
 
         $mockDb = $this->createMock(PDO::class);
         $mockDb->method('prepare')->willReturnCallback(
-            function (string $sql) use ($encryptedSecret, $backupVersion, $hashedBackupCode, $userId, $roleName) {
+            function (string $sql) use ($encryptedSecret, $backupVersion, $hashedBackupCode, $userId, $roleName, $profileId) {
                 $stmt = $this->createMock(PDOStatement::class);
                 $stmt->method('execute')->willReturn(true);
 
                 if (str_contains($sql, 'FROM users') && str_contains($sql, 'two_factor_secret')) {
-                    // handle2fa user lookup
+                    // handle2fa user lookup (legacy path)
                     $stmt->method('fetch')->willReturn([
                         'id' => $userId,
                         'email' => self::TEST_USER_EMAIL,
@@ -198,18 +202,30 @@ class TwoFactorKeyConsistencyTest extends TestCase
                         'two_factor_secret' => $encryptedSecret,
                         'two_factor_backup_codes_version' => $backupVersion,
                     ]);
+                    $stmt->method('fetchColumn')->willReturn(false);
+                } elseif (str_contains($sql, 'SELECT email FROM users')) {
+                    // Legacy path: email lookup so we can resolve profile_id
+                    $stmt->method('fetch')->willReturn(false);
+                    $stmt->method('fetchColumn')->willReturn(self::TEST_USER_EMAIL);
+                } elseif (str_contains($sql, 'FROM profile_emails')) {
+                    // Legacy path: email → profile_id lookup (for backup_codes post-038)
+                    $stmt->method('fetch')->willReturn(false);
+                    $stmt->method('fetchColumn')->willReturn($profileId);
                 } elseif (str_contains($sql, 'FROM roles') || str_contains($sql, 'role_id FROM users')) {
                     // completeTwoFaLogin role lookup
                     $stmt->method('fetch')->willReturn(['name' => $roleName]);
+                    $stmt->method('fetchColumn')->willReturn(false);
                 } elseif (str_contains($sql, 'FROM backup_codes')) {
-                    // BackupCodesService::validateCode lookup
+                    // BackupCodesService::validateCode lookup (keyed on profile_id post-038)
                     $stmt->method('fetch')->willReturn(
                         $hashedBackupCode !== null
                             ? ['id' => 1, 'code' => $hashedBackupCode]
                             : false
                     );
+                    $stmt->method('fetchColumn')->willReturn(false);
                 } else {
                     $stmt->method('fetch')->willReturn(false);
+                    $stmt->method('fetchColumn')->willReturn(false);
                 }
 
                 return $stmt;
