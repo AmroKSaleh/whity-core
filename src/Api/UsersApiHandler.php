@@ -133,7 +133,7 @@ class UsersApiHandler
                     JOIN roles r ON m.role_id = r.id
                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                     WHERE m.status = 'active'
-                    ORDER BY m.tenant_id, m.created_at DESC
+                    ORDER BY m.tenant_id, m.created_at DESC, m.profile_id ASC
                     LIMIT :limit OFFSET :offset
                 ");
                 $stmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
@@ -155,7 +155,7 @@ class UsersApiHandler
                     JOIN roles r ON m.role_id = r.id
                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                     WHERE m.tenant_id = :tenant_id AND m.status = 'active'
-                    ORDER BY m.created_at DESC
+                    ORDER BY m.created_at DESC, m.profile_id ASC
                     LIMIT :limit OFFSET :offset
                 ");
                 $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
@@ -170,7 +170,7 @@ class UsersApiHandler
             $users = array_map(fn (array $row): array => $this->toPublicUser($row), $rows);
 
             return Response::json(['data' => $users, 'pagination' => $p->meta($total)], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->log('error', 'Failed to fetch users', [
                 'event' => 'users.error',
                 'tenant_id' => TenantContext::getTenantId(),
@@ -238,7 +238,7 @@ class UsersApiHandler
             }
 
             return Response::json(['data' => $this->toPublicUser($row)], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->log('error', 'Failed to fetch user', [
                 'event' => 'users.error',
                 'tenant_id' => TenantContext::getTenantId(),
@@ -328,8 +328,11 @@ class UsersApiHandler
 
                 // Reject when an ACTIVE membership already exists for this profile
                 // in the tenant (a profile may be re-added after being removed, but
-                // never double-added while active).
-                $existing = $this->fetchMembershipRow($profileId, $tenantId);
+                // never double-added while active). This MUST check the exact
+                // target tenant ($tenantId) — NOT fetchMembershipRow(), whose
+                // system-tenant (0) branch resolves a membership in ANY tenant and
+                // would produce a spurious 409 / a promote that matches no row.
+                $existing = $this->fetchMembershipInTenant($profileId, $tenantId);
                 if ($existing !== null && ($existing['status'] ?? '') === 'active') {
                     if ($ownTx && $this->db->inTransaction()) {
                         $this->db->rollBack();
@@ -397,7 +400,7 @@ class UsersApiHandler
             $row = $this->fetchMembershipRow($profileId, $tenantId);
 
             return Response::json(['data' => $this->publicUserOrEmpty($row, $profileId, $tenantId)], 201);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->log('error', 'Failed to create user', [
                 'event' => 'users.error',
                 'tenant_id' => TenantContext::getTenantId(),
@@ -573,15 +576,18 @@ class UsersApiHandler
                 }
 
                 if ($membershipUpdates !== []) {
+                    // Always scope the write to the SINGLE resolved membership's
+                    // tenant. For the system tenant (0) $ownerTenantId is the
+                    // tenant of the membership resolved by fetchMembershipRow; a
+                    // bare `WHERE profile_id = ?` would overwrite the profile's
+                    // role/OU in EVERY tenant it belongs to (cross-tenant
+                    // corruption + a foreign OU planted across the tenant
+                    // boundary). For a normal tenant $ownerTenantId === the
+                    // caller tenant. Either way exactly one membership changes.
                     $membershipParams[] = $profileId;
-                    if ($currentTenantId === self::SYSTEM_TENANT_ID) {
-                        $sql = 'UPDATE memberships SET ' . implode(', ', $membershipUpdates)
-                            . ' WHERE profile_id = ?';
-                    } else {
-                        $sql = 'UPDATE memberships SET ' . implode(', ', $membershipUpdates)
-                            . ' WHERE profile_id = ? AND tenant_id = ?';
-                        $membershipParams[] = $ownerTenantId;
-                    }
+                    $membershipParams[] = $ownerTenantId;
+                    $sql = 'UPDATE memberships SET ' . implode(', ', $membershipUpdates)
+                        . ' WHERE profile_id = ? AND tenant_id = ?';
                     $this->db->prepare($sql)->execute($membershipParams);
                 }
 
@@ -622,7 +628,7 @@ class UsersApiHandler
             $row = $this->fetchMembershipRow($profileId, $ownerTenantId);
 
             return Response::json(['data' => $this->publicUserOrEmpty($row, $profileId, $ownerTenantId)], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->log('error', 'Failed to update user', [
                 'event' => 'users.error',
                 'tenant_id' => TenantContext::getTenantId(),
@@ -685,7 +691,7 @@ class UsersApiHandler
             ]);
 
             return Response::json(['data' => ['id' => $profileId, 'message' => 'User deleted']], 200);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->log('error', 'Failed to delete user', [
                 'event' => 'users.error',
                 'tenant_id' => TenantContext::getTenantId(),
@@ -720,7 +726,7 @@ class UsersApiHandler
                 JOIN roles r ON m.role_id = r.id
                 LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                 WHERE m.profile_id = ?
-                ORDER BY m.created_at DESC
+                ORDER BY m.created_at DESC, m.tenant_id ASC
                 LIMIT 1
             ");
             $stmt->execute([$profileId]);
@@ -736,6 +742,31 @@ class UsersApiHandler
             ");
             $stmt->execute([$profileId, $tenantId]);
         }
+
+        /** @var array<string, mixed>|false $row */
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Resolve a profile's membership in EXACTLY the given tenant (no system-tenant
+     * cross-tenant resolution). Used by create() to decide add-vs-promote-vs-409
+     * against the precise insert target — including the system tenant (0) itself,
+     * where {@see self::fetchMembershipRow()} would instead resolve a membership
+     * in some OTHER tenant.
+     *
+     * @return array<string, mixed>|null The (profile_id, tenant_id) membership, or null.
+     */
+    private function fetchMembershipInTenant(int $profileId, int $tenantId): ?array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT m.profile_id AS id, m.tenant_id, m.status, m.role_id
+             FROM memberships m
+             WHERE m.profile_id = ? AND m.tenant_id = ?
+             LIMIT 1"
+        );
+        $stmt->execute([$profileId, $tenantId]);
 
         /** @var array<string, mixed>|false $row */
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

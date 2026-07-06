@@ -177,9 +177,10 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
     }
 
     /**
-     * WC-f3660e68: the SYSTEM tenant (id 0) edits across tenants by design — the
-     * membership UPDATE leaves the system path unscoped, so a system-tenant edit
-     * of Tenant B's membership still lands.
+     * WC-f3660e68: the SYSTEM tenant (id 0) edits across tenants by design. The
+     * membership UPDATE is scoped to the SINGLE resolved membership's tenant, so a
+     * system-tenant edit of a profile whose only membership is in Tenant B lands
+     * on that Tenant-B membership.
      */
     public function testSystemTenantCanUpdateForeignUser(): void
     {
@@ -193,7 +194,34 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertSame(
             2,
             (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 102 AND tenant_id = 2')->fetchColumn(),
-            'The system-tenant membership UPDATE must remain unscoped and land on the foreign row'
+            'The system-tenant membership UPDATE must land on the resolved (Tenant B) membership'
+        );
+    }
+
+    /**
+     * WC-f3660e68 (review finding #1): a system-tenant (0) role update by
+     * profile_id must alter EXACTLY ONE membership — the single resolved one —
+     * NEVER every tenant's membership for that profile. Profile 101 holds active
+     * memberships in BOTH Tenant A (role 1/admin) and Tenant B (role 2/user). The
+     * previous system-tenant UPDATE omitted the tenant predicate (`WHERE
+     * profile_id = ?`), so it rewrote both tenants' role_id and could plant a
+     * foreign OU across the tenant boundary. We update to role 100
+     * (tenant-a-private, distinct from both seeded roles): the buggy write would
+     * set role_id = 100 on BOTH memberships; the scoped write sets exactly one.
+     */
+    public function testSystemTenantUpdateTouchesOnlyOneMembershipOfMultiTenantProfile(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->usersHandler()->update(
+            $this->req('PATCH', '/api/users/101', ['role' => 'tenant-a-private'], self::SYSTEM_TENANT),
+            ['id' => '101']
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM memberships WHERE profile_id = 101 AND role_id = 100')->fetchColumn(),
+            'A system-tenant update must alter EXACTLY ONE tenant membership, not every membership of the profile'
         );
     }
 
