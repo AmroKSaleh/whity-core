@@ -184,4 +184,17 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
         ]);
         self::assertSame(422, $res->getStatusCode());
     }
+
+    public function testOverLongWorkspaceNameIsRejectedWith422NotA500(): void
+    {
+        // A value longer than the backing VARCHAR(255) must be caught by
+        // validation (422), not blow up as a Postgres 22001 → generic 500.
+        $res = $this->register([
+            'email'       => 'long@acme.test',
+            'password'    => 'a-strong-password',
+            'tenant_name' => str_repeat('a', 256),
+        ]);
+        self::assertSame(422, $res->getStatusCode());
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'long@acme.test'")->fetchColumn());
+    }
 }

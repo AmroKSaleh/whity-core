@@ -87,6 +87,10 @@ class EnforceTenantIsolation
         // WC-206: versioned auth surface under /api/v1/.
         '/api/v1/login',
         '/api/v1/login/2fa',
+        // WC-235: public self-service registration. Unauthenticated by design —
+        // it provisions a brand-new tenant + owner, so there is no session/tenant
+        // to resolve yet; RegisterApiHandler validates + rate-limiting throttles.
+        '/api/v1/register',
         // ADR 0005 §6: multi-membership tenant selection. Public like login/2fa —
         // the caller holds only the short-lived selection cookie (no session yet);
         // AuthHandler::handleSelectTenant re-validates membership before minting.

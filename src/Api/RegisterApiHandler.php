@@ -56,6 +56,13 @@ final class RegisterApiHandler
             if ($tenantName === '') {
                 return Response::error('A workspace name is required', 422);
             }
+            // Cap inputs to the backing VARCHAR(255) columns: an over-long value
+            // would otherwise surface as a Postgres 22001 → generic 500 (and would
+            // diverge from the length-less SQLite test shim). FILTER_VALIDATE_EMAIL
+            // imposes no length bound of its own.
+            if (strlen($email) > 255 || strlen($tenantName) > 255 || strlen($displayName) > 255) {
+                return Response::error('Email, workspace name, and display name must each be 255 characters or fewer', 422);
+            }
             try {
                 PasswordPolicy::validate($password);
             } catch (\InvalidArgumentException $e) {
