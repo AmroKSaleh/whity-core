@@ -65,8 +65,14 @@ final class RegisterApiHandler
             }
             try {
                 PasswordPolicy::validate($password);
-            } catch (\InvalidArgumentException $e) {
-                return Response::error($e->getMessage(), 422);
+            } catch (\InvalidArgumentException) {
+                // Return a controlled message built from the policy constant — never
+                // the raw exception text (WC-186: no handler may leak $e->getMessage()
+                // into a client response).
+                return Response::error(
+                    'Password must be at least ' . PasswordPolicy::MIN_LENGTH . ' characters',
+                    422
+                );
             }
             $slug = self::slugify($tenantName);
             if ($slug === '') {
