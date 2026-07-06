@@ -27,7 +27,6 @@ final class MigrationCycleTest extends TestCase
     private const RBAC_TABLES = [
         'tenants',
         'roles',
-        'users',
         'permissions',
         'role_permissions',
         'organizational_units',
@@ -66,10 +65,11 @@ final class MigrationCycleTest extends TestCase
             $this->assertTrue($this->tableExists($table), "Expected table '{$table}' to exist after migrate run.");
         }
 
-        // users.tenant_id must be NOT NULL with a FK to tenants(id).
-        $this->assertColumnIsNotNull('users', 'tenant_id');
-        $this->assertForeignKeyExists('users', 'tenant_id', 'tenants', 'id');
-        $this->assertIndexExistsOn('users', 'tenant_id');
+        // The legacy `users` table is retired by migration 042; the tenant-owned
+        // identity table is now `memberships` (tenant_id NOT NULL + FK to tenants).
+        $this->assertFalse($this->tableExists('users'), 'users must be dropped by migration 042.');
+        $this->assertColumnIsNotNull('memberships', 'tenant_id');
+        $this->assertForeignKeyExists('memberships', 'tenant_id', 'tenants', 'id');
 
     }
 

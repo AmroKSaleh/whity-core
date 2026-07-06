@@ -36,3 +36,4 @@ docker-compose.override.yml
 storybook-static/
 phpunit_full.log
 .phpunit-sqlite.log
+.phpunit-full.log
