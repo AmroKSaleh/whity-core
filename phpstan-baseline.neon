@@ -522,7 +522,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 10
+			count: 13
 			path: tests/Api/RegisterApiHandlerRealEngineTest.php
 
 		-

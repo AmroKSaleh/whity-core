@@ -8,6 +8,8 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\RegisterApiHandler;
+use Whity\Core\Identity\EmailVerificationPolicy;
+use Whity\Core\Identity\EmailVerificationProvider;
 use Whity\Core\Request;
 
 /**
@@ -31,6 +33,12 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
     {
         $this->pdo = SchemaFromMigrations::make(true);
         $this->handler = new RegisterApiHandler($this->pdo);
+    }
+
+    protected function tearDown(): void
+    {
+        // Never leak the enforcement flag into other tests.
+        unset($_ENV[EmailVerificationPolicy::ENV_FLAG]);
     }
 
     /**
@@ -196,5 +204,90 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
         ]);
         self::assertSame(422, $res->getStatusCode());
         self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'long@acme.test'")->fetchColumn());
+    }
+
+    // ── WC-235: email-verification seam (default OFF; enforce via env flag) ────
+
+    public function testVerificationDisabledByDefaultMarksEmailVerifiedAndSendsNothing(): void
+    {
+        // Inline anon spy so PHPStan sees the concrete type (and its $calls).
+        $spy = new class implements EmailVerificationProvider {
+            /** @var list<array{profileId: int, email: string}> */
+            public array $calls = [];
+
+            public function sendVerification(int $profileId, string $email): void
+            {
+                $this->calls[] = ['profileId' => $profileId, 'email' => $email];
+            }
+        };
+        $handler = new RegisterApiHandler($this->pdo, $spy);
+
+        $res = $handler->register(new Request('POST', '/api/register', [], (string) json_encode([
+            'email' => 'mvp@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'MVP WS',
+        ])));
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertFalse($this->decode($res)['data']['verification_required']);
+        self::assertContains(
+            (string) $this->pdo->query("SELECT verified FROM profile_emails WHERE email = 'mvp@acme.test'")->fetchColumn(),
+            ['1', 't', 'true'],
+            'MVP default: the owner email is self-attested verified'
+        );
+        self::assertSame([], $spy->calls, 'no verification is dispatched when the flag is off');
+    }
+
+    public function testVerificationEnforcedMarksEmailUnverifiedAndHandsOffToProvider(): void
+    {
+        $_ENV[EmailVerificationPolicy::ENV_FLAG] = '1';
+        $spy = new class implements EmailVerificationProvider {
+            /** @var list<array{profileId: int, email: string}> */
+            public array $calls = [];
+
+            public function sendVerification(int $profileId, string $email): void
+            {
+                $this->calls[] = ['profileId' => $profileId, 'email' => $email];
+            }
+        };
+        $handler = new RegisterApiHandler($this->pdo, $spy);
+
+        $res = $handler->register(new Request('POST', '/api/register', [], (string) json_encode([
+            'email' => 'verify@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Verify WS',
+        ])));
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertTrue($this->decode($res)['data']['verification_required']);
+        $profileId = (int) $this->decode($res)['data']['profile_id'];
+        // "not verified": assert it is NOT the verified-true representation
+        // rather than guessing the false one (SQLite '0'; Postgres stringifies
+        // boolean false to '' and true to '1').
+        self::assertNotContains(
+            (string) $this->pdo->query("SELECT verified FROM profile_emails WHERE email = 'verify@acme.test'")->fetchColumn(),
+            ['1', 't', 'true'],
+            'enforced: the owner email starts unverified'
+        );
+        // The provider was handed off to exactly once, with the new profile + email.
+        self::assertCount(1, $spy->calls);
+        self::assertSame($profileId, $spy->calls[0]['profileId']);
+        self::assertSame('verify@acme.test', $spy->calls[0]['email']);
+    }
+
+    public function testProviderFailureUnderEnforcementStillReturns201(): void
+    {
+        // A verification-delivery failure must NOT undo the created account.
+        $_ENV[EmailVerificationPolicy::ENV_FLAG] = '1';
+        $throwing = new class implements EmailVerificationProvider {
+            public function sendVerification(int $profileId, string $email): void
+            {
+                throw new \RuntimeException('smtp down');
+            }
+        };
+        $handler = new RegisterApiHandler($this->pdo, $throwing);
+
+        $res = $handler->register(new Request('POST', '/api/register', [], (string) json_encode([
+            'email' => 'resilient@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Resilient WS',
+        ])));
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertSame(1, (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'resilient@acme.test'")->fetchColumn());
     }
 }
