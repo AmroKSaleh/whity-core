@@ -279,14 +279,9 @@ final class DualClaimValidationRealEngineTest extends TestCase
      */
     public function testTokenWithLegacyUserIdClaimsOnlyIsRejected(): void
     {
-        // Seed a users row so the old epoch check would have passed — the guard
-        // must catch this via principalIdsFromClaims() returning null (no profile_id).
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, 'x', 1, datetime('now'), 0)"
-        );
-        $stmt->execute([self::TENANT_A, 'legacy@example.com']);
-
+        // The legacy `users` table is gone (migration 042); a legacy-shape token
+        // (user_id/tenant_id, no profile_id) must fail closed on the MCP path
+        // because principalIdsFromClaims() requires profile_id/active_tenant_id.
         $legacyToken = $this->mint([
             'user_id'     => 42,
             'tenant_id'   => self::TENANT_A,

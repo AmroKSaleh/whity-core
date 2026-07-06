@@ -47,10 +47,10 @@ final class TenantPredicateGuardTest extends TestCase
 
     public function testUnscopedSelectOnTenantTableIsFlagged(): void
     {
-        $violations = $this->scan('DELETE FROM users WHERE id = ?');
+        $violations = $this->scan('DELETE FROM memberships WHERE id = ?');
 
-        self::assertCount(1, $violations, 'An unscoped DELETE on users must be flagged.');
-        self::assertSame(['users'], $violations[0]['tables']);
+        self::assertCount(1, $violations, 'An unscoped DELETE on memberships must be flagged.');
+        self::assertSame(['memberships'], $violations[0]['tables']);
     }
 
     public function testUnscopedSelectAndUpdateAreFlagged(): void
@@ -61,7 +61,7 @@ final class TenantPredicateGuardTest extends TestCase
 
     public function testScopedQueryWithTenantPredicateIsNotFlagged(): void
     {
-        self::assertSame([], $this->scan('DELETE FROM users WHERE id = ? AND tenant_id = ?'));
+        self::assertSame([], $this->scan('DELETE FROM memberships WHERE id = ? AND tenant_id = ?'));
         self::assertSame([], $this->scan('SELECT * FROM persons WHERE id = :id AND tenant_id = :tid'));
         self::assertSame([], $this->scan('UPDATE roles SET name = ? WHERE id = ? AND tenant_id = ?'));
     }
@@ -70,7 +70,7 @@ final class TenantPredicateGuardTest extends TestCase
     {
         self::assertSame(
             [],
-            $this->scan('SELECT u.id FROM users u JOIN roles r ON u.role_id = r.id WHERE u.tenant_id = ?')
+            $this->scan('SELECT u.id FROM memberships u JOIN roles r ON u.role_id = r.id WHERE u.tenant_id = ?')
         );
     }
 
@@ -87,7 +87,7 @@ final class TenantPredicateGuardTest extends TestCase
     {
         self::assertSame(
             [],
-            $this->scan('DELETE FROM users WHERE id = ? AND EXISTS (SELECT 1 FROM roles r WHERE r.id = users.role_id AND r.tenant_id = ?)')
+            $this->scan('DELETE FROM memberships WHERE id = ? AND EXISTS (SELECT 1 FROM roles r WHERE r.id = memberships.role_id AND r.tenant_id = ?)')
         );
     }
 
@@ -95,7 +95,7 @@ final class TenantPredicateGuardTest extends TestCase
     {
         // tenant_id appears only in the SELECT list, not as a predicate — the row
         // is NOT scoped, so this MUST be flagged.
-        $violations = $this->scan('SELECT id, tenant_id, email FROM users WHERE id = ?');
+        $violations = $this->scan('SELECT id, tenant_id, email FROM memberships WHERE id = ?');
 
         self::assertCount(1, $violations, 'A projected tenant_id column does not scope the row.');
     }
@@ -119,7 +119,7 @@ final class TenantPredicateGuardTest extends TestCase
 
     public function testInsertIsOutOfScope(): void
     {
-        self::assertSame([], $this->scan('INSERT INTO users (tenant_id, email) VALUES (?, ?)'));
+        self::assertSame([], $this->scan('INSERT INTO memberships (tenant_id, email) VALUES (?, ?)'));
     }
 
     public function testUpsertWithDoUpdateIsOutOfScope(): void
@@ -141,7 +141,7 @@ final class TenantPredicateGuardTest extends TestCase
             public function run($db): void
             {
                 // @tenant-guard-ignore: system-tenant (id 0) sees all tenants
-                $stmt = $db->prepare('SELECT * FROM users WHERE id = ?');
+                $stmt = $db->prepare('SELECT * FROM memberships WHERE id = ?');
             }
         }
         PHP;
@@ -175,7 +175,7 @@ final class TenantPredicateGuardTest extends TestCase
             public function run($db): void
             {
                 // @tenant-guard-ignore:
-                $stmt = $db->prepare('SELECT * FROM users WHERE id = ?');
+                $stmt = $db->prepare('SELECT * FROM memberships WHERE id = ?');
             }
         }
         PHP;
@@ -198,7 +198,7 @@ final class TenantPredicateGuardTest extends TestCase
         {
             public function run($db, array $updates, $id, $tenantId): void
             {
-                $sql = 'UPDATE users SET ' . implode(', ', $updates) . ' WHERE id = ? AND tenant_id = ?';
+                $sql = 'UPDATE memberships SET ' . implode(', ', $updates) . ' WHERE id = ? AND tenant_id = ?';
                 $db->prepare($sql);
             }
         }

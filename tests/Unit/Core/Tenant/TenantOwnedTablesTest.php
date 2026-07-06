@@ -39,21 +39,21 @@ final class TenantOwnedTablesTest extends TestCase
 
     public function testKnownTenantTablesAreOwned(): void
     {
-        foreach (['users', 'roles', 'persons', 'relations', 'audit_log', 'permission_delegations'] as $table) {
+        foreach (['roles', 'persons', 'relations', 'audit_log', 'permission_delegations', 'memberships'] as $table) {
             self::assertTrue(TenantOwnedTables::isTenantOwned($table), "{$table} must be tenant-owned.");
         }
     }
 
     public function testMembershipIsCaseInsensitive(): void
     {
-        self::assertTrue(TenantOwnedTables::isTenantOwned('USERS'));
+        self::assertTrue(TenantOwnedTables::isTenantOwned('MEMBERSHIPS'));
         self::assertTrue(TenantOwnedTables::isTenantOwned('Audit_Log'));
     }
 
     public function testTransitivelyScopedAndGlobalTablesAreNotOwned(): void
     {
         // No tenant_id column: scoped via a parent (role_permissions->roles,
-        // backup_codes->users) or genuinely global.
+        // backup_codes->profiles) or genuinely global.
         foreach (['role_permissions', 'backup_codes', 'permissions', 'relationship_types', 'tenants'] as $table) {
             self::assertFalse(
                 TenantOwnedTables::isTenantOwned($table),

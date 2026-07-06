@@ -198,9 +198,9 @@ final class DispatcherTenantBindingTest extends TestCase
         $this->pdo->exec("INSERT INTO tenants (id, name) VALUES (" . self::TENANT_ID . ", 'Tenant Five') ON CONFLICT DO NOTHING");
         $this->pdo->exec("INSERT INTO roles (id, tenant_id, name) VALUES (1, " . self::TENANT_ID . ", 'admin') ON CONFLICT DO NOTHING");
         $hash = password_hash('pw', PASSWORD_BCRYPT);
-        $this->pdo->prepare("INSERT INTO users (id, tenant_id, email, password, role_id, token_epoch) VALUES (?, ?, 'u@test.com', ?, 1, 0) ON CONFLICT DO NOTHING")
-            ->execute([self::USER_ID, self::TENANT_ID, $hash]);
 
+        // Identity is on the profile model; the legacy `users` table was retired
+        // by the identity hard cutover (migration 042).
         // After migration 040, McpTokenService.issue() takes profile_id and emits
         // {profile_id, active_tenant_id} in JWT claims. The membership guard requires
         // an active membership for the profile in the declared tenant.

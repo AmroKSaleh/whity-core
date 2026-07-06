@@ -77,28 +77,26 @@ final class RoleCheckerRealEngineTest extends TestCase
     {
         // admin role (1) is granted plugins:read directly via permission_id.
         $this->grant('admin', 'plugins:read');
-        $adminUserId = $this->seedUser('admin@example.com', 'admin');
+        $adminProfileId = $this->seedProfile('admin@example.com', 'admin');
 
         $checker = $this->roleChecker();
 
-        // On pre-fix code the step-2 probe selects rp.permission_string and the
-        // engine raises "no such column", surfacing as a 500. After the fix it
-        // resolves through permissions.name and returns true.
+        // Resolves through permissions.name via the membership path and returns true.
         $this->assertTrue(
-            $checker->hasPermission($adminUserId, 'plugins:read', 1),
-            'A direct role_permissions grant (via permission_id join) must satisfy hasPermission().'
+            $checker->hasPermissionForProfile($adminProfileId, 'plugins:read', 1),
+            'A direct role_permissions grant (via permission_id join) must satisfy hasPermissionForProfile().'
         );
     }
 
     public function testHasPermissionReturnsFalseWhenRoleLacksDirectGrantAndHasNoHierarchy(): void
     {
         // user role (2) holds no grant and no parent; must be denied — not error.
-        $userId = $this->seedUser('user@example.com', 'user');
+        $userProfileId = $this->seedProfile('user@example.com', 'user');
 
         $checker = $this->roleChecker();
 
         $this->assertFalse(
-            $checker->hasPermission($userId, 'plugins:read', 1),
+            $checker->hasPermissionForProfile($userProfileId, 'plugins:read', 1),
             'A role without the grant and without a hierarchy parent must be denied.'
         );
     }
@@ -107,9 +105,9 @@ final class RoleCheckerRealEngineTest extends TestCase
     {
         $this->grant('admin', 'plugins:read');
         $this->grant('admin', 'users:read');
-        $adminUserId = $this->seedUser('admin@example.com', 'admin');
+        $adminProfileId = $this->seedProfile('admin@example.com', 'admin');
 
-        $perms = $this->roleChecker()->getPermissionsForUser($adminUserId);
+        $perms = $this->roleChecker()->getEffectivePermissionsForProfile($adminProfileId, 1);
 
         // The admin role is pre-seeded with many production permissions by migrations,
         // so we assert containment rather than an exact set.
@@ -139,7 +137,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         // SchemaFromMigrations::make() runs all migrations (including this one), so
         // admin already holds the six plugin permissions. We verify the
         // post-migration state and that calling up() again is idempotent.
-        $adminUserId = $this->seedUser('admin@example.com', 'admin');
+        $adminProfileId = $this->seedProfile('admin@example.com', 'admin');
 
         RoleChecker::clearCache();
         GrantPluginsManageToAdmin::up($this->db);
@@ -147,7 +145,7 @@ final class RoleCheckerRealEngineTest extends TestCase
         $checker = $this->roleChecker();
         foreach (self::PLUGIN_PERMISSIONS as $permission) {
             $this->assertTrue(
-                $checker->hasPermission($adminUserId, $permission, 1),
+                $checker->hasPermissionForProfile($adminProfileId, $permission, 1),
                 "After the migration runs, admin must hold {$permission}."
             );
         }
@@ -155,13 +153,13 @@ final class RoleCheckerRealEngineTest extends TestCase
 
     public function testMigrationDoesNotGrantRetiredPluginsManage(): void
     {
-        $adminUserId = $this->seedUser('admin@example.com', 'admin');
+        $adminProfileId = $this->seedProfile('admin@example.com', 'admin');
 
         RoleChecker::clearCache();
         GrantPluginsManageToAdmin::up($this->db);
 
         $this->assertFalse(
-            $this->roleChecker()->hasPermission($adminUserId, 'plugins:manage', 1),
+            $this->roleChecker()->hasPermissionForProfile($adminProfileId, 'plugins:manage', 1),
             'The retired plugins:manage permission must never be granted to admin.'
         );
 
@@ -289,21 +287,33 @@ final class RoleCheckerRealEngineTest extends TestCase
     }
 
     /**
-     * Seed a user with the given email assigned to a role by name; returns its id.
+     * Seed a profile with the given email assigned to a role by name; returns its profile id.
      */
-    private function seedUser(string $email, string $roleName): int
+    private function seedProfile(string $email, string $roleName): int
     {
         $roleId = (int) $this->pdo
             ->query("SELECT id FROM roles WHERE name = '{$roleName}'")
             ->fetchColumn();
 
         $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (1, ?, ?, ?, NOW())'
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
         );
-        $stmt->execute([$email, 'x', $roleId]);
+        $stmt->execute([explode('@', $email)[0]]);
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, 1, 1, datetime('now'))"
+        )->execute([$profileId, $email]);
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, 1, ?, NULL, 'active', datetime('now'))"
+        )->execute([$profileId, $roleId]);
+
+        return $profileId;
     }
 
     /**

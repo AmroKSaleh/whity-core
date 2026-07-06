@@ -35,3 +35,8 @@ docker-compose.override.yml
 # Storybook build output (regenerated; never committed)
 storybook-static/
 phpunit_full.log
+.phpunit-sqlite.log
+.phpunit-full.log
+.phpstan.log
+.phpunit-pg.log
+.phpunit-pg-int.log

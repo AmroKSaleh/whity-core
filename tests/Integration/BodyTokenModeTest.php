@@ -974,12 +974,8 @@ class BodyTokenModeTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (2, 'Tenant Two', datetime('now'))");
         $pdo->exec("INSERT OR IGNORE INTO roles   (id, name) VALUES (1, 'admin')");
 
-        // Single-membership user (self::EMAIL).
-        $pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
-        )->execute([self::USER_ID, self::TENANT_ID, self::EMAIL, password_hash(self::PASSWORD, PASSWORD_BCRYPT), self::ROLE_ID]);
-
+        // Single-membership user (self::EMAIL). Identity is on the profile model;
+        // the legacy `users` table was retired by the identity hard cutover (042).
         $pdo->prepare(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
@@ -1020,12 +1016,7 @@ class BodyTokenModeTest extends TestCase
         )->execute([self::MULTI_USER_ID, self::TENANT_B_ID, self::ROLE_ID]);
 
         // 2FA single-membership user (self::TWOFA_EMAIL). 2FA is enabled and the
-        // secret is populated per-test by make2faHandlerAndCode().
-        $pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
-        )->execute([self::TWOFA_USER_ID, self::TENANT_ID, self::TWOFA_EMAIL, password_hash(self::PASSWORD, PASSWORD_BCRYPT), self::ROLE_ID]);
-
+        // secret is populated per-test by make2faHandlerAndCode() on the profile.
         $pdo->prepare(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)

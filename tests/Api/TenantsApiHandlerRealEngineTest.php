@@ -280,14 +280,10 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
 
     private function seedUser(int $id, int $tenantId, string $email): void
     {
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (id, tenant_id, role_id, email, password, created_at)
-             VALUES (?, ?, 2, ?, 'x', datetime('now'))"
-        );
-        $stmt->execute([$id, $tenantId, $email]);
-
-        // WC-d88de9fa: the tenants list now counts memberships (ADR 0005 §3).
-        // Seed a profile and membership so userCount reflects the seeded data.
+        // WC-d88de9fa: the tenants list counts memberships (ADR 0005 §3). Identity
+        // is on the profile model; the legacy `users` table was retired by the
+        // identity hard cutover (migration 042). Seed a profile and membership so
+        // userCount reflects the seeded data.
         $pStmt = $this->pdo->prepare(
             "INSERT INTO profiles
                 (id, display_name, password_hash, two_factor_enabled,

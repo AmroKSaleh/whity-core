@@ -72,7 +72,7 @@ final class MeCapabilitiesApiHandlerTest extends TestCase
 
         $seen = [];
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('getEffectivePermissionsForUser')
+        $roleChecker->method('getEffectivePermissionsForProfile')
             ->willReturnCallback(function (int $userId, int $tenantId) use (&$seen): array {
                 $seen = [$userId, $tenantId];
                 return ['relations:read'];
@@ -120,7 +120,7 @@ final class MeCapabilitiesApiHandlerTest extends TestCase
         TenantContext::setTenantId(1);
 
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('getEffectivePermissionsForUser')
+        $roleChecker->method('getEffectivePermissionsForProfile')
             ->willThrowException(new \RuntimeException('secret internal detail'));
 
         $response = (new MeCapabilitiesApiHandler($roleChecker))->list($this->authedRequest(42));
@@ -140,7 +140,7 @@ final class MeCapabilitiesApiHandlerTest extends TestCase
     private function handler(array $permissions): MeCapabilitiesApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('getEffectivePermissionsForUser')
+        $roleChecker->method('getEffectivePermissionsForProfile')
             ->willReturn($permissions);
 
         return new MeCapabilitiesApiHandler($roleChecker);

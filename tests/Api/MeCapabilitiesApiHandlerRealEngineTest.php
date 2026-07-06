@@ -205,13 +205,11 @@ final class MeCapabilitiesApiHandlerRealEngineTest extends TestCase
     }
 
     /**
-     * Seed a PROFILE with an ACTIVE membership carrying the given role, and a
-     * migration_035_profile_ids self-mapping so the SAME id resolves correctly
-     * through BOTH RoleChecker paths:
-     *   - getEffectivePermissionsForUser(id) → maps id→profile (035) → membership
-     *   - getEffectivePermissionsForProfile(id) → membership directly (delegate()).
-     * Returns that id. WC-bc07b6de: delegations are profile-keyed; the handler
-     * READ path is user-keyed — the self-mapping bridges the two for the test.
+     * Seed a PROFILE with an ACTIVE membership carrying the given role and return
+     * its profile id. Post-cutover the /api/me/capabilities handler resolves the
+     * effective set via getEffectivePermissionsForProfile(profile_id) directly
+     * (the legacy user-keyed path and migration_035_profile_ids were retired by
+     * migration 042), so no id→profile mapping is needed.
      */
     private function seedUser(string $email, string $roleName): int
     {
@@ -229,11 +227,6 @@ final class MeCapabilitiesApiHandlerRealEngineTest extends TestCase
             "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
              VALUES (?, ?, ?, NULL, 'active', NOW())"
         )->execute([$profileId, self::TENANT_ID, $roleId]);
-
-        // Self-mapping: the handler's user-keyed READ path resolves id→profile.
-        $this->pdo->prepare(
-            'INSERT INTO migration_035_profile_ids (user_id, profile_id) VALUES (?, ?)'
-        )->execute([$profileId, $profileId]);
 
         return $profileId;
     }

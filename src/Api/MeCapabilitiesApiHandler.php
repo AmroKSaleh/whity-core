@@ -35,7 +35,7 @@ use Whity\Core\Tenant\TenantContext;
  *
  * Source of truth
  * ---------------
- * The permission set is exactly {@see RoleChecker::getEffectivePermissionsForUser()}
+ * The permission set is exactly {@see RoleChecker::getEffectivePermissionsForProfile()}
  * — the same authoritative, tenant-scoped, delegation-aware set RbacMiddleware
  * enforces on every gated route. The handler does NO direct database access
  * beyond RoleChecker, and never trusts the client: the slugs are UI hints only
@@ -80,7 +80,7 @@ final class MeCapabilitiesApiHandler
             }
 
             // The authoritative effective set, sorted for deterministic output.
-            $permissions = $this->roleChecker->getEffectivePermissionsForUser($userId, $tenantId);
+            $permissions = $this->roleChecker->getEffectivePermissionsForProfile($userId, $tenantId);
             sort($permissions);
 
             return Response::json(['data' => ['permissions' => $permissions]], 200);

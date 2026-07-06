@@ -69,10 +69,10 @@ final class PromptsListHandler implements MethodHandler
             return false;
         }
         if ($prompt->requiredPermission !== null) {
-            return $this->roleChecker->hasPermission($principal->userId, $prompt->requiredPermission, $tenantId);
+            return $this->roleChecker->hasPermissionForProfile($principal->userId, $prompt->requiredPermission, $tenantId);
         }
         if ($prompt->requiredRole !== null) {
-            return $this->roleChecker->hasRole($principal->userId, $prompt->requiredRole, $tenantId);
+            return $this->roleChecker->hasRoleForProfile($principal->userId, $prompt->requiredRole, $tenantId);
         }
         return true;
     }

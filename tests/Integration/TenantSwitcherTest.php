@@ -479,18 +479,17 @@ final class TenantSwitcherTest extends TestCase
         ], 900, 'access');
     }
 
+    /**
+     * No-op retained for call-site compatibility.
+     *
+     * The legacy `users` table was retired by the identity hard cutover
+     * (migration 042). Callers only need a numeric id to embed in a legacy-shape
+     * JWT `user_id` claim; the row itself is never queried (legacy tokens carry
+     * no profile_id and are rejected before any identity lookup).
+     */
     private function seedUser(string $email, int $tenantId): int
     {
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, 1, datetime('now'), 0)"
-        );
-        $stmt->execute([
-            $tenantId,
-            $email,
-            password_hash(self::PASSWORD, PASSWORD_BCRYPT),
-        ]);
-        return (int) $this->pdo->lastInsertId();
+        return 42;
     }
 
     private function seedProfile(string $displayName, string $email): int

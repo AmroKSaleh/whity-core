@@ -538,44 +538,6 @@ final class MembershipRbacTest extends TestCase
     }
 
     // =========================================================================
-    // Dual-window legacy compatibility
-    // =========================================================================
-
-    /**
-     * The legacy hasPermission($userId, ...) still works during Phase B when
-     * the migration_035_profile_ids mapping table is present. It resolves via
-     * the membership-aware path using the mapped profile_id.
-     */
-    public function testLegacyHasPermissionRoutesViaProfileMapping(): void
-    {
-        $profileId = $this->seedProfile('legacy@example.com');
-        $this->addMembership($profileId, self::TENANT_A, 'admin');
-        $this->grantPermission('admin', 'users:delete');
-
-        // Seed a legacy user row and the 035 mapping.
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (?, ?, ?, ?, NOW())'
-        );
-        $stmt->execute([self::TENANT_A, 'legacy@example.com', 'x', $this->roleId('viewer')]);
-        $userId = (int) $this->pdo->lastInsertId();
-
-        // Insert the 035 mapping: user_id → profile_id.
-        $this->pdo->prepare(
-            'INSERT OR IGNORE INTO migration_035_profile_ids (user_id, profile_id) VALUES (?, ?)'
-        )->execute([$userId, $profileId]);
-
-        RoleChecker::clearCache();
-
-        // Even though the user row has role 'viewer', the profile has admin membership.
-        // The legacy path must route through the profile and see admin permissions.
-        $this->assertTrue(
-            $this->checker->hasPermission($userId, 'users:delete', self::TENANT_A),
-            'Legacy hasPermission() must route via profile mapping and resolve admin membership.'
-        );
-    }
-
-    // =========================================================================
     // OU-inherited role via membership (membership-aware path)
     // =========================================================================
 

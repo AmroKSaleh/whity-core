@@ -110,7 +110,7 @@ final class PromptsGetHandlerTest extends TestCase
 
     public function testInvoke_throwsForbidden_whenRoleNotGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(false);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(false);
         $this->registry->register(new Prompt('admin-prompt', 'Admin', requiredRole: 'admin'));
 
         $this->expectException(McpException::class);
@@ -121,7 +121,7 @@ final class PromptsGetHandlerTest extends TestCase
 
     public function testInvoke_throwsForbidden_whenPermissionNotGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(false);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
         $this->registry->register(new Prompt('perm-prompt', 'Perm', requiredPermission: 'things:read'));
 
         $this->expectException(McpException::class);
@@ -132,8 +132,8 @@ final class PromptsGetHandlerTest extends TestCase
 
     public function testInvoke_doesNotCallRoleChecker_forOpenPrompt(): void
     {
-        $this->roleChecker->expects($this->never())->method('hasRole');
-        $this->roleChecker->expects($this->never())->method('hasPermission');
+        $this->roleChecker->expects($this->never())->method('hasRoleForProfile');
+        $this->roleChecker->expects($this->never())->method('hasPermissionForProfile');
 
         $this->registry->register(new Prompt(
             name: 'open-prompt',
@@ -276,7 +276,7 @@ final class PromptsGetHandlerTest extends TestCase
 
     public function testInvoke_succeedsWithRoleGranted_forRoleProtectedPrompt(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(true);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(true);
         $this->registry->register(new Prompt(
             name: 'admin-prompt',
             description: 'Admin',

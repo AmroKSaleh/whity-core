@@ -50,7 +50,6 @@ final class TenantOwnedTables
      * @var array<string, string>
      */
     private const TABLES = [
-        'users' => '001_create_users_roles.php',
         'roles' => '001_create_users_roles.php',
         'deployments' => '004_create_deployment_tables.php',
         'migration_rollbacks' => '004_create_deployment_tables.php',

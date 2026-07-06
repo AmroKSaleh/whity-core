@@ -143,7 +143,7 @@ final class ResourcesReadHandlerTest extends TestCase
     public function testInvoke_throwsForbidden_whenRequiredPermissionNotGranted(): void
     {
         $this->roleChecker->expects($this->once())
-            ->method('hasPermission')
+            ->method('hasPermissionForProfile')
             ->with(self::USER_ID, 'stuff:read', self::TENANT_ID)
             ->willReturn(false);
 
@@ -156,7 +156,7 @@ final class ResourcesReadHandlerTest extends TestCase
     public function testInvoke_throwsForbidden_whenRequiredRoleNotGranted(): void
     {
         $this->roleChecker->expects($this->once())
-            ->method('hasRole')
+            ->method('hasRoleForProfile')
             ->with(self::USER_ID, 'admin', self::TENANT_ID)
             ->willReturn(false);
 
@@ -168,8 +168,8 @@ final class ResourcesReadHandlerTest extends TestCase
 
     public function testInvoke_doesNotCallRoleChecker_whenNoRbacRequired(): void
     {
-        $this->roleChecker->expects($this->never())->method('hasPermission');
-        $this->roleChecker->expects($this->never())->method('hasRole');
+        $this->roleChecker->expects($this->never())->method('hasPermissionForProfile');
+        $this->roleChecker->expects($this->never())->method('hasRoleForProfile');
 
         ($this->handler)(['uri' => ResourceDeriver::URI_SCHEME . '/api/things'], self::BEARER);
     }
@@ -191,7 +191,7 @@ final class ResourcesReadHandlerTest extends TestCase
 
     public function testInvoke_callsHandler_whenPermissionGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $result = ($this->handler)(['uri' => ResourceDeriver::URI_SCHEME . '/api/perm-only'], self::BEARER);
 
@@ -200,7 +200,7 @@ final class ResourcesReadHandlerTest extends TestCase
 
     public function testInvoke_callsHandler_whenRoleGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(true);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(true);
 
         $result = ($this->handler)(['uri' => ResourceDeriver::URI_SCHEME . '/api/admin-only'], self::BEARER);
 
@@ -211,7 +211,7 @@ final class ResourcesReadHandlerTest extends TestCase
 
     public function testInvoke_passesRouterPathParams_toHandler(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $uri = ResourceDeriver::URI_SCHEME . '/api/things/42';
         ($this->handler)(['uri' => $uri], self::BEARER);

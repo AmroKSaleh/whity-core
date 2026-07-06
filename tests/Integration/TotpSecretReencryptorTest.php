@@ -24,7 +24,7 @@ class TotpSecretReencryptorTest extends TestCase
     {
         $pdo = new PDO('sqlite::memory:');
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->exec('CREATE TABLE users (id INTEGER PRIMARY KEY, two_factor_secret TEXT)');
+        $pdo->exec('CREATE TABLE profiles (id INTEGER PRIMARY KEY, two_factor_secret TEXT)');
 
         return $pdo;
     }
@@ -50,7 +50,7 @@ class TotpSecretReencryptorTest extends TestCase
         $newPlain = 'KRSXG5CTMVRXEZLU';
         $newBlob = $totp->encryptSecret($newPlain);
 
-        $insert = $pdo->prepare('INSERT INTO users (id, two_factor_secret) VALUES (?, ?)');
+        $insert = $pdo->prepare('INSERT INTO profiles (id, two_factor_secret) VALUES (?, ?)');
         $insert->execute([1, $legacyBlob]);   // legacy → must be migrated
         $insert->execute([2, null]);          // no secret → not selected
         $insert->execute([3, $newBlob]);      // already new → skipped
@@ -63,12 +63,12 @@ class TotpSecretReencryptorTest extends TestCase
         $this->assertSame(0, $stats['failed']);
 
         // User 1 is now stored in the new authenticated format and decrypts to the original.
-        $row1 = (string) $pdo->query('SELECT two_factor_secret FROM users WHERE id = 1')->fetchColumn();
+        $row1 = (string) $pdo->query('SELECT two_factor_secret FROM profiles WHERE id = 1')->fetchColumn();
         $this->assertNotSame($legacyBlob, $row1);
         $this->assertSame($legacyPlain, $totp->decryptSecret($row1));
 
         // User 3 (already migrated) is untouched.
-        $row3 = (string) $pdo->query('SELECT two_factor_secret FROM users WHERE id = 3')->fetchColumn();
+        $row3 = (string) $pdo->query('SELECT two_factor_secret FROM profiles WHERE id = 3')->fetchColumn();
         $this->assertSame($newBlob, $row3);
 
         // Idempotent: a second run migrates nothing.

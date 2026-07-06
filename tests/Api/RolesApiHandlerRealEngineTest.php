@@ -202,9 +202,9 @@ final class RolesApiHandlerRealEngineTest extends TestCase
         )['data'];
         $roleId = (int) $created['id'];
 
-        // A genuine (other) user is assigned the role within the tenant via
-        // users.role_id; this is sufficient for the active-assignment guard now
-        // that user_roles has been dropped by migration 039.
+        // A genuine (other) member is assigned the role within the tenant via
+        // memberships.role_id — the sole authoritative role-assignment signal now
+        // that user_roles (migration 039) and users (migration 042) are dropped.
         // Seed tenant 1 first (migration 010 only seeds system tenant id=0;
         // on PostgreSQL FK enforcement requires the tenant row to exist).
         $this->pdo->exec(
@@ -212,8 +212,13 @@ final class RolesApiHandlerRealEngineTest extends TestCase
              VALUES (1, 'test-tenant', datetime('now'))"
         );
         $this->pdo->exec(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at)
-             VALUES (50, 1, 'real@example.com', 'x', {$roleId}, datetime('now'))"
+            "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (50, 'real', 'x', false, 0, 0, datetime('now'), datetime('now'))"
+        );
+        $this->pdo->exec(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (50, 1, {$roleId}, 'active', datetime('now'))"
         );
 
         $response = $handler->delete(

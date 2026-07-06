@@ -33,7 +33,7 @@ export async function createAuthedApi(
         'This account must have 2FA DISABLED for the E2E suite to run ' +
         '(documented prerequisite). On the shared dev stack you can clear it ' +
         "with: docker exec whity_postgres psql -U whity -d whity_core -c " +
-        `"UPDATE users SET two_factor_enabled=false WHERE email='${creds.email}';"`
+        `"UPDATE profiles SET two_factor_enabled=false WHERE id=(SELECT profile_id FROM profile_emails WHERE email='${creds.email}');"`
     );
   }
   expect(

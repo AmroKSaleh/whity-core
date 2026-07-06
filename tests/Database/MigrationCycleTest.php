@@ -27,7 +27,6 @@ final class MigrationCycleTest extends TestCase
     private const RBAC_TABLES = [
         'tenants',
         'roles',
-        'users',
         'permissions',
         'role_permissions',
         'organizational_units',
@@ -66,10 +65,13 @@ final class MigrationCycleTest extends TestCase
             $this->assertTrue($this->tableExists($table), "Expected table '{$table}' to exist after migrate run.");
         }
 
-        // users.tenant_id must be NOT NULL with a FK to tenants(id).
-        $this->assertColumnIsNotNull('users', 'tenant_id');
-        $this->assertForeignKeyExists('users', 'tenant_id', 'tenants', 'id');
-        $this->assertIndexExistsOn('users', 'tenant_id');
+        // The legacy `users` table is retired by migration 042; the tenant-owned
+        // identity table is now `memberships` (tenant_id NOT NULL + FK to tenants,
+        // with a supporting index — migration 030).
+        $this->assertFalse($this->tableExists('users'), 'users must be dropped by migration 042.');
+        $this->assertColumnIsNotNull('memberships', 'tenant_id');
+        $this->assertForeignKeyExists('memberships', 'tenant_id', 'tenants', 'id');
+        $this->assertIndexExistsOn('memberships', 'tenant_id');
 
     }
 
@@ -134,19 +136,31 @@ final class MigrationCycleTest extends TestCase
 
         $roleId = (int) $db->query('SELECT id FROM roles WHERE name = :n', [':n' => 'admin'])->fetch(PDO::FETCH_COLUMN);
 
-        $userId = (int) $db->query(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (:t, 'cascade@example.com', 'x', :r, NOW()) RETURNING id",
-            [':t' => $tenantId, ':r' => $roleId]
+        // Identity is on the profile model (the legacy `users` table was retired by
+        // migration 042). A membership carries the tenant FK, so the tenant→member
+        // cascade is now proven through memberships.
+        $profileId = (int) $db->query(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES ('cascade', 'x', false, 0, 0, NOW(), NOW()) RETURNING id"
         )->fetch(PDO::FETCH_COLUMN);
 
-        // Deleting the tenant must cascade to users.
-        // user_roles was dropped by migration 039 and is no longer tested here.
+        $membershipId = (int) $db->query(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (:p, :t, :r, 'active', NOW()) RETURNING id",
+            [':p' => $profileId, ':t' => $tenantId, ':r' => $roleId]
+        )->fetch(PDO::FETCH_COLUMN);
+
+        // Deleting the tenant must cascade to its memberships (ON DELETE CASCADE).
+        // user_roles was dropped by migration 039; users by migration 042.
         $db->query('DELETE FROM tenants WHERE id = :t', [':t' => $tenantId]);
 
-        $remainingUsers = (int) $db->query('SELECT COUNT(*) FROM users WHERE id = :u', [':u' => $userId])->fetch(PDO::FETCH_COLUMN);
+        $remaining = (int) $db->query(
+            'SELECT COUNT(*) FROM memberships WHERE id = :m',
+            [':m' => $membershipId]
+        )->fetch(PDO::FETCH_COLUMN);
 
-        $this->assertSame(0, $remainingUsers, 'Users should cascade-delete with their tenant.');
+        $this->assertSame(0, $remaining, 'Memberships should cascade-delete with their tenant.');
     }
 
     // ---- helpers ---------------------------------------------------------

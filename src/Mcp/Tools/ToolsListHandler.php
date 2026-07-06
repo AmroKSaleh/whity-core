@@ -64,8 +64,8 @@ final class ToolsListHandler implements MethodHandler
             return false;
         }
         if ($requiredPermission !== null) {
-            return $this->roleChecker->hasPermission($principal->userId, $requiredPermission, $tenantId);
+            return $this->roleChecker->hasPermissionForProfile($principal->userId, $requiredPermission, $tenantId);
         }
-        return $this->roleChecker->hasRole($principal->userId, $requiredRole, $tenantId);
+        return $this->roleChecker->hasRoleForProfile($principal->userId, $requiredRole, $tenantId);
     }
 }
