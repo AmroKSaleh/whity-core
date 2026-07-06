@@ -66,10 +66,12 @@ final class MigrationCycleTest extends TestCase
         }
 
         // The legacy `users` table is retired by migration 042; the tenant-owned
-        // identity table is now `memberships` (tenant_id NOT NULL + FK to tenants).
+        // identity table is now `memberships` (tenant_id NOT NULL + FK to tenants,
+        // with a supporting index — migration 030).
         $this->assertFalse($this->tableExists('users'), 'users must be dropped by migration 042.');
         $this->assertColumnIsNotNull('memberships', 'tenant_id');
         $this->assertForeignKeyExists('memberships', 'tenant_id', 'tenants', 'id');
+        $this->assertIndexExistsOn('memberships', 'tenant_id');
 
     }
 
