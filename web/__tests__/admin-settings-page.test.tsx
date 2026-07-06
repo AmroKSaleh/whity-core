@@ -58,6 +58,7 @@ beforeAll(() => {
 });
 
 import AdminSettingsPage from '@/app/(protected)/admin/settings/page';
+import GlobalSettingsPage from '@/app/(protected)/admin/settings/global/page';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -169,13 +170,17 @@ describe('AdminSettingsPage — RBAC gating', () => {
     expect(mockApiGet).not.toHaveBeenCalledWith('/api/v1/settings/global');
   });
 
-  it('renders and loads the Global defaults section with settings:manage', async () => {
+  it('never renders global defaults on the tenant page, even with settings:manage (WC-235)', async () => {
+    // Global defaults moved to the system-tenant-only /admin/settings/global
+    // page. The tenant page must not render the global form nor fetch the global
+    // endpoint, even for a settings:manage holder (a regular tenant admin has it).
     grant('settings:read', 'settings:write', 'settings:manage');
     render(<AdminSettingsPage />);
-    expect(await screen.findByRole('heading', { name: /global defaults/i })).toBeInTheDocument();
-    await waitFor(() =>
-      expect(mockApiGet).toHaveBeenCalledWith('/api/v1/settings/global')
-    );
+    // The tenant form still loads…
+    expect(await screen.findByLabelText(/site name/i)).toBeInTheDocument();
+    // …but there is no global-defaults heading and the global endpoint is untouched.
+    expect(screen.queryByRole('heading', { name: /global defaults/i })).not.toBeInTheDocument();
+    expect(mockApiGet).not.toHaveBeenCalledWith('/api/v1/settings/global');
   });
 });
 
@@ -278,8 +283,9 @@ describe('AdminSettingsPage — system-tenant gating (WC-224)', () => {
     expect(
       screen.queryByRole('button', { name: /save tenant settings/i })
     ).not.toBeInTheDocument();
-    // The Global defaults section is still present for the superuser.
-    expect(screen.getByRole('heading', { name: /global defaults/i })).toBeInTheDocument();
+    // WC-235: the global defaults form is NOT on the tenant page anymore (it
+    // moved to /admin/settings/global); the notice above links there.
+    expect(screen.queryByRole('heading', { name: /global defaults/i })).not.toBeInTheDocument();
   });
 
   it('renders the editable tenant form when tenant_overridable is true', async () => {
@@ -325,10 +331,12 @@ describe('AdminSettingsPage — errorMessage details fallback (WC-224)', () => {
   });
 });
 
-describe('AdminSettingsPage — global save flow', () => {
-  it('PATCHes /api/v1/settings/global from the Global defaults form', async () => {
+describe('GlobalSettingsPage — global save flow (WC-235)', () => {
+  it('PATCHes /api/v1/settings/global from the Global defaults form on the global page', async () => {
+    // The mocked useAuth user is the system tenant (tenant_id: 0), so the
+    // system-tenant-gated global page renders for a settings:manage caller.
     grant('settings:read', 'settings:write', 'settings:manage');
-    render(<AdminSettingsPage />);
+    render(<GlobalSettingsPage />);
     await screen.findByRole('heading', { name: /global defaults/i });
 
     const globalSiteName = await screen.findByLabelText(/global site name/i);
