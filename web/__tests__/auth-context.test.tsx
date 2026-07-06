@@ -368,7 +368,7 @@ describe('AuthContext', () => {
     expect(screen.getByTestId('authenticated')).toHaveTextContent('Not authenticated');
   });
 
-  // ── WC-d4340daf: dual-claim JWT decode (token-fallback login path) ──────────
+  // ── Canonical JWT decode (token-fallback login path), ADR 0005 §5 ──────────
 
   /** Build an unsigned JWT-shaped string with the given payload claims. */
   function fakeJwt(payload: Record<string, unknown>): string {
@@ -432,7 +432,11 @@ describe('AuthContext', () => {
     });
   });
 
-  test('testTokenDecodeFallsBackToLegacyClaims', async () => {
+  test('testTokenDecodeIgnoresLegacyOnlyClaims', async () => {
+    // Post-cutover (WC-idcut-E/F): a token carrying ONLY the retired legacy
+    // {user_id, tenant_id} claims (no profile_id) is not a valid identity, so
+    // the decode fallback populates NO user — it fails closed rather than
+    // resurrecting the dropped claim shape.
     await loginWithTokenOnly(
       fakeJwt({
         user_id: 5,
@@ -443,8 +447,8 @@ describe('AuthContext', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId('user-id')).toHaveTextContent('5');
-      expect(screen.getByTestId('tenant-id')).toHaveTextContent('3');
+      expect(screen.getByTestId('user-id')).toHaveTextContent('none');
+      expect(screen.getByTestId('tenant-id')).toHaveTextContent('none');
     });
   });
 

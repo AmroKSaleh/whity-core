@@ -23,7 +23,7 @@ export interface Membership {
 interface AuthContextType {
   user: User | null;
   /** The authenticated profile's active memberships (WC-f8164c87). Empty array
-   * for unauthenticated or legacy-token sessions. */
+   * for unauthenticated sessions. */
   memberships: Membership[];
   isLoading: boolean;
   error: string | null;
@@ -47,13 +47,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 interface JWTPayload {
   exp?: number;
-  id?: number;
-  user_id?: number;
-  tenant_id?: number;
   /**
-   * New identity claims (WC-d4340daf, ADR 0005 §5). Preferred over the legacy
-   * user_id / tenant_id pair when present; the legacy claims remain readable
-   * during the dual-claim compatibility window.
+   * Canonical identity claims (ADR 0005 §5): profile_id is the identity and
+   * active_tenant_id the session's tenant. The legacy {user_id, tenant_id}
+   * dual-claim window was removed by the identity hard cutover (WC-idcut-E/F).
    */
   profile_id?: number;
   active_tenant_id?: number;
@@ -159,19 +156,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(data.user);
       } else if (typeof data.token === 'string') {
         const payload = decodeJWT(data.token);
-        // Dual-claim window (WC-d4340daf): prefer the new {profile_id,
-        // active_tenant_id} claims, falling back to the legacy id/user_id and
-        // tenant_id claims for tokens minted before the claim-model change.
-        const userId = payload?.profile_id ?? payload?.id ?? payload?.user_id;
+        // Canonical claims only (ADR 0005 §5): profile_id is the identity,
+        // active_tenant_id the session's tenant. Used purely to populate the
+        // in-memory profile for rendering; the token is never persisted.
+        const profileId = payload?.profile_id;
         const tenantId =
-          typeof payload?.active_tenant_id === 'number'
-            ? payload.active_tenant_id
-            : typeof payload?.tenant_id === 'number'
-              ? payload.tenant_id
-              : 0;
-        if (payload && userId && payload.email) {
+          typeof payload?.active_tenant_id === 'number' ? payload.active_tenant_id : 0;
+        if (payload && profileId && payload.email) {
           setUser({
-            id: userId,
+            id: profileId,
             email: payload.email,
             role: payload.role || '',
             tenant_id: tenantId,
