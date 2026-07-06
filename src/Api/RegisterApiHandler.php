@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use PDO;
+use Whity\Core\Identity\EmailVerificationPolicy;
+use Whity\Core\Identity\EmailVerificationProvider;
+use Whity\Core\Identity\NullEmailVerificationProvider;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -35,8 +38,15 @@ final class RegisterApiHandler
     /** The base (global, NULL-tenant) role the workspace owner is granted. */
     private const OWNER_ROLE = 'admin';
 
-    public function __construct(private PDO $db)
+    private PDO $db;
+    private EmailVerificationProvider $verificationProvider;
+
+    public function __construct(PDO $db, ?EmailVerificationProvider $verificationProvider = null)
     {
+        $this->db = $db;
+        // Default to the MVP no-op provider; a real one is bound in the
+        // composition root when EMAIL_VERIFICATION_ENFORCED is turned on.
+        $this->verificationProvider = $verificationProvider ?? new NullEmailVerificationProvider();
     }
 
     public function register(Request $request): Response
@@ -81,6 +91,12 @@ final class RegisterApiHandler
             if ($displayName === '') {
                 $displayName = self::localPart($email);
             }
+
+            // Email-verification enforcement (WC-235): default OFF (MVP). When ON,
+            // the primary email starts unverified and we hand off to the provider
+            // after commit; when OFF, the email is self-attested verified and
+            // nothing is sent. Flipping the flag needs no change to this handler.
+            $enforced = EmailVerificationPolicy::isEnforced();
 
             // ── Resolve the base owner role; fail closed if the platform has not
             //    been seeded (a workspace owner cannot exist without it). ────────
@@ -145,11 +161,16 @@ final class RegisterApiHandler
                     ]
                 );
 
-                // 3. Primary verified email (self-attested by the owner at signup).
+                // 3. Primary email. When verification is enforced the address
+                // starts UNVERIFIED (the provider drives the confirm round-trip);
+                // otherwise it is self-attested verified at signup (MVP default).
+                // The literal is a controlled boolean (never user input) and is
+                // portable across Postgres + the SQLite test shim.
+                $verifiedLiteral = $enforced ? 'false' : 'true';
                 // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL table (ADR 0005 §2)
                 $this->db->prepare(
-                    'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-                     VALUES (:profile_id, :email, true, true, NOW())'
+                    "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+                     VALUES (:profile_id, :email, {$verifiedLiteral}, true, NOW())"
                 )->execute([':profile_id' => $profileId, ':email' => $email]);
 
                 // 4. Active owner membership binding the profile to the new tenant.
@@ -172,11 +193,24 @@ final class RegisterApiHandler
                 throw $e;
             }
 
+            // Hand off to the verification provider AFTER commit (never inside the
+            // transaction), and only when enforced. A delivery failure must not
+            // undo the already-created account — log it and still return 201; the
+            // owner can re-request verification. (The MVP provider is a no-op.)
+            if ($enforced) {
+                try {
+                    $this->verificationProvider->sendVerification($profileId, $email);
+                } catch (\Throwable $e) {
+                    error_log('[register] verification dispatch failed for profile ' . $profileId . ': ' . $e->getMessage());
+                }
+            }
+
             return Response::json([
                 'data' => [
-                    'profile_id' => $profileId,
-                    'tenant_id'  => $tenantId,
-                    'email'      => $email,
+                    'profile_id'            => $profileId,
+                    'tenant_id'             => $tenantId,
+                    'email'                 => $email,
+                    'verification_required' => $enforced,
                 ],
             ], 201);
         } catch (\Throwable $e) {
