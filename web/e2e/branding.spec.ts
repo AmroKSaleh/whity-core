@@ -1,6 +1,7 @@
 import { test, expect } from './support/fixtures';
-import { ADMIN, uniqueSuffix } from './support/constants';
+import { SYSTEM_ADMIN, uniqueSuffix } from './support/constants';
 import { createAuthedApi } from './support/api';
+import { systemStatePath } from './support/storage';
 
 /**
  * WC-233 — Tenant Branding: display wiring (Slice 4, no upload UI).
@@ -114,13 +115,15 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
     const originalSiteName = original.siteName;
 
     const testSiteName = `E2E Brand ${uniqueSuffix()}`;
-    const api = await createAuthedApi(baseURL!, ADMIN);
+    // The public branding endpoint (GET /api/v1/branding) carries no auth and
+    // resolves the tenant by host, so in CI the document <title> reflects the
+    // GLOBAL site_name. Global defaults are system-tenant-only (WC-235), so the
+    // write must go through the SYSTEM-TENANT admin against /settings/global —
+    // a regular tenant admin (ADMIN, tenant 1) would be rejected with 403.
+    const api = await createAuthedApi(baseURL!, SYSTEM_ADMIN);
 
     try {
-      // (b) Set a unique known test value via the GLOBAL settings endpoint.
-      // admin@example.com is the system tenant (id 0) which has no per-tenant
-      // override layer — it must use /api/v1/settings/global, NOT /api/v1/settings
-      // (which 422s for the system tenant).
+      // (b) Set a unique known global site_name.
       const patchRes = await api.patch('/api/v1/settings/global', {
         data: { settings: { site_name: testSiteName } },
       });
@@ -166,23 +169,28 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Logo/favicon round-trips — require Slice-5 upload UI
-// (web/components/branding-settings.tsx mounted at /admin/settings).
+// Logo/favicon round-trips — require Slice-5 upload UI, driven on the GLOBAL
+// branding page (web/components/branding-settings.tsx at /admin/settings/global).
 //
-// Controls are driven via data-testid attributes added by BrandingSettings:
-//   branding-file-input-logo_wide-global   (hidden file input, wide logo global scope)
-//   branding-file-input-favicon-global     (hidden file input, favicon global scope)
-//   branding-clear-btn-logo_wide-global    (Clear button for wide logo global scope)
-//   branding-upload-btn-logo_wide-global   (Upload trigger button)
-// The global scope is used because admin@example.com is the system tenant
-// (tenantOverridable=false), which shows only global controls.
+// These assert the DISPLAY surfaces (dashboard sidebar, favicon <link>). The
+// public branding endpoint resolves the tenant by host and carries no auth, so
+// in CI those surfaces reflect GLOBAL branding — which after WC-235 only the
+// SYSTEM-TENANT admin may manage. The whole block therefore runs under the
+// system-tenant session and uploads via the variant='global' controls:
+//   branding-file-input-logo_wide-global   (hidden file input, wide logo)
+//   branding-file-input-favicon-global     (hidden file input, favicon)
+//   branding-clear-btn-logo_wide-global    (Clear button for wide logo)
 // ---------------------------------------------------------------------------
 
 test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => {
+  // Global branding is system-tenant-only (WC-235): drive this block as the
+  // system-tenant admin, overriding the [admin] project's default session.
+  test.use({ storageState: systemStatePath });
+
   test.afterAll(async ({ baseURL }) => {
     if (!baseURL) return;
-    // Clean up any uploaded assets via the branding API.
-    const api = await createAuthedApi(baseURL, ADMIN);
+    // Clean up any uploaded GLOBAL assets via the branding API (system tenant).
+    const api = await createAuthedApi(baseURL, SYSTEM_ADMIN);
     for (const key of ['logo_wide', 'logo_square', 'favicon'] as const) {
       await api.delete(`/api/v1/branding/global/assets/${key}`).catch(() => undefined);
     }
@@ -190,14 +198,16 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
   });
 
   test('uploading a wide logo shows an <img> in the sidebar (not text)', async ({ page, baseURL }) => {
-    // Navigate to /admin/settings, find the BrandingSettings "Wide logo"
+    // Navigate to /admin/settings/global, find the BrandingSettings "Wide logo"
     // global-scope file input (data-testid), upload a PNG, wait for the
     // success toast, then navigate to the dashboard and assert the sidebar
     // renders an <img alt="…"> rather than an <h1> text node.
     if (!baseURL) test.skip();
 
-    await page.goto('/admin/settings');
-    await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible();
+    await page.goto('/admin/settings/global');
+    await expect(
+      page.getByRole('heading', { name: 'Global branding defaults', exact: true })
+    ).toBeVisible();
 
     // Use the data-testid selector for the hidden file input — more reliable
     // than the accept-attribute selector when multiple inputs share a type.
@@ -258,7 +268,7 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     // route. This is testable via page.evaluate on document.head.
     if (!baseURL) test.skip();
 
-    await page.goto('/admin/settings');
+    await page.goto('/admin/settings/global');
 
     // Minimal ICO header — keep the bytes so we can assert round-trip integrity.
     const uploadedIcoBytes = Buffer.from('00000100', 'hex');
@@ -295,7 +305,7 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     // With a logo uploaded from the previous test, click the Clear button for
     // the wide logo in the branding settings (global scope), then assert the
     // sidebar reverts to text.
-    await page.goto('/admin/settings');
+    await page.goto('/admin/settings/global');
     await page.getByTestId('branding-clear-btn-logo_wide-global').click();
     await expect(page.getByText('Wide logo cleared.')).toBeVisible({ timeout: 10_000 });
 

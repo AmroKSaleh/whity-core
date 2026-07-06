@@ -264,6 +264,39 @@ final class SettingsApiRealEngineTest extends TestCase
         );
     }
 
+    /**
+     * WC-235 SECURITY regression: a REGULAR tenant's admin holds settings:manage
+     * within its OWN tenant, but the global (platform-wide) defaults are a
+     * SYSTEM-TENANT resource. Without the system-tenant gate, any self-service-
+     * registered tenant owner (who is granted the admin role, including
+     * settings:manage) could read and edit the whole install's settings —
+     * a cross-tenant privilege escalation. The manage permission is necessary
+     * but NOT sufficient: the caller must be acting in the system tenant (id 0).
+     */
+    public function testGlobalEndpointsRejectManageCallerOutsideSystemTenant(): void
+    {
+        // USER_FULL holds all three settings perms (incl. settings:manage) in
+        // Tenant A — but Tenant A is NOT the system tenant.
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $get = $this->handler->getGlobal(
+            $this->req('GET', '/api/settings/global', null, self::USER_FULL)
+        );
+        self::assertSame(403, $get->getStatusCode(), $get->getBody());
+
+        $patch = $this->handler->patchGlobal(
+            $this->req('PATCH', '/api/settings/global', ['settings' => ['timezone' => 'Europe/Berlin']], self::USER_FULL)
+        );
+        self::assertSame(403, $patch->getStatusCode(), $patch->getBody());
+
+        // The rejected write must not have touched the global defaults.
+        self::assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM app_settings')->fetchColumn(),
+            'A regular-tenant manage caller must never write a global default.'
+        );
+    }
+
     public function testPatchGlobalUpsertsGlobalDefaultForManageCaller(): void
     {
         TenantContext::setTenantId(self::SYSTEM_TENANT);

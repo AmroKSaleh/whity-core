@@ -42,7 +42,6 @@ import {
 // ---------------------------------------------------------------------------
 
 const SETTINGS_WRITE = 'settings:write';
-const SETTINGS_MANAGE = 'settings:manage';
 
 // ---------------------------------------------------------------------------
 // Asset metadata
@@ -223,16 +222,25 @@ function AssetUploader({ meta, scope, currentUrl, disabled, onSuccess, onClearSu
 
 export interface BrandingSettingsProps {
   /** False when the current tenant is the system tenant (no per-tenant layer). */
-  tenantOverridable: boolean;
+  tenantOverridable?: boolean;
+  /**
+   * Which surface to render (WC-235):
+   *  - 'tenant' (default) → the per-tenant branding assets, for /admin/settings.
+   *  - 'global'           → the platform-wide branding defaults + custom host,
+   *    for the system-tenant-only /admin/settings/global page.
+   * The global surface must never be rendered on the tenant page (a regular
+   * tenant admin holds settings:manage but the backend gates global writes to
+   * the system tenant).
+   */
+  variant?: 'tenant' | 'global';
 }
 
-export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
+export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' }: BrandingSettingsProps) {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
 
   const canWrite = hasPermission(SETTINGS_WRITE);
-  const canManage = hasPermission(SETTINGS_MANAGE);
 
   // ---------------------------------------------------------------------------
   // Fetch the current effective branding (live preview source)
@@ -311,7 +319,8 @@ export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
 
   return (
     <>
-      {/* ---- Tenant branding card ---- */}
+      {/* ---- Tenant branding card (variant='tenant') ---- */}
+      {variant === 'tenant' && (
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
@@ -335,9 +344,9 @@ export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
               <IconInfoCircle className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
               <p>
                 As the system tenant, you have no per-tenant branding overrides. Edit the
-                platform-wide branding assets in{' '}
+                platform-wide branding assets under{' '}
                 <strong className="font-medium text-foreground">Global branding defaults</strong>{' '}
-                below.
+                on the Global Settings page.
               </p>
             </div>
           ) : (
@@ -359,9 +368,10 @@ export function BrandingSettings({ tenantOverridable }: BrandingSettingsProps) {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {/* ---- Global branding defaults card (settings:manage only) ---- */}
-      {canManage && (
+      {/* ---- Global branding defaults card (variant='global', system tenant only) ---- */}
+      {variant === 'global' && (
         <Card className="border border-border bg-card shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2">

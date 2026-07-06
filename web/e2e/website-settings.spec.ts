@@ -75,10 +75,18 @@ test.describe('Website Settings — admin (settings:read/write/manage)', () => {
     await expect(page.getByLabel('Timezone', { exact: true })).toHaveValue(newTz);
   });
 
-  test('shows the Global defaults section to a settings:manage admin', async ({ page }) => {
+  test('global defaults are off the tenant page and denied to a non-system-tenant admin (WC-235)', async ({ page }) => {
+    // Global (system-wide) defaults moved to /admin/settings/global and are gated
+    // to the system tenant (id 0). ADMIN is a REGULAR tenant admin: even though it
+    // holds settings:manage, it must NOT see the global form on the tenant page…
     await openWebsiteSettings(page);
-    await expect(page.getByRole('heading', { name: 'Global defaults' })).toBeVisible();
-    await expect(page.getByLabel('Global site name', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Global defaults' })).toHaveCount(0);
+    await expect(page.getByLabel('Global site name', { exact: true })).toHaveCount(0);
+
+    // …and must be denied when navigating directly to the global page.
+    await page.goto('/admin/settings/global');
+    await expect(page.getByRole('heading', { name: 'Access Denied' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Global defaults' })).toHaveCount(0);
   });
 });
 

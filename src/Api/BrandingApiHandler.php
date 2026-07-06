@@ -141,7 +141,8 @@ final class BrandingApiHandler
     /** @param array<string, mixed> $params */
     private function handleUpload(Request $request, array $params, string $perm, bool $global): Response
     {
-        $ctx = $this->authorize($request, $perm);
+        // Global uploads require the system tenant; tenant uploads do not.
+        $ctx = $this->authorize($request, $perm, $global);
         if ($ctx instanceof Response) {
             return $ctx;
         }
@@ -184,7 +185,8 @@ final class BrandingApiHandler
     /** @param array<string, mixed> $params */
     private function handleClear(Request $request, array $params, string $perm, bool $global): Response
     {
-        $ctx = $this->authorize($request, $perm);
+        // Global clears require the system tenant; tenant clears do not.
+        $ctx = $this->authorize($request, $perm, $global);
         if ($ctx instanceof Response) {
             return $ctx;
         }
@@ -221,7 +223,11 @@ final class BrandingApiHandler
      */
     public function setBrandingHost(Request $request, array $params = []): Response
     {
-        $ctx = $this->authorize($request, CorePermissions::SETTINGS_MANAGE);
+        // The domain→tenant host mapping is a platform concern (it routes every
+        // request) and this takes the target tenant from the path — restrict to
+        // the system tenant so a tenant admin cannot claim/rewrite another
+        // tenant's host.
+        $ctx = $this->authorize($request, CorePermissions::SETTINGS_MANAGE, systemTenantOnly: true);
         if ($ctx instanceof Response) {
             return $ctx;
         }
@@ -250,7 +256,7 @@ final class BrandingApiHandler
     }
 
     /** @return array{tenantId:int,userId:int}|Response */
-    private function authorize(Request $request, string $permission): array|Response
+    private function authorize(Request $request, string $permission, bool $systemTenantOnly = false): array|Response
     {
         if ($this->roleChecker === null) {
             return Response::error('Forbidden', 403);
@@ -263,6 +269,15 @@ final class BrandingApiHandler
         $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id) ? $actor->profile_id : null;
         if ($userId === null || !$this->roleChecker->hasPermissionForProfile($userId, $permission, $tenantId)) {
             return Response::error('Insufficient permissions', 403, ['required' => $permission]);
+        }
+        // Global branding defaults and the domain→tenant host mapping are
+        // PLATFORM resources (they affect the whole install / route every
+        // tenant). settings:manage is held by every tenant's admin, so it is
+        // necessary but not sufficient: these operations require the system
+        // tenant (id 0). Prevents a self-service-registered tenant owner from
+        // rewriting global branding or claiming another tenant's host (WC-235).
+        if ($systemTenantOnly && $tenantId !== 0) {
+            return Response::error('Global branding is managed by the system tenant only', 403);
         }
         return ['tenantId' => $tenantId, 'userId' => $userId];
     }

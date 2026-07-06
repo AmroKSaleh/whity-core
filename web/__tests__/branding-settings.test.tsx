@@ -179,21 +179,24 @@ describe('BrandingSettings — system tenant (!tenantOverridable)', () => {
 // Gate 3: custom-host field absent without settings:manage
 // ---------------------------------------------------------------------------
 
-describe('BrandingSettings — settings:manage gate', () => {
-  it('does not render the custom-host field without settings:manage', async () => {
-    grant('settings:write'); // has write but NOT manage
-    render(<BrandingSettings tenantOverridable={true} />);
+describe('BrandingSettings — tenant vs global variant (WC-235)', () => {
+  it('the tenant variant never renders the global branding section or custom-host', async () => {
+    // Even WITH settings:manage, the tenant surface has no global section — the
+    // global branding + host moved to the system-tenant-only global page.
+    grant('settings:write', 'settings:manage');
+    render(<BrandingSettings variant="tenant" tenantOverridable={true} />);
 
     await waitFor(() =>
       expect(screen.getByTestId('branding-upload-btn-logo_wide-tenant')).toBeInTheDocument()
     );
 
     expect(screen.queryByTestId('branding-custom-host-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('branding-upload-btn-logo_wide-global')).not.toBeInTheDocument();
   });
 
-  it('renders the global branding section and custom-host field with settings:manage', async () => {
+  it('the global variant renders the global branding section and custom-host field', async () => {
     grant('settings:write', 'settings:manage');
-    render(<BrandingSettings tenantOverridable={true} />);
+    render(<BrandingSettings variant="global" />);
 
     await waitFor(() =>
       expect(screen.getByTestId('branding-custom-host-input')).toBeInTheDocument()
@@ -203,9 +206,9 @@ describe('BrandingSettings — settings:manage gate', () => {
     expect(screen.getByTestId('branding-upload-btn-logo_wide-global')).toBeInTheDocument();
   });
 
-  it('calls setBrandingHost on Save host click', async () => {
+  it('calls setBrandingHost on Save host click (global variant)', async () => {
     grant('settings:write', 'settings:manage');
-    render(<BrandingSettings tenantOverridable={true} />);
+    render(<BrandingSettings variant="global" />);
 
     await waitFor(() =>
       expect(screen.getByTestId('branding-custom-host-input')).toBeInTheDocument()

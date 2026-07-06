@@ -21,6 +21,24 @@ export const REGULAR_USER: Credentials = {
 };
 
 /**
+ * The seeded SYSTEM-TENANT (id 0) admin. It holds the admin role in tenant 0,
+ * which grants `settings:manage` (migration 026), so it is the ONLY identity
+ * allowed to read/write the GLOBAL platform defaults and global branding after
+ * WC-235 restricted those surfaces to the system tenant. Regular tenant admins
+ * (e.g. {@link ADMIN}, tenant 1) can only manage their own tenant's overrides.
+ *
+ * The public effective-branding endpoint (GET /api/v1/branding) resolves the
+ * tenant by host and carries NO auth context, so in CI (no per-tenant host) the
+ * document <title>, login heading and sidebar all reflect GLOBAL branding —
+ * which is why every branding-DISPLAY assertion is driven by this account's
+ * global writes, not a tenant override.
+ */
+export const SYSTEM_ADMIN: Credentials = {
+  email: process.env.E2E_SYSTEM_EMAIL ?? 'superuser@example.com',
+  password: process.env.E2E_SYSTEM_PASSWORD ?? 'superuser123',
+};
+
+/**
  * The delegation-granted account. Unlike ADMIN/REGULAR_USER it is NOT seeded:
  * the auth setup project provisions it idempotently through the admin API
  * (role `user`, so its ROLE grants nothing beyond the regular user) and then
