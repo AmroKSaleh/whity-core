@@ -232,6 +232,9 @@ class UsersApiHandler
             }
 
             $tenantId = TenantContext::getTenantId();
+            if ($tenantId === null) {
+                return Response::error('Tenant context required', 400);
+            }
             $row = $this->fetchMembershipRow((int)$id, $tenantId);
             if ($row === null) {
                 return Response::error('User not found', 404);
@@ -290,6 +293,9 @@ class UsersApiHandler
 
             $email = (string)$body['email'];
             $tenantId = TenantContext::getTenantId();
+            if ($tenantId === null) {
+                return Response::error('Tenant context required', 400);
+            }
 
             // Resolve the submitted role (a NAME as the Create form sends it, or a
             // numeric role_id). Absent role defaults to the global `user` role;
@@ -435,6 +441,9 @@ class UsersApiHandler
             }
 
             $currentTenantId = TenantContext::getTenantId();
+            if ($currentTenantId === null) {
+                return Response::error('Tenant context required', 400);
+            }
             $body = JsonBody::parsed($request);
             $profileId = (int)$id;
 
@@ -659,6 +668,9 @@ class UsersApiHandler
             }
 
             $currentTenantId = TenantContext::getTenantId();
+            if ($currentTenantId === null) {
+                return Response::error('Tenant context required', 400);
+            }
             $profileId = (int)$id;
 
             // Guard: the membership must exist in the caller's tenant.
