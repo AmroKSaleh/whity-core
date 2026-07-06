@@ -9,7 +9,8 @@ use PDO;
 /**
  * Seeder class for database initialization
  *
- * Seeds default tenant, roles, and users with hashed passwords.
+ * Seeds the default tenant, roles, and profile-model identity rows
+ * (profiles + profile_emails + memberships) with hashed passwords.
  * All inserts use ON CONFLICT for idempotent execution.
  *
  * Initial user passwords are sourced from the INITIAL_ADMIN_PASSWORD,
@@ -24,15 +25,15 @@ use PDO;
  * the global base roles (NULL-tenant roles) and every tenant — see
  * WC-110/WC-223.
  *
- * Profile model (ADR 0005 / WC-10522424)
- * ──────────────────────────────────────
- * Every seeded account is ALSO provisioned as a profile + profile_email +
+ * Profile model (ADR 0005 / WC-10522424 / WC-idcut-F)
+ * ───────────────────────────────────────────────────
+ * Every seeded account is provisioned as a profile + profile_email +
  * membership so that on a fresh install the system admin (system@whity.local,
  * tenant 0) and the dev fixtures (admin@example.com, user@example.com,
- * superuser@example.com) can authenticate through the new profile login path
- * (AuthHandler::identityClaims) introduced by the dual-claim window
- * (WC-d4340daf).  The users rows are kept in parallel — both identity layers
- * co-exist during Phase B.
+ * superuser@example.com) authenticate through the profile login path
+ * (AuthHandler::identityClaims). The legacy `users` table was retired by the
+ * identity hard cutover (migration 042), so profiles/profile_emails/memberships
+ * are now the sole identity layer.
  *
  * All profile/profile_email/membership inserts use ON CONFLICT guards so
  * re-seeding is idempotent.
@@ -87,47 +88,6 @@ class Seeder
         $userPassword      = InitialPassword::hashFor('INITIAL_USER_PASSWORD', 'user@example.com');
         $superuserPassword = InitialPassword::hashFor('INITIAL_SUPERUSER_PASSWORD', 'superuser@example.com');
         $systemPassword    = InitialPassword::hashFor('INITIAL_SYSTEM_ADMIN_PASSWORD', 'system@whity.local');
-
-        // ── Seed users table (legacy identity layer, Phase B) ─────────────────
-
-        // admin@example.com — default-tenant admin
-        $db->query(
-            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (:tenant_id, :email, :password, :role_id, NOW())
-             ON CONFLICT (tenant_id, email) DO NOTHING',
-            [
-                ':tenant_id' => $tenantId,
-                ':email'     => 'admin@example.com',
-                ':password'  => $adminPassword,
-                ':role_id'   => $adminRoleId,
-            ]
-        );
-
-        // user@example.com — default-tenant regular user
-        $db->query(
-            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (:tenant_id, :email, :password, :role_id, NOW())
-             ON CONFLICT (tenant_id, email) DO NOTHING',
-            [
-                ':tenant_id' => $tenantId,
-                ':email'     => 'user@example.com',
-                ':password'  => $userPassword,
-                ':role_id'   => $userRoleId,
-            ]
-        );
-
-        // superuser@example.com — system-tenant (id 0) superuser
-        // @tenant-guard-ignore: seed-time bootstrap; system-tenant (0) superuser
-        $db->query(
-            'INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (0, :email, :password, :role_id, NOW())
-             ON CONFLICT (tenant_id, email) DO NOTHING',
-            [
-                ':email'    => 'superuser@example.com',
-                ':password' => $superuserPassword,
-                ':role_id'  => $adminRoleId,
-            ]
-        );
 
         // ── Seed profile model (ADR 0005, WC-10522424) ────────────────────────
         // Each account gets: profile row + primary verified profile_email +
