@@ -516,6 +516,16 @@ parameters:
 			path: tests/Api/PluginsApiHandlerTest.php
 
 		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Api/RegisterApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 9
+			path: tests/Api/RegisterApiHandlerRealEngineTest.php
+
+		-
 			message: "#^Offset 'display_name' does not exist on array\\<string, mixed\\>\\|null\\.$#"
 			count: 1
 			path: tests/Api/RelationsApiHandlerRealEngineTest.php
