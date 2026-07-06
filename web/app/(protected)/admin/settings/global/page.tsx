@@ -11,6 +11,7 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { IconAlertCircle, IconDeviceFloppy, IconWorld } from '@tabler/icons-react';
+import { BrandingSettings } from '@/components/branding-settings';
 import {
   SETTINGS_MANAGE,
   SYSTEM_TENANT_ID,
@@ -80,6 +81,7 @@ export default function GlobalSettingsPage() {
         description="System-wide defaults applied to every tenant that has not overridden a value. Managed by the system tenant only."
       />
       <GlobalSettingsSection addToast={addToast} />
+      <BrandingSettings variant="global" />
     </div>
   );
 }

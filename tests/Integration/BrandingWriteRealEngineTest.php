@@ -159,7 +159,7 @@ final class BrandingWriteRealEngineTest extends TestCase
 
     public function testGlobalUploadSucceedsForManageCaller(): void
     {
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
         $req = $this->multipartReq('POST', '/api/v1/branding/global/assets/logo_wide', self::USER_FULL, $this->fakePng());
         $res = $this->handler->uploadGlobal($req, ['key' => 'logo_wide']);
         self::assertSame(200, $res->getStatusCode(), $res->getBody());
@@ -170,7 +170,7 @@ final class BrandingWriteRealEngineTest extends TestCase
 
     public function testGlobalClearSucceedsForManageCaller(): void
     {
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
         // Upload first
         $up = $this->multipartReq('POST', '/api/v1/branding/global/assets/favicon', self::USER_FULL, $this->fakePng());
         $this->handler->uploadGlobal($up, ['key' => 'favicon']);
@@ -180,11 +180,32 @@ final class BrandingWriteRealEngineTest extends TestCase
         self::assertSame(200, $res->getStatusCode(), $res->getBody());
     }
 
+    /**
+     * WC-235 SECURITY regression: global branding defaults + the domain→tenant
+     * host mapping are SYSTEM-TENANT resources. A REGULAR tenant's admin holds
+     * settings:manage within its own tenant, but must NOT write the platform-wide
+     * branding (every tenant sees it) nor claim/rewrite a tenant's host.
+     */
+    public function testGlobalBrandingAndHostRejectedForNonSystemTenantManageCaller(): void
+    {
+        // USER_FULL is an admin in Tenant A (holds settings:manage there).
+        TenantContext::setTenantId(self::TENANT_A);
+
+        $up = $this->multipartReq('POST', '/api/v1/branding/global/assets/logo_wide', self::USER_FULL, $this->fakePng());
+        self::assertSame(403, $this->handler->uploadGlobal($up, ['key' => 'logo_wide'])->getStatusCode());
+
+        $del = $this->plainReq('DELETE', '/api/v1/branding/global/assets/logo_wide', self::USER_FULL);
+        self::assertSame(403, $this->handler->clearGlobal($del, ['key' => 'logo_wide'])->getStatusCode());
+
+        $host = $this->jsonReq('PUT', '/api/v1/tenants/1/branding-host', self::USER_FULL, ['host' => 'evil.example.com']);
+        self::assertSame(403, $this->handler->setBrandingHost($host, ['id' => '1'])->getStatusCode());
+    }
+
     // ==================== Task 3.4: setBrandingHost ====================
 
     public function testSetBrandingHostValidHost(): void
     {
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
         $req = $this->jsonReq('PUT', '/api/v1/tenants/1/branding-host', self::USER_FULL, ['host' => 'brand.example.com']);
         $res = $this->handler->setBrandingHost($req, ['id' => '1']);
         self::assertSame(200, $res->getStatusCode(), $res->getBody());
@@ -194,7 +215,7 @@ final class BrandingWriteRealEngineTest extends TestCase
 
     public function testSetBrandingHostNullClears(): void
     {
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
         $req = $this->jsonReq('PUT', '/api/v1/tenants/1/branding-host', self::USER_FULL, ['host' => null]);
         $res = $this->handler->setBrandingHost($req, ['id' => '1']);
         self::assertSame(200, $res->getStatusCode(), $res->getBody());
@@ -204,7 +225,7 @@ final class BrandingWriteRealEngineTest extends TestCase
 
     public function testSetBrandingHostEmptyStringClears(): void
     {
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
         $req = $this->jsonReq('PUT', '/api/v1/tenants/1/branding-host', self::USER_FULL, ['host' => '']);
         $res = $this->handler->setBrandingHost($req, ['id' => '1']);
         self::assertSame(200, $res->getStatusCode(), $res->getBody());
@@ -214,7 +235,7 @@ final class BrandingWriteRealEngineTest extends TestCase
 
     public function testSetBrandingHostBadFormatIs422(): void
     {
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
         $req = $this->jsonReq('PUT', '/api/v1/tenants/1/branding-host', self::USER_FULL, ['host' => 'notahostname']);
         $res = $this->handler->setBrandingHost($req, ['id' => '1']);
         self::assertSame(422, $res->getStatusCode());
@@ -225,7 +246,7 @@ final class BrandingWriteRealEngineTest extends TestCase
     {
         // Tenant 2 already holds 'dup.example.com'
         $this->pdo->exec("INSERT INTO tenants (id, name, slug, branding_host) VALUES (2, 'Other', 'other', 'dup.example.com')");
-        TenantContext::setTenantId(self::TENANT_A);
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
         $req = $this->jsonReq('PUT', '/api/v1/tenants/1/branding-host', self::USER_FULL, ['host' => 'dup.example.com']);
         $res = $this->handler->setBrandingHost($req, ['id' => '1']);
         self::assertSame(409, $res->getStatusCode());

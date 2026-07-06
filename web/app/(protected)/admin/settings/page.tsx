@@ -98,7 +98,7 @@ export default function AdminSettingsPage() {
         </Link>
       )}
       <TenantSettingsSection canWrite={canWrite} addToast={addToast} />
-      <BrandingSettings tenantOverridable={tenantOverridable} />
+      <BrandingSettings variant="tenant" tenantOverridable={tenantOverridable} />
     </div>
   );
 }
