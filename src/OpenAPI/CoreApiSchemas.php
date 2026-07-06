@@ -1232,6 +1232,12 @@ final class CoreApiSchemas
      */
     public static function components(): array
     {
+        // WC-f3660e68 (ADR 0005 hard cutover): `id` is now the canonical
+        // profile_id (profiles.id), NOT a legacy users.id. A "user" in a tenant
+        // is an ACTIVE membership; role/ou_id/status come from that membership,
+        // email/name from the profile identity. `status` is the membership
+        // lifecycle state (active|invited|suspended); the list only returns
+        // 'active' but reads may surface others.
         $user = self::object([
             'id' => self::int(),
             'name' => self::str(),
@@ -1240,6 +1246,7 @@ final class CoreApiSchemas
             'tenantId' => self::int(),
             'ou_id' => self::int(true),
             'createdAt' => self::str(true),
+            'status' => self::str(),
         ], ['id', 'name', 'email', 'role', 'tenantId', 'createdAt']);
 
         $permission = self::object([
