@@ -123,7 +123,7 @@ final class SettingsApiHandler
      */
     public function getGlobal(Request $request): Response
     {
-        $context = $this->authorize($request, CorePermissions::SETTINGS_MANAGE);
+        $context = $this->authorize($request, CorePermissions::SETTINGS_MANAGE, systemTenantOnly: true);
         if ($context instanceof Response) {
             return $context;
         }
@@ -153,7 +153,7 @@ final class SettingsApiHandler
      */
     public function patchGlobal(Request $request): Response
     {
-        $context = $this->authorize($request, CorePermissions::SETTINGS_MANAGE);
+        $context = $this->authorize($request, CorePermissions::SETTINGS_MANAGE, systemTenantOnly: true);
         if ($context instanceof Response) {
             return $context;
         }
@@ -275,7 +275,7 @@ final class SettingsApiHandler
      *         Response (403) when the tenant is unresolved or the permission is
      *         not held.
      */
-    private function authorize(Request $request, string $permission): array|Response
+    private function authorize(Request $request, string $permission, bool $systemTenantOnly = false): array|Response
     {
         $tenantId = TenantContext::getTenantId();
         if ($tenantId === null) {
@@ -289,6 +289,17 @@ final class SettingsApiHandler
 
         if ($userId === null || !$this->roleChecker->hasPermissionForProfile($userId, $permission, $tenantId)) {
             return Response::error('Insufficient permissions', 403, ['required' => $permission]);
+        }
+
+        // Global (platform-wide) settings are a SYSTEM-TENANT resource: they
+        // affect the whole install / every tenant. A regular tenant's admin holds
+        // settings:manage within its OWN tenant, but that must NEVER reach the
+        // global defaults — otherwise any self-service-registered tenant owner
+        // could edit platform settings (cross-tenant escalation, WC-235). The
+        // permission is necessary but not sufficient: the caller must also be
+        // acting in the system tenant (id 0).
+        if ($systemTenantOnly && $tenantId !== SettingsService::SYSTEM_TENANT_ID) {
+            return Response::error('Global settings are managed by the system tenant only', 403);
         }
 
         return ['tenantId' => $tenantId, 'userId' => $userId];
