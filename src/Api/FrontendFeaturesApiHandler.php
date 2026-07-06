@@ -364,7 +364,7 @@ final class FrontendFeaturesApiHandler
     private function callerSatisfies(array $route, int $userId, int $tenantId): bool
     {
         $requiredRole = $route['requiredRole'] ?? null;
-        if (is_string($requiredRole) && !$this->roleChecker->hasRole($userId, $requiredRole, $tenantId)) {
+        if (is_string($requiredRole) && !$this->roleChecker->hasRoleForProfile($userId, $requiredRole, $tenantId)) {
             return false;
         }
 

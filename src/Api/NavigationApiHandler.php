@@ -119,7 +119,7 @@ final class NavigationApiHandler
     {
         $requiredRole = $item['requiredRole'] ?? null;
         if (is_string($requiredRole) && $requiredRole !== ''
-            && !$this->roleChecker->hasRole($userId, $requiredRole, $tenantId)) {
+            && !$this->roleChecker->hasRoleForProfile($userId, $requiredRole, $tenantId)) {
             return false;
         }
 

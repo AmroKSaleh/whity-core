@@ -120,7 +120,7 @@ final class ResourcesListHandlerTest extends TestCase
 
     public function testInvoke_excludesPermissionProtectedResource_whenPermissionNotGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(false);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -130,7 +130,7 @@ final class ResourcesListHandlerTest extends TestCase
 
     public function testInvoke_includesPermissionProtectedResource_whenPermissionGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -150,7 +150,7 @@ final class ResourcesListHandlerTest extends TestCase
 
     public function testInvoke_excludesRoleProtectedResource_whenRoleNotGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(false);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(false);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -160,7 +160,7 @@ final class ResourcesListHandlerTest extends TestCase
 
     public function testInvoke_includesRoleProtectedResource_whenRoleGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(true);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(true);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -188,7 +188,7 @@ final class ResourcesListHandlerTest extends TestCase
 
     public function testInvoke_includesPermissionProtectedTemplate_whenPermissionGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -217,7 +217,7 @@ final class ResourcesListHandlerTest extends TestCase
             ['method' => 'GET', 'path' => '/api/private', 'schema' => ['summary' => 'Private'], 'requiredRole' => null, 'requiredPermission' => 'private:read'],
         ]);
         $handler = new ResourcesListHandler($deriver, $this->roleChecker, $this->tokenValidator);
-        $this->roleChecker->method('hasPermission')->willReturn(false);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
 
         $result = ($handler)(null, self::BEARER);
 

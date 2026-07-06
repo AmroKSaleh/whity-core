@@ -760,42 +760,31 @@ class RolesApiHandler
     }
 
     /**
-     * Whether the role still has users assigned to it.
+     * Whether the role still has members assigned to it.
      *
-     * Counts `memberships.role_id` (the authoritative live signal, ADR 0005 §3)
-     * and the legacy `users.role_id` single-role column (still present until the
-     * users table is retired in a later identity cutover step). Scoped to the
-     * tenant; the SYSTEM tenant (id 0) counts globally.
+     * Counts `memberships.role_id` — the sole authoritative role-assignment
+     * signal (ADR 0005 §3) now that the legacy `users` table has been retired by
+     * the identity hard cutover (migration 042). Scoped to the tenant; the SYSTEM
+     * tenant (id 0) counts globally.
      *
      * Note: `user_roles` is no longer queried — that junction table was dropped
-     * by migration 039.
+     * by migration 039; `users` was dropped by migration 042.
      *
      * @param int      $roleId   The role id.
      * @param int|null $tenantId The resolved tenant id.
-     * @return bool True if at least one user is assigned the role.
+     * @return bool True if at least one member is assigned the role.
      */
     private function roleHasActiveUsers(int $roleId, ?int $tenantId): bool
     {
         if ($tenantId === 0 || $tenantId === null) {
             // ROLE data: memberships.role_id is the authoritative role assignment
-            // (ADR 0005 §3). Also check the legacy users.role_id column so roles
-            // actively in use via the old single-role path are protected.
-            // @tenant-guard-ignore: system-tenant (id 0) counts references across all tenants; scoped else-branch binds tenant_id in all subqueries
-            $stmt = $this->db->prepare('
-                SELECT (
-                    (SELECT COUNT(*) FROM memberships WHERE role_id = ?)
-                    + (SELECT COUNT(*) FROM users WHERE role_id = ?)
-                ) AS cnt
-            ');
-            $stmt->execute([$roleId, $roleId]);
+            // (ADR 0005 §3).
+            // @tenant-guard-ignore: system-tenant (id 0) counts references across all tenants; scoped else-branch binds tenant_id
+            $stmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM memberships WHERE role_id = ?');
+            $stmt->execute([$roleId]);
         } else {
-            $stmt = $this->db->prepare('
-                SELECT (
-                    (SELECT COUNT(*) FROM memberships WHERE role_id = ? AND tenant_id = ?)
-                    + (SELECT COUNT(*) FROM users WHERE role_id = ? AND tenant_id = ?)
-                ) AS cnt
-            ');
-            $stmt->execute([$roleId, $tenantId, $roleId, $tenantId]);
+            $stmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM memberships WHERE role_id = ? AND tenant_id = ?');
+            $stmt->execute([$roleId, $tenantId]);
         }
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

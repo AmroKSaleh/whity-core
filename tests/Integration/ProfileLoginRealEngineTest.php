@@ -640,20 +640,15 @@ final class ProfileLoginRealEngineTest extends TestCase
     }
 
     /**
-     * Seed a legacy users row (still required by the dual-claim window) and return its id.
+     * No-op retained for call-site compatibility.
+     *
+     * The legacy `users` table was retired by the identity hard cutover
+     * (migration 042); login now resolves purely via profile_emails → profiles →
+     * memberships, so no `users` row is seeded. The return value is not consumed
+     * by any test (identity is anchored on the profile id).
      */
     private function seedUser(string $email, int $tenantId): int
     {
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, datetime('now'), 0)"
-        );
-        $stmt->execute([
-            $tenantId,
-            $email,
-            password_hash(self::PASSWORD, PASSWORD_BCRYPT),
-            1,
-        ]);
-        return (int) $this->pdo->lastInsertId();
+        return 0;
     }
 }

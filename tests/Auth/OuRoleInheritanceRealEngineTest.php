@@ -17,14 +17,15 @@ use Whity\Database\Database;
  *
  * Pattern mirrors {@see RoleCheckerRealEngineTest}: the code under test runs
  * against a genuine SQL engine seeded with the REAL production OU schema
- * (`organizational_units(id, parent_id, tenant_id)`, `users.ou_id`,
+ * (`organizational_units(id, parent_id, tenant_id)`, `memberships.ou_id`,
  * `ou_role_assignments(ou_id, role_id, tenant_id)`), so real SQL semantics —
  * tenant predicates, parent-chain joins — are enforced rather than masked by
- * mocked PDO.
+ * mocked PDO. Identity is on profiles + memberships; the `users` table was
+ * retired by the identity hard cutover (migration 042).
  *
- * The central regression these tests pin: on main, {@see RoleChecker::hasPermission()}
- * considered ONLY the user's direct `users.role_id` (+ role hierarchy) and
- * IGNORED roles assigned via the user's organizational unit, so an OU role
+ * The central regression these tests pin: on main, permission resolution
+ * considered ONLY the member's direct `memberships.role_id` (+ role hierarchy)
+ * and IGNORED roles assigned via the member's organizational unit, so an OU role
  * assignment granted nothing. After the fix, the effective role set unions the
  * direct role with every tenant-scoped OU/ancestor-OU role.
  *
@@ -65,11 +66,11 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         $userId = $this->seedUser('editor@a.example', 'editor', self::TENANT_A, ouId: null);
 
         $this->assertTrue(
-            $this->checker()->hasPermission($userId, 'posts:write', self::TENANT_A),
+            $this->checker()->hasPermissionForProfile($userId, 'posts:write', self::TENANT_A),
             'A direct role grant must still satisfy hasPermission().'
         );
         $this->assertTrue(
-            $this->checker()->hasRole($userId, 'editor', self::TENANT_A),
+            $this->checker()->hasRoleForProfile($userId, 'editor', self::TENANT_A),
             'The direct role must be reported by hasRole().'
         );
     }
@@ -89,21 +90,21 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         // no posts:write, so this would be false on main. The assertion documents
         // exactly the gap WC-54 flaw 2 closes.
         $this->assertTrue(
-            $this->checker()->hasPermission($userId, 'posts:write', self::TENANT_A),
+            $this->checker()->hasPermissionForProfile($userId, 'posts:write', self::TENANT_A),
             'A role assigned to the user\'s OU must grant its permissions (OU inheritance).'
         );
         $this->assertTrue(
-            $this->checker()->hasRole($userId, 'editor', self::TENANT_A),
+            $this->checker()->hasRoleForProfile($userId, 'editor', self::TENANT_A),
             'hasRole() must include the OU-assigned role in the effective set.'
         );
         $this->assertContains(
             'editor',
-            $this->checker()->getEffectiveRolesForUser($userId, self::TENANT_A),
+            $this->checker()->getEffectiveRolesForProfile($userId, self::TENANT_A),
             'Effective roles must union direct + OU roles.'
         );
         $this->assertContains(
             'user',
-            $this->checker()->getEffectiveRolesForUser($userId, self::TENANT_A),
+            $this->checker()->getEffectiveRolesForProfile($userId, self::TENANT_A),
             'Effective roles must retain the direct role too.'
         );
     }
@@ -117,7 +118,7 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         $userId = $this->seedUser('member@a.example', 'user', self::TENANT_A, ouId: $ouId);
 
         $this->assertFalse(
-            $this->checker()->hasPermission($userId, 'posts:write', self::TENANT_A),
+            $this->checker()->hasPermissionForProfile($userId, 'posts:write', self::TENANT_A),
             'With no granting role (direct or via OU) the user must be denied.'
         );
     }
@@ -136,7 +137,7 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         $userId = $this->seedUser('child@a.example', 'user', self::TENANT_A, ouId: $childOu);
 
         $this->assertTrue(
-            $this->checker()->hasPermission($userId, 'posts:write', self::TENANT_A),
+            $this->checker()->hasPermissionForProfile($userId, 'posts:write', self::TENANT_A),
             'A user in a child OU must inherit roles assigned to an ancestor OU.'
         );
     }
@@ -155,7 +156,7 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         $userId = $this->seedUser('cyc@a.example', 'user', self::TENANT_A, ouId: $ouB);
 
         $this->assertTrue(
-            $this->checker()->hasPermission($userId, 'posts:write', self::TENANT_A),
+            $this->checker()->hasPermissionForProfile($userId, 'posts:write', self::TENANT_A),
             'A cyclic OU chain must terminate and still surface collected grants.'
         );
     }
@@ -178,12 +179,12 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         $userId = $this->seedUser('a@a.example', 'user', self::TENANT_A, ouId: $ouId);
 
         $this->assertFalse(
-            $this->checker()->hasPermission($userId, 'tenants:delete', self::TENANT_A),
+            $this->checker()->hasPermissionForProfile($userId, 'tenants:delete', self::TENANT_A),
             'An OU role assigned under another tenant must never grant in this tenant.'
         );
         $this->assertNotContains(
             'admin',
-            $this->checker()->getEffectiveRolesForUser($userId, self::TENANT_A),
+            $this->checker()->getEffectiveRolesForProfile($userId, self::TENANT_A),
             'Cross-tenant OU roles must be filtered out of the effective set.'
         );
     }
@@ -199,7 +200,7 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         $userId = $this->seedUser('member@a.example', 'user', self::TENANT_A, ouId: $ouId);
 
         $this->assertFalse(
-            $this->checker()->hasPermission($userId, 'posts:write', self::TENANT_B),
+            $this->checker()->hasPermissionForProfile($userId, 'posts:write', self::TENANT_B),
             'Resolving a user under the wrong tenant must not surface their OU roles.'
         );
     }
@@ -225,15 +226,15 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         $checker = $this->checker();
 
         // Warm A's cache, then resolve B.
-        $this->assertTrue($checker->hasPermission($userA, 'posts:write', self::TENANT_A));
+        $this->assertTrue($checker->hasPermissionForProfile($userA, 'posts:write', self::TENANT_A));
         $this->assertFalse(
-            $checker->hasPermission($userA, 'tenants:delete', self::TENANT_A),
+            $checker->hasPermissionForProfile($userA, 'tenants:delete', self::TENANT_A),
             'User A must not have tenant B\'s OU grant.'
         );
 
-        $this->assertTrue($checker->hasPermission($userB, 'tenants:delete', self::TENANT_B));
+        $this->assertTrue($checker->hasPermissionForProfile($userB, 'tenants:delete', self::TENANT_B));
         $this->assertFalse(
-            $checker->hasPermission($userB, 'posts:write', self::TENANT_B),
+            $checker->hasPermissionForProfile($userB, 'posts:write', self::TENANT_B),
             'User B (different tenant key) must not be served user A\'s cached set.'
         );
     }
@@ -248,7 +249,7 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
 
         $checker = $this->checker();
         $this->assertFalse(
-            $checker->hasPermission($userId, 'posts:write', self::TENANT_A),
+            $checker->hasPermissionForProfile($userId, 'posts:write', self::TENANT_A),
             'Before the OU assignment the user must be denied.'
         );
 
@@ -256,7 +257,7 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         RoleChecker::clearCache();
 
         $this->assertTrue(
-            $checker->hasPermission($userId, 'posts:write', self::TENANT_A),
+            $checker->hasPermissionForProfile($userId, 'posts:write', self::TENANT_A),
             'After clearCache() the new OU assignment must take effect.'
         );
     }
@@ -323,15 +324,31 @@ final class OuRoleInheritanceRealEngineTest extends TestCase
         )->execute([$tenantId, $ouId, $this->roleId($roleName)]);
     }
 
+    /**
+     * Seed a profile + primary verified email + one membership (carrying the
+     * role and optional OU) in the given tenant; returns the profile id — the
+     * canonical caller identity RoleChecker resolves against (ADR 0005).
+     */
     private function seedUser(string $email, string $roleName, int $tenantId, ?int $ouId): int
     {
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, ?, NOW())'
-        );
-        $stmt->execute([$tenantId, $email, 'x', $this->roleId($roleName), $ouId]);
+        $this->pdo->prepare(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+        )->execute([explode('@', $email)[0]]);
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, 1, 1, datetime('now'))"
+        )->execute([$profileId, $email]);
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, ?, 'active', datetime('now'))"
+        )->execute([$profileId, $tenantId, $this->roleId($roleName), $ouId]);
+
+        return $profileId;
     }
 
     private function roleId(string $roleName): int

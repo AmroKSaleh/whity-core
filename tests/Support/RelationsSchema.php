@@ -82,20 +82,6 @@ final class RelationsSchema
     }
 
     /**
-     * Legacy alias — kept for tests outside the Relations suite that still seed
-     * the users table. Returns a users.id (NOT a profile id).
-     *
-     * @deprecated Use seedProfile() for all new relations tests.
-     */
-    public static function seedUser(PDO $pdo, int $tenantId, string $email, int $roleId = 2): int
-    {
-        $pdo->prepare('INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at) VALUES (?, ?, ?, ?, NULL, NOW())')
-            ->execute([$tenantId, $email, 'x', $roleId]);
-
-        return (int) $pdo->lastInsertId();
-    }
-
-    /**
      * Insert a non-account person and return its id.
      */
     public static function seedPerson(PDO $pdo, int $tenantId, string $displayName): int

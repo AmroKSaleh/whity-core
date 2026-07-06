@@ -148,7 +148,7 @@ final class ToolsCallHandlerTest extends TestCase
     public function testInvoke_throwsForbidden_whenRequiredPermissionNotGranted(): void
     {
         $this->roleChecker->expects($this->once())
-            ->method('hasPermission')
+            ->method('hasPermissionForProfile')
             ->with(self::USER_ID, 'things:write', self::TENANT_ID)
             ->willReturn(false);
 
@@ -161,7 +161,7 @@ final class ToolsCallHandlerTest extends TestCase
     public function testInvoke_throwsForbidden_whenRequiredRoleNotGranted(): void
     {
         $this->roleChecker->expects($this->once())
-            ->method('hasRole')
+            ->method('hasRoleForProfile')
             ->with(self::USER_ID, 'admin', self::TENANT_ID)
             ->willReturn(false);
 
@@ -173,8 +173,8 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testInvoke_doesNotCallRoleChecker_whenNoPermissionRequired(): void
     {
-        $this->roleChecker->expects($this->never())->method('hasPermission');
-        $this->roleChecker->expects($this->never())->method('hasRole');
+        $this->roleChecker->expects($this->never())->method('hasPermissionForProfile');
+        $this->roleChecker->expects($this->never())->method('hasRoleForProfile');
 
         ($this->handler)(['name' => 'get_api_things', 'arguments' => []], self::BEARER);
     }
@@ -194,7 +194,7 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testInvoke_callsHandler_whenPermissionGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $result = ($this->handler)([
             'name'      => 'patch_api_things_id',
@@ -206,7 +206,7 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testInvoke_callsHandler_whenRoleGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(true);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(true);
 
         $result = ($this->handler)([
             'name'      => 'delete_api_things_id',
@@ -220,7 +220,7 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testInvoke_substitutesPathParam_inSynthesizedRequestPath(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         ($this->handler)([
             'name'      => 'patch_api_things_id',
@@ -245,7 +245,7 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testInvoke_doesNotIncludePathParam_inBody(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         ($this->handler)([
             'name'      => 'patch_api_things_id',
@@ -261,7 +261,7 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testInvoke_setsJwtClaims_onSynthesizedRequest(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         ($this->handler)([
             'name'      => 'patch_api_things_id',
@@ -277,7 +277,7 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testInvoke_setsUserObject_onSynthesizedRequest(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         ($this->handler)([
             'name'      => 'patch_api_things_id',
@@ -304,7 +304,7 @@ final class ToolsCallHandlerTest extends TestCase
     public function testInvoke_throwsInvalidParams_whenIntegerPathArgIsNonNumericString(): void
     {
         // PATCH /api/things/{id:\d+} declares 'id' as type integer (from path constraint)
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $this->expectException(McpException::class);
         $this->expectExceptionCode(ErrorCode::INVALID_PARAMS);
@@ -315,7 +315,7 @@ final class ToolsCallHandlerTest extends TestCase
     public function testInvoke_coercesDigitString_toIntegerForPathParam(): void
     {
         // "42" as a string should be coerced to int 42 before path substitution
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $result = ($this->handler)([
             'name'      => 'patch_api_things_id',
@@ -470,7 +470,7 @@ final class ToolsCallHandlerTest extends TestCase
 
     public function testRbacDenied_stillRecordsAuditLog(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(false);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
 
         /** @var MockObject&AuditLoggerInterface $audit */
         $audit = $this->createMock(AuditLoggerInterface::class);

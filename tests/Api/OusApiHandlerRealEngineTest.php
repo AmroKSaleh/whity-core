@@ -413,16 +413,10 @@ final class OusApiHandlerRealEngineTest extends TestCase
             'SELECT id FROM roles WHERE name = ' . $this->pdo->quote($role)
         )->fetchColumn();
 
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, 'hashed-secret', ?, ?, datetime('now'))"
-        );
-        $stmt->execute([$id, $tenantId, $email, $roleId, $ouId]);
-
-        // WC-d88de9fa: the members() endpoint now resolves IDENTITY via
+        // WC-d88de9fa: the members() endpoint resolves IDENTITY via
         // profiles/profile_emails (ADR 0005 §1-2) and ROLE/OU via memberships
-        // (ADR 0005 §3). Mirror each user into the new tables so the test
-        // remains green during the dual-window transition.
+        // (ADR 0005 §3). The legacy `users` table was retired by the identity
+        // hard cutover (migration 042), so identity is seeded on the profile model.
         $displayName = strstr($email, '@', true) ?: $email;
         $pStmt = $this->pdo->prepare(
             "INSERT INTO profiles

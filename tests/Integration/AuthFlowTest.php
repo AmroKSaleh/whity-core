@@ -272,21 +272,9 @@ class AuthFlowTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (1, 'Test Tenant', datetime('now'))");
         $pdo->exec("INSERT OR IGNORE INTO roles   (id, name) VALUES (1, 'admin')");
 
-        // Legacy users row (dual-claim window backward compat).
-        $stmt = $pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
-        );
-        $stmt->execute([
-            self::TEST_USER_ID,
-            self::TEST_TENANT_ID,
-            self::TEST_USER_EMAIL,
-            password_hash(self::TEST_USER_PASSWORD, PASSWORD_BCRYPT),
-            self::TEST_ROLE_ID,
-        ]);
-
-        // WC-c35c4ce0: the new login path resolves via profile_emails → profiles → memberships.
-        // Seed the profile model rows so the test user can authenticate.
+        // The login path resolves via profile_emails → profiles → memberships
+        // (the legacy `users` table was retired by the identity hard cutover,
+        // migration 042). Seed the profile model rows so the test user authenticates.
         $pdo->prepare(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)

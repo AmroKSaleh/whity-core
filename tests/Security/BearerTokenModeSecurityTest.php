@@ -465,12 +465,8 @@ class BearerTokenModeSecurityTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (8, 'Security Tenant B', datetime('now'))");
         $pdo->exec("INSERT OR IGNORE INTO roles   (id, name) VALUES (1, 'admin')");
 
-        // Primary test user.
-        $pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
-        )->execute([self::USER_ID, self::TENANT_ID, self::EMAIL, password_hash(self::PASSWORD, PASSWORD_BCRYPT), self::ROLE_ID]);
-
+        // Primary test user. Identity is on the profile model; the legacy `users`
+        // table was retired by the identity hard cutover (migration 042).
         $pdo->prepare(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
@@ -508,12 +504,6 @@ class BearerTokenModeSecurityTest extends TestCase
             "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
              VALUES (?, ?, ?, 'active', datetime('now'))"
         )->execute([self::SWITCH_USER_ID, self::TENANT_ID, self::ROLE_ID]);
-
-        // Legacy users row for the switch-tenant user (kept for schema FK compatibility).
-        $pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at, token_epoch)
-             VALUES (?, ?, ?, ?, ?, datetime('now'), 0)"
-        )->execute([self::SWITCH_USER_ID, self::TENANT_B_ID, self::SWITCH_EMAIL, password_hash(self::PASSWORD, PASSWORD_BCRYPT), self::ROLE_ID]);
 
         return $pdo;
     }

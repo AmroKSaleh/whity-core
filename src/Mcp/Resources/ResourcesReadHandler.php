@@ -116,11 +116,11 @@ final class ResourcesReadHandler implements MethodHandler
         $requiredRole       = $matched['requiredRole'] ?? null;
 
         if (is_string($requiredPermission) && $requiredPermission !== '') {
-            if (!$this->roleChecker->hasPermission($principal->userId, $requiredPermission, $tenantId)) {
+            if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $requiredPermission, $tenantId)) {
                 throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
             }
         } elseif (is_string($requiredRole) && $requiredRole !== '') {
-            if (!$this->roleChecker->hasRole($principal->userId, $requiredRole, $tenantId)) {
+            if (!$this->roleChecker->hasRoleForProfile($principal->userId, $requiredRole, $tenantId)) {
                 throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
             }
         }

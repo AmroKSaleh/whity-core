@@ -15,16 +15,14 @@ use Whity\Database\Database;
 /**
  * Tests for {@see RoleChecker}.
  *
- * Authorization checks ({@see RoleChecker::hasRole()},
- * {@see RoleChecker::hasPermission()}) traverse several related tables (users,
- * roles, role_permissions, organizational_units, ou_role_assignments) and unfold
- * through both the role hierarchy and the OU parent chain. Mocking that graph by
- * matching exact SQL strings is brittle and hides real SQL semantics (the very
- * gap WC-54 flaw 1 slipped through), so these tests run the real resolver against
- * an in-memory SQLite engine seeded with the production schema. The two genuinely
- * static lookups ({@see RoleChecker::getRoleForUser()},
- * {@see RoleChecker::getPermissionsForUser()}) are still exercised the same way —
- * just through real rows rather than stubbed statements.
+ * Authorization checks ({@see RoleChecker::hasRoleForProfile()},
+ * {@see RoleChecker::hasPermissionForProfile()}) traverse several related tables
+ * (profiles, memberships, roles, role_permissions, organizational_units,
+ * ou_role_assignments) and unfold through both the role hierarchy and the OU
+ * parent chain. These tests run the real resolver against an in-memory SQLite
+ * engine seeded with the production schema. The `users` table was retired by the
+ * identity hard cutover (migration 042); all identity is now on profiles +
+ * profile_emails + memberships.
  */
 class RoleCheckerTest extends TestCase
 {
@@ -48,81 +46,25 @@ class RoleCheckerTest extends TestCase
     }
 
     // ---------------------------------------------------------------------
-    // Primary role lookups
-    // ---------------------------------------------------------------------
-
-    public function testGetRoleForUser(): void
-    {
-        $userId = $this->seedUser('admin@example.com', 'admin');
-
-        $this->assertSame('admin', $this->roleChecker->getRoleForUser($userId));
-    }
-
-    public function testGetRoleForNonexistentUser(): void
-    {
-        $this->assertNull($this->roleChecker->getRoleForUser(999));
-    }
-
-    // ---------------------------------------------------------------------
-    // hasRole (effective role set)
-    // ---------------------------------------------------------------------
-
-    public function testHasRoleReturnsTrue(): void
-    {
-        $userId = $this->seedUser('user@example.com', 'user');
-
-        $this->assertTrue($this->roleChecker->hasRole($userId, 'user', self::TENANT));
-    }
-
-    public function testHasRoleReturnsFalse(): void
-    {
-        $userId = $this->seedUser('user@example.com', 'user');
-
-        $this->assertFalse($this->roleChecker->hasRole($userId, 'admin', self::TENANT));
-    }
-
-    public function testHasRoleWorksForAdmin(): void
-    {
-        $userId = $this->seedUser('admin@example.com', 'admin');
-
-        $this->assertTrue($this->roleChecker->hasRole($userId, 'admin', self::TENANT));
-    }
-
-    // ---------------------------------------------------------------------
-    // hasPermission / getPermissionsForUser
+    // hasPermissionForProfile / hasRoleForProfile
     // ---------------------------------------------------------------------
 
     public function testHasPermissionReturnsFalseIfPermissionDoesntExistInRegistry(): void
     {
-        $userId = $this->seedUser('admin@example.com', 'admin');
+        $profileId = $this->seedProfile('admin@example.com', 'admin');
 
         // An unregistered permission can never be granted, regardless of grants.
         $this->assertFalse(
-            $this->roleChecker->hasPermission($userId, 'nonexistent:permission', self::TENANT)
+            $this->roleChecker->hasPermissionForProfile($profileId, 'nonexistent:permission', self::TENANT)
         );
     }
 
     public function testHasPermissionReturnsTrueIfUserRoleHoldsItDirectly(): void
     {
         $this->grant('user', 'users:read');
-        $userId = $this->seedUser('user@example.com', 'user');
+        $profileId = $this->seedProfile('user@example.com', 'user');
 
-        $this->assertTrue($this->roleChecker->hasPermission($userId, 'users:read', self::TENANT));
-    }
-
-    public function testGetPermissionsForUserReturnsAllUserPermissions(): void
-    {
-        // Use a test-only role (viewer) that migrations never grant permissions to,
-        // so the assertSame can enumerate exactly the grants made here.
-        $this->grant('viewer', 'users:read');
-        $this->grant('viewer', 'users:write');
-        $this->grant('viewer', 'roles:read');
-        $userId = $this->seedUser('viewer@example.com', 'viewer');
-
-        $permissions = $this->roleChecker->getPermissionsForUser($userId);
-
-        sort($permissions);
-        $this->assertSame(['roles:read', 'users:read', 'users:write'], $permissions);
+        $this->assertTrue($this->roleChecker->hasPermissionForProfile($profileId, 'users:read', self::TENANT));
     }
 
     // ---------------------------------------------------------------------
@@ -152,8 +94,8 @@ class RoleCheckerTest extends TestCase
     }
 
     /**
-     * Checking whether an admin user has a viewer-level permission resolves via
-     * inheritance: admin -> editor -> viewer.
+     * Checking whether an admin profile has a viewer-level permission resolves
+     * via inheritance: admin -> editor -> viewer.
      */
     public function testAdminInheritsViewerPermissionViaHierarchy(): void
     {
@@ -163,10 +105,10 @@ class RoleCheckerTest extends TestCase
         $this->grant('editor', 'posts:write');
         $this->grant('viewer', 'dashboard:read');
 
-        $userId = $this->seedUser('admin@example.com', 'admin');
+        $profileId = $this->seedProfile('admin@example.com', 'admin');
 
         $this->assertTrue(
-            $this->roleChecker->hasPermission($userId, 'dashboard:read', self::TENANT),
+            $this->roleChecker->hasPermissionForProfile($profileId, 'dashboard:read', self::TENANT),
             "admin should inherit viewer's dashboard:read via the hierarchy chain"
         );
     }
@@ -309,15 +251,27 @@ class RoleCheckerTest extends TestCase
             ->execute([$this->roleId($parentRoleName), $this->roleId($roleName)]);
     }
 
-    private function seedUser(string $email, string $roleName): int
+    private function seedProfile(string $email, string $roleName): int
     {
         $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, created_at)
-             VALUES (?, ?, ?, ?, NULL, NOW())'
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'x', 0, 0, 0, datetime('now'), datetime('now'))"
         );
-        $stmt->execute([self::TENANT, $email, 'x', $this->roleId($roleName)]);
+        $stmt->execute([explode('@', $email)[0]]);
+        $profileId = (int) $this->pdo->lastInsertId();
 
-        return (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, 1, 1, datetime('now'))"
+        )->execute([$profileId, $email]);
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, NULL, 'active', datetime('now'))"
+        )->execute([$profileId, self::TENANT, $this->roleId($roleName)]);
+
+        return $profileId;
     }
 
     private function roleId(string $roleName): int
@@ -350,7 +304,7 @@ class RoleCheckerTest extends TestCase
             ('editor',      datetime('now')),
             ('viewer',      datetime('now'))");
 
-        // Migration 001 seeds only the System tenant (id=0).  seedUser() inserts
+        // Migration 001 seeds only the System tenant (id=0).  seedProfile() inserts
         // rows with tenant_id=1 (TENANT constant), so add a test tenant.
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'test-tenant')");
 

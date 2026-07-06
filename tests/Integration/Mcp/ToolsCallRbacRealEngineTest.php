@@ -61,9 +61,6 @@ final class ToolsCallRbacRealEngineTest extends TestCase
     private McpTokenService $tokens;
     private Dispatcher $dispatcher;
 
-    /** @var array<string, int> email => user id */
-    private array $userIds = [];
-
     /** @var array<string, int> email => profile id (for mcp_tokens issuance after migration 040) */
     private array $profileIds = [];
 
@@ -380,35 +377,48 @@ final class ToolsCallRbacRealEngineTest extends TestCase
         $this->grant('widget_reader', 'widgets:read');
         $this->grant('widget_writer', 'widgets:write');
 
-        // Seed users (for RoleChecker resolution which still reads users table)
-        // AND matching profiles (for mcp_tokens issuance which now uses profile_id).
-        $this->userIds['reader@a.test'] = $this->seedUser('reader@a.test', 100, self::TENANT_A, null);
-        $this->userIds['writer@a.test'] = $this->seedUser('writer@a.test', 101, self::TENANT_A, null);
-        $this->userIds['none@a.test']   = $this->seedUser('none@a.test',   102, self::TENANT_A, null);
-
-        // OU in tenant A assigned the writer role; ou_user has the no-grant direct
-        // role but inherits widgets:write through OU membership — within tenant A only.
+        // OU in tenant A assigned the writer role; the ou@a.test member has the
+        // no-grant direct role (widget_none) but inherits widgets:write through OU
+        // membership — within tenant A only.
         $ouId = $this->seedOu('Engineering', self::TENANT_A);
         $this->assignRoleToOu($ouId, 101, self::TENANT_A);
-        $this->userIds['ou@a.test'] = $this->seedUser('ou@a.test', 102, self::TENANT_A, $ouId);
 
-        // Seed profiles for each user (after migration 040 mcp_tokens references profiles.id).
-        $this->profileIds['reader@a.test'] = $this->seedProfile($this->userIds['reader@a.test']);
-        $this->profileIds['writer@a.test'] = $this->seedProfile($this->userIds['writer@a.test']);
-        $this->profileIds['none@a.test']   = $this->seedProfile($this->userIds['none@a.test']);
-        $this->profileIds['ou@a.test']     = $this->seedProfile($this->userIds['ou@a.test']);
+        // Identity is on the profile model (the legacy `users` table was retired by
+        // migration 042). Each profile gets an ACTIVE membership in TENANT_A whose
+        // role_id/ou_id drive RBAC (hasPermissionForProfile). Profiles deliberately
+        // have NO memberships in TENANT_B or SYSTEM_TENANT — cross-tenant tokens are
+        // rejected at auth (UNAUTHENTICATED), which the cross-tenant tests assert.
+        $this->profileIds['reader@a.test'] = $this->seedProfileMember('reader@a.test', 100, null);
+        $this->profileIds['writer@a.test'] = $this->seedProfileMember('writer@a.test', 101, null);
+        $this->profileIds['none@a.test']   = $this->seedProfileMember('none@a.test',   102, null);
+        $this->profileIds['ou@a.test']     = $this->seedProfileMember('ou@a.test',     102, $ouId);
 
-        // Seed active memberships in TENANT_A so the ActiveTenantMembershipGuard accepts
-        // MCP tokens that carry {profile_id, active_tenant_id=TENANT_A}.
-        // Note: profiles deliberately have NO memberships in TENANT_B or SYSTEM_TENANT —
-        // cross-tenant tokens are rejected at auth (UNAUTHENTICATED), which is MORE
-        // secure than failing at RBAC. The cross-tenant tests below assert this.
-        foreach ($this->profileIds as $profileId) {
-            $this->pdo->prepare("
-                INSERT OR IGNORE INTO memberships (profile_id, tenant_id, role_id, status, created_at)
-                VALUES (?, ?, 100, 'active', NOW())
-            ")->execute([$profileId, self::TENANT_A]);
-        }
+    }
+
+    /**
+     * Seed a profile + primary email + one ACTIVE membership in TENANT_A carrying
+     * the given role and optional OU; return the profile id.
+     */
+    private function seedProfileMember(string $email, int $roleId, ?int $ouId): int
+    {
+        $this->pdo->prepare(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES (?, 'x', false, 0, 0, NOW(), NOW())"
+        )->execute([strstr($email, '@', true) ?: $email]);
+        $profileId = (int) $this->pdo->lastInsertId();
+
+        $this->pdo->prepare(
+            "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
+             VALUES (?, ?, true, true, NOW())"
+        )->execute([$profileId, $email]);
+
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, ?, 'active', NOW())"
+        )->execute([$profileId, self::TENANT_A, $roleId, $ouId]);
+
+        return $profileId;
     }
 
     private function grant(string $roleName, string $permission): void
@@ -426,33 +436,6 @@ final class ToolsCallRbacRealEngineTest extends TestCase
 
         $this->pdo->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
             ->execute([$roleId, $permissionId]);
-    }
-
-    private function seedUser(string $email, int $roleId, int $tenantId, ?int $ouId): int
-    {
-        $stmt = $this->pdo->prepare(
-            'INSERT INTO users (tenant_id, email, password, role_id, ou_id, token_epoch, created_at)
-             VALUES (?, ?, ?, ?, ?, 0, NOW())'
-        );
-        $stmt->execute([$tenantId, $email, 'x', $roleId, $ouId]);
-
-        return (int) $this->pdo->lastInsertId();
-    }
-
-    /**
-     * Seed a profile for the given user id and return the new profile id.
-     * mcp_tokens is keyed on profiles.id after migration 040.
-     */
-    private function seedProfile(int $userId): int
-    {
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
-                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, 'x', false, 0, 0, NOW(), NOW())"
-        );
-        $stmt->execute(["Profile for user {$userId}"]);
-
-        return (int) $this->pdo->lastInsertId();
     }
 
     private function seedOu(string $name, int $tenantId): int

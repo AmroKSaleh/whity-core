@@ -143,14 +143,9 @@ final class AdminApiHandlerRealEngineTest extends TestCase
 
     private function seedUser(int $id, int $tenantId, int $roleId): void
     {
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO users (id, tenant_id, email, password, role_id, created_at)
-             VALUES (?, ?, ?, 'x', ?, datetime('now'))"
-        );
-        $stmt->execute([$id, $tenantId, "u{$id}@example.com", $roleId]);
-
-        // WC-d88de9fa: stats() now counts memberships (ADR 0005 §3).
-        // Seed a membership so the aggregate counts match the seeded users.
+        // WC-d88de9fa: stats() counts memberships (ADR 0005 §3). Identity is on the
+        // profile model; the legacy `users` table was retired by migration 042.
+        // Seed a membership so the aggregate counts match the seeded members.
         $mStmt = $this->pdo->prepare(
             "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
              VALUES (?, ?, ?, 'active', datetime('now'))"
@@ -238,17 +233,6 @@ final class AdminApiHandlerRealEngineTest extends TestCase
             )
         ');
         $pdo->exec("INSERT INTO permissions (id, name) VALUES (1, 'users:read'), (2, 'roles:read')");
-
-        $pdo->exec('
-            CREATE TABLE users (
-                id INTEGER PRIMARY KEY,
-                tenant_id INTEGER NOT NULL,
-                email TEXT NOT NULL,
-                password TEXT NOT NULL,
-                role_id INTEGER,
-                created_at TEXT
-            )
-        ');
 
         // WC-d88de9fa: stats() now counts memberships (ADR 0005 §3).
         // role_id is NOT NULL to match production migration 030 (avoid masking a

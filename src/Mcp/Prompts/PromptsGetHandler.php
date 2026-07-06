@@ -61,11 +61,11 @@ final class PromptsGetHandler implements MethodHandler
                 throw new McpException(ErrorCode::UNAUTHENTICATED, 'No tenant context');
             }
             if ($prompt->requiredPermission !== null) {
-                if (!$this->roleChecker->hasPermission($principal->userId, $prompt->requiredPermission, $tenantId)) {
+                if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $prompt->requiredPermission, $tenantId)) {
                     throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
                 }
             } elseif ($prompt->requiredRole !== null) {
-                if (!$this->roleChecker->hasRole($principal->userId, $prompt->requiredRole, $tenantId)) {
+                if (!$this->roleChecker->hasRoleForProfile($principal->userId, $prompt->requiredRole, $tenantId)) {
                     throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
                 }
             }

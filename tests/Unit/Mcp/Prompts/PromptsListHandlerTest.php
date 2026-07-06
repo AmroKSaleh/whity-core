@@ -114,7 +114,7 @@ final class PromptsListHandlerTest extends TestCase
 
     public function testInvoke_excludesRoleProtectedPrompt_whenRoleNotGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(false);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(false);
         $this->registry->register(new Prompt('admin-prompt', 'Admin only', requiredRole: 'admin'));
 
         $result = ($this->handler)(null, self::BEARER);
@@ -124,7 +124,7 @@ final class PromptsListHandlerTest extends TestCase
 
     public function testInvoke_includesRoleProtectedPrompt_whenRoleGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(true);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(true);
         $this->registry->register(new Prompt('admin-prompt', 'Admin only', requiredRole: 'admin'));
 
         $result = ($this->handler)(null, self::BEARER);
@@ -146,7 +146,7 @@ final class PromptsListHandlerTest extends TestCase
 
     public function testInvoke_excludesPermissionProtectedPrompt_whenPermissionNotGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(false);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
         $this->registry->register(new Prompt('perm-prompt', 'Needs perm', requiredPermission: 'things:read'));
 
         $result = ($this->handler)(null, self::BEARER);
@@ -156,7 +156,7 @@ final class PromptsListHandlerTest extends TestCase
 
     public function testInvoke_includesPermissionProtectedPrompt_whenPermissionGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
         $this->registry->register(new Prompt('perm-prompt', 'Needs perm', requiredPermission: 'things:read'));
 
         $result = ($this->handler)(null, self::BEARER);

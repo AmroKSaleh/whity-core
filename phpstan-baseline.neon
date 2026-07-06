@@ -182,7 +182,7 @@ parameters:
 
 		-
 			message: "#^Strict comparison using \\=\\=\\= between array and false will always evaluate to false\\.$#"
-			count: 3
+			count: 2
 			path: src/Auth/RoleChecker.php
 
 		-
@@ -814,21 +814,6 @@ parameters:
 			message: "#^Call to an undefined method Psr\\\\Log\\\\LoggerInterface\\:\\:expects\\(\\)\\.$#"
 			count: 2
 			path: tests/Integration/HookIntegrationTest.php
-
-		-
-			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
-			count: 7
-			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
-
-		-
-			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
-			count: 3
-			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
-
-		-
-			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 24
-			path: tests/Integration/MigrateUsersToProfilesRealEngineTest.php
 
 		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"

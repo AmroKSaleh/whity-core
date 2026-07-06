@@ -119,7 +119,7 @@ final class ToolsListHandlerTest extends TestCase
 
     public function testInvoke_excludesPermissionProtectedTool_whenPermissionNotGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(false);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -129,7 +129,7 @@ final class ToolsListHandlerTest extends TestCase
 
     public function testInvoke_includesPermissionProtectedTool_whenPermissionGranted(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -149,7 +149,7 @@ final class ToolsListHandlerTest extends TestCase
 
     public function testInvoke_excludesRoleProtectedTool_whenRoleNotGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(false);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(false);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -159,7 +159,7 @@ final class ToolsListHandlerTest extends TestCase
 
     public function testInvoke_includesRoleProtectedTool_whenRoleGranted(): void
     {
-        $this->roleChecker->method('hasRole')->willReturn(true);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(true);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -181,8 +181,8 @@ final class ToolsListHandlerTest extends TestCase
 
     public function testInvoke_returnsAllGrantedTools_forAuthenticatedCallerWithAllGrants(): void
     {
-        $this->roleChecker->method('hasPermission')->willReturn(true);
-        $this->roleChecker->method('hasRole')->willReturn(true);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
+        $this->roleChecker->method('hasRoleForProfile')->willReturn(true);
 
         $result = ($this->handler)(null, self::BEARER);
 
@@ -221,7 +221,7 @@ final class ToolsListHandlerTest extends TestCase
             ['method' => 'POST', 'path' => '/api/secure-static', 'schema' => ['summary' => 'Secure static'], 'requiredRole' => null, 'requiredPermission' => 'secure:write'],
         ]);
         $handler = new ToolsListHandler($deriver, $this->roleChecker, $this->tokenValidator);
-        $this->roleChecker->method('hasPermission')->willReturn(false);
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
 
         $result = ($handler)(null, self::BEARER);
 

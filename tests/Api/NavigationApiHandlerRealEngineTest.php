@@ -105,7 +105,7 @@ final class NavigationApiHandlerRealEngineTest extends TestCase
         $roleArgs = [];
         $permArgs = [];
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasRole')
+        $roleChecker->method('hasRoleForProfile')
             ->willReturnCallback(function (int $userId, string $role, int $tenantId) use (&$roleArgs): bool {
                 $roleArgs[] = [$userId, $role, $tenantId];
                 return true;
@@ -223,7 +223,7 @@ final class NavigationApiHandlerRealEngineTest extends TestCase
     private function handler(array $roles, array $permissions): NavigationApiHandler
     {
         $roleChecker = $this->createMock(RoleChecker::class);
-        $roleChecker->method('hasRole')
+        $roleChecker->method('hasRoleForProfile')
             ->willReturnCallback(
                 static fn (int $userId, string $role, int $tenantId): bool => in_array($role, $roles, true)
             );

@@ -23,6 +23,9 @@ use Whity\Database\Seeder;
  * role, which — per the RBAC model — may manage global base roles and every
  * tenant. The default `admin@example.com` lives in a regular tenant and cannot.
  * Re-running the seeder must not duplicate that row (idempotent ON CONFLICT).
+ *
+ * Post WC-idcut-F: the `users` table is retired (migration 042). Assertions now
+ * query `profiles`, `profile_emails`, and `memberships`.
  */
 final class SeederRealEngineTest extends TestCase
 {
@@ -73,7 +76,7 @@ final class SeederRealEngineTest extends TestCase
     {
         Seeder::seed($this->db);
 
-        $row = $this->fetchUser('superuser@example.com');
+        $row = $this->fetchProfile('superuser@example.com');
 
         self::assertNotFalse($row, 'Seeder must create superuser@example.com.');
         self::assertSame(0, (int) $row['tenant_id'], 'Superuser must live in the system tenant (id 0).');
@@ -88,7 +91,7 @@ final class SeederRealEngineTest extends TestCase
     {
         Seeder::seed($this->db);
 
-        $row = $this->fetchUser('superuser@example.com');
+        $row = $this->fetchProfile('superuser@example.com');
         self::assertNotFalse($row);
 
         $tenant = $this->db
@@ -106,7 +109,7 @@ final class SeederRealEngineTest extends TestCase
 
         $count = $this->db
             ->query(
-                'SELECT COUNT(*) AS c FROM users WHERE tenant_id = 0 AND email = :email',
+                'SELECT COUNT(*) AS c FROM profile_emails WHERE email = :email',
                 [':email' => 'superuser@example.com']
             )
             ->fetch();
@@ -116,12 +119,22 @@ final class SeederRealEngineTest extends TestCase
     }
 
     /**
+     * Fetch profile data for an email via profile_emails JOIN profiles JOIN memberships.
+     *
      * @return array<string, mixed>|false
      */
-    private function fetchUser(string $email): array|false
+    private function fetchProfile(string $email): array|false
     {
         return $this->db
-            ->query('SELECT tenant_id, role_id FROM users WHERE email = :email', [':email' => $email])
+            ->query(
+                'SELECT m.tenant_id, m.role_id
+                 FROM profile_emails pe
+                 JOIN memberships m ON m.profile_id = pe.profile_id
+                 WHERE pe.email = :email
+                 ORDER BY m.tenant_id ASC
+                 LIMIT 1',
+                [':email' => $email]
+            )
             ->fetch();
     }
 

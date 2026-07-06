@@ -312,42 +312,6 @@ final class MembershipRbacMutationTest extends TestCase
     }
 
     // =========================================================================
-    // Dual-window mapping branch — getEffectiveRolesForUser / ForUser
-    // =========================================================================
-
-    /**
-     * When a user_id → profile_id mapping exists (migration_035_profile_ids),
-     * getEffectiveRolesForUser MUST resolve the PROFILE's membership roles (not the
-     * legacy users-table role). Kills the mutant on the `$profileId !== null`
-     * branch (line ~499) that would flip the dual-window routing.
-     */
-    public function testGetEffectiveRolesForUserRoutesThroughProfileMapping(): void
-    {
-        $profile = $this->seedProfile('dualrole@example.com');
-        // Profile is ADMIN in its membership.
-        $this->addMembershipWithStatus($profile, self::TENANT_A, 'admin', 'active');
-
-        // Legacy user row carries a DIFFERENT role (viewer) to prove the mapping wins.
-        $this->pdo->prepare(
-            "INSERT INTO users (tenant_id, email, password, role_id, created_at)
-             VALUES (?, ?, 'x', ?, datetime('now'))"
-        )->execute([self::TENANT_A, 'dualrole@example.com', $this->roleId('viewer')]);
-        $userId = (int) $this->pdo->lastInsertId();
-
-        $this->pdo->prepare(
-            'INSERT OR IGNORE INTO migration_035_profile_ids (user_id, profile_id) VALUES (?, ?)'
-        )->execute([$userId, $profile]);
-        RoleChecker::clearCache();
-
-        // The mapped path must resolve the profile's ADMIN role, not the user's viewer.
-        self::assertSame(
-            ['admin'],
-            $this->checker->getEffectiveRolesForUser($userId, self::TENANT_A),
-            'A mapped user_id must resolve the profile membership role (admin), not the legacy users.role_id (viewer).'
-        );
-    }
-
-    // =========================================================================
     // DelegationService.delegate() — subset-invariant gate boundaries
     // =========================================================================
 
