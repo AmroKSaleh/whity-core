@@ -1,6 +1,7 @@
 import { test, expect } from './support/fixtures';
-import { ADMIN, uniqueSuffix } from './support/constants';
+import { SYSTEM_ADMIN, uniqueSuffix } from './support/constants';
 import { createAuthedApi } from './support/api';
+import { systemStatePath } from './support/storage';
 
 /**
  * WC-233 — Tenant Branding: display wiring (Slice 4, no upload UI).
@@ -114,20 +115,21 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
     const originalSiteName = original.siteName;
 
     const testSiteName = `E2E Brand ${uniqueSuffix()}`;
-    const api = await createAuthedApi(baseURL!, ADMIN);
+    // The public branding endpoint (GET /api/v1/branding) carries no auth and
+    // resolves the tenant by host, so in CI the document <title> reflects the
+    // GLOBAL site_name. Global defaults are system-tenant-only (WC-235), so the
+    // write must go through the SYSTEM-TENANT admin against /settings/global —
+    // a regular tenant admin (ADMIN, tenant 1) would be rejected with 403.
+    const api = await createAuthedApi(baseURL!, SYSTEM_ADMIN);
 
     try {
-      // (b) Set a unique known test value via the caller tenant's settings.
-      // admin@example.com is a REGULAR tenant admin (tenant 1), so it edits its
-      // OWN tenant's settings; the platform-wide global defaults are
-      // system-tenant-only (WC-235). The effective branding for this tenant
-      // reflects the override.
-      const patchRes = await api.patch('/api/v1/settings', {
+      // (b) Set a unique known global site_name.
+      const patchRes = await api.patch('/api/v1/settings/global', {
         data: { settings: { site_name: testSiteName } },
       });
       expect(
         patchRes.status(),
-        `PATCH /api/v1/settings should return 200 (got ${patchRes.status()})`
+        `PATCH /api/v1/settings/global should return 200 (got ${patchRes.status()})`
       ).toBe(200);
 
       // (c) Reload and assert the title/sidebar reflect the test value.
@@ -140,12 +142,12 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
       }
 
       // (d) Restore the original site_name.
-      const restoreRes = await api.patch('/api/v1/settings', {
+      const restoreRes = await api.patch('/api/v1/settings/global', {
         data: { settings: { site_name: originalSiteName } },
       });
       expect(
         restoreRes.status(),
-        `restore PATCH /api/v1/settings should return 200`
+        `restore PATCH /api/v1/settings/global should return 200`
       ).toBe(200);
 
       // (e) Assert the page reverted to the original.
@@ -157,7 +159,7 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
     } finally {
       // Ensure restore runs even on failure so the suite stays re-runnable.
       await api
-        .patch('/api/v1/settings', {
+        .patch('/api/v1/settings/global', {
           data: { settings: { site_name: originalSiteName } },
         })
         .catch(() => undefined);
@@ -167,42 +169,49 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Logo/favicon round-trips — require Slice-5 upload UI
-// (web/components/branding-settings.tsx mounted at /admin/settings).
+// Logo/favicon round-trips — require Slice-5 upload UI, driven on the GLOBAL
+// branding page (web/components/branding-settings.tsx at /admin/settings/global).
 //
-// Controls are driven via data-testid attributes added by BrandingSettings:
-//   branding-file-input-logo_wide-tenant   (hidden file input, wide logo tenant scope)
-//   branding-file-input-favicon-tenant     (hidden file input, favicon tenant scope)
-//   branding-clear-btn-logo_wide-tenant    (Clear button for wide logo tenant scope)
-//   branding-upload-btn-logo_wide-tenant   (Upload trigger button)
-// admin@example.com is a REGULAR tenant admin (tenant 1), so it uploads its OWN
-// tenant's branding assets; global defaults are system-tenant-only (WC-235).
+// These assert the DISPLAY surfaces (dashboard sidebar, favicon <link>). The
+// public branding endpoint resolves the tenant by host and carries no auth, so
+// in CI those surfaces reflect GLOBAL branding — which after WC-235 only the
+// SYSTEM-TENANT admin may manage. The whole block therefore runs under the
+// system-tenant session and uploads via the variant='global' controls:
+//   branding-file-input-logo_wide-global   (hidden file input, wide logo)
+//   branding-file-input-favicon-global     (hidden file input, favicon)
+//   branding-clear-btn-logo_wide-global    (Clear button for wide logo)
 // ---------------------------------------------------------------------------
 
 test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => {
+  // Global branding is system-tenant-only (WC-235): drive this block as the
+  // system-tenant admin, overriding the [admin] project's default session.
+  test.use({ storageState: systemStatePath });
+
   test.afterAll(async ({ baseURL }) => {
     if (!baseURL) return;
-    // Clean up any uploaded assets via the branding API.
-    const api = await createAuthedApi(baseURL, ADMIN);
+    // Clean up any uploaded GLOBAL assets via the branding API (system tenant).
+    const api = await createAuthedApi(baseURL, SYSTEM_ADMIN);
     for (const key of ['logo_wide', 'logo_square', 'favicon'] as const) {
-      await api.delete(`/api/v1/branding/assets/${key}`).catch(() => undefined);
+      await api.delete(`/api/v1/branding/global/assets/${key}`).catch(() => undefined);
     }
     await api.dispose();
   });
 
   test('uploading a wide logo shows an <img> in the sidebar (not text)', async ({ page, baseURL }) => {
-    // Navigate to /admin/settings, find the BrandingSettings "Wide logo"
-    // tenant-scope file input (data-testid), upload a PNG, wait for the
+    // Navigate to /admin/settings/global, find the BrandingSettings "Wide logo"
+    // global-scope file input (data-testid), upload a PNG, wait for the
     // success toast, then navigate to the dashboard and assert the sidebar
     // renders an <img alt="…"> rather than an <h1> text node.
     if (!baseURL) test.skip();
 
-    await page.goto('/admin/settings');
-    await expect(page.getByRole('heading', { name: 'Branding', exact: true })).toBeVisible();
+    await page.goto('/admin/settings/global');
+    await expect(
+      page.getByRole('heading', { name: 'Global branding defaults', exact: true })
+    ).toBeVisible();
 
     // Use the data-testid selector for the hidden file input — more reliable
     // than the accept-attribute selector when multiple inputs share a type.
-    const fileInput = page.getByTestId('branding-file-input-logo_wide-tenant');
+    const fileInput = page.getByTestId('branding-file-input-logo_wide-global');
 
     // Minimal 1×1 red PNG (valid magic bytes, parseable by the backend validator).
     // We keep the exact bytes so we can assert round-trip byte integrity below.
@@ -259,12 +268,12 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     // route. This is testable via page.evaluate on document.head.
     if (!baseURL) test.skip();
 
-    await page.goto('/admin/settings');
+    await page.goto('/admin/settings/global');
 
     // Minimal ICO header — keep the bytes so we can assert round-trip integrity.
     const uploadedIcoBytes = Buffer.from('00000100', 'hex');
 
-    const faviconInput = page.getByTestId('branding-file-input-favicon-tenant');
+    const faviconInput = page.getByTestId('branding-file-input-favicon-global');
     await faviconInput.setInputFiles({
       name: 'favicon.ico',
       mimeType: 'image/x-icon',
@@ -294,10 +303,10 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
 
   test('clearing a logo reverts the sidebar to text', async ({ page }) => {
     // With a logo uploaded from the previous test, click the Clear button for
-    // the wide logo in the branding settings (tenant scope), then assert the
+    // the wide logo in the branding settings (global scope), then assert the
     // sidebar reverts to text.
-    await page.goto('/admin/settings');
-    await page.getByTestId('branding-clear-btn-logo_wide-tenant').click();
+    await page.goto('/admin/settings/global');
+    await page.getByTestId('branding-clear-btn-logo_wide-global').click();
     await expect(page.getByText('Wide logo cleared.')).toBeVisible({ timeout: 10_000 });
 
     await page.goto('/dashboard');

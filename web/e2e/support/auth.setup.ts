@@ -4,9 +4,15 @@ import {
   DELEGATED_PERMISSIONS,
   DELEGATE_USER,
   REGULAR_USER,
+  SYSTEM_ADMIN,
 } from './constants';
 import { LoginPage } from './pages';
-import { adminStatePath, delegateStatePath, userStatePath } from './storage';
+import {
+  adminStatePath,
+  delegateStatePath,
+  systemStatePath,
+  userStatePath,
+} from './storage';
 import { createAuthedApi, ensureDelegation, ensureUser } from './api';
 import { resetTwoFactorViaDb } from './totp';
 
@@ -34,6 +40,18 @@ setup('authenticate as regular user', async ({ page }) => {
   const login = new LoginPage(page);
   await login.loginExpectingSuccess(REGULAR_USER);
   await page.context().storageState({ path: userStatePath });
+  expect(page.url()).toContain('/dashboard');
+});
+
+setup('authenticate as system admin', async ({ page }) => {
+  // The system-tenant (id 0) admin. It is the only identity that may manage the
+  // GLOBAL platform defaults / branding after WC-235, so the branding-display
+  // specs drive their global writes through this session. Clear any residual
+  // 2FA first, matching the admin setup's self-heal.
+  await resetTwoFactorViaDb(SYSTEM_ADMIN.email);
+  const login = new LoginPage(page);
+  await login.loginExpectingSuccess(SYSTEM_ADMIN);
+  await page.context().storageState({ path: systemStatePath });
   expect(page.url()).toContain('/dashboard');
 });
 
