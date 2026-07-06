@@ -28,6 +28,9 @@ final class RouteCatalogueCompletenessTest extends TestCase
      * @var list<string>
      */
     private const KNOWN_UNDOCUMENTED = [
+        // WC-235: public self-service registration — OpenAPI schema to follow in
+        // a dedicated documentation task (mirrors the auth-routes rollout).
+        'POST /api/register',
         // WC-388a61e3: auth + 2FA routes are now declared in CoreApiSchemas::authRoutes().
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.

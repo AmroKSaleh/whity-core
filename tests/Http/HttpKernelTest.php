@@ -479,6 +479,38 @@ class HttpKernelTest extends TestCase
     }
 
     /**
+     * WC-235 regression: the public self-service registration route must be in
+     * EnforceTenantIsolation's allowlist, so an UNAUTHENTICATED request passes
+     * through to the handler instead of 401'ing at the tenant-isolation layer.
+     * The handler-unit tests call RegisterApiHandler directly and bypass this
+     * middleware, so only a kernel-level test catches a missing allowlist entry
+     * (which would render self-service signup completely unreachable).
+     */
+    public function testRegisterRouteIsPublicAndBypassesTenantAuth(): void
+    {
+        $jwtParser = $this->createMock(JwtParser::class);
+        $tenantMiddleware = new EnforceTenantIsolation($jwtParser);
+
+        $handlerRan = false;
+        $handler = static function (Request $req) use (&$handlerRan): Response {
+            $handlerRan = true;
+            return Response::json(['data' => ['ok' => true]], 201);
+        };
+        // The external path after version prefixing is /api/v1/register (the
+        // path EnforceTenantIsolation::PUBLIC_ROUTES lists).
+        $this->router->register('POST', '/api/v1/register', $handler);
+
+        $kernel = new HttpKernel($this->router, $this->rbacMiddleware);
+        $kernel->use($tenantMiddleware);
+
+        // Anonymous signup: no Authorization header, no session/tenant yet.
+        $response = $kernel->handle(new Request('POST', '/api/v1/register'));
+
+        $this->assertTrue($handlerRan, 'register handler must run — the route must not 401 at the tenant-isolation layer');
+        $this->assertSame(201, $response->getStatusCode());
+    }
+
+    /**
      * Test memory limit is not exceeded when limit is set high
      */
     public function testMemoryLimitNotExceeded(): void
