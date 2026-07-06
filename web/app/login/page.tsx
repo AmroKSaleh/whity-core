@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -354,6 +355,14 @@ export default function LoginPage() {
               >
                 {buttonText}
               </Button>
+
+              {/* WC-235: self-service registration entry point. */}
+              <p className="text-sm text-center text-muted-foreground">
+                New here?{' '}
+                <Link href="/register" className="font-medium text-primary hover:underline">
+                  Create a workspace
+                </Link>
+              </p>
             </form>
           )}
 
