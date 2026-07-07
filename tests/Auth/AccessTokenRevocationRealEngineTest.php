@@ -8,6 +8,7 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\AuthHandler;
+use Whity\Auth\DeviceCredentialService;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Request;
@@ -268,6 +269,68 @@ final class AccessTokenRevocationRealEngineTest extends TestCase
             $this->validator()->validateAccessToken(),
             'A token without a token_epoch claim must be treated as epoch 0 and validate against a profile at epoch 0.'
         );
+    }
+
+    // ==================== logout-others (WC-b-logout-others) ====================
+
+    public function testLogoutOthersReMintsCurrentAndSignsOutOtherSessions(): void
+    {
+        $profileId = $this->seedProfile('lo@example.com', 'secret-123', epoch: 0);
+        $current = $this->mintAccess($profileId, 1, epoch: 0);
+        $other   = $this->mintAccess($profileId, 1, epoch: 0); // a different device/session
+
+        // Token mode: present the current access token as Bearer so the re-minted
+        // session comes back in the body (readable), and X-Auth-Mode: token.
+        $response = $this->handler()->handleLogoutOthers(new Request(
+            'POST',
+            '/api/me/logout-others',
+            ['Authorization' => 'Bearer ' . $current, 'X-Auth-Mode' => 'token']
+        ));
+        self::assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        // The re-minted token (new epoch) keeps the caller signed in HERE.
+        $body = json_decode($response->getBody(), true);
+        self::assertIsArray($body);
+        self::assertNotNull(
+            $this->validator()->validateAccessTokenFromBearer((string) $body['access_token']),
+            'The caller must remain signed in via the re-minted session.'
+        );
+
+        // Every OTHER session (old epoch) is now rejected — including the token
+        // the caller used to make this request.
+        self::assertNull(
+            $this->validator()->validateAccessTokenFromBearer($other),
+            'All other sessions must be signed out by the epoch bump.'
+        );
+        self::assertNull($this->validator()->validateAccessTokenFromBearer($current));
+    }
+
+    public function testLogoutOthersAlsoSignsOutDeviceCredentials(): void
+    {
+        $profileId = $this->seedProfile('lod@example.com', 'secret-123', epoch: 0);
+        $deviceCred = (new DeviceCredentialService($this->pdo, $this->jwtParser))
+            ->issue($profileId, 1, 'lod@example.com', 'Laptop', 'windows', null)['token'];
+        self::assertNotNull($this->validator()->validateDeviceToken($deviceCred), 'Device credential valid before.');
+
+        $current = $this->mintAccess($profileId, 1, epoch: 0);
+        $response = $this->handler()->handleLogoutOthers(new Request(
+            'POST',
+            '/api/me/logout-others',
+            ['Authorization' => 'Bearer ' . $current, 'X-Auth-Mode' => 'token']
+        ));
+        self::assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        // Device credentials are epoch-checked, so the epoch bump signs them out too.
+        self::assertNull(
+            $this->validator()->validateDeviceToken($deviceCred),
+            'logout-others must also sign out device credentials.'
+        );
+    }
+
+    public function testLogoutOthersRequiresAuthentication(): void
+    {
+        $response = $this->handler()->handleLogoutOthers(new Request('POST', '/api/me/logout-others', []));
+        self::assertSame(401, $response->getStatusCode());
     }
 
     // ==================== helpers ====================

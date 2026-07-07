@@ -43,6 +43,9 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'GET /api/devices',
         'DELETE /api/devices/{id}',
         'POST /api/devices/token',
+        // WC-b-logout-others: sign out of all other sessions/devices; OpenAPI
+        // schema to follow in the same documentation task.
+        'POST /api/me/logout-others',
         // WC-388a61e3: auth + 2FA routes are now declared in CoreApiSchemas::authRoutes().
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.

@@ -3,6 +3,7 @@
 import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
+import { SessionsSettings } from '@/components/SessionsSettings';
 import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
@@ -42,6 +43,17 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <TwoFactorSettings />
+        </CardContent>
+      </Card>
+
+      {/* Sessions & devices (WC-b-logout-others) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Sessions &amp; devices</CardTitle>
+          <CardDescription>Sign out of sessions on your other browsers, apps, and devices</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SessionsSettings />
         </CardContent>
       </Card>
     </div>

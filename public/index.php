@@ -576,6 +576,9 @@ $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
 $router->register('PATCH', '/api/me', [$authHandler, 'handleUpdateMe'], null);
 $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);
 $router->register('POST', '/api/auth/logout', [$authHandler, 'handleLogout'], null);
+// WC-b-logout-others: sign out of all OTHER sessions & devices (bump token_epoch
+// then re-mint the current session). Self-authenticating like /me and refresh.
+$router->register('POST', '/api/me/logout-others', [$authHandler, 'handleLogoutOthers'], null);
 // WC-f8164c87: authenticated tenant switch. Requires a full session (access
 // token cookie), validates active membership in the target tenant, re-mints
 // session JWT with the new active_tenant_id. NOT a public route — unlike
