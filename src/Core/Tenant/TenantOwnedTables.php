@@ -77,6 +77,11 @@ final class TenantOwnedTables
         // is enforced on listing and revocation by binding profile_id + tenant_id
         // (re-keyed from user_id by migration 040).
         'mcp_tokens' => '033_create_mcp_tokens.php',
+
+        // WC-b-device-tokens (Phase B) — registered-device credential registry
+        // (migration 044). Native-client enrollments scoped to profile_id +
+        // tenant_id; list/revoke bind both, so the predicate guard must police it.
+        'devices' => '044_create_devices.php',
     ];
 
     /**

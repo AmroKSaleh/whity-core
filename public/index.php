@@ -589,6 +589,19 @@ $router->register('POST', '/api/auth/switch-tenant', [$authHandler, 'handleSwitc
 $dbWrapper = new \Whity\Auth\DatabaseQueryWrapper($db->getPdo());
 $backupCodesService = new BackupCodesService($dbWrapper);
 $tokenValidator = new TokenValidator($jwtParser, $db->getPdo());
+
+// 10a-bis. Device (native-client) enrollment + credential exchange (WC-b-device-tokens).
+// Management endpoints (register/list/revoke) are session-gated in-handler (cookie
+// OR Bearer access token) and scoped to the caller's own profile — NOT public. The
+// exchange endpoint IS public: it self-authenticates via the device credential
+// (like the MCP bearer surface) and is added to PUBLIC_ROUTES as /api/v1/devices/token.
+$deviceService = new \Whity\Auth\DeviceCredentialService($db->getPdo(), $jwtParser);
+$deviceHandler = new \Whity\Api\DeviceApiHandler($tokenValidator, $deviceService);
+$router->register('POST',   '/api/devices',       [$deviceHandler, 'register'], null);
+$router->register('GET',    '/api/devices',       [$deviceHandler, 'list'], null);
+$router->register('DELETE', '/api/devices/{id}',  [$deviceHandler, 'revoke'], null);
+$router->register('POST',   '/api/devices/token', [$authHandler, 'handleDeviceTokenExchange'], null);
+
 $twoFactorHandler = new TwoFactorHandler($db->getPdo(), $totpService, $backupCodesService, $tokenValidator, $auditLogger);
 $router->register('POST', '/api/auth/2fa/setup', [$twoFactorHandler, 'setup'], null);
 $router->register('POST', '/api/auth/2fa/confirm', [$twoFactorHandler, 'confirm'], null);

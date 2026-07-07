@@ -119,6 +119,12 @@ class EnforceTenantIsolation
         '/api/v1/branding',
         // KeyHub KiCad plugin native-client login — issues JWTs to the desktop app.
         '/api/v1/keyhub/auth/token',
+        // WC-b-device-tokens: device-credential exchange. Self-authenticating via
+        // the long-lived device credential (type='device') — like the MCP bearer
+        // surface, the standard access-token flow would reject it, so it bypasses
+        // tenant resolution and validates the credential inside the handler. Only
+        // the EXCHANGE is public; device register/list/revoke stay session-gated.
+        '/api/v1/devices/token',
         // MCP Streamable-HTTP endpoint — handles its own auth via mcp token type
         // (ADR-0006); the per-call contract validates the token and sets
         // TenantContext inside the dispatcher. The standard access-token flow
