@@ -31,6 +31,12 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // WC-235: public self-service registration — OpenAPI schema to follow in
         // a dedicated documentation task (mirrors the auth-routes rollout).
         'POST /api/register',
+        // WC-235: pending-registration review (admin-approval activation) —
+        // system-tenant-only; OpenAPI schema to follow in the same documentation
+        // task as /api/register.
+        'GET /api/registrations/pending',
+        'POST /api/registrations/{id}/approve',
+        'POST /api/registrations/{id}/reject',
         // WC-388a61e3: auth + 2FA routes are now declared in CoreApiSchemas::authRoutes().
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.
