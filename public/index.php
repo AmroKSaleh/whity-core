@@ -222,6 +222,12 @@ $bootTimestamp = time();
 $logger = new ErrorLogLogger();
 TenantContext::setLogger($logger);
 
+// WC-d: error tracker for uncaught exceptions. Null until ERROR_TRACKER_DSN
+// (or SENTRY_DSN) is configured; when active it captures each uncaught error
+// with secret-free context (release, tenant_id, request_id, loaded plugins +
+// versions). Selection is config-driven so activation is a deploy-time env change.
+$errorTracker = \Whity\Core\Observability\ErrorTrackerFactory::fromEnv($_ENV);
+
 // 1. Initialize database connection
 $db = Database::connect();
 // Expose the shared, lazy, self-healing Database service to plugin route
@@ -986,7 +992,7 @@ if ($isWorker) {
         // are gated behind development/DEBUG. Decision is computed once per
         // iteration and captured by the request closure below.
         $logLifecycle = WorkerRuntime::shouldLogLifecycle($_ENV);
-        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle, $securityHeaders) {
+        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle, $securityHeaders, $errorTracker) {
             try {
                 // Dispatch request start hook
                 if ($logLifecycle) {
@@ -1048,7 +1054,16 @@ if ($isWorker) {
                     // If send also fails, just log it
                     error_log('Failed to send error response: ' . $sendError->getMessage());
                 }
-                error_log($e->getMessage() . "\n" . $e->getTraceAsString());
+                $requestId = \Whity\Core\Observability\ErrorContext::newRequestId();
+                try {
+                    $errorTracker->captureException(
+                        $e,
+                        \Whity\Core\Observability\ErrorContext::gather($pluginLoader->getPluginMetadata(), $requestId)
+                    );
+                } catch (\Throwable) {
+                    // Telemetry must never mask the original error.
+                }
+                error_log('[' . $requestId . '] ' . $e->getMessage() . "\n" . $e->getTraceAsString());
             } finally {
                 // Dispatch request end hook
                 if ($logLifecycle) {
@@ -1153,7 +1168,16 @@ if ($isWorker) {
             // If send also fails, just log it
             error_log('Failed to send error response: ' . $sendError->getMessage());
         }
-        error_log($e->getMessage() . "\n" . $e->getTraceAsString());
+        $requestId = \Whity\Core\Observability\ErrorContext::newRequestId();
+        try {
+            $errorTracker->captureException(
+                $e,
+                \Whity\Core\Observability\ErrorContext::gather($pluginLoader->getPluginMetadata(), $requestId)
+            );
+        } catch (\Throwable) {
+            // Telemetry must never mask the original error.
+        }
+        error_log('[' . $requestId . '] ' . $e->getMessage() . "\n" . $e->getTraceAsString());
     } finally {
         \Whity\Core\Tenant\TenantContext::reset();
         AuditContext::reset();
