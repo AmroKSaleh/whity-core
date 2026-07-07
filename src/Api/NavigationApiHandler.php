@@ -107,8 +107,9 @@ final class NavigationApiHandler
     /**
      * Whether the caller satisfies every RBAC gate the item declares.
      *
-     * An item with neither gate is public. When both gates are present BOTH
-     * must pass, mirroring RbacMiddleware.
+     * An item with neither gate is public. When multiple gates are present ALL
+     * must pass, mirroring RbacMiddleware. A `systemTenantOnly` item is
+     * additionally hidden outside the system tenant (id 0).
      *
      * @param array<string, mixed> $item     The navigation item descriptor.
      * @param int                  $userId   The resolved caller user id.
@@ -126,6 +127,14 @@ final class NavigationApiHandler
         $requiredPermission = $item['requiredPermission'] ?? null;
         if (is_string($requiredPermission) && $requiredPermission !== ''
             && !$this->roleChecker->hasPermissionForProfile($userId, $requiredPermission, $tenantId)) {
+            return false;
+        }
+
+        // System-tenant-only items (e.g. platform governance surfaces) are
+        // hidden for any caller not acting in the system tenant (id 0), even if
+        // they hold the declared permission within their own tenant. Mirrors the
+        // handler-side systemTenantOnly gates (WC-235).
+        if (($item['systemTenantOnly'] ?? false) === true && $tenantId !== 0) {
             return false;
         }
 

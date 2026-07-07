@@ -8,6 +8,7 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\RegisterApiHandler;
+use Whity\Core\Identity\AccountActivationPolicy;
 use Whity\Core\Identity\EmailVerificationPolicy;
 use Whity\Core\Identity\EmailVerificationProvider;
 use Whity\Core\Request;
@@ -37,8 +38,9 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
 
     protected function tearDown(): void
     {
-        // Never leak the enforcement flag into other tests.
+        // Never leak the enforcement flags into other tests.
         unset($_ENV[EmailVerificationPolicy::ENV_FLAG]);
+        unset($_ENV[AccountActivationPolicy::ENV_FLAG]);
     }
 
     /**
@@ -269,6 +271,44 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
         self::assertCount(1, $spy->calls);
         self::assertSame($profileId, $spy->calls[0]['profileId']);
         self::assertSame('verify@acme.test', $spy->calls[0]['email']);
+    }
+
+    // ── WC-235: admin-approval seam (default OFF; enforce via env flag) ────────
+
+    public function testApprovalDisabledByDefaultProvisionsActiveOwnerAndNoApprovalFlag(): void
+    {
+        $res = $this->register([
+            'email' => 'auto@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Auto WS',
+        ]);
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertFalse($this->decode($res)['data']['approval_required']);
+        $profileId = (int) $this->decode($res)['data']['profile_id'];
+        self::assertSame('active', (string) $this->pdo->query(
+            "SELECT status FROM memberships WHERE profile_id = {$profileId}"
+        )->fetchColumn());
+    }
+
+    public function testApprovalEnforcedProvisionsInvitedOwnerAndSetsApprovalFlag(): void
+    {
+        $_ENV[AccountActivationPolicy::ENV_FLAG] = '1';
+
+        $res = $this->register([
+            'email' => 'pending@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Pending WS',
+        ]);
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertTrue($this->decode($res)['data']['approval_required']);
+        $profileId = (int) $this->decode($res)['data']['profile_id'];
+        // The owner membership starts 'invited' (pending) — login is refused
+        // until a system-tenant admin approves it. The tenant + profile + email
+        // are still fully provisioned so approval only needs a status flip.
+        self::assertSame('invited', (string) $this->pdo->query(
+            "SELECT status FROM memberships WHERE profile_id = {$profileId}"
+        )->fetchColumn());
+        self::assertSame(1, (int) $this->pdo->query(
+            "SELECT COUNT(*) FROM profile_emails WHERE email = 'pending@acme.test'"
+        )->fetchColumn());
     }
 
     public function testProviderFailureUnderEnforcementStillReturns201(): void

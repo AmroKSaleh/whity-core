@@ -398,6 +398,21 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_READ,
     ];
     $items[] = [
+        'id' => 'pending-registrations',
+        'label' => 'Pending Registrations',
+        'href' => '/admin/registrations',
+        'icon' => 'user-check',
+        'group' => 'admin',
+        'order' => 9.5,
+        // WC-235: system-tenant governance surface. Mirrors GET
+        // /api/v1/registrations/pending, gated on registrations:approve AND the
+        // system tenant (id 0) — a regular tenant admin holds the permission in
+        // its own tenant but must never approve another workspace's owner, so
+        // the item is hidden for them (the page also enforces both server-side).
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::REGISTRATIONS_APPROVE,
+        'systemTenantOnly' => true,
+    ];
+    $items[] = [
         'id' => 'ai-principals',
         'label' => 'AI Principals',
         'href' => '/admin/ai-principals',
@@ -795,6 +810,16 @@ $router->register('DELETE', '/api/branding/assets/{key}',           [$brandingHa
 $router->register('POST',   '/api/branding/global/assets/{key}',    [$brandingHandler, 'uploadGlobal'],  null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('DELETE', '/api/branding/global/assets/{key}',    [$brandingHandler, 'clearGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHandler, 'setBrandingHost'], null, null, CorePermissions::SETTINGS_MANAGE);
+
+// 13c-bis. Register the pending-registration review API (WC-235). Gated on
+// registrations:approve (6th positional arg) AND — inside the handler — on the
+// SYSTEM tenant (id 0): approving a registration activates another tenant's
+// owner, a platform operation a regular tenant admin must never perform. Active
+// only matters when ADMIN_APPROVAL_ENFORCED is on; the routes are always wired.
+$registrationsHandler = new \Whity\Api\RegistrationsApiHandler($db->getPdo(), $roleChecker);
+$router->register('GET',  '/api/registrations/pending',      [$registrationsHandler, 'listPending'], null, null, CorePermissions::REGISTRATIONS_APPROVE);
+$router->register('POST', '/api/registrations/{id}/approve', [$registrationsHandler, 'approve'],     null, null, CorePermissions::REGISTRATIONS_APPROVE);
+$router->register('POST', '/api/registrations/{id}/reject',  [$registrationsHandler, 'reject'],      null, null, CorePermissions::REGISTRATIONS_APPROVE);
 
 // 13d. Register the Tenant Email-Domain API (WC-9b87). Admin-gated; tenant-scoped
 // in the handler via TenantContext so a caller can only manage its own domains.

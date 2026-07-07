@@ -95,6 +95,13 @@ final class CorePermissions
     // authenticate AI clients to the MCP endpoint.
     public const MCP_TOKENS_MANAGE = 'mcp:tokens:manage';
 
+    // Self-service registration approval (WC-235). Gates the system-tenant-only
+    // review of pending registrations: list, approve (invited → active) and
+    // reject (invited → suspended). Necessary but not sufficient — the handler
+    // additionally requires the caller to be acting in the system tenant (id 0),
+    // since a freshly-registered tenant's only member is the pending owner.
+    public const REGISTRATIONS_APPROVE = 'registrations:approve';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -132,6 +139,7 @@ final class CorePermissions
             self::SETTINGS_WRITE,
             self::SETTINGS_MANAGE,
             self::MCP_TOKENS_MANAGE,
+            self::REGISTRATIONS_APPROVE,
         ];
     }
 }

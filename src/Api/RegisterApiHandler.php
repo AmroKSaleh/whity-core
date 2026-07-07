@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use PDO;
+use Whity\Core\Identity\AccountActivationPolicy;
 use Whity\Core\Identity\EmailVerificationPolicy;
 use Whity\Core\Identity\EmailVerificationProvider;
+use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\NullEmailVerificationProvider;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
@@ -18,9 +20,12 @@ use Whity\Http\JsonBody;
  *
  * Provisions a NEW tenant with the registrant as its owner. In one transaction
  * it creates: a `tenants` row, a global `profiles` row (+ a primary verified
- * `profile_emails` row), and an ACTIVE `memberships` row binding the profile to
- * the new tenant with the base `admin` role (ADR 0005 — identity is
- * profiles + profile_emails + memberships; there is no legacy `users` row).
+ * `profile_emails` row), and a `memberships` row binding the profile to the new
+ * tenant with the base `admin` role (ADR 0005 — identity is profiles +
+ * profile_emails + memberships; there is no legacy `users` row). The membership
+ * is 'active' by default; when {@see AccountActivationPolicy} is enforced it is
+ * 'invited' (pending) and the owner cannot log in until a system-tenant admin
+ * approves it.
  *
  * PUBLIC + UNAUTHENTICATED: registered with NO required permission and covered
  * by the global rate-limiter (a public tenant-creating endpoint is an abuse
@@ -98,6 +103,16 @@ final class RegisterApiHandler
             // nothing is sent. Flipping the flag needs no change to this handler.
             $enforced = EmailVerificationPolicy::isEnforced();
 
+            // Admin-approval enforcement (WC-235): default OFF (MVP). When ON,
+            // the owner membership is provisioned as 'invited' (pending) instead
+            // of 'active', so the owner CANNOT log in until a system-tenant admin
+            // approves it. Independent of email verification above. Flipping the
+            // flag needs no change to this handler.
+            $approvalRequired = AccountActivationPolicy::isEnforced();
+            $membershipStatus = $approvalRequired
+                ? MembershipRepository::STATUS_INVITED
+                : MembershipRepository::STATUS_ACTIVE;
+
             // ── Resolve the base owner role; fail closed if the platform has not
             //    been seeded (a workspace owner cannot exist without it). ────────
             // @tenant-guard-ignore: base roles are global (NULL tenant_id); looked up by unique name
@@ -173,14 +188,19 @@ final class RegisterApiHandler
                      VALUES (:profile_id, :email, {$verifiedLiteral}, true, NOW())"
                 )->execute([':profile_id' => $profileId, ':email' => $email]);
 
-                // 4. Active owner membership binding the profile to the new tenant.
+                // 4. Owner membership binding the profile to the new tenant. Its
+                // status is 'active' (owner can log in immediately) unless admin
+                // approval is enforced, in which case it is 'invited' (pending)
+                // and login is refused until a system-tenant admin approves it.
+                // The value is a controlled enum constant, never user input.
                 $this->db->prepare(
                     "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
-                     VALUES (:profile_id, :tenant_id, :role_id, NULL, 'active', NOW())"
+                     VALUES (:profile_id, :tenant_id, :role_id, NULL, :status, NOW())"
                 )->execute([
                     ':profile_id' => $profileId,
                     ':tenant_id'  => $tenantId,
                     ':role_id'    => $roleId,
+                    ':status'     => $membershipStatus,
                 ]);
 
                 if ($ownTx) {
@@ -211,6 +231,11 @@ final class RegisterApiHandler
                     'tenant_id'             => $tenantId,
                     'email'                 => $email,
                     'verification_required' => $enforced,
+                    // When true the owner cannot log in until a system-tenant
+                    // admin approves the pending registration (WC-235). The
+                    // client shows a "pending approval" message instead of
+                    // chaining a login it knows will be refused.
+                    'approval_required'     => $approvalRequired,
                 ],
             ], 201);
         } catch (\Throwable $e) {
