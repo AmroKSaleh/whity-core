@@ -1134,6 +1134,62 @@ class AuthHandler
     }
 
     /**
+     * Handle POST /api/v1/me/logout-others — sign out of all OTHER sessions and
+     * devices, keeping only the caller's current session (WC-b-logout-others).
+     *
+     * Mechanism: bump `profiles.token_epoch`, which invalidates EVERY token the
+     * profile holds — access, refresh, AND device credentials (all epoch-checked)
+     * — across every browser/app/device, then immediately re-mint the CURRENT
+     * session at the new epoch so the caller stays signed in here. Same primitive
+     * a password change uses (handleUpdateMe), minus the password change. Because
+     * revocation is a global epoch bump (sessions are stateless — no per-session
+     * table), this is all-other-sessions, not selective; a specific native device
+     * is instead revoked individually via DELETE /api/v1/devices/{id}.
+     *
+     * Self-authenticating (cookie OR Bearer access token) via resolveAccessClaims,
+     * like the sibling /me and /auth/refresh endpoints.
+     *
+     * @param array<string, mixed> $params
+     */
+    public function handleLogoutOthers(Request $request, array $params = []): Response
+    {
+        $claims = $this->resolveAccessClaims($request);
+        if ($claims === null) {
+            return Response::error('Unauthorized', 401);
+        }
+
+        // Fail closed (WC-idcut-E): profile_id must be a strict positive int;
+        // active_tenant_id may be 0 (system tenant), so require >= 0.
+        $profileId      = isset($claims['profile_id']) && is_int($claims['profile_id']) ? $claims['profile_id'] : null;
+        $activeTenantId = isset($claims['active_tenant_id']) && is_int($claims['active_tenant_id']) ? $claims['active_tenant_id'] : null;
+        if ($profileId === null || $profileId <= 0 || $activeTenantId === null || $activeTenantId < 0) {
+            return Response::error('Unauthorized', 401);
+        }
+        $email = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+
+        // Bump the epoch → every OTHER token for this profile (access/refresh/device)
+        // is now epoch-stale and rejected on next use.
+        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+        $this->db->prepare(
+            'UPDATE profiles SET token_epoch = token_epoch + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+        )->execute([$profileId]);
+
+        // Re-mint the CURRENT session at the new epoch so THIS device stays signed
+        // in. issueSessionForProfile re-resolves the role from an ACTIVE membership
+        // (fails closed if it was revoked), sets cookies (cookie mode) or returns
+        // tokens (token mode), and audits the event.
+        return $this->issueSessionForProfile(
+            $profileId,
+            $activeTenantId,
+            $email,
+            $this->currentProfileTokenEpoch($profileId),
+            $request,
+            self::isTokenMode($request),
+            'auth.logout_others'
+        );
+    }
+
+    /**
      * Read a profile's CURRENT token epoch (WC-d4340daf).
      *
      * Epoch source for post-cutover tokens that carry {profile_id,

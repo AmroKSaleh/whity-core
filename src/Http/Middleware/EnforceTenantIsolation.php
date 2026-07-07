@@ -98,6 +98,11 @@ class EnforceTenantIsolation
         '/api/v1/me',
         '/api/v1/auth/refresh',
         '/api/v1/auth/logout',
+        // WC-b-logout-others: sign out of all OTHER sessions/devices. Self-
+        // validates the current access token (cookie or Bearer) via
+        // resolveAccessClaims, then bumps the epoch + re-mints — same
+        // self-authenticating pattern as /me and /auth/refresh above.
+        '/api/v1/me/logout-others',
         // WC-175 (#191): /api/navigation is NO LONGER public. It is now
         // caller-aware — NavigationApiHandler resolves the authenticated user
         // and tenant and RBAC-filters items — so an unauthenticated request
