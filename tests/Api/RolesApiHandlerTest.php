@@ -180,6 +180,26 @@ class RolesApiHandlerTest extends TestCase
     }
 
     /**
+     * An over-long description (unbounded TEXT column) is rejected with a clean
+     * 422 before any DB write (input hardening). The guard short-circuits ahead
+     * of the name-uniqueness query, so a bare PDO mock is never touched.
+     */
+    public function testCreateRejectsOverLongDescriptionWith422(): void
+    {
+        $handler = new RolesApiHandler($this->createMock(PDO::class), $this->passthroughHookManager());
+        $request = $this->authedRequest('POST', '/api/roles', [
+            'name' => 'Editor',
+            'description' => str_repeat('a', 10001),
+            'permissions' => [],
+        ]);
+
+        $response = $handler->create($request);
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('description', json_decode($response->getBody(), true)['details']['field']);
+    }
+
+    /**
      * WC-110 (mocked): POST with numeric permission ids validates them against
      * the catalogue and links the matching ids (the web UI sends ids). The real
      * SQL semantics are exercised in RolesApiHandlerRealEngineTest.

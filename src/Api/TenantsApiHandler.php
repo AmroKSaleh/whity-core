@@ -8,6 +8,7 @@ use Whity\Api\Exception\SystemTenantProtectedException;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
@@ -225,6 +226,15 @@ class TenantsApiHandler
             $name = $body['name'];
             $slug = $body['slug'] ?? $this->generateSlug($name);
 
+            // Bound the free-text fields (VARCHAR(255)) before any DB write so an
+            // over-long value is a clean 422, not a Postgres 22001 → 500.
+            if ($tooLong = InputLimits::firstViolation([
+                'name' => [(string) $name, InputLimits::NAME_MAX],
+                'slug' => [(string) $slug, InputLimits::NAME_MAX],
+            ])) {
+                return $tooLong;
+            }
+
             // Validate slug format
             if (!preg_match('/^[a-z0-9-]+$/', $slug)) {
                 return Response::error('Slug must contain only lowercase letters, numbers, and hyphens', 400);
@@ -331,6 +341,15 @@ class TenantsApiHandler
 
             $updates = [];
             $params_array = [];
+
+            // Bound the free-text fields (VARCHAR(255)) before the write; only the
+            // fields actually present in the body are checked (null = skipped).
+            if ($tooLong = InputLimits::firstViolation([
+                'name' => [isset($body['name']) ? (string) $body['name'] : null, InputLimits::NAME_MAX],
+                'slug' => [isset($body['slug']) ? (string) $body['slug'] : null, InputLimits::NAME_MAX],
+            ])) {
+                return $tooLong;
+            }
 
             // Update name
             if (isset($body['name']) && $body['name'] !== $tenant['name']) {

@@ -499,8 +499,14 @@ const BUTTON_VARIANT: Record<
 
 function ButtonRenderer({ block }: { block: ButtonBlock }) {
   const variant = block.variant ? BUTTON_VARIANT[block.variant] : 'default';
-  // Navigate only for internal paths; any other href is inert (no navigation).
-  const isInternal = block.href.startsWith('/');
+  // Navigate only for internal, same-origin paths; any other href is inert (no
+  // navigation). A protocol-relative URL ("//evil.com", or "/\evil.com" which
+  // browsers normalize to "//") also starts with "/" but points off-site, so it
+  // must be excluded — otherwise a plugin could smuggle an open-redirect.
+  const isInternal =
+    block.href.startsWith('/') &&
+    !block.href.startsWith('//') &&
+    !block.href.startsWith('/\\');
   if (isInternal) {
     return (
       <Button asChild variant={variant}>

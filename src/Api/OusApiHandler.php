@@ -8,6 +8,7 @@ use Whity\Api\Exception\OuHierarchyCycleException;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Hooks\HookManager;
@@ -114,6 +115,15 @@ class OusApiHandler
             $parentId = $body['parent_id'] ?? null;
             $description = $body['description'] ?? '';
             $slug = $this->generateSlug($name);
+
+            // Bound the free-text fields before any DB write: name is VARCHAR(255),
+            // description is an otherwise-unbounded TEXT column.
+            if ($tooLong = InputLimits::firstViolation([
+                'name' => [(string) $name, InputLimits::NAME_MAX],
+                'description' => [(string) $description, InputLimits::TEXT_MAX],
+            ])) {
+                return $tooLong;
+            }
 
             // Parent validation: if parent_id supplied, it must exist and belong to current tenant
             if ($parentId !== null) {
@@ -275,6 +285,14 @@ class OusApiHandler
 
             $updates = [];
             $params_array = [];
+
+            // Bound the free-text fields present in the body before the write.
+            if ($tooLong = InputLimits::firstViolation([
+                'name' => [isset($body['name']) ? (string) $body['name'] : null, InputLimits::NAME_MAX],
+                'description' => [isset($body['description']) ? (string) $body['description'] : null, InputLimits::TEXT_MAX],
+            ])) {
+                return $tooLong;
+            }
 
             // Handle name update - regenerate slug when name changes
             if (isset($body['name']) && $body['name'] !== $ou['name']) {

@@ -9,6 +9,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
@@ -271,6 +272,16 @@ class RolesApiHandler
 
             $name = (string)$body['name'];
             $description = isset($body['description']) ? (string)$body['description'] : '';
+
+            // Bound the free-text fields before any DB write: name is VARCHAR(255),
+            // description is an otherwise-unbounded TEXT column.
+            if ($tooLong = InputLimits::firstViolation([
+                'name' => [$name, InputLimits::NAME_MAX],
+                'description' => [$description, InputLimits::TEXT_MAX],
+            ])) {
+                return $tooLong;
+            }
+
             /** @var array<int, string|int> $permissions */
             $permissions = $this->extractPermissionList($body);
 
@@ -402,6 +413,14 @@ class RolesApiHandler
 
             $updates = [];
             $updateParams = [];
+
+            // Bound the free-text fields present in the body before the write.
+            if ($tooLong = InputLimits::firstViolation([
+                'name' => [isset($body['name']) ? (string) $body['name'] : null, InputLimits::NAME_MAX],
+                'description' => [isset($body['description']) ? (string) $body['description'] : null, InputLimits::TEXT_MAX],
+            ])) {
+                return $tooLong;
+            }
 
             if (isset($body['name']) && $body['name'] !== $role['name']) {
                 // @tenant-guard-ignore: role-name uniqueness check is intentionally platform-global (role names are globally unique)
