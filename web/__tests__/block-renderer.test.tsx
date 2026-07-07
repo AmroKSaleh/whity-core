@@ -358,6 +358,36 @@ describe('BlockRenderer', () => {
     expect(screen.queryByRole('link', { name: 'Evil' })).toBeNull();
   });
 
+  it('renders a protocol-relative button href as inert (open-redirect guard)', () => {
+    // "//evil.example" starts with "/" but points off-site — it must NOT become
+    // a navigating link. "/\evil.example" (browser-normalized to "//") too.
+    const { container } = render(
+      <BlockRenderer
+        blocks={[
+          { type: 'button', label: 'Proto', href: '//evil.example' },
+          { type: 'button', label: 'Backslash', href: '/\\evil.example' },
+        ]}
+      />
+    );
+    for (const anchor of Array.from(container.querySelectorAll('a'))) {
+      const href = anchor.getAttribute('href') ?? '';
+      expect(href.startsWith('//')).toBe(false);
+      expect(href.startsWith('/\\')).toBe(false);
+    }
+    expect(screen.queryByRole('link', { name: 'Proto' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Backslash' })).toBeNull();
+  });
+
+  it('renders a genuine internal button href as a navigating link', () => {
+    render(
+      <BlockRenderer
+        blocks={[{ type: 'button', label: 'Home', href: '/dashboard' }]}
+      />
+    );
+    // A single-slash internal path still navigates.
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/dashboard');
+  });
+
   it('renders a multi-block tree without throwing and shows each child', () => {
     render(
       <BlockRenderer

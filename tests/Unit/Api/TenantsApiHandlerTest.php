@@ -87,6 +87,25 @@ class TenantsApiHandlerTest extends TestCase
     }
 
     /**
+     * An over-long name (VARCHAR(255)) on update is rejected with a clean 422
+     * before the write (input hardening). The target-tenant SELECT still runs;
+     * the length guard short-circuits ahead of the name-uniqueness query.
+     */
+    public function testUpdateRejectsOverLongNameWith422(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $selectStmt = $this->mockStatement(['id' => 5, 'name' => 'Acme', 'slug' => 'acme']);
+        $this->mockDb->method('prepare')->willReturn($selectStmt);
+
+        $request = new Request('PATCH', '/api/tenants/5', [], (string) json_encode(['name' => str_repeat('a', 256)]));
+        $response = $this->handler->update($request, ['id' => 5]);
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('name', json_decode($response->getBody(), true)['details']['field']);
+    }
+
+    /**
      * AC1: A system user (tenant_id=0) deleting another tenant succeeds (200).
      */
     public function testSystemUserCanDeleteAnotherTenant(): void

@@ -10,6 +10,7 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
@@ -292,6 +293,10 @@ class UsersApiHandler
             }
 
             $email = (string)$body['email'];
+            // Bound the email (VARCHAR(255)) before any DB write.
+            if ($tooLong = InputLimits::firstViolation(['email' => [$email, InputLimits::NAME_MAX]])) {
+                return $tooLong;
+            }
             $tenantId = TenantContext::getTenantId();
             if ($tenantId === null) {
                 return Response::error('Tenant context required', 400);
@@ -474,6 +479,10 @@ class UsersApiHandler
             // GLOBAL uniqueness of profile_emails.email (ADR 0005 §2).
             $currentEmail = (string)($membership['email'] ?? '');
             if (isset($body['email']) && $body['email'] !== '' && $body['email'] !== $currentEmail) {
+                // Bound the email (VARCHAR(255)) before the write.
+                if ($tooLong = InputLimits::firstViolation(['email' => [(string) $body['email'], InputLimits::NAME_MAX]])) {
+                    return $tooLong;
+                }
                 // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL identity table (ADR 0005 §2); UNIQUE(email)
                 $checkStmt = $this->db->prepare(
                     'SELECT profile_id FROM profile_emails WHERE email = ? AND profile_id != ?'

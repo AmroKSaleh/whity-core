@@ -110,6 +110,32 @@ class OusApiHandlerTest extends TestCase
     }
 
     /**
+     * An over-long name (VARCHAR(255)) is rejected with a clean 422 before any
+     * DB write, rather than surfacing as a Postgres 22001 → 500 (input hardening).
+     */
+    public function testCreateOuRejectsOverLongNameWith422(): void
+    {
+        $body = (string) json_encode(['name' => str_repeat('a', 256), 'description' => 'ok']);
+        $response = $this->handler->create(new Request('POST', '/api/ous', [], $body));
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('name', json_decode($response->getBody(), true)['details']['field']);
+    }
+
+    /**
+     * An over-long description (unbounded TEXT column) is capped at the
+     * application layer so a single field cannot absorb the full 1 MiB body.
+     */
+    public function testCreateOuRejectsOverLongDescriptionWith422(): void
+    {
+        $body = (string) json_encode(['name' => 'Engineering', 'description' => str_repeat('a', 10001)]);
+        $response = $this->handler->create(new Request('POST', '/api/ous', [], $body));
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('description', json_decode($response->getBody(), true)['details']['field']);
+    }
+
+    /**
      * Test creating an OU triggers hooks
      */
     public function testCreateOuTriggersCreatingHook(): void

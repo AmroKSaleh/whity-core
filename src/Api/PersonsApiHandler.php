@@ -8,6 +8,7 @@ use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
@@ -104,6 +105,15 @@ class PersonsApiHandler
             $displayName = isset($body['displayName']) ? trim((string) $body['displayName']) : '';
             if ($displayName === '') {
                 return Response::error('displayName is required', 400);
+            }
+
+            // Bound the free-text fields before the write: displayName is
+            // VARCHAR(255); notes is an otherwise-unbounded TEXT column.
+            if ($tooLong = InputLimits::firstViolation([
+                'displayName' => [$displayName, InputLimits::NAME_MAX],
+                'notes' => [$this->nullableString($body, 'notes'), InputLimits::TEXT_MAX],
+            ])) {
+                return $tooLong;
             }
 
             $personId = $this->persons->insert(
@@ -215,6 +225,14 @@ class PersonsApiHandler
             }
             if (array_key_exists('notes', $body)) {
                 $fields['notes'] = $this->nullableString($body, 'notes');
+            }
+
+            // Bound the free-text fields present in the update before the write.
+            if ($tooLong = InputLimits::firstViolation([
+                'displayName' => [$fields['display_name'] ?? null, InputLimits::NAME_MAX],
+                'notes' => [$fields['notes'] ?? null, InputLimits::TEXT_MAX],
+            ])) {
+                return $tooLong;
             }
 
             $this->persons->update($id, $tenantId, $fields);
