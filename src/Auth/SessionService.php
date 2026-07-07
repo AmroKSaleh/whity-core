@@ -63,32 +63,39 @@ final class SessionService
     }
 
     /**
-     * Rotate an existing session in place: the family identified by its OLD
-     * refresh jti adopts the freshly-minted access + refresh jtis and its
-     * last_seen / expiry are bumped. Returns false when no active row matched
-     * (e.g. a session that predates this feature, or was already revoked) — the
-     * caller keeps working; it simply is not (yet) listed.
+     * Rotate an existing session in place: the family whose CURRENT access OR
+     * refresh jti is $matchJti adopts the freshly-minted access + refresh jtis
+     * and its last_seen / expiry are bumped. Returns false when no active row
+     * matched (a session that predates this feature, or was already revoked) —
+     * the caller keeps working; it simply is not (yet) listed.
      *
+     * Matching on EITHER jti is deliberate: the refresh flow presents a refresh
+     * token (so $matchJti is the current refresh_jti), while the re-mint flows
+     * (switch-tenant / password-change / logout-others) authenticate with an
+     * access token (so $matchJti is the current access_jti). Both jtis are
+     * 128-bit-random platform-wide unique, so this never rotates the wrong row.
+     *
+     * @param string $matchJti  The caller's CURRENT access or refresh jti.
      * @param string $expiresAt 'Y-m-d H:i:s' of the new refresh token's expiry.
      */
     public function rotate(
-        string $oldRefreshJti,
+        string $matchJti,
         string $newAccessJti,
         string $newRefreshJti,
         string $expiresAt,
     ): bool {
-        // @tenant-guard-ignore: matched by refresh_jti — a platform-wide UNIQUE handle from the caller's own presented token, so it cannot touch another tenant's session row.
+        // @tenant-guard-ignore: matched by the caller's own current jti (access OR refresh) — each is a platform-wide UNIQUE handle, so it cannot touch another tenant's session row.
         $stmt = $this->db->prepare(
             'UPDATE sessions
                 SET refresh_jti = :new_refresh, access_jti = :new_access,
                     last_seen_at = NOW(), expires_at = :expires_at
-              WHERE refresh_jti = :old_refresh AND revoked_at IS NULL'
+              WHERE (refresh_jti = :match OR access_jti = :match) AND revoked_at IS NULL'
         );
         $stmt->execute([
             ':new_refresh' => $newRefreshJti,
             ':new_access'  => $newAccessJti,
             ':expires_at'  => $expiresAt,
-            ':old_refresh' => $oldRefreshJti,
+            ':match'       => $matchJti,
         ]);
 
         return $stmt->rowCount() > 0;

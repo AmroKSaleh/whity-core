@@ -113,6 +113,67 @@ final class SessionsRealEngineTest extends TestCase
         self::assertNull($this->validator()->validateAccessTokenFromBearer($accessB), 'Other sessions must be revoked.');
     }
 
+    public function testRotateMatchesByAccessJtiNotOnlyRefreshJti(): void
+    {
+        // Regression (adversarial review): the re-mint flows (switch-tenant /
+        // password-change / logout-others) authenticate with an ACCESS token, so
+        // rotate() must match on access_jti — not only refresh_jti — or those
+        // flows silently orphan the row and leave an unrevocable token family.
+        $pid = $this->seedProfile('rot@example.com');
+        $svc = new SessionService($this->pdo);
+        $svc->start($pid, 1, 'ACCESS-1', 'REFRESH-1', '2099-01-01 00:00:00', 'UA', '1.1.1.1');
+
+        self::assertTrue(
+            $svc->rotate('ACCESS-1', 'ACCESS-2', 'REFRESH-2', '2099-01-01 00:00:00'),
+            'rotate() must match by the current access jti.'
+        );
+        $rows = $svc->listForProfile($pid, 1, 'ACCESS-2');
+        self::assertCount(1, $rows, 'rotation stays a single row (family).');
+        self::assertTrue($rows[0]['current'], 'the row now carries the new access jti.');
+
+        self::assertTrue(
+            $svc->rotate('REFRESH-2', 'ACCESS-3', 'REFRESH-3', '2099-01-01 00:00:00'),
+            'rotate() must also still match by the current refresh jti (the refresh flow).'
+        );
+    }
+
+    public function testEmailChangeRotatesTheSessionSoRevokeKillsTheNewToken(): void
+    {
+        // End-to-end proof of the rotate fix through a real re-mint flow
+        // (handleUpdateMe presents the access token). Before the fix this
+        // orphaned the row; now the row rotates and stays revocable.
+        $this->seedProfile('a@example.com');
+        [$access] = $this->login('a@example.com');
+
+        $res = $this->authHandler()->handleUpdateMe(new Request(
+            'PATCH',
+            '/api/me',
+            ['Authorization' => 'Bearer ' . $access, 'X-Auth-Mode' => 'token'],
+            (string) json_encode(['email' => 'a2@example.com', 'current_password' => 'secret-123'])
+        ));
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+        $newAccess = (string) json_decode($res->getBody(), true)['access_token'];
+
+        // Same family rotated (not orphaned): still one session, flagged current.
+        $sessions = json_decode(
+            $this->sessionsHandler()->list($this->bearer('GET', '/api/me/sessions', $newAccess))->getBody(),
+            true
+        )['sessions'];
+        self::assertCount(1, $sessions);
+        self::assertTrue($sessions[0]['current']);
+
+        // Revoking it kills the NEW (live) token — proving the row tracks it.
+        $id = $sessions[0]['id'];
+        self::assertSame(
+            204,
+            $this->sessionsHandler()->revoke($this->bearer('DELETE', "/api/me/sessions/{$id}", $newAccess), ['id' => (string) $id])->getStatusCode()
+        );
+        self::assertNull(
+            $this->validator()->validateAccessTokenFromBearer($newAccess),
+            'Revoking the rotated session must kill the current token.'
+        );
+    }
+
     public function testSessionEndpointsRequireAuthentication(): void
     {
         self::assertSame(401, $this->sessionsHandler()->list(new Request('GET', '/api/me/sessions'))->getStatusCode());
