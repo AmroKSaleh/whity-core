@@ -1435,6 +1435,7 @@ class AuthHandler
         // Best-effort last-seen bump; a failed touch must not block the exchange.
         if ($jti !== '') {
             try {
+                // @tenant-guard-ignore: jti is a platform-wide UNIQUE 128-bit handle bound to this validated credential — a jti-only predicate cannot touch another tenant's device row (same as isDeviceRegistered).
                 $touch = $this->db->prepare('UPDATE devices SET last_seen_at = NOW() WHERE jti = ?');
                 $touch->execute([$jti]);
             } catch (\Throwable) {
