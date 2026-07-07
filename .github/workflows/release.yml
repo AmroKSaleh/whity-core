@@ -218,6 +218,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write   # WC-d: upload the Trivy image-scan SARIF
 
     steps:
       - name: Checkout tag
@@ -244,6 +245,28 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.ref_name }}
             ${{ steps.image.outputs.name }}:latest
+
+      # WC-d: scan the just-pushed release image for OS/library CVEs. REPORT-ONLY
+      # for now (exit-code 0): a base-image HIGH/CRITICAL must not block the first
+      # release. ignore-unfixed drops CVEs with no available fix (pure noise for a
+      # gate). Findings land in the Security tab via the SARIF upload below; flip
+      # exit-code to '1' to make it a hard release gate once the image is triaged.
+      - name: Trivy image vulnerability scan (report)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
 
   smoke:
     # WC-2990117b: Boot the GHCR image that was just pushed and confirm it serves

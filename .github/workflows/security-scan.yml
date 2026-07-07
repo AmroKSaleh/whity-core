@@ -1,0 +1,125 @@
+# Security scanning (WC-d): SAST + scheduled dependency re-audit.
+#
+# Complements the PR-gate audits already in automated-tests.yml
+# (`composer audit`, `npm audit --audit-level=high`), which only catch advisories
+# introduced by a change. This workflow adds:
+#   - CodeQL     — GitHub's SAST for the JavaScript/TypeScript frontend
+#                  (PHP is not a CodeQL-supported language — see `semgrep` below).
+#   - Semgrep    — SAST for the PHP backend AND JS/TS, results uploaded as SARIF.
+#   - re-audit   — a WEEKLY re-run of composer/npm audit so a newly-disclosed
+#                  advisory against UNCHANGED code surfaces without waiting for
+#                  the next PR that happens to touch dependencies.
+#
+# Findings are surfaced in the repo's Security tab (code-scanning alerts); the
+# jobs are report-oriented and are NOT required checks, so adding this workflow
+# never blocks a PR or a release. Tighten to hard gates (make required / set
+# non-zero exit codes) once the initial findings are triaged.
+#
+# SARIF upload requires code scanning to be enabled (free on public repos; needs
+# GitHub Advanced Security on private repos). If it is not yet enabled the
+# upload step no-ops the alerts but the scan output still prints in the log.
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 06:00 UTC — catch newly-disclosed advisories on unchanged code.
+    - cron: '0 6 * * 1'
+
+# Least privilege: read the code, write code-scanning alerts.
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: CodeQL (JavaScript/TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # security-and-quality adds maintainability queries on top of security.
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  semgrep:
+    name: Semgrep SAST (PHP + JS/TS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Semgrep
+        run: python -m pip install --quiet semgrep
+
+      # Registry rulesets: general security audit + PHP + JS/TS. Semgrep exits
+      # non-zero when it finds something; continue-on-error keeps the job green
+      # so the SARIF (uploaded below) is the signal, not a hard build failure.
+      - name: Semgrep scan
+        continue-on-error: true
+        run: >-
+          semgrep scan
+          --config p/security-audit
+          --config p/php
+          --config p/javascript
+          --config p/typescript
+          --sarif --output semgrep.sarif
+          --metrics off
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  dependency-reaudit:
+    name: Dependency re-audit (composer + npm)
+    # Scheduled only: the PR gate already audits changes (automated-tests.yml).
+    # This re-checks the CURRENT lockfiles against freshly-disclosed advisories.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      # composer audit reads composer.lock directly — no install needed.
+      - name: composer audit
+        run: composer audit --no-interaction --abandoned=report
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: npm audit (workspace root)
+        run: npm audit --audit-level=high
