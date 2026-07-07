@@ -19,6 +19,7 @@ use Whity\Auth\DatabaseQueryWrapper;
 use Whity\Auth\DeviceCredentialService;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
+use Whity\Auth\SessionService;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\TotpService;
 use Whity\Core\Delegation\DelegationRepository;
@@ -1516,11 +1517,51 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertCount(0, $this->deviceService()->listForProfile(101, self::TENANT_A));
     }
 
+    // ==================== sessions (WC-f-sessions-table) ====================
+    //
+    // The sessions table (migration 045) is tenant+profile-scoped. Prove a tenant
+    // can neither SEE nor REVOKE another tenant's session, and a rejected
+    // cross-tenant revoke leaves the foreign session active.
+
+    public function testSessionListIsTenantScoped(): void
+    {
+        $svc = $this->sessionService();
+        $svc->start(101, self::TENANT_A, 'acc-a', 'ref-a', '2099-01-01 00:00:00', 'UA/A', '10.0.0.1');
+
+        self::assertCount(1, $svc->listForProfile(101, self::TENANT_A, null));
+        self::assertCount(0, $svc->listForProfile(102, self::TENANT_B, null));
+    }
+
+    public function testTenantCannotRevokeForeignSessionAndItSurvives(): void
+    {
+        $svc = $this->sessionService();
+        $svc->start(101, self::TENANT_A, 'acc-a', 'ref-a', '2099-01-01 00:00:00', 'UA/A', '10.0.0.1');
+        $id = (int) $svc->listForProfile(101, self::TENANT_A, null)[0]['id'];
+
+        self::assertFalse(
+            $svc->revokeById($id, 102, self::TENANT_B),
+            "A tenant must not be able to revoke another tenant's session."
+        );
+        self::assertCount(
+            1,
+            $svc->listForProfile(101, self::TENANT_A, null),
+            'A rejected cross-tenant revoke must leave the session active.'
+        );
+
+        self::assertTrue($svc->revokeById($id, 101, self::TENANT_A));
+        self::assertCount(0, $svc->listForProfile(101, self::TENANT_A, null));
+    }
+
     // ==================== helpers ====================
 
     private function deviceService(): DeviceCredentialService
     {
         return new DeviceCredentialService($this->pdo, new JwtParser(self::JWT_SECRET));
+    }
+
+    private function sessionService(): SessionService
+    {
+        return new SessionService($this->pdo);
     }
 
     /**

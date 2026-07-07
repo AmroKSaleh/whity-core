@@ -605,6 +605,14 @@ $router->register('GET',    '/api/devices',       [$deviceHandler, 'list'], null
 $router->register('DELETE', '/api/devices/{id}',  [$deviceHandler, 'revoke'], null);
 $router->register('POST',   '/api/devices/token', [$authHandler, 'handleDeviceTokenExchange'], null);
 
+// 10a-ter. Interactive session management (WC-f-sessions-table). Session-gated
+// in-handler (cookie OR Bearer access token), scoped to the caller's own
+// profile. Interactive logins only — native devices are managed via /api/devices.
+$sessionsHandler = new \Whity\Api\SessionsApiHandler($tokenValidator, new \Whity\Auth\SessionService($db->getPdo()));
+$router->register('GET',    '/api/me/sessions',      [$sessionsHandler, 'list'], null);
+$router->register('DELETE', '/api/me/sessions/{id}', [$sessionsHandler, 'revoke'], null);
+$router->register('DELETE', '/api/me/sessions',      [$sessionsHandler, 'revokeOthers'], null);
+
 $twoFactorHandler = new TwoFactorHandler($db->getPdo(), $totpService, $backupCodesService, $tokenValidator, $auditLogger);
 $router->register('POST', '/api/auth/2fa/setup', [$twoFactorHandler, 'setup'], null);
 $router->register('POST', '/api/auth/2fa/confirm', [$twoFactorHandler, 'confirm'], null);
