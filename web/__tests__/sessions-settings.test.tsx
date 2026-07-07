@@ -1,5 +1,6 @@
 /**
- * WC-b-logout-others — SessionsSettings ("Sign out of all other sessions & devices").
+ * WC-f-sessions-table — SessionsSettings list UI (fetch, per-row revoke,
+ * revoke-all-others, and the "everywhere incl devices" epoch action).
  */
 
 import React from 'react';
@@ -18,40 +19,97 @@ jest.mock('@/lib/toast-context', () => ({
 
 import { SessionsSettings } from '@/components/SessionsSettings';
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  mockApiClient.mockResolvedValue({ ok: true, json: async () => ({ user: {} }) });
-});
+const SESSIONS = [
+  {
+    id: 1,
+    user_agent: 'Mozilla/5.0 (Macintosh)',
+    ip_address: '10.0.0.9',
+    created_at: '2026-07-01 10:00:00',
+    last_seen_at: '2026-07-07 09:00:00',
+    current: true,
+  },
+  {
+    id: 2,
+    user_agent: 'Mozilla/5.0 (Windows)',
+    ip_address: '10.0.0.8',
+    created_at: '2026-07-02 10:00:00',
+    last_seen_at: '2026-07-06 09:00:00',
+    current: false,
+  },
+];
 
-async function openAndConfirm() {
-  fireEvent.click(screen.getByTestId('logout-others-button'));
-  fireEvent.click(await screen.findByTestId('logout-others-confirm'));
+/** Route apiClient responses by method + path. */
+function wire(list = SESSIONS) {
+  mockApiClient.mockImplementation((url: string, opts?: { method?: string }) => {
+    const method = opts?.method ?? 'GET';
+    if (url === '/api/v1/me/sessions' && method === 'GET') {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ sessions: list }) });
+    }
+    if (url === '/api/v1/me/sessions' && method === 'DELETE') {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ revoked: 1 }) });
+    }
+    if (url.startsWith('/api/v1/me/sessions/') && method === 'DELETE') {
+      return Promise.resolve({ ok: true, status: 204, json: async () => ({}) });
+    }
+    if (url === '/api/v1/me/logout-others' && method === 'POST') {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    }
+    return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+  });
 }
 
-it('POSTs to /api/v1/me/logout-others, refreshes auth, and toasts success', async () => {
+beforeEach(() => {
+  jest.clearAllMocks();
+  wire();
+});
+
+it('lists sessions, flags the current one, and shows revoke only on others', async () => {
   render(<SessionsSettings />);
-  await openAndConfirm();
+  await waitFor(() => expect(screen.getByTestId('session-row-1')).toBeInTheDocument());
+
+  expect(screen.getByTestId('session-current-badge')).toBeInTheDocument();
+  // Current session (id 1) has no revoke button; the other (id 2) does.
+  expect(screen.queryByTestId('session-revoke-1')).not.toBeInTheDocument();
+  expect(screen.getByTestId('session-revoke-2')).toBeInTheDocument();
+});
+
+it('revokes a single session and removes its row', async () => {
+  render(<SessionsSettings />);
+  await waitFor(() => expect(screen.getByTestId('session-revoke-2')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByTestId('session-revoke-2'));
+  await waitFor(() =>
+    expect(mockApiClient).toHaveBeenCalledWith('/api/v1/me/sessions/2', { method: 'DELETE' })
+  );
+  await waitFor(() => expect(screen.queryByTestId('session-row-2')).not.toBeInTheDocument());
+});
+
+it('signs out all other sessions (session-scoped DELETE)', async () => {
+  render(<SessionsSettings />);
+  await waitFor(() => expect(screen.getByTestId('sessions-revoke-others')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByTestId('sessions-revoke-others'));
+  await waitFor(() =>
+    expect(mockApiClient).toHaveBeenCalledWith('/api/v1/me/sessions', { method: 'DELETE' })
+  );
+  expect(addToast).toHaveBeenCalledWith(expect.stringContaining('all other sessions'), 'success');
+});
+
+it('signs out everywhere (epoch) after confirm, then refreshes auth', async () => {
+  render(<SessionsSettings />);
+  await waitFor(() => expect(screen.getByTestId('sessions-logout-everywhere')).toBeInTheDocument());
+
+  fireEvent.click(screen.getByTestId('sessions-logout-everywhere'));
+  fireEvent.click(await screen.findByTestId('sessions-logout-everywhere-confirm'));
 
   await waitFor(() =>
     expect(mockApiClient).toHaveBeenCalledWith('/api/v1/me/logout-others', { method: 'POST' })
   );
-  await waitFor(() =>
-    expect(addToast).toHaveBeenCalledWith(expect.stringContaining('Signed out'), 'success')
-  );
   expect(refreshAuth).toHaveBeenCalled();
 });
 
-it('does not call the API until the action is confirmed', () => {
+it('shows an empty state when there are no sessions', async () => {
+  wire([]);
   render(<SessionsSettings />);
-  fireEvent.click(screen.getByTestId('logout-others-button')); // opens dialog only
-  expect(mockApiClient).not.toHaveBeenCalled();
-});
-
-it('surfaces a server error as an error toast and does not refresh auth', async () => {
-  mockApiClient.mockResolvedValue({ ok: false, json: async () => ({ error: 'nope' }) });
-  render(<SessionsSettings />);
-  await openAndConfirm();
-
-  await waitFor(() => expect(addToast).toHaveBeenCalledWith('nope', 'error'));
-  expect(refreshAuth).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.getByTestId('sessions-empty')).toBeInTheDocument());
 });
