@@ -16,6 +16,7 @@ use Whity\Api\UsersApiHandler;
 use Whity\Auth\AuthHandler;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\DatabaseQueryWrapper;
+use Whity\Auth\DeviceCredentialService;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
 use Whity\Auth\TokenValidator;
@@ -1475,7 +1476,52 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         );
     }
 
+    // ==================== devices (WC-b-device-tokens) ====================
+    //
+    // The devices table (migration 044) is tenant+profile-scoped. Prove a tenant
+    // can neither SEE nor REVOKE another tenant's registered device, and that a
+    // rejected cross-tenant revoke leaves the foreign credential intact (still
+    // active). Alice = profile 101 / Tenant A; Bob = profile 102 / Tenant B.
+
+    public function testDeviceListIsTenantScoped(): void
+    {
+        $this->deviceService()->issue(101, self::TENANT_A, 'a1@t1.example', 'Alice Laptop', 'windows', null);
+
+        // Alice (Tenant A) sees her own device; Bob (Tenant B) sees nothing.
+        self::assertCount(1, $this->deviceService()->listForProfile(101, self::TENANT_A));
+        self::assertCount(0, $this->deviceService()->listForProfile(102, self::TENANT_B));
+    }
+
+    public function testTenantCannotRevokeForeignDeviceAndRowSurvives(): void
+    {
+        $issued = $this->deviceService()->issue(101, self::TENANT_A, 'a1@t1.example', 'Alice Laptop', 'windows', null);
+
+        // Bob (Tenant B) cannot revoke Alice's (Tenant A) device.
+        self::assertFalse(
+            $this->deviceService()->revokeById($issued['id'], 102, self::TENANT_B),
+            "A tenant must not be able to revoke another tenant's device."
+        );
+
+        // The rejected cross-tenant revoke leaves Alice's credential ACTIVE —
+        // listForProfile filters out revoked devices, so a still-listed device
+        // proves the jti was never inserted into revoked_tokens.
+        self::assertCount(
+            1,
+            $this->deviceService()->listForProfile(101, self::TENANT_A),
+            'A rejected cross-tenant revoke must leave the device credential active.'
+        );
+
+        // The owning tenant CAN revoke it, and it then drops from the active list.
+        self::assertTrue($this->deviceService()->revokeById($issued['id'], 101, self::TENANT_A));
+        self::assertCount(0, $this->deviceService()->listForProfile(101, self::TENANT_A));
+    }
+
     // ==================== helpers ====================
+
+    private function deviceService(): DeviceCredentialService
+    {
+        return new DeviceCredentialService($this->pdo, new JwtParser(self::JWT_SECRET));
+    }
 
     /**
      * Fetch a boolean column value as a PHP int (0 or 1).
