@@ -347,6 +347,63 @@ class TokenValidator
     }
 
     /**
+     * Validate a DEVICE credential passed as a Bearer token — the long-lived
+     * credential a native client exchanges for a session at
+     * POST /api/v1/devices/token (WC-b-device-tokens).
+     *
+     * Checks: signature + expiry (via JwtParser), type='device', aud='device',
+     * jti not in revoked_tokens, jti registered in `devices`, epoch current, and
+     * the active membership guard.
+     *
+     * Device credentials ARE epoch-checked (unlike MCP tokens): enrollment is
+     * self-service off a live session, so the credential is bound to the
+     * profile's token_epoch at issue time and a password-change bump invalidates
+     * it — "change your password" is a real kill switch for a leaked credential.
+     * A specific lost device is still revoked individually via revoked_tokens.
+     *
+     * @param string $token Raw bearer token string.
+     * @return array<string, mixed>|null Validated claims, or null on any failure.
+     */
+    public function validateDeviceToken(string $token): ?array
+    {
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null) {
+            return null;
+        }
+
+        if (($claims['type'] ?? null) !== 'device') {
+            return null;
+        }
+
+        if (($claims['aud'] ?? null) !== 'device') {
+            return null;
+        }
+
+        $jti = $claims['jti'] ?? null;
+        if (!is_string($jti) || $jti === '') {
+            return null;
+        }
+
+        if ($this->isTokenRevoked($jti)) {
+            return null;
+        }
+
+        if (!$this->isDeviceRegistered($jti)) {
+            return null;
+        }
+
+        if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
+        if (!$this->membershipGuard->allows($claims)) {
+            return null;
+        }
+
+        return $claims;
+    }
+
+    /**
      * Derive the MCP principal's [profileId, tenantId] from post-cutover claims.
      *
      * WC-idcut-E: profile_id/active_tenant_id only. Non-integer values fail closed.
@@ -397,6 +454,25 @@ class TokenValidator
             // @tenant-guard-ignore: jti is a platform-wide unique handle (like revoked_tokens.jti);
             // querying by jti alone cannot pull a different tenant's row.
             $stmt = $this->db->prepare('SELECT 1 FROM mcp_tokens WHERE jti = ? LIMIT 1');
+            $stmt->execute([$jti]);
+            return (bool) $stmt->fetchColumn();
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Check if a jti is registered in `devices`.
+     *
+     * Guards against a hand-crafted, validly-signed token that was never issued
+     * through device registration.
+     */
+    private function isDeviceRegistered(string $jti): bool
+    {
+        try {
+            // @tenant-guard-ignore: jti is a platform-wide unique handle (like revoked_tokens.jti);
+            // querying by jti alone cannot pull a different tenant's row.
+            $stmt = $this->db->prepare('SELECT 1 FROM devices WHERE jti = ? LIMIT 1');
             $stmt->execute([$jti]);
             return (bool) $stmt->fetchColumn();
         } catch (\Exception) {

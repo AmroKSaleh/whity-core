@@ -37,6 +37,12 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'GET /api/registrations/pending',
         'POST /api/registrations/{id}/approve',
         'POST /api/registrations/{id}/reject',
+        // WC-b-device-tokens: device (native-client) enrollment + credential
+        // exchange; OpenAPI schema to follow in a dedicated documentation task.
+        'POST /api/devices',
+        'GET /api/devices',
+        'DELETE /api/devices/{id}',
+        'POST /api/devices/token',
         // WC-388a61e3: auth + 2FA routes are now declared in CoreApiSchemas::authRoutes().
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.

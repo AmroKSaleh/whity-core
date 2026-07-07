@@ -576,6 +576,11 @@ parameters:
 			path: tests/Auth/AccessTokenRevocationRealEngineTest.php
 
 		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 4
+			path: tests/Integration/DeviceTokensRealEngineTest.php
+
+		-
 			message: "#^Parameter \\#1 \\$string of function base64_encode expects string, string\\|false given\\.$#"
 			count: 6
 			path: tests/Auth/JwtParserTest.php

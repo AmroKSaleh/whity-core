@@ -1373,6 +1373,92 @@ class AuthHandler
     }
 
     /**
+     * Handle POST /api/v1/devices/token — exchange a device credential for a
+     * short-lived session (WC-b-device-tokens).
+     *
+     * The native client presents its long-lived device credential (type='device',
+     * issued at enrollment) as `Authorization: Bearer` or in the body field
+     * `credential`, and receives a fresh access+refresh session (token-body mode —
+     * device clients never use cookies). This is the "per-device refresh
+     * credential" step: the durable, individually-revocable enrollment mints
+     * ephemeral sessions on demand.
+     *
+     * PUBLIC route: the credential self-authenticates (no prior session), exactly
+     * like the MCP bearer surface. Two kill switches stop a leaked credential:
+     * revoking the device (DELETE /api/v1/devices/{id}) inserts its jti into
+     * revoked_tokens; and a password change bumps profiles.token_epoch, which the
+     * epoch-checked validateDeviceToken rejects — so a stolen credential cannot be
+     * laundered into persistence that survives a password change. Either way no
+     * further sessions can be minted, and any already-issued access token dies
+     * within its 15-minute TTL.
+     *
+     * @param array<string, mixed> $params
+     */
+    public function handleDeviceTokenExchange(Request $request, array $params = []): Response
+    {
+        $ip = $this->clientIp($request);
+
+        // Throttle by IP before touching the credential (mirrors handleRefresh).
+        if ($this->loginThrottle !== null && $this->loginThrottle->isThrottled(null, $ip)) {
+            return Response::error('Too many attempts', 429);
+        }
+
+        // Resolve the device credential: Authorization: Bearer, else body field.
+        $rawToken = null;
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
+            $rawToken = $m[1];
+        }
+        if ($rawToken === null) {
+            $body = JsonBody::parsed($request);
+            $bodyToken = $body['credential'] ?? null;
+            $rawToken = is_string($bodyToken) ? $bodyToken : null;
+        }
+
+        $claims = $rawToken !== null ? $this->tokenValidator->validateDeviceToken($rawToken) : null;
+        if ($claims === null) {
+            $this->loginThrottle?->recordFailure(null, $ip);
+            return Response::error('Invalid device credential', 401);
+        }
+
+        // Fail closed (WC-idcut-E): profile_id must be a strict positive int;
+        // active_tenant_id may be 0 (system tenant), so require >= 0. A missing or
+        // mistyped claim must never default to 0/system authority.
+        $profileId      = $claims['profile_id'] ?? null;
+        $activeTenantId = $claims['active_tenant_id'] ?? null;
+        if (!is_int($profileId) || $profileId <= 0 || !is_int($activeTenantId) || $activeTenantId < 0) {
+            return Response::error('Invalid device credential', 401);
+        }
+        $email = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+        $jti   = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : '';
+
+        // Best-effort last-seen bump; a failed touch must not block the exchange.
+        if ($jti !== '') {
+            try {
+                $touch = $this->db->prepare('UPDATE devices SET last_seen_at = NOW() WHERE jti = ?');
+                $touch->execute([$jti]);
+            } catch (\Throwable) {
+                // ignore — last_seen is telemetry, not a gate
+            }
+        }
+
+        // Re-read the CURRENT epoch so the minted access token is never stale
+        // (same rationale as handleRefresh, WC-185).
+        $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
+
+        // Native clients always want body tokens — force token mode.
+        return $this->issueSessionForProfile(
+            $profileId,
+            $activeTenantId,
+            $email,
+            $tokenEpoch,
+            $request,
+            true,
+            'auth.device.exchange'
+        );
+    }
+
+    /**
      * Handle POST /api/auth/logout - Logout and revoke tokens
      *
      * Revokes BOTH the access and refresh tokens by adding each one's jti to the
