@@ -387,7 +387,8 @@ class AuthHandler
             $email,
             (int) ($profile['token_epoch'] ?? 0),
             $request,
-            $tokenMode
+            $tokenMode,
+            recordNewSession: true
         );
     }
 
@@ -467,7 +468,15 @@ class AuthHandler
         }
         $this->loginThrottle?->clearUser($profileId);
 
-        return $this->issueSessionForProfile($profileId, $tenantId, $email, $tokenEpoch, $request, $tokenMode);
+        return $this->issueSessionForProfile(
+            $profileId,
+            $tenantId,
+            $email,
+            $tokenEpoch,
+            $request,
+            $tokenMode,
+            recordNewSession: true
+        );
     }
 
     /**
@@ -595,7 +604,9 @@ class AuthHandler
         Request $request,
         bool $tokenMode = false,
         string $auditAction = 'auth.login.success',
-        array $auditMetadata = []
+        array $auditMetadata = [],
+        bool $recordNewSession = false,
+        ?string $rotateSessionFromJti = null
     ): Response
     {
         // Resolve role from the active membership (post-cutover: no legacy users row).
@@ -633,6 +644,24 @@ class AuthHandler
 
         $accessTokenStr  = $this->jwtParser->create($claims, 900, 'access');
         $refreshTokenStr = $this->jwtParser->create($claims, 604800, 'refresh');
+
+        // Session registry (WC-f): record a new interactive session on login /
+        // tenant selection, or rotate the caller's existing session on a re-mint
+        // (switch-tenant / logout-others). Best-effort — a session-table failure
+        // must never break auth. Device-token exchanges pass neither flag, so a
+        // native client's ephemeral access token is NOT tracked here (it lives in
+        // the devices list instead).
+        if ($recordNewSession || $rotateSessionFromJti !== null) {
+            $this->recordSession(
+                $accessTokenStr,
+                $refreshTokenStr,
+                $profileId,
+                $activeTenantId,
+                $request,
+                $recordNewSession,
+                $rotateSessionFromJti
+            );
+        }
 
         if ($tokenMode) {
             // Token-body mode (WC-ddcd16ad): return tokens in JSON, set NO cookies.
@@ -911,7 +940,10 @@ class AuthHandler
             $request,
             $tokenMode,
             'auth.tenant_switch',
-            ['to_tenant_id' => $targetTenantId]
+            ['to_tenant_id' => $targetTenantId],
+            // Same device continuing under a new active tenant → rotate the
+            // caller's existing session row (matched by its current access jti).
+            rotateSessionFromJti: isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : null
         );
     }
 
@@ -1104,6 +1136,14 @@ class AuthHandler
         $accessToken  = $this->jwtParser->create($newClaims, 900, 'access');
         $refreshToken = $this->jwtParser->create($newClaims, 604800, 'refresh');
 
+        // Rotate the caller's session row to the re-minted jtis (matched by the
+        // access jti this request carried) so it stays live/listable after an
+        // email or password change. Best-effort.
+        $currentJti = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : null;
+        if ($currentJti !== null) {
+            $this->recordSession($accessToken, $refreshToken, $profileId, $activeTenantId, $request, false, $currentJti);
+        }
+
         $this->logProfileUpdate($activeTenantId, $profileId, $emailProvided, $passwordChanged);
 
         if ($tokenMode) {
@@ -1166,6 +1206,17 @@ class AuthHandler
             return Response::error('Unauthorized', 401);
         }
         $email = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+        $currentJti = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : '';
+
+        // Mark every OTHER session row revoked (list accuracy + blacklist), keeping
+        // the caller's current one (matched by its access jti). Best-effort.
+        if ($currentJti !== '') {
+            try {
+                $this->sessions()->revokeAllExcept($profileId, $activeTenantId, $currentJti);
+            } catch (\Throwable $e) {
+                error_log('[sessions] logout-others revokeAllExcept failed: ' . $e->getMessage());
+            }
+        }
 
         // Bump the epoch → every OTHER token for this profile (access/refresh/device)
         // is now epoch-stale and rejected on next use.
@@ -1175,9 +1226,9 @@ class AuthHandler
         )->execute([$profileId]);
 
         // Re-mint the CURRENT session at the new epoch so THIS device stays signed
-        // in. issueSessionForProfile re-resolves the role from an ACTIVE membership
-        // (fails closed if it was revoked), sets cookies (cookie mode) or returns
-        // tokens (token mode), and audits the event.
+        // in, rotating its session row to the fresh jtis. issueSessionForProfile
+        // re-resolves the role from an ACTIVE membership (fails closed if revoked),
+        // sets cookies (cookie mode) or returns tokens (token mode), and audits.
         return $this->issueSessionForProfile(
             $profileId,
             $activeTenantId,
@@ -1185,8 +1236,61 @@ class AuthHandler
             $this->currentProfileTokenEpoch($profileId),
             $request,
             self::isTokenMode($request),
-            'auth.logout_others'
+            'auth.logout_others',
+            [],
+            rotateSessionFromJti: $currentJti !== '' ? $currentJti : null
         );
+    }
+
+    /**
+     * Record or rotate the interactive session row for a freshly-minted access +
+     * refresh pair (WC-f-sessions-table). Best-effort: it must NEVER throw into
+     * the auth path, so any session-table error is logged and swallowed.
+     */
+    private function recordSession(
+        string $accessToken,
+        string $refreshToken,
+        int $profileId,
+        int $activeTenantId,
+        Request $request,
+        bool $recordNew,
+        ?string $rotateFromJti
+    ): void {
+        try {
+            $ac = $this->jwtParser->parse($accessToken);
+            $rf = $this->jwtParser->parse($refreshToken);
+            $accessJti  = is_array($ac) && isset($ac['jti']) ? (string) $ac['jti'] : '';
+            $refreshJti = is_array($rf) && isset($rf['jti']) ? (string) $rf['jti'] : '';
+            if ($accessJti === '' || $refreshJti === '') {
+                return;
+            }
+            $expiresAt = is_array($rf) && isset($rf['exp'])
+                ? date('Y-m-d H:i:s', (int) $rf['exp'])
+                : date('Y-m-d H:i:s', time() + 604800);
+
+            $sessions = $this->sessions();
+            if ($recordNew) {
+                $sessions->start(
+                    $profileId,
+                    $activeTenantId,
+                    $accessJti,
+                    $refreshJti,
+                    $expiresAt,
+                    $request->getHeader('User-Agent'),
+                    $this->clientIp($request)
+                );
+            } elseif ($rotateFromJti !== null) {
+                $sessions->rotate($rotateFromJti, $accessJti, $refreshJti, $expiresAt);
+            }
+        } catch (\Throwable $e) {
+            error_log('[sessions] record/rotate failed: ' . $e->getMessage());
+        }
+    }
+
+    /** The session registry service (constructed per call; no ctor change). */
+    private function sessions(): SessionService
+    {
+        return new SessionService($this->db);
     }
 
     /**
@@ -1406,6 +1510,13 @@ class AuthHandler
 
         $accessToken     = $this->jwtParser->create($newClaims, 900, 'access');
         $newRefreshToken = $this->jwtParser->create($newClaims, 604800, 'refresh');
+
+        // Rotate the interactive session row in place, matched by the OLD refresh
+        // jti this call presented, so the family stays one row across rotations.
+        $oldRefreshJti = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : null;
+        if ($oldRefreshJti !== null) {
+            $this->recordSession($accessToken, $newRefreshToken, $profileId, $activeTenantId, $request, false, $oldRefreshJti);
+        }
 
         if ($tokenMode) {
             // Token-body mode: return new tokens in JSON, set NO cookies.
@@ -1792,7 +1903,8 @@ class AuthHandler
                     $email,
                     $this->currentProfileTokenEpoch($profileId),
                     $request,
-                    $tokenMode
+                    $tokenMode,
+                    recordNewSession: true
                 );
             }
             return $this->requireTenantSelection($profileId, $email, $memberships, $tokenMode);
@@ -1805,7 +1917,8 @@ class AuthHandler
             $email,
             $this->currentProfileTokenEpoch($profileId),
             $request,
-            $tokenMode
+            $tokenMode,
+            recordNewSession: true
         );
     }
 

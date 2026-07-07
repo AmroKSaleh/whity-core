@@ -82,6 +82,11 @@ final class TenantOwnedTables
         // (migration 044). Native-client enrollments scoped to profile_id +
         // tenant_id; list/revoke bind both, so the predicate guard must police it.
         'devices' => '044_create_devices.php',
+
+        // WC-f-sessions-table (Phase F) — interactive login-session registry
+        // (migration 045). Scoped to profile_id + tenant_id; list/revoke bind
+        // both, so the predicate guard must police every query against it.
+        'sessions' => '045_create_sessions.php',
     ];
 
     /**
