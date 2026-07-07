@@ -40,6 +40,9 @@ export default function RegisterPage() {
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  // WC-235: when admin approval is enforced the owner cannot log in yet, so we
+  // show a "pending approval" confirmation instead of chaining a login.
+  const [pendingApproval, setPendingApproval] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
 
   // Match the login page's SSR-safe "enabled until mounted" timing so the
@@ -104,6 +107,16 @@ export default function RegisterPage() {
       });
 
       if (response.status === 201) {
+        // WC-235: when admin approval is enforced the owner membership is
+        // 'invited' (pending), so a login would be refused. Show a pending
+        // confirmation instead of chaining login.
+        const created = await response.json().catch(() => ({}));
+        if (created?.data?.approval_required === true) {
+          setPendingApproval(true);
+          addToast('Workspace created — awaiting administrator approval.', 'success');
+          return;
+        }
+
         // Account + workspace created. Sign in with the same credentials — a
         // fresh owner has exactly one active membership, so login mints the
         // session directly.
@@ -170,9 +183,31 @@ export default function RegisterPage() {
               className="h-10 w-auto max-w-[220px] object-contain mx-auto mb-2"
             />
           ) : null}
-          <CardTitle className="text-2xl">{`Create your ${branding.siteName} workspace`}</CardTitle>
-          <CardDescription>Set up a new workspace and your owner account</CardDescription>
+          <CardTitle className="text-2xl">
+            {pendingApproval ? 'Workspace created' : `Create your ${branding.siteName} workspace`}
+          </CardTitle>
+          <CardDescription>
+            {pendingApproval
+              ? 'Your workspace is awaiting administrator approval'
+              : 'Set up a new workspace and your owner account'}
+          </CardDescription>
         </CardHeader>
+        {pendingApproval ? (
+          <CardContent>
+            <div className="space-y-4 text-center" data-testid="registration-pending-approval">
+              <Alert>
+                <AlertDescription>
+                  Thanks for signing up! An administrator needs to approve your new workspace
+                  before you can sign in. You&rsquo;ll be able to log in with your email and
+                  password once it&rsquo;s approved.
+                </AlertDescription>
+              </Alert>
+              <Button asChild className="w-full">
+                <Link href="/login">Back to sign in</Link>
+              </Button>
+            </div>
+          </CardContent>
+        ) : (
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {registerError && (
@@ -282,6 +317,7 @@ export default function RegisterPage() {
             </p>
           </form>
         </CardContent>
+        )}
       </Card>
     </div>
   );
