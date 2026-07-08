@@ -80,6 +80,17 @@ final class IdentityProviderRepositoryRealEngineTest extends TestCase
         self::assertTrue($row['enabled']);
     }
 
+    public function testDisabledProviderReadsBackAsDisabled(): void
+    {
+        // Regression for the PG boolean trap: PDO_pgsql returns a boolean column
+        // as 't'/'f', and (bool)'f' === true — so a naive cast would report a
+        // disabled provider as enabled. Passes on SQLite ('0') AND real Postgres.
+        $id = $this->repo->insert($this->tenantA, $this->providerData(['enabled' => false]));
+        $row = $this->repo->findById($id, $this->tenantA);
+        self::assertNotNull($row);
+        self::assertFalse($row['enabled'], 'a disabled provider must read back as disabled');
+    }
+
     public function testHasSecretFalseWhenNoneStored(): void
     {
         $id = $this->repo->insert($this->tenantA, $this->providerData(['client_secret_encrypted' => null]));

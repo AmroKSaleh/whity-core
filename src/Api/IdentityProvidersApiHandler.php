@@ -31,6 +31,22 @@ final class IdentityProvidersApiHandler
     /** Provider keys we currently support configuring. */
     private const ALLOWED_PROVIDERS = ['google', 'microsoft', 'oidc'];
 
+    /**
+     * Backing-column widths. An over-long value is caught here as a 422 rather
+     * than surfacing as a Postgres 22001 → generic 500.
+     *
+     * @var array<string, int>
+     */
+    private const MAX_LENGTHS = [
+        'provider_key' => 64,
+        'display_name' => 255,
+        'client_id'    => 512,
+        'issuer'       => 512,
+        'discovery_url' => 512,
+        'scopes'       => 512,
+        'domain'       => 253,
+    ];
+
     private IdentityProviderRepository $repo;
 
     public function __construct(PDO $db, private readonly EncryptedSecretStore $secrets)
@@ -86,6 +102,11 @@ final class IdentityProvidersApiHandler
             'enabled'       => !isset($body['enabled']) || (bool) $body['enabled'],
             'client_secret_encrypted' => $this->encryptSecretOrNull($body['client_secret'] ?? null),
         ];
+
+        $lengthError = $this->lengthViolation($data);
+        if ($lengthError !== null) {
+            return Response::error($lengthError, 422);
+        }
 
         try {
             $id = $this->repo->insert($tenantId, $data);
@@ -160,7 +181,21 @@ final class IdentityProvidersApiHandler
             return Response::error('No updatable fields supplied', 422);
         }
 
-        $affected = $this->repo->update($id, $tenantId, $data);
+        $lengthError = $this->lengthViolation($data);
+        if ($lengthError !== null) {
+            return Response::error($lengthError, 422);
+        }
+
+        try {
+            $affected = $this->repo->update($id, $tenantId, $data);
+        } catch (\PDOException $e) {
+            if (stripos($e->getMessage(), 'unique') !== false) {
+                return Response::error('This provider is already configured for your tenant', 409);
+            }
+            error_log('[identity-providers] update failed: ' . $e->getMessage());
+            return Response::error('Failed to update identity provider', 500);
+        }
+
         if ($affected === 0) {
             return Response::error('Identity provider not found', 404);
         }
@@ -186,6 +221,23 @@ final class IdentityProvidersApiHandler
             return Response::error('Identity provider not found', 404);
         }
         return Response::json([], 204);
+    }
+
+    /**
+     * Return a 422 message if any length-bounded field exceeds its column width,
+     * or null when all are within bounds. Ignores non-string / encrypted values.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function lengthViolation(array $data): ?string
+    {
+        foreach (self::MAX_LENGTHS as $field => $max) {
+            $value = $data[$field] ?? null;
+            if (is_string($value) && strlen($value) > $max) {
+                return "{$field} must be {$max} characters or fewer";
+            }
+        }
+        return null;
     }
 
     private function encryptSecretOrNull(mixed $secret): ?string

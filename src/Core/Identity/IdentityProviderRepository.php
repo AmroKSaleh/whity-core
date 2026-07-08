@@ -45,7 +45,7 @@ final class IdentityProviderRepository
         // a TRUE/FALSE literal — portable across Postgres + the SQLite test shim.
         // Binding an int/PHP-bool to a PG boolean column is the classic 42804 trap
         // (and PHP false binds as '' which PG rejects), so avoid it entirely.
-        $enabledLiteral = ($data['enabled'] ?? true) ? 'TRUE' : 'FALSE';
+        $enabledLiteral = ((bool) ($data['enabled'] ?? true)) ? 'TRUE' : 'FALSE';
 
         $stmt = $this->db->prepare(
             "INSERT INTO identity_providers
@@ -199,9 +199,20 @@ final class IdentityProviderRepository
             'discovery_url' => $row['discovery_url'] !== null ? (string) $row['discovery_url'] : null,
             'scopes'        => (string) $row['scopes'],
             'domain'        => $row['domain'] !== null ? (string) $row['domain'] : null,
-            'enabled'       => (bool) $row['enabled'],
+            'enabled'       => self::toBool($row['enabled']),
             'created_at'    => (string) $row['created_at'],
             'updated_at'    => (string) $row['updated_at'],
         ];
+    }
+
+    /**
+     * Coerce a DB boolean to PHP bool across drivers. PDO_pgsql returns a boolean
+     * column as the STRING 't'/'f' (and `(bool) 'f' === true`), while the SQLite
+     * shim returns '1'/'0' — so a naive `(bool)` cast reports every Postgres row
+     * as enabled. Match the canonical true-representations explicitly.
+     */
+    private static function toBool(mixed $value): bool
+    {
+        return in_array((string) $value, ['1', 't', 'true'], true);
     }
 }

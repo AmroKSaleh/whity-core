@@ -124,6 +124,38 @@ final class IdentityProvidersApiHandlerRealEngineTest extends TestCase
         self::assertSame(409, $this->post($this->validBody())->getStatusCode());
     }
 
+    public function testOverLongFieldIsRejectedWith422NotA500(): void
+    {
+        $res = $this->post($this->validBody(['display_name' => str_repeat('a', 256)]));
+        self::assertSame(422, $res->getStatusCode(), $res->getBody());
+    }
+
+    public function testUpdateToDuplicateProviderKeyIs409(): void
+    {
+        $this->post($this->validBody(['provider_key' => 'google']));
+        $msId = (int) $this->decode($this->post($this->validBody([
+            'provider_key' => 'microsoft',
+            'display_name' => 'MS',
+        ])))['data']['id'];
+
+        // Renaming the microsoft provider's key to the already-taken google → 409.
+        $res = $this->handler->update(
+            new Request('PATCH', '/api/identity-providers/' . $msId, [], (string) json_encode(['provider_key' => 'google'])),
+            ['id' => (string) $msId]
+        );
+        self::assertSame(409, $res->getStatusCode(), $res->getBody());
+    }
+
+    public function testDisabledProviderRoundTripsAsDisabled(): void
+    {
+        $id = (int) $this->decode($this->post($this->validBody(['enabled' => false])))['data']['id'];
+        $res = $this->handler->update(
+            new Request('PATCH', '/api/identity-providers/' . $id, [], (string) json_encode(['display_name' => 'x'])),
+            ['id' => (string) $id]
+        );
+        self::assertFalse($this->decode($res)['data']['enabled']);
+    }
+
     public function testListReturnsProvidersWithoutSecret(): void
     {
         $this->post($this->validBody());
