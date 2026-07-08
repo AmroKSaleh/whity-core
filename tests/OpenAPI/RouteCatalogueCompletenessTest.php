@@ -64,6 +64,12 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'DELETE /api/email-domains/{id}',
         'GET /api/email-domains',
         'POST /api/email-domains',
+        // WC-e6287: per-tenant identity-provider (SSO/OIDC) admin endpoints —
+        // OpenAPI schema to follow in a dedicated documentation task.
+        'GET /api/identity-providers',
+        'POST /api/identity-providers',
+        'PATCH /api/identity-providers/{id}',
+        'DELETE /api/identity-providers/{id}',
         // WC-d279a9b3: MCP Streamable-HTTP endpoints — OpenAPI schema not
         // applicable (MCP uses its own JSON-RPC discovery surface, not OpenAPI).
         'GET /mcp',

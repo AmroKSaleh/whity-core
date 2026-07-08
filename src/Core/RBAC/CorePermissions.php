@@ -102,6 +102,12 @@ final class CorePermissions
     // since a freshly-registered tenant's only member is the pending owner.
     public const REGISTRATIONS_APPROVE = 'registrations:approve';
 
+    // Federated-auth provider management (WC-e6287d12). Gates the per-tenant CRUD
+    // of identity-provider (SSO/OIDC) configurations — client id/secret, issuer,
+    // scopes, domain binding. Tenant-scoped: an admin manages only their own
+    // tenant's providers.
+    public const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -140,6 +146,7 @@ final class CorePermissions
             self::SETTINGS_MANAGE,
             self::MCP_TOKENS_MANAGE,
             self::REGISTRATIONS_APPROVE,
+            self::AUTH_PROVIDERS_MANAGE,
         ];
     }
 }

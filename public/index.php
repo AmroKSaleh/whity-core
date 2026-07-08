@@ -133,6 +133,7 @@ use Whity\Api\MeCapabilitiesApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
 use Whity\Api\OpenApiHandler;
+use Whity\Api\IdentityProvidersApiHandler;
 use Whity\Api\TenantEmailDomainApiHandler;
 use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Delegation\DelegationService;
@@ -899,6 +900,20 @@ $emailDomainHandler = new TenantEmailDomainApiHandler($db->getPdo());
 $router->register('GET',    '/api/email-domains',           [$emailDomainHandler, 'list'],   'admin');
 $router->register('POST',   '/api/email-domains',           [$emailDomainHandler, 'create'], 'admin');
 $router->register('DELETE', '/api/email-domains/{id:\d+}',  [$emailDomainHandler, 'delete'], 'admin');
+
+// 13e. Register the per-tenant identity-provider (SSO/OIDC) admin API (WC-e6287).
+// Gated on auth_providers:manage (6th positional arg; role stays null so
+// RbacMiddleware enforces the permission) and tenant-scoped in the handler. The
+// client secret is encrypted at rest via the shared EncryptedSecretStore and is
+// never returned in a response.
+$identityProvidersHandler = new IdentityProvidersApiHandler(
+    $db->getPdo(),
+    \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV)
+);
+$router->register('GET',    '/api/identity-providers',          [$identityProvidersHandler, 'list'],   null, null, CorePermissions::AUTH_PROVIDERS_MANAGE);
+$router->register('POST',   '/api/identity-providers',          [$identityProvidersHandler, 'create'], null, null, CorePermissions::AUTH_PROVIDERS_MANAGE);
+$router->register('PATCH',  '/api/identity-providers/{id:\d+}', [$identityProvidersHandler, 'update'], null, null, CorePermissions::AUTH_PROVIDERS_MANAGE);
+$router->register('DELETE', '/api/identity-providers/{id:\d+}', [$identityProvidersHandler, 'delete'], null, null, CorePermissions::AUTH_PROVIDERS_MANAGE);
 
 // 14. Register the family relations API (WC-65). Reads are gated on
 // relations:read, writes on relations:manage (6th positional arg; requiredRole
