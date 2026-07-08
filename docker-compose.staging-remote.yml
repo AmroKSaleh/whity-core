@@ -1,0 +1,78 @@
+# Remote staging stack for whity-core (WC-e) — PULLS a pre-built image.
+#
+# Unlike docker-compose.staging.yml (which BUILDS from a bind-mounted checkout
+# for local use), this file runs the published GHCR *release* image — the same
+# artifact release.yml builds, pushes, and smoke-tests on every tag. It carries
+# the code baked in, so there is NO source bind mount and NO Caddyfile mount:
+# the app is exactly what shipped, which is the whole point of a staging deploy.
+#
+# It is driven by .github/workflows/deploy-staging.yml, which copies this file
+# to the staging host and runs:
+#   WHITY_IMAGE=ghcr.io/<repo>:<tag> docker compose \
+#     -p whity-staging -f docker-compose.staging-remote.yml --env-file .env.staging up -d
+# then `... exec frankenphp php public/index.php migrate run` and a health poll.
+#
+# All secrets come from .env.staging on the host (never committed). The
+# `:?message` guards make a missing secret fail fast rather than boot a weak,
+# prod-like worker.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: whity_staging_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-whity}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      POSTGRES_DB: ${DB_NAME:-whity_core}
+    ports:
+      - "${DB_PORT_HOST:-5433}:5432"
+    volumes:
+      - postgres_data_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-whity} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frankenphp:
+    # The published release image (code baked in). Override the tag per deploy
+    # with WHITY_IMAGE; defaults to :latest so a bare `up` pulls the newest release.
+    image: ${WHITY_IMAGE:-ghcr.io/amroksaleh/whity-core:latest}
+    container_name: whity_staging_frankenphp
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${APP_PORT_HOST:-8100}:80"
+    environment:
+      # Prod-like: NOT `development`, so the JWT/ENCRYPTION guards engage.
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5}
+      DB_MAX_LIFETIME: ${DB_MAX_LIFETIME:-1800}
+      DB_PING_INTERVAL: ${DB_PING_INTERVAL:-5}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3100}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD must be set for staging}
+      INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD:?INITIAL_USER_PASSWORD must be set for staging}
+      INITIAL_SYSTEM_ADMIN_PASSWORD: ${INITIAL_SYSTEM_ADMIN_PASSWORD:?INITIAL_SYSTEM_ADMIN_PASSWORD must be set for staging}
+      INITIAL_SUPERUSER_PASSWORD: ${INITIAL_SUPERUSER_PASSWORD:?INITIAL_SUPERUSER_PASSWORD must be set for staging}
+      # No project Caddyfile is mounted here (the image ships the base FrankenPHP
+      # Caddyfile). auto_https off + SERVER_NAME :80 bind it to plain HTTP on :80,
+      # and FRANKENPHP_CONFIG enables persistent worker mode — same knobs the
+      # release smoke job uses. Terminate TLS at your staging reverse proxy.
+      CADDY_GLOBAL_OPTIONS: "auto_https off"
+      SERVER_NAME: ":80"
+      SERVER_ROOT: "public/"
+      FRANKENPHP_CONFIG: ${FRANKENPHP_CONFIG:-worker /app/public/index.php 8}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data_staging:

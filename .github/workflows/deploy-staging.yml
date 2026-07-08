@@ -1,0 +1,164 @@
+# WC-e: deploy the published release image to a staging host over SSH.
+#
+# Flow: pick an image tag -> copy docker-compose.staging-remote.yml to the host
+# -> write .env.staging from a secret -> `docker compose pull && up -d` ->
+# `migrate run` inside the app container -> poll GET /api/health on the host
+# until 200. A deploy that does not end in a healthy /api/health FAILS the run.
+#
+# ACTIVATE-BY-CONFIG: this does nothing until you set the staging secrets. The
+# `preflight` job checks whether STAGING_SSH_HOST is set and, if not, the deploy
+# job is skipped and the run succeeds with a notice — so merging this workflow
+# never turns the pipeline red on repos that have no staging host yet.
+#
+# Required secrets to activate:
+#   STAGING_SSH_HOST   host / IP of the staging box
+#   STAGING_SSH_USER   ssh user
+#   STAGING_SSH_KEY    that user's PRIVATE key (PEM)
+#   STAGING_ENV        the FULL contents of .env.staging (see .env.staging.example)
+# Optional secrets / vars:
+#   STAGING_SSH_PORT       ssh port                 (default 22)
+#   STAGING_DEPLOY_DIR     dir on the host          (default /opt/whity-staging)
+#   STAGING_APP_PORT       host port the app binds  (default 8100)
+#   STAGING_REGISTRY_USER  GHCR user (private image pull)
+#   STAGING_REGISTRY_TOKEN GHCR read:packages token (private image pull)
+name: Deploy to staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. v1.2.3). Defaults to latest.'
+        required: false
+        default: 'latest'
+  # Auto-deploy the newest published release to staging.
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  # Gate: only proceed when a staging host is actually configured. secrets can't
+  # be used in a job-level `if:`, so we surface "is it configured?" as an output.
+  preflight:
+    name: Check staging is configured
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          HOST: ${{ secrets.STAGING_SSH_HOST }}
+        run: |
+          if [ -n "$HOST" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Staging host is configured — deploy will run."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::STAGING_SSH_HOST is not set — skipping staging deploy (activate-by-config)."
+          fi
+
+  deploy:
+    name: Deploy + migrate + health-check
+    runs-on: ubuntu-latest
+    needs: preflight
+    # Skip cleanly when unconfigured, and never deploy a release that failed.
+    if: >-
+      needs.preflight.outputs.configured == 'true' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve image reference
+        id: image
+        env:
+          # workflow_dispatch supplies a tag; a Release-triggered run deploys :latest
+          # (the tag the release just pushed alongside the version tag).
+          INPUT_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="${INPUT_TAG:-latest}"
+          echo "ref=${name}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "Deploying image: ${name}:${tag}"
+
+      - name: Copy compose file to the host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          port: ${{ secrets.STAGING_SSH_PORT || 22 }}
+          source: docker-compose.staging-remote.yml
+          target: ${{ secrets.STAGING_DEPLOY_DIR || '/opt/whity-staging' }}
+
+      - name: Deploy over SSH (pull -> up -> migrate -> health)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          STAGING_ENV: ${{ secrets.STAGING_ENV }}
+          DEPLOY_DIR: ${{ secrets.STAGING_DEPLOY_DIR || '/opt/whity-staging' }}
+          APP_PORT: ${{ secrets.STAGING_APP_PORT || '8100' }}
+          REGISTRY_USER: ${{ secrets.STAGING_REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.STAGING_REGISTRY_TOKEN }}
+        with:
+          host: ${{ secrets.STAGING_SSH_HOST }}
+          username: ${{ secrets.STAGING_SSH_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          port: ${{ secrets.STAGING_SSH_PORT || 22 }}
+          # Pass the CI-side env through to the remote shell so the heredoc/secrets
+          # never get expanded or logged on the runner.
+          envs: IMAGE_REF,STAGING_ENV,DEPLOY_DIR,APP_PORT,REGISTRY_USER,REGISTRY_TOKEN
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd "$DEPLOY_DIR"
+
+            # Write the app secrets file (0600) from the STAGING_ENV secret.
+            umask 077
+            printf '%s\n' "$STAGING_ENV" > .env.staging
+
+            COMPOSE="docker compose -p whity-staging -f docker-compose.staging-remote.yml --env-file .env.staging"
+
+            # Log in to GHCR only if a private-pull token was provided.
+            if [ -n "${REGISTRY_TOKEN:-}" ]; then
+              echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "${REGISTRY_USER:-x}" --password-stdin
+            fi
+
+            echo "==> Pulling ${IMAGE_REF}"
+            WHITY_IMAGE="$IMAGE_REF" APP_PORT_HOST="$APP_PORT" $COMPOSE pull
+
+            echo "==> Starting stack"
+            WHITY_IMAGE="$IMAGE_REF" APP_PORT_HOST="$APP_PORT" $COMPOSE up -d
+
+            # Wait for Postgres to accept connections before migrating.
+            echo "==> Waiting for Postgres"
+            for i in $(seq 1 30); do
+              if $COMPOSE exec -T postgres pg_isready -U "${DB_USER:-whity}" >/dev/null 2>&1; then
+                echo "Postgres ready"; break
+              fi
+              sleep 2
+              [ "$i" -eq 30 ] && { echo "Postgres did not become ready"; $COMPOSE logs postgres; exit 1; }
+            done
+
+            # Migrations are idempotent; seeding is a deliberate one-time step and
+            # is intentionally NOT run here so a redeploy never mutates staging data.
+            echo "==> Running migrations"
+            WHITY_IMAGE="$IMAGE_REF" $COMPOSE exec -T frankenphp php public/index.php migrate run
+
+            # Health gate: poll the app on the host until it serves 200, or fail.
+            echo "==> Health check http://localhost:${APP_PORT}/api/health"
+            for i in $(seq 1 30); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${APP_PORT}/api/health" || true)
+              echo "Attempt $i/30 -> HTTP $code"
+              if [ "$code" = "200" ]; then
+                echo "Staging is healthy."
+                curl -s "http://localhost:${APP_PORT}/api/health" || true
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "Health check failed — dumping app logs:"
+            WHITY_IMAGE="$IMAGE_REF" $COMPOSE logs --tail=100 frankenphp
+            exit 1
