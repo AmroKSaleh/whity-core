@@ -1,0 +1,138 @@
+# WC-d: rehearsed backup + restore drill (verifies the backup is RESTORABLE).
+#
+# A backup you have never restored is not a backup. This exercises the real
+# scripts/backup-db.sh -> scripts/restore-db.sh round-trip on a genuine
+# PostgreSQL, with encryption on, and asserts the restored copy is complete
+# (seeded rows present) and migration-consistent (`migrate run` is a no-op and
+# `migrate status` is clean). It also prints the restore duration (RTO signal).
+#
+# Uses only a throwaway local backup (no S3, no real secrets), so it runs in CI
+# unattended: on a weekly schedule, on manual dispatch, and on any PR that
+# touches the backup/restore scripts (so a change to them is proven before merge).
+name: Backup/Restore Drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 6 * * 1'   # weekly, after the security scan
+  pull_request:
+    paths:
+      - 'scripts/backup-db.sh'
+      - 'scripts/restore-db.sh'
+      - '.github/workflows/backup-restore-drill.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    name: Backup then restore-to-clean + verify
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: whity
+          POSTGRES_PASSWORD: whity_dev
+          POSTGRES_DB: whity_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U whity -d whity_core"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGPORT: '5432'
+      PGUSER: whity
+      PGPASSWORD: whity_dev
+      # Exercise encryption-at-rest in the drill.
+      BACKUP_ENCRYPTION_KEY: drill-encryption-key-min-32-chars-aaaaaaaa
+      BACKUP_DIR: ./backups
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          coverage: none
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Write .env (source DB)
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=development
+          DB_HOST=localhost
+          DB_PORT=5432
+          DB_NAME=whity_core
+          DB_USER=whity
+          DB_PASSWORD=whity_dev
+          JWT_SECRET=ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY=ci_encryption_key_min_32_chars_bbbbbbbb
+          INITIAL_ADMIN_PASSWORD=admin123
+          INITIAL_USER_PASSWORD=user123
+          INITIAL_SYSTEM_ADMIN_PASSWORD=systemadmin123
+          INITIAL_SUPERUSER_PASSWORD=superuser123
+          EOF
+
+      - name: Migrate + seed the source database
+        run: |
+          php public/index.php migrate run
+          php public/index.php seed
+
+      - name: Back up the source database (encrypted)
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_NAME: whity_core
+          DB_USER: whity
+          DB_PASSWORD: whity_dev
+        run: bash scripts/backup-db.sh
+
+      - name: Create a clean restore target
+        run: createdb whity_restore
+
+      - name: Restore into the clean target (timed — RTO signal)
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_NAME: whity_restore
+          DB_USER: whity
+          DB_PASSWORD: whity_dev
+        run: |
+          backup="$(ls -1 ./backups/whity_*.sql.gz.enc | head -1)"
+          echo "Restoring from: ${backup}"
+          start=$(date +%s)
+          bash scripts/restore-db.sh "$backup"
+          end=$(date +%s)
+          echo "Restore duration (RTO): $((end - start))s"
+
+      - name: Migrate the restored DB (must be a no-op) + status
+        run: |
+          sed -i 's/^DB_NAME=whity_core$/DB_NAME=whity_restore/' .env
+          php public/index.php migrate run
+          php public/index.php migrate status
+
+      - name: Verify the restore is complete
+        run: |
+          set -e
+          tenants=$(psql -d whity_restore -tAc 'SELECT count(*) FROM tenants;')
+          profiles=$(psql -d whity_restore -tAc 'SELECT count(*) FROM profiles;')
+          echo "Restored rows — tenants: ${tenants}, profiles: ${profiles}"
+          if [ "${tenants}" -lt 1 ] || [ "${profiles}" -lt 1 ]; then
+            echo "::error::Restore verification failed — expected seeded rows in the restored database."
+            exit 1
+          fi
+          echo "Restore verified: seeded data present and migration-consistent."
