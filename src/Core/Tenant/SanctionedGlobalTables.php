@@ -65,6 +65,13 @@ final class SanctionedGlobalTables
         // is always unambiguous. No tenant_id column; rows join only to profiles.
         'profile_emails' => 'Globally-unique email addresses per profile (ADR 0005); UNIQUE(email) fixes #181 — no tenant_id column.',
 
+        // WC-235 email-verification (migration 046) — single-use, time-boxed
+        // verification tokens for a profile_emails address. An email address is
+        // platform-unique across all tenants (profile_emails is itself global),
+        // so a verification token for it carries no tenant_id; rows join only to
+        // profile_emails (ON DELETE CASCADE). Consumed/expired rows are dead.
+        'email_verifications' => 'Verification tokens for globally-unique profile emails (WC-235); rows join only to the global profile_emails table — no tenant_id column.',
+
         // WC-91f2 (Phase F) — cross-worker atomic counter store (migration 032).
         // Keys are platform-wide identifiers (e.g. "login:fail:user:42",
         // "login:fail:ip:1.2.3.4") with no inherent tenant scope; the same counter

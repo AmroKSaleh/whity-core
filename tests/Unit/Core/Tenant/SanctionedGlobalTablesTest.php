@@ -69,8 +69,11 @@ final class SanctionedGlobalTablesTest extends TestCase
         // A guard against accidental scope creep: adding a table here removes it
         // from tenant-isolation enforcement, so the list must stay deliberate.
         // Bump this only alongside a documented decision.
+        // 7 (WC-235): email_verifications joined — verification tokens for the
+        // globally-unique profile_emails; reviewed as legitimately global (rows
+        // join only to a global table, no tenant_id).
         self::assertLessThanOrEqual(
-            6,
+            7,
             count(SanctionedGlobalTables::all()),
             'The sanctioned global-table allowlist should stay minimal; review any growth.'
         );

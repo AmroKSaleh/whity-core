@@ -31,6 +31,10 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // WC-235: public self-service registration — OpenAPI schema to follow in
         // a dedicated documentation task (mirrors the auth-routes rollout).
         'POST /api/register',
+        // WC-235: public email verification (request a link + confirm a token) —
+        // OpenAPI schema to follow in the same documentation task as /api/register.
+        'POST /api/email/request-verification',
+        'POST /api/email/verify',
         // WC-235: pending-registration review (admin-approval activation) —
         // system-tenant-only; OpenAPI schema to follow in the same documentation
         // task as /api/register.

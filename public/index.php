@@ -110,8 +110,12 @@ use Whity\Http\Middleware\CsrfGuard;
 use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Http\Middleware\RequestBodyValidator;
 use Whity\Api\UsersApiHandler;
+use Whity\Api\EmailVerificationHandler;
 use Whity\Api\RegisterApiHandler;
-use Whity\Core\Identity\NullEmailVerificationProvider;
+use Whity\Core\Identity\EmailVerificationService;
+use Whity\Core\Identity\ProfileEmailRepository;
+use Whity\Core\Identity\TokenEmailVerificationProvider;
+use Whity\Core\Mail\MailerFactory;
 use Whity\Api\RolesApiHandler;
 use Whity\Api\TenantsApiHandler;
 use Whity\Api\PermissionsApiHandler;
@@ -567,11 +571,39 @@ $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // WC-235: public self-service registration — provisions a new tenant + owner
 // (profile + primary email + active admin membership). Public + no required
 // permission; the global rate-limiter (non-exempt path) throttles abuse.
-// WC-235: email verification is a no-op in the MVP. To enable it, bind a real
-// EmailVerificationProvider here and set EMAIL_VERIFICATION_ENFORCED=1 — no
-// change to RegisterApiHandler is required.
-$registerHandler = new RegisterApiHandler($db->getPdo(), new NullEmailVerificationProvider());
+// WC-235: email verification. The concrete provider issues a hashed, single-use,
+// time-boxed token (EmailVerificationService) and delivers the link via the
+// configured Mailer (MAIL_TRANSPORT; NullMailer by default). Registration hands
+// off to it only when EMAIL_VERIFICATION_ENFORCED=1; the resend/confirm endpoints
+// below share the same service. Binding a real provider here is harmless while
+// the flag is off (RegisterApiHandler only calls it when enforcement is on).
+$mailer = MailerFactory::fromEnv($_ENV, $logger);
+$emailVerificationService = new EmailVerificationService($db->getPdo());
+$profileEmailRepository = new ProfileEmailRepository($db->getPdo());
+$verifyUrlBase = (string) ($_ENV['EMAIL_VERIFICATION_URL'] ?? getenv('EMAIL_VERIFICATION_URL')
+    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/verify-email'));
+$emailVerificationProvider = new TokenEmailVerificationProvider(
+    $emailVerificationService,
+    $profileEmailRepository,
+    $mailer,
+    $verifyUrlBase
+);
+$registerHandler = new RegisterApiHandler($db->getPdo(), $emailVerificationProvider);
 $router->register('POST', '/api/register', [$registerHandler, 'register'], null);
+
+// WC-235: public email verification — (re)send a link + confirm a token. Both are
+// unauthenticated (a new owner has no session yet; a confirm link carries no JWT),
+// so both are on EnforceTenantIsolation::PUBLIC_ROUTES. Rate-limited via the
+// shared store; audited as system-level (tenant 0) identity events.
+$emailVerificationHandler = new EmailVerificationHandler(
+    $emailVerificationService,
+    $profileEmailRepository,
+    $emailVerificationProvider,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger
+);
+$router->register('POST', '/api/email/request-verification', [$emailVerificationHandler, 'request'], null);
+$router->register('POST', '/api/email/verify', [$emailVerificationHandler, 'confirm'], null);
 $router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
 // ADR 0005 §6: multi-membership tenant selection. Public like /api/login/2fa —
 // the caller holds only the short-lived selection cookie (not a full session);
