@@ -72,6 +72,12 @@ final class SanctionedGlobalTables
         // profile_emails (ON DELETE CASCADE). Consumed/expired rows are dead.
         'email_verifications' => 'Verification tokens for globally-unique profile emails (WC-235); rows join only to the global profile_emails table — no tenant_id column.',
 
+        // WC-7ad4 (Phase F) — federated identity links (migration 047). Maps an
+        // external SSO account's (issuer, subject) to a global profile; a
+        // federated identity belongs to a person, not an org, so no tenant_id
+        // (like profiles/profile_emails, ADR 0005). Rows join only to profiles.
+        'external_identities' => 'Federated (SSO/OIDC) account links to global profiles (WC-7ad4); identity is per-person, not per-tenant — no tenant_id column.',
+
         // WC-91f2 (Phase F) — cross-worker atomic counter store (migration 032).
         // Keys are platform-wide identifiers (e.g. "login:fail:user:42",
         // "login:fail:ip:1.2.3.4") with no inherent tenant scope; the same counter
