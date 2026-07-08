@@ -43,6 +43,10 @@ export default function RegisterPage() {
   // WC-235: when admin approval is enforced the owner cannot log in yet, so we
   // show a "pending approval" confirmation instead of chaining a login.
   const [pendingApproval, setPendingApproval] = useState(false);
+  // WC-235: when email verification is enforced the owner must confirm their
+  // address first, so we show a "check your email" confirmation instead of
+  // chaining a login into the dashboard with an unverified address.
+  const [pendingVerification, setPendingVerification] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
 
   // Match the login page's SSR-safe "enabled until mounted" timing so the
@@ -117,6 +121,16 @@ export default function RegisterPage() {
           return;
         }
 
+        // Email verification enforced: the address starts unverified and the
+        // owner must confirm it (via the emailed link → /verify-email) before
+        // signing in, so show a "check your email" panel rather than chaining a
+        // login. Independent of the approval gate above.
+        if (created?.data?.verification_required === true) {
+          setPendingVerification(true);
+          addToast('Workspace created — check your email to verify your address.', 'success');
+          return;
+        }
+
         // Account + workspace created. Sign in with the same credentials — a
         // fresh owner has exactly one active membership, so login mints the
         // session directly.
@@ -184,12 +198,18 @@ export default function RegisterPage() {
             />
           ) : null}
           <CardTitle className="text-2xl">
-            {pendingApproval ? 'Workspace created' : `Create your ${branding.siteName} workspace`}
+            {pendingApproval
+              ? 'Workspace created'
+              : pendingVerification
+                ? 'Check your email'
+                : `Create your ${branding.siteName} workspace`}
           </CardTitle>
           <CardDescription>
             {pendingApproval
               ? 'Your workspace is awaiting administrator approval'
-              : 'Set up a new workspace and your owner account'}
+              : pendingVerification
+                ? 'Confirm your email address to finish signing up'
+                : 'Set up a new workspace and your owner account'}
           </CardDescription>
         </CardHeader>
         {pendingApproval ? (
@@ -205,6 +225,26 @@ export default function RegisterPage() {
               <Button asChild className="w-full">
                 <Link href="/login">Back to sign in</Link>
               </Button>
+            </div>
+          </CardContent>
+        ) : pendingVerification ? (
+          <CardContent>
+            <div className="space-y-4 text-center" data-testid="registration-pending-verification">
+              <Alert>
+                <AlertDescription>
+                  Thanks for signing up! We&rsquo;ve sent a verification link to{' '}
+                  <span className="font-medium">{email}</span>. Open it to confirm your address,
+                  then sign in. The link expires in 24 hours.
+                </AlertDescription>
+              </Alert>
+              <Button asChild className="w-full">
+                <Link href="/verify-email">Didn&rsquo;t get it? Resend the link</Link>
+              </Button>
+              <p className="text-sm text-center text-muted-foreground">
+                <Link href="/login" className="font-medium text-primary hover:underline">
+                  Back to sign in
+                </Link>
+              </p>
             </div>
           </CardContent>
         ) : (
