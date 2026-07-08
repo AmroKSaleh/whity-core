@@ -87,6 +87,11 @@ final class TenantOwnedTables
         // (migration 045). Scoped to profile_id + tenant_id; list/revoke bind
         // both, so the predicate guard must police every query against it.
         'sessions' => '045_create_sessions.php',
+
+        // WC-e6287 (Phase F) — per-tenant identity-provider (SSO/OIDC) registry
+        // (migration 048). Each tenant configures its own providers; every query
+        // binds tenant_id so a tenant can only see/manage its own configs.
+        'identity_providers' => '048_create_identity_providers.php',
     ];
 
     /**
