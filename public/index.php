@@ -113,7 +113,10 @@ use Whity\Api\UsersApiHandler;
 use Whity\Api\EmailVerificationHandler;
 use Whity\Api\RegisterApiHandler;
 use Whity\Core\Identity\EmailVerificationService;
+use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
+use Whity\Core\Identity\TenantEmailDomainPolicyService;
+use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Identity\TokenEmailVerificationProvider;
 use Whity\Core\Mail\MailerFactory;
 use Whity\Api\RolesApiHandler;
@@ -595,12 +598,19 @@ $router->register('POST', '/api/register', [$registerHandler, 'register'], null)
 // unauthenticated (a new owner has no session yet; a confirm link carries no JWT),
 // so both are on EnforceTenantIsolation::PUBLIC_ROUTES. Rate-limited via the
 // shared store; audited as system-level (tenant 0) identity events.
+// WC-9b87: on a successful confirm the handler applies the tenant email-domain
+// policy (accept invite / auto-provision membership) for the now-verified email.
+$emailDomainPolicy = new TenantEmailDomainPolicyService(
+    new TenantEmailDomainsRepository($db->getPdo()),
+    new MembershipRepository($db->getPdo())
+);
 $emailVerificationHandler = new EmailVerificationHandler(
     $emailVerificationService,
     $profileEmailRepository,
     $emailVerificationProvider,
     new DatabaseSharedStore($db->getPdo()),
-    $auditLogger
+    $auditLogger,
+    $emailDomainPolicy
 );
 $router->register('POST', '/api/email/request-verification', [$emailVerificationHandler, 'request'], null);
 $router->register('POST', '/api/email/verify', [$emailVerificationHandler, 'confirm'], null);

@@ -11,7 +11,10 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Api\EmailVerificationHandler;
 use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Identity\EmailVerificationService;
+use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
+use Whity\Core\Identity\TenantEmailDomainPolicyService;
+use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Identity\TokenEmailVerificationProvider;
 use Whity\Core\Mail\Mailer;
 use Whity\Core\Request;
@@ -63,7 +66,11 @@ final class EmailVerificationHandlerRealEngineTest extends TestCase
             $this->emails,
             $provider,
             new DatabaseSharedStore($this->pdo),
-            new AuditLogger($this->pdo, new NullLogger())
+            new AuditLogger($this->pdo, new NullLogger()),
+            new TenantEmailDomainPolicyService(
+                new TenantEmailDomainsRepository($this->pdo),
+                new MembershipRepository($this->pdo)
+            )
         );
     }
 
@@ -215,5 +222,47 @@ final class EmailVerificationHandlerRealEngineTest extends TestCase
     public function testConfirmEmptyTokenIs422(): void
     {
         self::assertSame(422, $this->confirm('')->getStatusCode());
+    }
+
+    // ── WC-9b87: domain policy applied on a successful confirm ────────────────
+
+    public function testConfirmAppliesDomainPolicyAutoJoin(): void
+    {
+        // A tenant claims the email's domain with auto-provision enabled.
+        $tenantId = $this->seedTenant('Acme');
+        $roleId   = $this->baseRoleId();
+        (new TenantEmailDomainsRepository($this->pdo))->insert($tenantId, 'acme.test', $roleId, true);
+
+        $peid      = $this->seedEmail('newhire@acme.test', false);
+        $profileId = (int) $this->col("SELECT profile_id FROM profile_emails WHERE id = {$peid}");
+
+        // Before verification there is no membership in the claiming tenant —
+        // an UNVERIFIED address must never grant membership by domain.
+        self::assertSame(0, (int) $this->col(
+            "SELECT COUNT(*) FROM memberships WHERE profile_id = {$profileId} AND tenant_id = {$tenantId}"
+        ));
+
+        $raw = $this->service->issue($peid);
+        self::assertSame(200, $this->confirm($raw)->getStatusCode());
+
+        // Verifying the email auto-provisioned an ACTIVE membership in the tenant.
+        self::assertSame('active', (string) $this->col(
+            "SELECT status FROM memberships WHERE profile_id = {$profileId} AND tenant_id = {$tenantId}"
+        ));
+    }
+
+    private function seedTenant(string $name): int
+    {
+        $stmt = $this->pdo->prepare('INSERT INTO tenants (name, slug, created_at) VALUES (:n, :s, NOW())');
+        if ($stmt === false) {
+            self::fail('prepare failed');
+        }
+        $stmt->execute([':n' => $name, ':s' => strtolower($name)]);
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function baseRoleId(): int
+    {
+        return (int) $this->col('SELECT id FROM roles ORDER BY id ASC LIMIT 1');
     }
 }
