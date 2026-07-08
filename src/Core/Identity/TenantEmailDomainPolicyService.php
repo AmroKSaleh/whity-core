@@ -54,6 +54,17 @@ final class TenantEmailDomainPolicyService
             $defaultRoleId = (int) $policy['default_role_id'];
             $autoProvision = (bool) $policy['auto_provision'];
 
+            // Never auto-provision or accept into the system tenant (id 0): a
+            // tenant-0 membership carries platform-wide authority and must be
+            // granted explicitly, never by an email-domain match. Defense in
+            // depth — creating a tenant-0 domain claim is already system-admin
+            // gated (TenantEmailDomainApiHandler binds tenant_id from context) —
+            // but MembershipRepository::insert has no tenant-0 guard of its own,
+            // and this is exactly the untrusted auto-provision caller its note flags.
+            if ($tenantId <= 0) {
+                continue;
+            }
+
             $existing = $this->memberships->findByProfile($profileId, $tenantId);
 
             if ($existing !== null) {

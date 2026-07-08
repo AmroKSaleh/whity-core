@@ -8,6 +8,7 @@ use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Identity\EmailVerificationProvider;
 use Whity\Core\Identity\EmailVerificationService;
 use Whity\Core\Identity\ProfileEmailRepository;
+use Whity\Core\Identity\TenantEmailDomainPolicyService;
 use Whity\Core\RateLimit\ClientIp;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -48,6 +49,7 @@ final class EmailVerificationHandler
         private readonly EmailVerificationProvider $provider,
         private readonly SharedStoreInterface $store,
         private readonly AuditLogger $audit,
+        private readonly TenantEmailDomainPolicyService $domainPolicy,
     ) {}
 
     /**
@@ -148,6 +150,18 @@ final class EmailVerificationHandler
             'target_id'     => $result['profile_email_id'],
             'ip_address'    => ClientIp::fromRequest($request),
         ]);
+
+        // Apply the tenant email-domain policy now that the address is genuinely
+        // verified (WC-9b87): accept a pending invite or auto-provision a
+        // membership for any tenant that owns the domain. Runs AFTER the token
+        // is committed — a policy failure must not undo the verification (the
+        // join can be retried), and this is deliberately gated on real
+        // verification so nobody joins a tenant by an unproven address.
+        try {
+            $this->domainPolicy->applyToVerifiedEmail($result['email'], $result['profile_id']);
+        } catch (\Throwable $e) {
+            error_log('[email-verify] domain-policy application failed: ' . $e->getMessage());
+        }
 
         return Response::json([
             'data' => ['verified' => true, 'email' => $result['email']],
