@@ -1,0 +1,44 @@
+# WC-f: example Alertmanager routing for whity-core alerts.
+#
+# Routes the rules in prometheus-rules.yml to a notification channel: `critical`
+# pages, `warning` goes to a lower-urgency feed. Both point at a generic webhook
+# here (Slack/Teams/PagerDuty all accept one) — swap in your receiver of choice.
+#
+# The webhook URL is a SECRET: do NOT commit it. Reference it via a file/env
+# instead (Alertmanager reads `*_file` fields), e.g. mount it and set
+#   WHITY_ALERT_WEBHOOK_URL  ->  the notification webhook you provision.
+#
+# Validate:  amtool check-config ops/alerting/alertmanager-route.example.yml
+
+route:
+  receiver: whity-warning
+  group_by: ['alertname', 'env']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Anything critical pages immediately and re-notifies more aggressively.
+    - matchers:
+        - severity = "critical"
+      receiver: whity-critical
+      group_wait: 0s
+      repeat_interval: 1h
+
+receivers:
+  - name: whity-critical
+    webhook_configs:
+      # url_file keeps the secret OUT of this committed template.
+      - url_file: /etc/alertmanager/secrets/whity_alert_webhook_url
+        send_resolved: true
+
+  - name: whity-warning
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/whity_alert_webhook_url
+        send_resolved: true
+
+# Optional: silence a warning while its critical sibling is already firing, so
+# one incident is not double-paged.
+inhibit_rules:
+  - source_matchers: [severity = "critical"]
+    target_matchers: [severity = "warning"]
+    equal: ['alertname', 'env']

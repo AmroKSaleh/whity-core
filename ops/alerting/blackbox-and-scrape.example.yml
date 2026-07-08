@@ -1,0 +1,49 @@
+# WC-f: example blackbox_exporter module + Prometheus scrape jobs for probing
+# whity-core's GET /api/health. These feed ops/alerting/prometheus-rules.yml.
+#
+# whity-core exposes no /metrics endpoint yet, so availability/latency SLIs are
+# gathered by BLACKBOX PROBING the health route from the outside — which also
+# validates the whole request path (proxy, TLS, worker, DB ping) the way a user
+# hits it. Fill in your real staging/prod URLs below.
+
+# ── 1. blackbox_exporter module (blackbox.yml) ──────────────────────────────
+# Treat BOTH 200 and 503 as "the probe completed" so probe_success reflects
+# reachability, while the rules distinguish healthy (200) from degraded (503)
+# via probe_http_status_code. If you only accept 200, a degraded app looks
+# identical to a dead one and you lose that signal.
+modules:
+  whity_health:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200, 503]
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      fail_if_not_ssl: false          # set true once staging/prod are HTTPS-only
+      preferred_ip_protocol: ip4
+
+# ── 2. Prometheus scrape jobs (prometheus.yml → scrape_configs) ─────────────
+# The relabel dance is the standard blackbox pattern: the target URL is carried
+# in __param_target, and the real scrape address is the blackbox_exporter. The
+# `env` label is what the alert annotations interpolate ({{ $labels.env }}).
+scrape_configs:
+  - job_name: whity-health
+    metrics_path: /probe
+    params:
+      module: [whity_health]
+    static_configs:
+      - targets:
+          - https://staging.example.com/api/health   # <- your staging URL
+        labels:
+          env: staging
+      - targets:
+          - https://app.example.com/api/health        # <- your production URL
+        labels:
+          env: production
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115           # <- your blackbox_exporter addr

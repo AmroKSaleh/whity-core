@@ -1,0 +1,104 @@
+# WC-f: Prometheus alerting rules for a whity-core deployment.
+#
+# These fire off signals whity-core already exposes — no app instrumentation
+# required to start:
+#   * blackbox_exporter probing GET /api/health (up / degraded / latency)
+#   * a backup-freshness metric from the node_exporter textfile collector
+#     (see ops/alerting/backup-freshness-textfile.sh)
+#
+# Load it into Prometheus:
+#   rule_files:
+#     - /etc/prometheus/rules/whity-core.rules.yml
+# and reload (`kill -HUP` / POST /-/reload). Validate first with:
+#   promtool check rules ops/alerting/prometheus-rules.yml
+#
+# The scrape jobs these rules assume (labels: job, instance, env) are in
+# ops/alerting/blackbox-and-scrape.example.yml. Tune every `for:` / threshold to
+# your SLOs in docs/wiki/SLOs-and-Alerting.md before relying on them.
+
+groups:
+  - name: whity-core-availability
+    rules:
+      # The health probe could not complete at all (connection refused, DNS,
+      # TLS, timeout). Two minutes of continuous failure = hard down.
+      - alert: WhityHealthProbeDown
+        expr: probe_success{job="whity-health"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "whity-core {{ $labels.env }} is unreachable"
+          description: "GET /api/health on {{ $labels.instance }} has failed for >2m (probe_success=0)."
+
+      # The app answers but reports itself degraded (HTTP 503) — /api/health
+      # returns 503 when the database ping fails. App is up, dependency is not.
+      - alert: WhityHealthDegraded
+        expr: probe_http_status_code{job="whity-health"} == 503
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "whity-core {{ $labels.env }} is degraded (DB unreachable)"
+          description: "GET /api/health on {{ $labels.instance }} returns 503 for >2m — the worker is up but its database ping is failing."
+
+      # Any non-200, non-503 from the health route (e.g. 5xx from a crash, 502
+      # from the proxy) that is not the explicit degraded signal above.
+      - alert: WhityHealthUnexpectedStatus
+        expr: probe_http_status_code{job="whity-health"} != 200 and probe_http_status_code{job="whity-health"} != 503
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "whity-core {{ $labels.env }} health returns HTTP {{ $value }}"
+          description: "GET /api/health on {{ $labels.instance }} has returned an unexpected status for >5m."
+
+  - name: whity-core-latency
+    rules:
+      # Health-probe round trip slow — a coarse latency SLI until the app
+      # exposes per-route histograms. Sustained slowness on the cheapest route
+      # is an early warning (worker saturation, DB slow, GC pressure).
+      - alert: WhityHealthLatencyHigh
+        expr: avg_over_time(probe_duration_seconds{job="whity-health"}[5m]) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "whity-core {{ $labels.env }} health latency high"
+          description: "GET /api/health on {{ $labels.instance }} averaged >1s over 5m for >10m."
+
+  - name: whity-core-tls
+    rules:
+      # Certificate expiry on the probed HTTPS endpoint. Page while there is
+      # still time to renew, not after the outage.
+      - alert: WhityTlsCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{job="whity-health"} - time()) < 14 * 24 * 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "whity-core {{ $labels.env }} TLS cert expires in <14d"
+          description: "The certificate on {{ $labels.instance }} expires in {{ $value | humanizeDuration }}."
+
+  - name: whity-core-backups
+    rules:
+      # No successful DB backup within ~26h (nightly cadence + slack). Fed by
+      # the .last-success marker scripts/backup-db.sh writes, exported as
+      # whity_backup_last_success_timestamp_seconds by the textfile collector.
+      - alert: WhityBackupStale
+        expr: (time() - whity_backup_last_success_timestamp_seconds) > 26 * 3600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "whity-core {{ $labels.env }} DB backup is stale"
+          description: "No successful backup in {{ $value | humanizeDuration }} (expected nightly). Check the backup cron and scripts/backup-db.sh output."
+
+      # The backup metric is missing entirely — the exporter or cron never ran.
+      - alert: WhityBackupMetricMissing
+        expr: absent(whity_backup_last_success_timestamp_seconds)
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "whity-core backup freshness metric is missing"
+          description: "whity_backup_last_success_timestamp_seconds is absent — the textfile collector or the backup cron is not running."
