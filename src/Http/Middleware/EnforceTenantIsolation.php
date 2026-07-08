@@ -91,6 +91,12 @@ class EnforceTenantIsolation
         // it provisions a brand-new tenant + owner, so there is no session/tenant
         // to resolve yet; RegisterApiHandler validates + rate-limiting throttles.
         '/api/v1/register',
+        // WC-235: public email verification. Both are unauthenticated by design —
+        // request-verification is a pre-login resend (the owner has no session yet)
+        // and verify consumes a token from an emailed link that carries no JWT.
+        // EmailVerificationHandler rate-limits + audits; no tenant to resolve.
+        '/api/v1/email/request-verification',
+        '/api/v1/email/verify',
         // ADR 0005 §6: multi-membership tenant selection. Public like login/2fa —
         // the caller holds only the short-lived selection cookie (no session yet);
         // AuthHandler::handleSelectTenant re-validates membership before minting.
