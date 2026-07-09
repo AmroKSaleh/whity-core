@@ -81,12 +81,12 @@ final class SettingsApiRealEngineTest extends TestCase
         $data = $this->decode($response)['data'];
         self::assertSame('Whity', $data['effective']['site_name']);
         self::assertSame('UTC', $data['effective']['timezone']);
-        // 7 text keys: site_name, timezone, locale, support_email, mcp.enabled +
-        // the two instance-governance flags (auth.self_registration_enabled,
-        // auth.registration_approval_required). Governance flags are ENFORCED from
-        // the global layer (register reads getGlobal); a per-tenant override here
-        // is inert. PR2 scopes them to the global-only surface.
-        self::assertCount(7, $data['registry']);
+        // 5 tenant-overridable text keys: site_name, timezone, locale,
+        // support_email, mcp.enabled. The two instance-governance flags
+        // (auth.self_registration_enabled, auth.registration_approval_required)
+        // are GLOBAL-ONLY (WC-696206d8) and excluded from the per-tenant surface.
+        self::assertCount(5, $data['registry']);
+        self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }
 
@@ -328,6 +328,41 @@ final class SettingsApiRealEngineTest extends TestCase
         self::assertArrayHasKey('locale', $this->decode($response)['details']);
     }
 
+    public function testGlobalPatchAcceptsInstanceGovernanceKey(): void
+    {
+        // Governance flags ARE writable on the global (system-tenant) surface.
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->handler->patchGlobal(
+            $this->req('PATCH', '/api/settings/global', ['settings' => ['auth.self_registration_enabled' => 'true']], self::USER_FULL, self::SYSTEM_TENANT)
+        );
+
+        self::assertSame(200, $response->getStatusCode(), $response->getBody());
+        self::assertSame('true', $this->decode($response)['data']['auth.self_registration_enabled']);
+        self::assertSame(
+            'true',
+            $this->scalar("SELECT value FROM app_settings WHERE setting_key = 'auth.self_registration_enabled'")
+        );
+    }
+
+    public function testTenantPatchRejectsGlobalOnlyGovernanceKeyWith422(): void
+    {
+        // A tenant admin must NOT be able to set a global-only governance flag as a
+        // per-tenant override — it would be inert and misleading (WC-696206d8 / PR2).
+        TenantContext::setTenantId(self::TENANT_A);
+        $response = $this->handler->patch(
+            $this->req('PATCH', '/api/settings', ['settings' => ['auth.self_registration_enabled' => 'true']], self::USER_FULL)
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertArrayHasKey('auth.self_registration_enabled', $this->decode($response)['details']);
+        // Nothing persisted (no per-tenant override row leaked in).
+        self::assertSame(
+            0,
+            (int) $this->scalar("SELECT COUNT(*) FROM tenant_settings WHERE setting_key = 'auth.self_registration_enabled'"),
+            'a rejected global-only key must not create a per-tenant override'
+        );
+    }
+
     // ==================== helpers ====================
 
     private function makeHandler(): SettingsApiHandler
@@ -381,6 +416,15 @@ final class SettingsApiRealEngineTest extends TestCase
         self::assertIsArray($decoded);
 
         return $decoded;
+    }
+
+    /** Run a scalar query with a false-guard (PHPStan-clean). */
+    private function scalar(string $sql): mixed
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt);
+
+        return $stmt->fetchColumn();
     }
 
     /**

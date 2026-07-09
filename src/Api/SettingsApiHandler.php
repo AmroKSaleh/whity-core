@@ -64,7 +64,9 @@ final class SettingsApiHandler
         ['tenantId' => $tenantId] = $context;
 
         try {
-            $textKeys = array_flip(SettingsRegistry::textKeys());
+            // Per-tenant surface: text keys MINUS global-only governance keys
+            // (those are operator-level, edited on /settings/global only, WC-696206d8).
+            $textKeys = array_flip(SettingsRegistry::tenantTextKeys());
             $allEffective = $this->settings->effective($tenantId);
             $allOverridden = $this->settings->overriddenKeys($tenantId);
 
@@ -74,7 +76,7 @@ final class SettingsApiHandler
                     // they are managed via the branding endpoints. Only text-kind
                     // keys are visible here (WC-233).
                     'effective' => array_intersect_key($allEffective, $textKeys),
-                    'registry' => SettingsRegistry::describeText(),
+                    'registry' => SettingsRegistry::describeTenantText(),
                     'overridden' => array_values(array_filter(
                         $allOverridden,
                         static fn (string $k): bool => isset($textKeys[$k])
@@ -112,9 +114,11 @@ final class SettingsApiHandler
             fn (string $key, ?string $value): null => $this->writeTenant($tenantId, $key, $value),
             fn (int $tenantIdInner): array => array_intersect_key(
                 $this->settings->effective($tenantIdInner),
-                array_flip(SettingsRegistry::textKeys())
+                array_flip(SettingsRegistry::tenantTextKeys())
             ),
-            $tenantId
+            $tenantId,
+            // Per-tenant path: reject global-only governance keys (managed globally).
+            allowGlobalOnly: false
         );
     }
 
@@ -183,7 +187,8 @@ final class SettingsApiHandler
         Request $request,
         callable $writer,
         callable $recompute,
-        int $tenantId = 0
+        int $tenantId = 0,
+        bool $allowGlobalOnly = true
     ): Response {
         $body = JsonBody::parsed($request);
         $settings = $body['settings'] ?? null;
@@ -206,6 +211,12 @@ final class SettingsApiHandler
             }
             if (!SettingsRegistry::isKnown($key)) {
                 $details[$key] = "Unknown setting key: {$key}";
+                continue;
+            }
+            if (!$allowGlobalOnly && SettingsRegistry::isGlobalOnly($key)) {
+                // Governance key submitted on the per-tenant surface — reject
+                // rather than silently write an inert per-tenant override.
+                $details[$key] = "{$key} is a global instance setting and cannot be set per-tenant.";
                 continue;
             }
 
