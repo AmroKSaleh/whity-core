@@ -69,6 +69,21 @@ final class SettingsRegistry
     ];
 
     /**
+     * GLOBAL-ONLY keys (WC-696206d8 / instance governance): operator-level flags
+     * that have meaning ONLY at the global layer and are enforced from it. They
+     * are NOT per-tenant-overridable — a tenant admin must never set them (a
+     * per-tenant value would be inert and misleading). Exposed + writable ONLY on
+     * the global settings surface (/api/settings/global, SETTINGS_MANAGE), and
+     * excluded from the per-tenant settings surface.
+     *
+     * @var list<string>
+     */
+    private const GLOBAL_ONLY_KEYS = [
+        self::SELF_REGISTRATION_ENABLED,
+        self::REGISTRATION_APPROVAL_REQUIRED,
+    ];
+
+    /**
      * Maximum length of the site name, in characters.
      */
     private const SITE_NAME_MAX = 120;
@@ -154,6 +169,49 @@ final class SettingsRegistry
     public static function isKnown(string $key): bool
     {
         return array_key_exists($key, self::DEFAULTS);
+    }
+
+    /**
+     * Whether the key is GLOBAL-ONLY (operator governance): settable only on the
+     * global settings surface, never as a per-tenant override.
+     */
+    public static function isGlobalOnly(string $key): bool
+    {
+        return in_array($key, self::GLOBAL_ONLY_KEYS, true);
+    }
+
+    /**
+     * The text-kind keys that a TENANT may override — text keys minus the
+     * global-only governance keys. Drives the per-tenant settings surface.
+     *
+     * @return list<string>
+     */
+    public static function tenantTextKeys(): array
+    {
+        return array_values(array_filter(
+            self::textKeys(),
+            static fn (string $k): bool => !self::isGlobalOnly($k)
+        ));
+    }
+
+    /**
+     * Like {@see describeText()} but restricted to the tenant-overridable keys
+     * (excludes global-only governance keys) for the per-tenant settings API.
+     *
+     * @return list<array{key: string, type: string, default: string}>
+     */
+    public static function describeTenantText(): array
+    {
+        $descriptors = [];
+        foreach (self::tenantTextKeys() as $key) {
+            $descriptors[] = [
+                'key' => $key,
+                'type' => self::typeFor($key),
+                'default' => self::defaultFor($key),
+            ];
+        }
+
+        return $descriptors;
     }
 
     /**

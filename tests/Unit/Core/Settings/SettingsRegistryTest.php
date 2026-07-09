@@ -33,6 +33,19 @@ final class SettingsRegistryTest extends TestCase
         self::assertFalse(SettingsRegistry::isKnown('not_a_setting'));
     }
 
+    public function testGovernanceKeysAreGlobalOnlyAndExcludedFromTenantSurface(): void
+    {
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_registration_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.registration_approval_required'));
+        self::assertFalse(SettingsRegistry::isGlobalOnly('site_name'));
+
+        // The per-tenant surface excludes the global-only governance keys.
+        self::assertNotContains('auth.self_registration_enabled', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.registration_approval_required', SettingsRegistry::tenantTextKeys());
+        self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
+        self::assertCount(count(SettingsRegistry::textKeys()) - 2, SettingsRegistry::tenantTextKeys());
+    }
+
     public function testDefaultsMatchTheDesign(): void
     {
         self::assertSame('Whity', SettingsRegistry::defaultFor('site_name'));
