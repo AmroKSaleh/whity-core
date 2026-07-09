@@ -13,6 +13,8 @@ use Whity\Core\Identity\NullEmailVerificationProvider;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
 use Whity\Http\JsonBody;
 
 /**
@@ -44,11 +46,18 @@ final class RegisterApiHandler
     private const OWNER_ROLE = 'admin';
 
     private PDO $db;
+    private SettingsService $settings;
     private EmailVerificationProvider $verificationProvider;
 
-    public function __construct(PDO $db, ?EmailVerificationProvider $verificationProvider = null)
-    {
+    public function __construct(
+        PDO $db,
+        SettingsService $settings,
+        ?EmailVerificationProvider $verificationProvider = null,
+    ) {
         $this->db = $db;
+        // Instance-governance flags (self-registration open? approval required?)
+        // are read fresh per request from the GLOBAL settings layer.
+        $this->settings = $settings;
         // Default to the MVP no-op provider; a real one is bound in the
         // composition root when EMAIL_VERIFICATION_ENFORCED is turned on.
         $this->verificationProvider = $verificationProvider ?? new NullEmailVerificationProvider();
@@ -57,6 +66,16 @@ final class RegisterApiHandler
     public function register(Request $request): Response
     {
         try {
+            // Instance governance (WC-696206d8): self-service signup must be
+            // enabled by the operator. A fresh, sovereign instance is CLOSED by
+            // default (the operator opens signup via global instance settings), so
+            // a public caller cannot self-provision a tenant + account. Read fresh
+            // per request and fail closed with a generic 403 (no enumeration).
+            $global = $this->settings->getGlobal();
+            if (($global[SettingsRegistry::SELF_REGISTRATION_ENABLED] ?? 'false') !== 'true') {
+                return Response::error('Self-service registration is disabled', 403);
+            }
+
             $body = JsonBody::parsed($request);
 
             $email       = strtolower(trim((string) ($body['email'] ?? '')));
@@ -103,12 +122,14 @@ final class RegisterApiHandler
             // nothing is sent. Flipping the flag needs no change to this handler.
             $enforced = EmailVerificationPolicy::isEnforced();
 
-            // Admin-approval enforcement (WC-235): default OFF (MVP). When ON,
-            // the owner membership is provisioned as 'invited' (pending) instead
-            // of 'active', so the owner CANNOT log in until a system-tenant admin
-            // approves it. Independent of email verification above. Flipping the
-            // flag needs no change to this handler.
-            $approvalRequired = AccountActivationPolicy::isEnforced();
+            // Admin-approval enforcement (WC-235 + WC-696206d8): when ON, the owner
+            // membership is provisioned as 'invited' (pending) instead of 'active',
+            // so the owner CANNOT log in until a system-tenant admin approves it.
+            // Required by DEFAULT via the global instance setting (secure default);
+            // the legacy ADMIN_APPROVAL_ENFORCED env flag still forces it on too.
+            $approvalRequired =
+                (($global[SettingsRegistry::REGISTRATION_APPROVAL_REQUIRED] ?? 'true') === 'true')
+                || AccountActivationPolicy::isEnforced();
             $membershipStatus = $approvalRequired
                 ? MembershipRepository::STATUS_INVITED
                 : MembershipRepository::STATUS_ACTIVE;

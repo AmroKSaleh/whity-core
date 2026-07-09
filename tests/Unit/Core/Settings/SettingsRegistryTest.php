@@ -21,7 +21,8 @@ final class SettingsRegistryTest extends TestCase
         self::assertSame(
             ['site_name', 'timezone', 'locale', 'support_email',
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
-             'mcp.enabled'],
+             'mcp.enabled',
+             'auth.self_registration_enabled', 'auth.registration_approval_required'],
             SettingsRegistry::keys()
         );
     }
@@ -141,7 +142,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(8, $describe);
+        self::assertCount(10, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

@@ -592,7 +592,14 @@ $emailVerificationProvider = new TokenEmailVerificationProvider(
     $mailer,
     $verifyUrlBase
 );
-$registerHandler = new RegisterApiHandler($db->getPdo(), $emailVerificationProvider);
+// Global settings service (also reused by the settings/branding handlers below).
+// RegisterApiHandler reads the instance-governance flags (self-registration
+// open? approval required?) from it — closed by default on a fresh instance.
+$settingsService = new \Whity\Core\Settings\SettingsService(
+    new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
+    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
+);
+$registerHandler = new RegisterApiHandler($db->getPdo(), $settingsService, $emailVerificationProvider);
 $router->register('POST', '/api/register', [$registerHandler, 'register'], null);
 
 // WC-235: public email verification — (re)send a link + confirm a token. Both are
@@ -841,10 +848,7 @@ $router->register('GET', '/api/audit-logs', [$auditLogHandler, 'list'], null, nu
 // permission). The handler issues NO SQL — all access goes through
 // SettingsService and its repositories; the tenant always comes from
 // TenantContext, so a caller can only edit its own tenant's overrides.
-$settingsService = new \Whity\Core\Settings\SettingsService(
-    new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
-    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
-);
+// ($settingsService is constructed once, earlier, near the register handler.)
 $settingsHandler = new \Whity\Api\SettingsApiHandler($settingsService, $roleChecker);
 $router->register('GET',   '/api/settings',        [$settingsHandler, 'get'],         null, null, CorePermissions::SETTINGS_READ);
 $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'],       null, null, CorePermissions::SETTINGS_WRITE);

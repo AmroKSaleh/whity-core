@@ -44,6 +44,17 @@ final class SettingsRegistry
     // 'false'; an admin sets it per-tenant to enable the MCP endpoint.
     public const MCP_ENABLED = 'mcp.enabled';
 
+    // Instance-governance flags (WC-696206d8). Global/operator-level: control
+    // self-service signup for the whole instance. Literal 'true'/'false'.
+    //   - self_registration_enabled: is the public POST /api/register open at all?
+    //     Default 'false' (CLOSED) — a sovereign instance is operator-provisioned;
+    //     the operator opens signup explicitly via instance settings.
+    //   - registration_approval_required: when signup IS open, is a new owner
+    //     membership created 'invited' (pending admin approval) instead of active?
+    //     Default 'true' (approval required).
+    public const SELF_REGISTRATION_ENABLED = 'auth.self_registration_enabled';
+    public const REGISTRATION_APPROVAL_REQUIRED = 'auth.registration_approval_required';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -76,6 +87,9 @@ final class SettingsRegistry
         self::BRANDING_LOGO_SQUARE => '',
         self::BRANDING_FAVICON => '',
         self::MCP_ENABLED => 'false',
+        // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
+        self::SELF_REGISTRATION_ENABLED => 'false',
+        self::REGISTRATION_APPROVAL_REQUIRED => 'true',
     ];
 
     /**
@@ -235,8 +249,22 @@ final class SettingsRegistry
             self::LOCALE => self::validateLocale($value),
             self::SUPPORT_EMAIL => self::validateSupportEmail($value),
             self::MCP_ENABLED => self::validateMcpEnabled($value),
+            self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
+            self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
             default => "Unknown setting key: {$key}",
         };
+    }
+
+    /**
+     * Validate a literal boolean setting value ('true' | 'false').
+     */
+    private static function validateBoolean(string $value, string $key): ?string
+    {
+        if ($value !== 'true' && $value !== 'false') {
+            return "{$key} must be 'true' or 'false'.";
+        }
+
+        return null;
     }
 
     /**
