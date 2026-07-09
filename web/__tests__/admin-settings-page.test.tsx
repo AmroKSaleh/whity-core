@@ -331,23 +331,73 @@ describe('AdminSettingsPage — errorMessage details fallback (WC-224)', () => {
   });
 });
 
-describe('GlobalSettingsPage — global save flow (WC-235)', () => {
-  it('PATCHes /api/v1/settings/global from the Global defaults form on the global page', async () => {
+describe('GlobalSettingsPage — registry-driven global form (WC-235 / WC-2b9d4f6a)', () => {
+  it('renders the system-tenant global form and PATCHes ONLY the changed key', async () => {
     // The mocked useAuth user is the system tenant (tenant_id: 0), so the
     // system-tenant-gated global page renders for a settings:manage caller.
     grant('settings:read', 'settings:write', 'settings:manage');
     render(<GlobalSettingsPage />);
-    await screen.findByRole('heading', { name: /global defaults/i });
+    await screen.findByRole('heading', { name: /global settings/i });
 
-    const globalSiteName = await screen.findByLabelText(/global site name/i);
+    const globalSiteName = await screen.findByLabelText(/^site name$/i);
     fireEvent.change(globalSiteName, { target: { value: 'Platform' } });
+    fireEvent.click(screen.getByRole('button', { name: /save global defaults/i }));
+
+    // Only the edited key is submitted — untouched keys are never re-sent, so a
+    // not-yet-writable key on a partial backend can't be 422'd.
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith(
+        '/api/v1/settings/global',
+        expect.objectContaining({ body: { settings: { site_name: 'Platform' } } })
+      )
+    );
+  });
+
+  it('renders a bool-typed registry key as a toggle and sends true/false', async () => {
+    grant('settings:read', 'settings:write', 'settings:manage');
+    const registry = [
+      ...REGISTRY,
+      { key: 'auth.self_registration_enabled', type: 'bool', default: 'false' },
+    ];
+    const global = { ...GLOBAL, 'auth.self_registration_enabled': 'false' };
+    mockApiGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/settings/global') {
+        return Promise.resolve({ data: { data: { global, registry } }, error: undefined });
+      }
+      return Promise.resolve(settingsResponse());
+    });
+
+    render(<GlobalSettingsPage />);
+    const toggle = await screen.findByTestId('setting-switch-auth.self_registration_enabled');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('button', { name: /save global defaults/i }));
 
     await waitFor(() =>
       expect(mockApiPatch).toHaveBeenCalledWith(
         '/api/v1/settings/global',
-        expect.objectContaining({ body: { settings: expect.objectContaining({ site_name: 'Platform' }) } })
+        expect.objectContaining({
+          body: { settings: { 'auth.self_registration_enabled': 'true' } },
+        })
       )
     );
+  });
+
+  it('surfaces a 422 per-field detail inline next to its control', async () => {
+    grant('settings:read', 'settings:write', 'settings:manage');
+    mockApiPatch.mockResolvedValue({
+      data: undefined,
+      error: { error: 'Validation failed', details: { site_name: 'site_name must not be empty.' } },
+    });
+    render(<GlobalSettingsPage />);
+    const siteName = await screen.findByLabelText(/^site name$/i);
+    fireEvent.change(siteName, { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: /save global defaults/i }));
+
+    // The reason is rendered inline (role="alert"), not only toasted.
+    expect(await screen.findByText('site_name must not be empty.')).toBeInTheDocument();
+    expect(addToast).toHaveBeenCalledWith(expect.any(String), 'error');
   });
 });

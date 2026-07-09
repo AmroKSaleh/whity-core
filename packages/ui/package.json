@@ -22,6 +22,7 @@
     "./select": "./src/select.tsx",
     "./sheet": "./src/sheet.tsx",
     "./skeleton": "./src/skeleton.tsx",
+    "./switch": "./src/switch.tsx",
     "./tabs": "./src/tabs.tsx",
     "./textarea": "./src/textarea.tsx",
     "./utils": "./src/utils.ts",
