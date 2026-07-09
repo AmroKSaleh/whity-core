@@ -164,7 +164,13 @@ class PluginsApiHandler
             $lifecycleByName = $this->lifecycleStatusByName();
             $metadataByName = $this->metadataByName();
 
-            $plugins = [];
+            // Deduplicate by plugin id: a single plugin can transiently have BOTH
+            // an enabled `Foo.php` and a stale `Foo.php.disabled` on disk (an
+            // interrupted enable/disable, or a leftover), and each would otherwise
+            // produce a separate entry with the SAME id — a duplicate the admin UI
+            // keys on, breaking rendering. The enabled file is authoritative
+            // (presence of `Foo.php` == enabled), so it wins over `.disabled`.
+            $byId = [];
             $files = scandir($this->pluginDir);
 
             if ($files === false) {
@@ -197,9 +203,17 @@ class PluginsApiHandler
                     $entry += $this->matchLifecycle($id, $lifecycleByName);
                     $entry += $this->matchMetadata($id, $metadataByName);
                     $entry += $this->defaultMetadata($enabled);
-                    $plugins[] = $entry;
+
+                    // First entry for this id wins, EXCEPT an enabled file upgrades
+                    // a previously-seen disabled one — so a plugin is listed once.
+                    $existing = $byId[$id] ?? null;
+                    if ($existing === null || ($enabled && $existing['enabled'] !== true)) {
+                        $byId[$id] = $entry;
+                    }
                 }
             }
+
+            $plugins = array_values($byId);
 
             // Surface any loaded plugins that have no on-disk file entry matched
             // above (e.g. nested plugins whose folder name differs from the id).
