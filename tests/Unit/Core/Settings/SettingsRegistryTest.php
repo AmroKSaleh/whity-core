@@ -22,7 +22,8 @@ final class SettingsRegistryTest extends TestCase
             ['site_name', 'timezone', 'locale', 'support_email',
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'mcp.enabled',
-             'auth.self_registration_enabled', 'auth.registration_approval_required'],
+             'auth.self_registration_enabled', 'auth.registration_approval_required',
+             'auth.sso_enabled'],
             SettingsRegistry::keys()
         );
     }
@@ -37,13 +38,20 @@ final class SettingsRegistryTest extends TestCase
     {
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_registration_enabled'));
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.registration_approval_required'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.sso_enabled'));
         self::assertFalse(SettingsRegistry::isGlobalOnly('site_name'));
 
         // The per-tenant surface excludes the global-only governance keys.
         self::assertNotContains('auth.self_registration_enabled', SettingsRegistry::tenantTextKeys());
         self::assertNotContains('auth.registration_approval_required', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.sso_enabled', SettingsRegistry::tenantTextKeys());
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
-        self::assertCount(count(SettingsRegistry::textKeys()) - 2, SettingsRegistry::tenantTextKeys());
+        self::assertCount(count(SettingsRegistry::textKeys()) - 3, SettingsRegistry::tenantTextKeys());
+
+        // Boolean flags report type 'bool' (clients render a toggle).
+        self::assertSame('bool', SettingsRegistry::typeFor('auth.sso_enabled'));
+        self::assertSame('bool', SettingsRegistry::typeFor('mcp.enabled'));
+        self::assertSame('string', SettingsRegistry::typeFor('site_name'));
     }
 
     public function testDefaultsMatchTheDesign(): void
@@ -155,7 +163,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(10, $describe);
+        self::assertCount(11, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

@@ -55,6 +55,11 @@ final class SettingsRegistry
     public const SELF_REGISTRATION_ENABLED = 'auth.self_registration_enabled';
     public const REGISTRATION_APPROVAL_REQUIRED = 'auth.registration_approval_required';
 
+    // Instance SSO kill-switch (WC-28fb2e19). Global/operator-level: when 'false',
+    // federated sign-in is disabled instance-wide (both operator and tenant IdPs).
+    // Default 'true' — SSO is available where a provider is configured.
+    public const SSO_ENABLED = 'auth.sso_enabled';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -81,6 +86,20 @@ final class SettingsRegistry
     private const GLOBAL_ONLY_KEYS = [
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SSO_ENABLED,
+    ];
+
+    /**
+     * Boolean-valued keys (literal 'true'/'false'). Reported with type 'bool' so
+     * clients render a toggle instead of a text input.
+     *
+     * @var list<string>
+     */
+    private const BOOL_KEYS = [
+        self::MCP_ENABLED,
+        self::SELF_REGISTRATION_ENABLED,
+        self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SSO_ENABLED,
     ];
 
     /**
@@ -105,6 +124,7 @@ final class SettingsRegistry
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
+        self::SSO_ENABLED => 'true',
     ];
 
     /**
@@ -262,7 +282,11 @@ final class SettingsRegistry
      */
     public static function typeFor(string $key): string
     {
-        return self::kindFor($key) === 'asset' ? 'asset' : 'string';
+        if (self::kindFor($key) === 'asset') {
+            return 'asset';
+        }
+        // Boolean flags report 'bool' so clients render a toggle, not a text field.
+        return in_array($key, self::BOOL_KEYS, true) ? 'bool' : 'string';
     }
 
     /**
@@ -309,6 +333,7 @@ final class SettingsRegistry
             self::MCP_ENABLED => self::validateMcpEnabled($value),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
+            self::SSO_ENABLED => self::validateBoolean($value, self::SSO_ENABLED),
             default => "Unknown setting key: {$key}",
         };
     }

@@ -54,6 +54,7 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
     private int $profileId;
     private int $providerId;        // GLOBAL-TRUST provider (system tenant 0) — default flow
     private int $tenantProviderId;  // TENANT-TRUST provider (Acme's own IdP)
+    private \Whity\Core\Settings\SettingsService $settings;
 
     protected function setUp(): void
     {
@@ -103,6 +104,10 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
 
         $extRepo = new ExternalIdentityRepository($this->pdo);
         $emailRepo = new ProfileEmailRepository($this->pdo);
+        $this->settings = new \Whity\Core\Settings\SettingsService(
+            new \Whity\Core\Settings\GlobalSettingsRepository($this->pdo),
+            new \Whity\Core\Settings\TenantSettingsRepository($this->pdo)
+        );
         $this->handler = new SsoAuthHandler(
             $engine,
             new IdentityProviderRepository($this->pdo),
@@ -112,6 +117,7 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             new EncryptedSecretStore(['v1' => 'sso_test_key_0123456789abcdef0123456789'], 'v1'),
             $auth,
             new FederatedIdentityLinker($this->pdo, $extRepo, $emailRepo, new MembershipRepository($this->pdo)),
+            $this->settings,
             self::APP_URL
         );
 
@@ -256,6 +262,29 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         self::assertStringContainsString('code_challenge_method=S256', $loc);
         self::assertStringContainsString('state=', $loc);
         self::assertStringContainsString('access_type=offline', $loc);
+    }
+
+    public function testStartBouncesWhenSsoDisabledGlobally(): void
+    {
+        // Operator kill-switch (WC-28fb2e19): SSO off instance-wide.
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::SSO_ENABLED, 'false');
+
+        $res = $this->handler->start(new Request('GET', '/api/v1/auth/sso/google/start', [], ''), ['provider' => 'google']);
+        self::assertSame(302, $res->getStatusCode());
+        self::assertStringContainsString('/login?sso_error=sso_disabled', $this->location($res));
+    }
+
+    public function testCallbackBouncesWhenSsoDisabledGlobally(): void
+    {
+        $this->linkIdentity();
+        $this->primeFlow();
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::SSO_ENABLED, 'false');
+
+        $res = $this->runCallback();
+        // Even a valid linked flow is refused when SSO is globally disabled, and no
+        // session is minted.
+        self::assertStringContainsString('/login?sso_error=sso_disabled', $this->location($res));
     }
 
     public function testStartUnknownProviderBounces(): void
