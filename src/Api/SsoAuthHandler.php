@@ -48,8 +48,19 @@ final class SsoAuthHandler
         private readonly EncryptedSecretStore $secrets,
         private readonly AuthHandler $auth,
         private readonly FederatedIdentityLinker $linker,
+        private readonly \Whity\Core\Settings\SettingsService $settings,
         private readonly string $appUrl,
     ) {
+    }
+
+    /**
+     * Instance SSO kill-switch (WC-28fb2e19): federated sign-in is available only
+     * when the operator has left it enabled globally. Read fresh per request.
+     */
+    private function ssoEnabled(): bool
+    {
+        $global = $this->settings->getGlobal();
+        return ($global[\Whity\Core\Settings\SettingsRegistry::SSO_ENABLED] ?? 'true') === 'true';
     }
 
     /**
@@ -57,6 +68,9 @@ final class SsoAuthHandler
      */
     public function start(Request $request, array $params): Response
     {
+        if (!$this->ssoEnabled()) {
+            return $this->fail('sso_disabled');
+        }
         $providerKey = $this->providerKey($params);
         if ($providerKey === null) {
             return $this->fail('unknown_provider');
@@ -112,6 +126,9 @@ final class SsoAuthHandler
      */
     public function callback(Request $request, array $params): Response
     {
+        if (!$this->ssoEnabled()) {
+            return $this->fail('sso_disabled');
+        }
         $providerKey = $this->providerKey($params);
         if ($providerKey === null) {
             return $this->fail('unknown_provider');
