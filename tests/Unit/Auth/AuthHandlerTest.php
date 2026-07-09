@@ -93,8 +93,21 @@ class AuthHandlerTest extends TestCase
         }
         $stmts[] = $this->makeStmt(['role' => $roleName]);            // memberships role (issueSessionForProfile)
 
-        $this->mockDb->method('prepare')
-            ->willReturnOnConsecutiveCalls(...$stmts);
+        // issueSessionForProfile(recordNewSession: true) also records the session
+        // (SessionService::start → an extra prepare() for the `sessions` INSERT).
+        // Return the configured statements in order, then a working no-op fallback
+        // for any FURTHER prepare() — so the session-recording path completes
+        // silently instead of exhausting a fixed willReturnOnConsecutiveCalls list
+        // (which threw NoMoreReturnValuesConfigured, caught+logged by recordSession
+        // as stderr noise and a latent order/strict-mode fragility). $stmts is
+        // consumed by reference; the fallback covers recordSession + any extra.
+        $queue = $stmts;
+        $fallback = $this->makeStmt(false, []);
+        $this->mockDb->method('prepare')->willReturnCallback(
+            static function () use (&$queue, $fallback): PDOStatement {
+                return array_shift($queue) ?? $fallback;
+            }
+        );
     }
 
     // ── login tests (rewritten for the profile-based flow) ───────────────────────
