@@ -70,6 +70,10 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'POST /api/identity-providers',
         'PATCH /api/identity-providers/{id}',
         'DELETE /api/identity-providers/{id}',
+        // WC-ae16: public federated sign-in (OIDC) — browser redirect + callback;
+        // OpenAPI schema not applicable (302 redirect flow, not a JSON API).
+        'GET /api/auth/sso/{provider}/start',
+        'GET /api/auth/sso/{provider}/callback',
         // WC-d279a9b3: MCP Streamable-HTTP endpoints — OpenAPI schema not
         // applicable (MCP uses its own JSON-RPC discovery surface, not OpenAPI).
         'GET /mcp',

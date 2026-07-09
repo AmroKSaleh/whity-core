@@ -154,6 +154,11 @@ class EnforceTenantIsolation
         // includes the tenant id and filename, so an exact-match list is not
         // practical — a prefix check is used instead.
         '/api/v1/branding/asset/',
+        // WC-ae16: federated sign-in. /start and /callback carry a {provider}
+        // segment, so a prefix match is used. Both are unauthenticated by design
+        // (a pre-login user has no session/tenant); the OIDC state/nonce/PKCE flow
+        // is the safeguard, and the callback logs in only an already-linked identity.
+        '/api/v1/auth/sso/',
     ];
 
     private JwtParser $jwtParser;

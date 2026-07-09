@@ -196,4 +196,35 @@ class CookieManager
     {
         header('Set-Cookie: ' . self::buildCookieHeader('tenant_select_token', '', 0, '/api'), false);
     }
+
+    /**
+     * Set the SSO flow-state cookie (WC-ae16).
+     *
+     * A short-lived (default 10 min) signed JWT carrying the OIDC flow secrets
+     * (state, nonce, PKCE verifier, resolved provider + tenant) between the
+     * authorize redirect and the callback. HttpOnly + SameSite=Lax (Lax still
+     * sends the cookie on the top-level GET redirect back from the provider) +
+     * Secure outside development, like every other auth cookie. Path=/api so it
+     * is scoped to the API surface. Binding the `state` inside the signed cookie
+     * to the `state` echoed by the provider is the CSRF/replay defense.
+     *
+     * @param string $token     JWT of type 'oidc_flow'.
+     * @param int    $expiresIn Expiration in seconds (default 600).
+     */
+    public static function setSsoFlowToken(string $token, int $expiresIn = 600): void
+    {
+        header('Set-Cookie: ' . self::buildCookieHeader('sso_flow_token', $token, $expiresIn, '/api'), false);
+    }
+
+    /** Get the SSO flow-state token from cookies, or null if absent. */
+    public static function getSsoFlowToken(): ?string
+    {
+        return $_COOKIE['sso_flow_token'] ?? null;
+    }
+
+    /** Clear the SSO flow-state cookie (same Path as the setter). */
+    public static function clearSsoFlowToken(): void
+    {
+        header('Set-Cookie: ' . self::buildCookieHeader('sso_flow_token', '', 0, '/api'), false);
+    }
 }
