@@ -81,7 +81,12 @@ final class SettingsApiRealEngineTest extends TestCase
         $data = $this->decode($response)['data'];
         self::assertSame('Whity', $data['effective']['site_name']);
         self::assertSame('UTC', $data['effective']['timezone']);
-        self::assertCount(5, $data['registry']);
+        // 7 text keys: site_name, timezone, locale, support_email, mcp.enabled +
+        // the two instance-governance flags (auth.self_registration_enabled,
+        // auth.registration_approval_required). Governance flags are ENFORCED from
+        // the global layer (register reads getGlobal); a per-tenant override here
+        // is inert. PR2 scopes them to the global-only surface.
+        self::assertCount(7, $data['registry']);
         self::assertSame([], $data['overridden']);
     }
 

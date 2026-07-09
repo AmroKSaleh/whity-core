@@ -29,11 +29,21 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
 {
     private PDO $pdo;
     private RegisterApiHandler $handler;
+    private \Whity\Core\Settings\SettingsService $settings;
 
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make(true);
-        $this->handler = new RegisterApiHandler($this->pdo);
+        $this->settings = new \Whity\Core\Settings\SettingsService(
+            new \Whity\Core\Settings\GlobalSettingsRepository($this->pdo),
+            new \Whity\Core\Settings\TenantSettingsRepository($this->pdo)
+        );
+        // Instance defaults are secure-CLOSED; the existing suite exercises the
+        // open MVP posture, so enable self-registration and disable approval here.
+        // The governance-specific tests below flip these explicitly.
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::SELF_REGISTRATION_ENABLED, 'true');
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::REGISTRATION_APPROVAL_REQUIRED, 'false');
+        $this->handler = new RegisterApiHandler($this->pdo, $this->settings);
     }
 
     protected function tearDown(): void
@@ -62,6 +72,15 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
         self::assertIsArray($decoded);
 
         return $decoded;
+    }
+
+    /** Run a scalar query with a false-guard (PHPStan-clean). */
+    private function scalar(string $sql): mixed
+    {
+        $stmt = $this->pdo->query($sql);
+        self::assertNotFalse($stmt);
+
+        return $stmt->fetchColumn();
     }
 
     public function testRegisterProvisionsTenantProfileAndOwnerMembership(): void
@@ -222,7 +241,7 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
                 $this->calls[] = ['profileId' => $profileId, 'email' => $email];
             }
         };
-        $handler = new RegisterApiHandler($this->pdo, $spy);
+        $handler = new RegisterApiHandler($this->pdo, $this->settings, $spy);
 
         $res = $handler->register(new Request('POST', '/api/register', [], (string) json_encode([
             'email' => 'mvp@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'MVP WS',
@@ -250,7 +269,7 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
                 $this->calls[] = ['profileId' => $profileId, 'email' => $email];
             }
         };
-        $handler = new RegisterApiHandler($this->pdo, $spy);
+        $handler = new RegisterApiHandler($this->pdo, $this->settings, $spy);
 
         $res = $handler->register(new Request('POST', '/api/register', [], (string) json_encode([
             'email' => 'verify@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Verify WS',
@@ -321,7 +340,7 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
                 throw new \RuntimeException('smtp down');
             }
         };
-        $handler = new RegisterApiHandler($this->pdo, $throwing);
+        $handler = new RegisterApiHandler($this->pdo, $this->settings, $throwing);
 
         $res = $handler->register(new Request('POST', '/api/register', [], (string) json_encode([
             'email' => 'resilient@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Resilient WS',
@@ -329,5 +348,42 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
 
         self::assertSame(201, $res->getStatusCode(), $res->getBody());
         self::assertSame(1, (int) $this->pdo->query("SELECT COUNT(*) FROM profile_emails WHERE email = 'resilient@acme.test'")->fetchColumn());
+    }
+
+    // ── Instance governance (WC-696206d8) ───────────────────────────────────────
+
+    public function testSelfRegistrationDisabledIsRejectedAndNothingIsCreated(): void
+    {
+        // Closed instance: the operator has NOT opened self-service signup.
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::SELF_REGISTRATION_ENABLED, 'false');
+        $tenantsBefore = (int) $this->scalar('SELECT COUNT(*) FROM tenants');
+
+        $res = $this->register([
+            'email' => 'blocked@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Blocked WS',
+        ]);
+
+        self::assertSame(403, $res->getStatusCode());
+        // No tenant / profile / email created — the gate fires before any write.
+        self::assertSame($tenantsBefore, (int) $this->scalar('SELECT COUNT(*) FROM tenants'));
+        self::assertSame(0, (int) $this->scalar(
+            "SELECT COUNT(*) FROM profile_emails WHERE email = 'blocked@acme.test'"
+        ));
+    }
+
+    public function testApprovalRequiredByGlobalSettingProvisionsInvitedOwner(): void
+    {
+        // Approval required via the INSTANCE SETTING (no env flag) → pending owner.
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::REGISTRATION_APPROVAL_REQUIRED, 'true');
+
+        $res = $this->register([
+            'email' => 'setting-pending@acme.test', 'password' => 'a-strong-password', 'tenant_name' => 'Setting Pending WS',
+        ]);
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertTrue($this->decode($res)['data']['approval_required']);
+        $profileId = (int) $this->decode($res)['data']['profile_id'];
+        self::assertSame('invited', (string) $this->scalar(
+            "SELECT status FROM memberships WHERE profile_id = {$profileId}"
+        ));
     }
 }
