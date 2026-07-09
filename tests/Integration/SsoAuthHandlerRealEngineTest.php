@@ -19,6 +19,7 @@ use Whity\Core\Branding\HostResolver;
 use Whity\Core\Branding\TenantHostRepository;
 use Whity\Core\Http\HttpClient;
 use Whity\Core\Identity\ExternalIdentityRepository;
+use Whity\Core\Identity\FederatedIdentityLinker;
 use Whity\Core\Identity\IdentityProviderRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
 use Whity\Core\Request;
@@ -98,15 +99,18 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             null
         );
 
+        $extRepo = new ExternalIdentityRepository($this->pdo);
+        $emailRepo = new ProfileEmailRepository($this->pdo);
         $this->handler = new SsoAuthHandler(
             $engine,
             new IdentityProviderRepository($this->pdo),
-            new ExternalIdentityRepository($this->pdo),
-            new ProfileEmailRepository($this->pdo),
+            $extRepo,
+            $emailRepo,
             new HostResolver(new TenantHostRepository($this->pdo), 'example.test'),
             $this->jwtParser,
             new EncryptedSecretStore(['v1' => 'sso_test_key_0123456789abcdef0123456789'], 'v1'),
             $auth,
+            new FederatedIdentityLinker($this->pdo, $extRepo, $emailRepo),
             self::APP_URL
         );
 
@@ -185,8 +189,13 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
      * Build a valid oidc_flow cookie + matching $_GET, and a signed id_token in
      * the stubbed token response.
      */
-    private function primeFlow(string $state = 'state-1', string $nonce = 'nonce-1', string $sub = self::SUBJECT): void
-    {
+    private function primeFlow(
+        string $state = 'state-1',
+        string $nonce = 'nonce-1',
+        string $sub = self::SUBJECT,
+        string $email = 'alice@acme.test',
+        bool $emailVerified = true
+    ): void {
         $flow = $this->jwtParser->create([
             'state' => $state,
             'nonce' => $nonce,
@@ -200,7 +209,7 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         $now = time();
         $idToken = JWT::encode([
             'iss' => self::ISSUER, 'aud' => self::CLIENT_ID, 'sub' => $sub,
-            'email' => 'alice@acme.test', 'email_verified' => true, 'name' => 'Alice',
+            'email' => $email, 'email_verified' => $emailVerified, 'name' => 'Alice',
             'nonce' => $nonce, 'iat' => $now, 'exp' => $now + 3600,
         ], $this->privatePem, 'RS256', $this->kid);
         $this->http->tokenResponse = ['id_token' => $idToken, 'access_token' => 'at'];
@@ -262,14 +271,73 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         );
     }
 
-    public function testCallbackUnlinkedIdentityIsBouncedNotLoggedIn(): void
+    public function testCallbackVerifiedEmailMatchAutoLinksExistingProfileAndLogsIn(): void
     {
-        // No linkIdentity() → the verified identity maps to no local profile.
-        $this->primeFlow();
+        // No prior link, but the verified IdP email matches Alice's VERIFIED
+        // primary email → link-by-verified-email → login (WC-f3b17bd2).
+        $this->primeFlow(email: 'alice@acme.test', emailVerified: true);
         $_GET = ['code' => 'authcode', 'state' => 'state-1'];
 
         $res = $this->runCallback();
-        self::assertStringContainsString('/login?sso_error=not_linked', $this->location($res));
+        self::assertSame(self::APP_URL . '/dashboard', $this->location($res), $res->getBody());
+        // A link to Alice's profile now exists.
+        self::assertSame(
+            (string) $this->profileId,
+            (string) $this->col("SELECT profile_id FROM external_identities WHERE subject = '" . self::SUBJECT . "'")
+        );
+    }
+
+    public function testCallbackUnverifiedEmailIsRefused(): void
+    {
+        // Verified-match would link, but the IdP says the email is NOT verified →
+        // never link/provision by an unproven address (anti-takeover).
+        $this->primeFlow(email: 'alice@acme.test', emailVerified: false);
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertStringContainsString('/login?sso_error=email_unverified', $this->location($res));
+        self::assertSame(0, (int) $this->col("SELECT COUNT(*) FROM external_identities WHERE subject = '" . self::SUBJECT . "'"));
+    }
+
+    public function testCallbackNewVerifiedIdentityProvisionsAPasswordlessProfile(): void
+    {
+        // A verified identity whose email matches NO local profile → provision a
+        // new passwordless profile + verified email + link. It has no membership,
+        // so login bounces with no_membership (JIT membership is WC-635, next PR),
+        // but the account is provisioned and linked.
+        $this->primeFlow(sub: 'brand-new-sub', email: 'newperson@fresh.test', emailVerified: true);
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertStringContainsString('/login?sso_error=no_membership', $this->location($res));
+
+        // A passwordless profile + verified email + link were created.
+        $pid = (int) $this->col("SELECT profile_id FROM external_identities WHERE subject = 'brand-new-sub'");
+        self::assertGreaterThan(0, $pid);
+        self::assertSame('', (string) $this->col("SELECT password_hash FROM profiles WHERE id = {$pid}"));
+        self::assertContains(
+            (string) $this->col("SELECT verified FROM profile_emails WHERE email = 'newperson@fresh.test'"),
+            ['1', 't', 'true']
+        );
+    }
+
+    public function testCallbackUnverifiedLocalEmailConflictIsRefused(): void
+    {
+        // A local profile_email for the IdP's email exists but is UNVERIFIED →
+        // refuse (a half-registered local account must not be seizable via SSO).
+        $this->exec("INSERT INTO profiles
+            (display_name, password_hash, two_factor_enabled, two_factor_secret,
+             two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+            VALUES ('Pending', 'x', false, NULL, 0, 0, NOW(), NOW())");
+        $pendingId = (int) $this->pdo->lastInsertId();
+        (new ProfileEmailRepository($this->pdo))->insert($pendingId, 'pending@acme.test', false, true);
+
+        $this->primeFlow(sub: 'conflict-sub', email: 'pending@acme.test', emailVerified: true);
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertStringContainsString('/login?sso_error=link_conflict', $this->location($res));
+        self::assertSame(0, (int) $this->col("SELECT COUNT(*) FROM external_identities WHERE subject = 'conflict-sub'"));
     }
 
     public function testCallbackStateMismatchIsRejected(): void

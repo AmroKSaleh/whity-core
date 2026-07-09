@@ -93,6 +93,17 @@ final class ExternalIdentityRepository
     }
 
     /**
+     * Count the external identities linked to a profile (used to guard against
+     * unlinking a passwordless profile's only sign-in method).
+     */
+    public function countForProfile(int $profileId): int
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM external_identities WHERE profile_id = :profile_id');
+        $stmt->execute([':profile_id' => $profileId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
      * Record that this external identity was just used to sign in.
      *
      * @return int Rows affected (1 on success, 0 if id not found).

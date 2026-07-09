@@ -11,6 +11,7 @@ use Whity\Auth\Oidc\OidcEngine;
 use Whity\Auth\Oidc\StandardOidcProvider;
 use Whity\Core\Branding\HostResolver;
 use Whity\Core\Identity\ExternalIdentityRepository;
+use Whity\Core\Identity\FederatedIdentityLinker;
 use Whity\Core\Identity\IdentityProviderRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
 use Whity\Core\Request;
@@ -29,11 +30,12 @@ use Whity\Core\Security\EncryptedSecretStore;
  *     cookie + `state` (CSRF/replay), exchange the code, verify the ID token, map
  *     (issuer, subject) → a LINKED local profile, and mint a session.
  *
- * SCOPE (A5c): this logs in an ALREADY-LINKED identity. A first-time identity with
- * no link is NOT auto-provisioned here — that (and its anti-takeover rules) is the
- * account-linking step (WC-f3b17bd2); an unlinked identity is bounced to /login
- * with a generic marker. Both routes are GET, so the CSRF guard (POST-only) does
- * not apply; `state` is the CSRF defense.
+ * FIRST LOGIN (WC-f3b17bd2): a verified identity with no existing link is resolved
+ * by {@see FederatedIdentityLinker} — linked to an existing profile that owns the
+ * same VERIFIED email, or used to provision a new passwordless profile. Unverified
+ * emails and unverified local-email conflicts are refused (anti-takeover), bounced
+ * to /login with a generic marker. Both routes are GET, so the CSRF guard
+ * (POST-only) does not apply; `state` is the CSRF defense.
  */
 final class SsoAuthHandler
 {
@@ -46,6 +48,7 @@ final class SsoAuthHandler
         private readonly JwtParser $jwtParser,
         private readonly EncryptedSecretStore $secrets,
         private readonly AuthHandler $auth,
+        private readonly FederatedIdentityLinker $linker,
         private readonly string $appUrl,
     ) {
     }
@@ -197,15 +200,28 @@ final class SsoAuthHandler
             return $this->fail('failed');
         }
 
-        // Map the verified external identity → a LINKED local profile. A5c does not
-        // provision/link a first-time identity (that is WC-f3b17bd2) — bounce it.
-        $link = $this->identities->findByIssuerSubject($identity->issuer, $identity->subject);
-        if ($link === null) {
-            return $this->fail('not_linked');
+        // Resolve the verified identity to a local profile (WC-f3b17bd2): existing
+        // link, link-by-verified-email, or provision a new passwordless profile.
+        // Unverified email / unverified-local-conflict are refused (anti-takeover).
+        $resolution = $this->linker->resolveForLogin($identity, $providerKey);
+        if ($resolution['status'] === 'refused_unverified') {
+            return $this->fail('email_unverified');
         }
-        $this->identities->touchLastLogin((int) $link['id']);
+        if ($resolution['status'] === 'refused_conflict') {
+            return $this->fail('link_conflict');
+        }
 
-        $profileId = (int) $link['profile_id'];
+        // Non-refused statuses (existing/linked/provisioned) always carry a profile_id.
+        $profileId = $resolution['profile_id'] ?? null;
+        if ($profileId === null) {
+            return $this->fail('failed');
+        }
+
+        // Stamp last-login on the (now-existing) link.
+        $link = $this->identities->findByIssuerSubject($identity->issuer, $identity->subject);
+        if ($link !== null) {
+            $this->identities->touchLastLogin((int) $link['id']);
+        }
 
         // Profile-centric session semantics (intentional): completeFederatedLogin
         // resolves the profile's OWN active memberships and mints a session into
