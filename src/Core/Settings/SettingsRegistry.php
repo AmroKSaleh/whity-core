@@ -60,6 +60,19 @@ final class SettingsRegistry
     // Default 'true' — SSO is available where a provider is configured.
     public const SSO_ENABLED = 'auth.sso_enabled';
 
+    // Storage backend selection + S3-compatible config (WC-b8c5a271 / WC-28fb2e19).
+    // Global/operator-level. `storage.driver` selects local (default) or s3; the
+    // s3.* keys configure the bucket. The S3 SECRET KEY is NOT a setting — it is
+    // sourced from the STORAGE_S3_SECRET_KEY env (deployment secret), never stored
+    // in app_settings nor exposed on the settings API.
+    public const STORAGE_DRIVER = 'storage.driver';
+    public const STORAGE_S3_ENDPOINT = 'storage.s3.endpoint';
+    public const STORAGE_S3_REGION = 'storage.s3.region';
+    public const STORAGE_S3_BUCKET = 'storage.s3.bucket';
+    public const STORAGE_S3_ACCESS_KEY = 'storage.s3.access_key';
+    public const STORAGE_S3_PATH_STYLE = 'storage.s3.path_style';
+    public const STORAGE_S3_PUBLIC_BASE_URL = 'storage.s3.public_base_url';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -87,6 +100,13 @@ final class SettingsRegistry
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
         self::SSO_ENABLED,
+        self::STORAGE_DRIVER,
+        self::STORAGE_S3_ENDPOINT,
+        self::STORAGE_S3_REGION,
+        self::STORAGE_S3_BUCKET,
+        self::STORAGE_S3_ACCESS_KEY,
+        self::STORAGE_S3_PATH_STYLE,
+        self::STORAGE_S3_PUBLIC_BASE_URL,
     ];
 
     /**
@@ -100,6 +120,7 @@ final class SettingsRegistry
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
         self::SSO_ENABLED,
+        self::STORAGE_S3_PATH_STYLE,
     ];
 
     /**
@@ -125,6 +146,13 @@ final class SettingsRegistry
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
         self::SSO_ENABLED => 'true',
+        self::STORAGE_DRIVER => 'local',
+        self::STORAGE_S3_ENDPOINT => '',
+        self::STORAGE_S3_REGION => '',
+        self::STORAGE_S3_BUCKET => '',
+        self::STORAGE_S3_ACCESS_KEY => '',
+        self::STORAGE_S3_PATH_STYLE => 'true',
+        self::STORAGE_S3_PUBLIC_BASE_URL => '',
     ];
 
     /**
@@ -334,6 +362,13 @@ final class SettingsRegistry
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
             self::SSO_ENABLED => self::validateBoolean($value, self::SSO_ENABLED),
+            self::STORAGE_DRIVER => self::validateStorageDriver($value),
+            self::STORAGE_S3_PATH_STYLE => self::validateBoolean($value, self::STORAGE_S3_PATH_STYLE),
+            self::STORAGE_S3_ENDPOINT,
+            self::STORAGE_S3_REGION,
+            self::STORAGE_S3_BUCKET,
+            self::STORAGE_S3_ACCESS_KEY,
+            self::STORAGE_S3_PUBLIC_BASE_URL => null, // free-form strings (validated at driver build)
             default => "Unknown setting key: {$key}",
         };
     }
@@ -345,6 +380,15 @@ final class SettingsRegistry
     {
         if ($value !== 'true' && $value !== 'false') {
             return "{$key} must be 'true' or 'false'.";
+        }
+
+        return null;
+    }
+
+    private static function validateStorageDriver(string $value): ?string
+    {
+        if ($value !== 'local' && $value !== 's3') {
+            return "storage.driver must be 'local' or 's3'.";
         }
 
         return null;
