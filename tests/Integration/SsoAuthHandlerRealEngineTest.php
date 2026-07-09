@@ -19,7 +19,9 @@ use Whity\Core\Branding\HostResolver;
 use Whity\Core\Branding\TenantHostRepository;
 use Whity\Core\Http\HttpClient;
 use Whity\Core\Identity\ExternalIdentityRepository;
+use Whity\Core\Identity\FederatedIdentityLinker;
 use Whity\Core\Identity\IdentityProviderRepository;
+use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
 use Whity\Core\Request;
 use Whity\Core\Security\EncryptedSecretStore;
@@ -50,7 +52,8 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
     private StubOidcHttp $http;
     private int $tenantId;
     private int $profileId;
-    private int $providerId;
+    private int $providerId;        // GLOBAL-TRUST provider (system tenant 0) — default flow
+    private int $tenantProviderId;  // TENANT-TRUST provider (Acme's own IdP)
 
     protected function setUp(): void
     {
@@ -98,15 +101,17 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             null
         );
 
+        $extRepo = new ExternalIdentityRepository($this->pdo);
+        $emailRepo = new ProfileEmailRepository($this->pdo);
         $this->handler = new SsoAuthHandler(
             $engine,
             new IdentityProviderRepository($this->pdo),
-            new ExternalIdentityRepository($this->pdo),
-            new ProfileEmailRepository($this->pdo),
+            $emailRepo,
             new HostResolver(new TenantHostRepository($this->pdo), 'example.test'),
             $this->jwtParser,
             new EncryptedSecretStore(['v1' => 'sso_test_key_0123456789abcdef0123456789'], 'v1'),
             $auth,
+            new FederatedIdentityLinker($this->pdo, $extRepo, $emailRepo, new MembershipRepository($this->pdo)),
             self::APP_URL
         );
 
@@ -142,10 +147,25 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             VALUES (:p, :t, :r, NULL, 'active', NOW())")
             ->execute([':p' => $this->profileId, ':t' => $this->tenantId, ':r' => $roleId]);
 
-        // Enabled Google provider config for the tenant.
-        $this->providerId = (new IdentityProviderRepository($this->pdo))->insert($this->tenantId, [
+        // GLOBAL-TRUST provider: operator-configured at the system tenant (0). The
+        // default flow uses this, so the person-centric behaviours (verified-email
+        // link, provisioning) are exercised on the tier that permits them.
+        $providers = new IdentityProviderRepository($this->pdo);
+        $this->providerId = $providers->insert(0, [
             'provider_key' => 'google',
             'display_name' => 'Google',
+            'client_id' => self::CLIENT_ID,
+            'client_secret_encrypted' => null,
+            'issuer' => self::ISSUER,
+            'discovery_url' => 'https://accounts.google.com/.well-known/openid-configuration',
+            'scopes' => 'openid email profile',
+            'enabled' => true,
+        ]);
+
+        // TENANT-TRUST provider: Acme's own bring-your-own IdP.
+        $this->tenantProviderId = $providers->insert($this->tenantId, [
+            'provider_key' => 'google',
+            'display_name' => 'Acme Google',
             'client_id' => self::CLIENT_ID,
             'client_secret_encrypted' => null,
             'issuer' => self::ISSUER,
@@ -185,14 +205,22 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
      * Build a valid oidc_flow cookie + matching $_GET, and a signed id_token in
      * the stubbed token response.
      */
-    private function primeFlow(string $state = 'state-1', string $nonce = 'nonce-1', string $sub = self::SUBJECT): void
-    {
+    private function primeFlow(
+        string $state = 'state-1',
+        string $nonce = 'nonce-1',
+        string $sub = self::SUBJECT,
+        string $email = 'alice@acme.test',
+        bool $emailVerified = true,
+        ?int $providerId = null,
+        ?int $tenantId = null
+    ): void {
+        // Default flow is GLOBAL-TRUST (operator provider @ system tenant 0).
         $flow = $this->jwtParser->create([
             'state' => $state,
             'nonce' => $nonce,
             'code_verifier' => 'verifier-1',
-            'provider_id' => $this->providerId,
-            'tenant_id' => $this->tenantId,
+            'provider_id' => $providerId ?? $this->providerId,
+            'tenant_id' => $tenantId ?? 0,
             'provider_key' => 'google',
         ], 600, 'oidc_flow');
         $_COOKIE['sso_flow_token'] = $flow;
@@ -200,7 +228,7 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         $now = time();
         $idToken = JWT::encode([
             'iss' => self::ISSUER, 'aud' => self::CLIENT_ID, 'sub' => $sub,
-            'email' => 'alice@acme.test', 'email_verified' => true, 'name' => 'Alice',
+            'email' => $email, 'email_verified' => $emailVerified, 'name' => 'Alice',
             'nonce' => $nonce, 'iat' => $now, 'exp' => $now + 3600,
         ], $this->privatePem, 'RS256', $this->kid);
         $this->http->tokenResponse = ['id_token' => $idToken, 'access_token' => 'at'];
@@ -220,13 +248,7 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
 
     public function testStartRedirectsToAuthorizeEndpointWithPkceAndState(): void
     {
-        // No Host header → tenant 0; seed a provider for tenant 0 so start resolves.
-        (new IdentityProviderRepository($this->pdo))->insert(0, [
-            'provider_key' => 'google', 'display_name' => 'Google', 'client_id' => self::CLIENT_ID,
-            'issuer' => self::ISSUER, 'discovery_url' => 'https://accounts.google.com/.well-known/openid-configuration',
-            'scopes' => 'openid email profile', 'enabled' => true,
-        ]);
-
+        // No Host header → tenant 0; the seeded GLOBAL-TRUST provider resolves.
         $res = $this->handler->start(new Request('GET', '/api/v1/auth/sso/google/start', [], ''), ['provider' => 'google']);
         self::assertSame(302, $res->getStatusCode());
         $loc = $this->location($res);
@@ -262,14 +284,128 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         );
     }
 
-    public function testCallbackUnlinkedIdentityIsBouncedNotLoggedIn(): void
+    public function testCallbackVerifiedEmailMatchAutoLinksExistingProfileAndLogsIn(): void
     {
-        // No linkIdentity() → the verified identity maps to no local profile.
-        $this->primeFlow();
+        // No prior link, but the verified IdP email matches Alice's VERIFIED
+        // primary email → link-by-verified-email → login (WC-f3b17bd2).
+        $this->primeFlow(email: 'alice@acme.test', emailVerified: true);
         $_GET = ['code' => 'authcode', 'state' => 'state-1'];
 
         $res = $this->runCallback();
-        self::assertStringContainsString('/login?sso_error=not_linked', $this->location($res));
+        self::assertSame(self::APP_URL . '/dashboard', $this->location($res), $res->getBody());
+        // A link to Alice's profile now exists.
+        self::assertSame(
+            (string) $this->profileId,
+            (string) $this->col("SELECT profile_id FROM external_identities WHERE subject = '" . self::SUBJECT . "'")
+        );
+    }
+
+    public function testCallbackUnverifiedEmailIsRefused(): void
+    {
+        // Verified-match would link, but the IdP says the email is NOT verified →
+        // never link/provision by an unproven address (anti-takeover).
+        $this->primeFlow(email: 'alice@acme.test', emailVerified: false);
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertStringContainsString('/login?sso_error=email_unverified', $this->location($res));
+        self::assertSame(0, (int) $this->col("SELECT COUNT(*) FROM external_identities WHERE subject = '" . self::SUBJECT . "'"));
+    }
+
+    public function testCallbackNewVerifiedIdentityProvisionsAPasswordlessProfile(): void
+    {
+        // A verified identity whose email matches NO local profile → provision a
+        // new passwordless profile + verified email + link. It has no membership,
+        // so login bounces with no_membership (JIT membership is WC-635, next PR),
+        // but the account is provisioned and linked.
+        $this->primeFlow(sub: 'brand-new-sub', email: 'newperson@fresh.test', emailVerified: true);
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertStringContainsString('/login?sso_error=no_membership', $this->location($res));
+
+        // A passwordless profile + verified email + link were created.
+        $pid = (int) $this->col("SELECT profile_id FROM external_identities WHERE subject = 'brand-new-sub'");
+        self::assertGreaterThan(0, $pid);
+        self::assertSame('', (string) $this->col("SELECT password_hash FROM profiles WHERE id = {$pid}"));
+        self::assertContains(
+            (string) $this->col("SELECT verified FROM profile_emails WHERE email = 'newperson@fresh.test'"),
+            ['1', 't', 'true']
+        );
+    }
+
+    public function testCallbackUnverifiedLocalEmailConflictIsRefused(): void
+    {
+        // A local profile_email for the IdP's email exists but is UNVERIFIED →
+        // refuse (a half-registered local account must not be seizable via SSO).
+        $this->exec("INSERT INTO profiles
+            (display_name, password_hash, two_factor_enabled, two_factor_secret,
+             two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+            VALUES ('Pending', 'x', false, NULL, 0, 0, NOW(), NOW())");
+        $pendingId = (int) $this->pdo->lastInsertId();
+        (new ProfileEmailRepository($this->pdo))->insert($pendingId, 'pending@acme.test', false, true);
+
+        $this->primeFlow(sub: 'conflict-sub', email: 'pending@acme.test', emailVerified: true);
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertStringContainsString('/login?sso_error=link_conflict', $this->location($res));
+        self::assertSame(0, (int) $this->col("SELECT COUNT(*) FROM external_identities WHERE subject = 'conflict-sub'"));
+    }
+
+    public function testCallbackTenantTrustLinksActiveMemberAndConfinesSession(): void
+    {
+        // Acme's own IdP (tenant-trust) asserts a verified email belonging to an
+        // ACTIVE MEMBER of Acme → link in the tenant namespace + session into Acme.
+        $this->primeFlow(
+            sub: 'tenant-sub',
+            email: 'alice@acme.test',
+            emailVerified: true,
+            providerId: $this->tenantProviderId,
+            tenantId: $this->tenantId,
+        );
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertSame(self::APP_URL . '/dashboard', $this->location($res), $res->getBody());
+        // Linked in the TENANT namespace (provider_id = Acme's provider), so it can
+        // never collide with or spoof the global (issuer, subject) namespace.
+        self::assertSame(
+            (string) $this->tenantProviderId,
+            (string) $this->col("SELECT provider_id FROM external_identities WHERE subject = 'tenant-sub'")
+        );
+    }
+
+    public function testCallbackTenantTrustRefusesNonMember(): void
+    {
+        // A DIFFERENT tenant's member (Bob) — Acme's IdP asserts his verified email.
+        // Bob is NOT a member of Acme, so the tenant-trust IdP must not reach him
+        // (the cross-tenant takeover the review flagged). Refused, no link.
+        $this->exec("INSERT INTO tenants (name, slug, created_at) VALUES ('Other', 'other', NOW())");
+        $otherTenant = (int) $this->pdo->lastInsertId();
+        $roleId = (int) $this->col('SELECT id FROM roles ORDER BY id ASC LIMIT 1');
+        $this->exec("INSERT INTO profiles
+            (display_name, password_hash, two_factor_enabled, two_factor_secret,
+             two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+            VALUES ('Bob', '" . password_hash('x', PASSWORD_BCRYPT) . "', false, NULL, 0, 0, NOW(), NOW())");
+        $bobId = (int) $this->pdo->lastInsertId();
+        (new ProfileEmailRepository($this->pdo))->insert($bobId, 'bob@other.test', true, true);
+        $this->pdo->prepare("INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+            VALUES (:p, :t, :r, NULL, 'active', NOW())")
+            ->execute([':p' => $bobId, ':t' => $otherTenant, ':r' => $roleId]);
+
+        $this->primeFlow(
+            sub: 'bob-sub',
+            email: 'bob@other.test',
+            emailVerified: true,
+            providerId: $this->tenantProviderId,
+            tenantId: $this->tenantId,
+        );
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+        self::assertStringContainsString('/login?sso_error=no_account', $this->location($res));
+        self::assertSame(0, (int) $this->col("SELECT COUNT(*) FROM external_identities WHERE subject = 'bob-sub'"));
     }
 
     public function testCallbackStateMismatchIsRejected(): void

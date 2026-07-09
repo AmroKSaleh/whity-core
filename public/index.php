@@ -918,8 +918,9 @@ $router->register('DELETE', '/api/identity-providers/{id:\d+}', [$identityProvid
 // 13f. Federated sign-in ("Sign in with Google") over OIDC (WC-ae16). Two PUBLIC
 // GET routes (unauthenticated by design; a pre-login user has no session). GET is
 // CSRF-exempt; `state` is the CSRF defense. The engine's outbound fetches use the
-// SSRF-guarded HttpFetcher; JWKS are cached. The callback logs in an already-LINKED
-// identity (account linking/provisioning is WC-f3b17bd2).
+// SSRF-guarded HttpFetcher; JWKS are cached. The callback resolves the verified
+// identity via FederatedIdentityLinker (existing link / link-by-verified-email /
+// provision), with anti-takeover refusals (WC-f3b17bd2).
 $oidcEngine = new \Whity\Auth\Oidc\OidcEngine(
     new \Whity\Core\Http\HttpFetcher(),
     new \Whity\Auth\Oidc\JwksProvider(
@@ -927,19 +928,32 @@ $oidcEngine = new \Whity\Auth\Oidc\OidcEngine(
     ),
     $jwtParser
 );
+$externalIdentityRepository = new \Whity\Core\Identity\ExternalIdentityRepository($db->getPdo());
 $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
     $oidcEngine,
     new \Whity\Core\Identity\IdentityProviderRepository($db->getPdo()),
-    new \Whity\Core\Identity\ExternalIdentityRepository($db->getPdo()),
     $profileEmailRepository,
     $hostResolver,
     $jwtParser,
     \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV),
     $authHandler,
+    new \Whity\Core\Identity\FederatedIdentityLinker(
+        $db->getPdo(),
+        $externalIdentityRepository,
+        $profileEmailRepository,
+        new MembershipRepository($db->getPdo()),
+    ),
     (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
 );
 $router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/start',    [$ssoAuthHandler, 'start'],    null);
 $router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/callback', [$ssoAuthHandler, 'callback'], null);
+
+// 13g. Authenticated "connected accounts" management (WC-f3b17bd2): the caller
+// lists / unlinks their own federated identities. Self-authenticating via the
+// access token (cookie or Bearer), scoped to the caller's profile.
+$meIdentitiesHandler = new \Whity\Api\MeIdentitiesApiHandler($tokenValidator, $externalIdentityRepository, $db->getPdo());
+$router->register('GET',    '/api/me/identities',            [$meIdentitiesHandler, 'list'],   null);
+$router->register('DELETE', '/api/me/identities/{id:\d+}',   [$meIdentitiesHandler, 'unlink'], null);
 
 // 14. Register the family relations API (WC-65). Reads are gated on
 // relations:read, writes on relations:manage (6th positional arg; requiredRole

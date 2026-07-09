@@ -18,6 +18,15 @@ use PDO;
  * belongs to a person, not an org. Methods therefore carry no tenant_id;
  * profile-owned operations (list/unlink) are scoped by `profile_id` so a caller
  * can only touch their own links.
+ *
+ * TRUST TIERS (WC-f3b17bd2): the identity KEY depends on the provider's trust
+ * tier (see migration 047). Global-trust (operator) links carry `provider_id =
+ * NULL` and are resolved by {@see findGlobalByIssuerSubject()} over the global
+ * `(issuer, subject)` namespace; tenant-trust (bring-your-own) links carry the
+ * configuring `provider_id` and are resolved by {@see findByProviderSubject()}
+ * over the isolated `(provider_id, subject)` namespace. Callers MUST pick the
+ * lookup that matches the provider's tier — never resolve a tenant-trust login
+ * through the global namespace (that is the anti-spoofing invariant).
  */
 final class ExternalIdentityRepository
 {
@@ -31,9 +40,12 @@ final class ExternalIdentityRepository
     /**
      * Link an external account to a profile.
      *
-     * The UNIQUE(issuer, subject) constraint enforces that a given external
-     * account maps to at most one profile — a duplicate link raises a
-     * constraint violation (the caller decides whether that is a conflict).
+     * `$providerId` selects the trust namespace: NULL for a global-trust
+     * (operator) link keyed by `(issuer, subject)`, or the configuring
+     * `identity_providers.id` for a tenant-trust link keyed by `(provider_id,
+     * subject)`. The matching PARTIAL UNIQUE index enforces one profile per
+     * external account within that namespace — a duplicate raises a constraint
+     * violation (the caller decides whether that is a conflict).
      *
      * @return int The new row's id.
      */
@@ -43,14 +55,16 @@ final class ExternalIdentityRepository
         string $issuer,
         string $subject,
         ?string $email = null,
+        ?int $providerId = null,
     ): int {
         $stmt = $this->db->prepare(
             'INSERT INTO external_identities
-                 (profile_id, provider_key, issuer, subject, email, linked_at, created_at)
-             VALUES (:profile_id, :provider_key, :issuer, :subject, :email, NOW(), NOW())'
+                 (profile_id, provider_id, provider_key, issuer, subject, email, linked_at, created_at)
+             VALUES (:profile_id, :provider_id, :provider_key, :issuer, :subject, :email, NOW(), NOW())'
         );
         $stmt->execute([
             ':profile_id'   => $profileId,
+            ':provider_id'  => $providerId,
             ':provider_key' => $providerKey,
             ':issuer'       => $issuer,
             ':subject'      => $subject,
@@ -60,8 +74,47 @@ final class ExternalIdentityRepository
     }
 
     /**
-     * Resolve the profile linked to an external `(issuer, subject)`, or null if
-     * the account has never been linked. This is the federated-login lookup.
+     * Resolve a GLOBAL-TRUST link (operator IdP) by its `(issuer, subject)` — the
+     * global person namespace (`provider_id IS NULL`). Never matches a
+     * tenant-trust link, so a tenant IdP spoofing a global issuer cannot resolve
+     * here.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findGlobalByIssuerSubject(string $issuer, string $subject): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT * FROM external_identities
+             WHERE issuer = :issuer AND subject = :subject AND provider_id IS NULL LIMIT 1'
+        );
+        $stmt->execute([':issuer' => $issuer, ':subject' => $subject]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? $this->normalizeRow($row) : null;
+    }
+
+    /**
+     * Resolve a TENANT-TRUST link by its `(provider_id, subject)` — the isolated
+     * per-provider namespace. Never matches a global-trust link nor another
+     * provider's, so identities stay confined to the configuring tenant.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findByProviderSubject(int $providerId, string $subject): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT * FROM external_identities
+             WHERE provider_id = :provider_id AND subject = :subject LIMIT 1'
+        );
+        $stmt->execute([':provider_id' => $providerId, ':subject' => $subject]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row !== false ? $this->normalizeRow($row) : null;
+    }
+
+    /**
+     * Resolve the profile linked to an external `(issuer, subject)` regardless of
+     * trust tier, or null. Used only by tests and diagnostics — the login path
+     * MUST use the tier-specific {@see findGlobalByIssuerSubject()} /
+     * {@see findByProviderSubject()} so a lookup can never cross trust namespaces.
      *
      * @return array<string, mixed>|null
      */
@@ -90,6 +143,17 @@ final class ExternalIdentityRepository
         /** @var list<array<string, mixed>> $rows */
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         return array_map($this->normalizeRow(...), $rows);
+    }
+
+    /**
+     * Count the external identities linked to a profile (used to guard against
+     * unlinking a passwordless profile's only sign-in method).
+     */
+    public function countForProfile(int $profileId): int
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM external_identities WHERE profile_id = :profile_id');
+        $stmt->execute([':profile_id' => $profileId]);
+        return (int) $stmt->fetchColumn();
     }
 
     /**
@@ -132,6 +196,7 @@ final class ExternalIdentityRepository
         return [
             'id'            => (int) $row['id'],
             'profile_id'    => (int) $row['profile_id'],
+            'provider_id'   => isset($row['provider_id']) && $row['provider_id'] !== null ? (int) $row['provider_id'] : null,
             'provider_key'  => (string) $row['provider_key'],
             'issuer'        => (string) $row['issuer'],
             'subject'       => (string) $row['subject'],

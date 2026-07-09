@@ -74,6 +74,10 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // OpenAPI schema not applicable (302 redirect flow, not a JSON API).
         'GET /api/auth/sso/{provider}/start',
         'GET /api/auth/sso/{provider}/callback',
+        // WC-f3b17bd2: authenticated connected-accounts management — OpenAPI schema
+        // to follow in a dedicated documentation task.
+        'GET /api/me/identities',
+        'DELETE /api/me/identities/{id}',
         // WC-d279a9b3: MCP Streamable-HTTP endpoints — OpenAPI schema not
         // applicable (MCP uses its own JSON-RPC discovery surface, not OpenAPI).
         'GET /mcp',

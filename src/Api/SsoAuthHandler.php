@@ -10,7 +10,8 @@ use Whity\Auth\JwtParser;
 use Whity\Auth\Oidc\OidcEngine;
 use Whity\Auth\Oidc\StandardOidcProvider;
 use Whity\Core\Branding\HostResolver;
-use Whity\Core\Identity\ExternalIdentityRepository;
+use Whity\Core\Identity\FederatedIdentityLinker;
+use Whity\Core\Identity\FederatedProviderContext;
 use Whity\Core\Identity\IdentityProviderRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
 use Whity\Core\Request;
@@ -29,23 +30,24 @@ use Whity\Core\Security\EncryptedSecretStore;
  *     cookie + `state` (CSRF/replay), exchange the code, verify the ID token, map
  *     (issuer, subject) → a LINKED local profile, and mint a session.
  *
- * SCOPE (A5c): this logs in an ALREADY-LINKED identity. A first-time identity with
- * no link is NOT auto-provisioned here — that (and its anti-takeover rules) is the
- * account-linking step (WC-f3b17bd2); an unlinked identity is bounced to /login
- * with a generic marker. Both routes are GET, so the CSRF guard (POST-only) does
- * not apply; `state` is the CSRF defense.
+ * FIRST LOGIN (WC-f3b17bd2): a verified identity with no existing link is resolved
+ * by {@see FederatedIdentityLinker} — linked to an existing profile that owns the
+ * same VERIFIED email, or used to provision a new passwordless profile. Unverified
+ * emails and unverified local-email conflicts are refused (anti-takeover), bounced
+ * to /login with a generic marker. Both routes are GET, so the CSRF guard
+ * (POST-only) does not apply; `state` is the CSRF defense.
  */
 final class SsoAuthHandler
 {
     public function __construct(
         private readonly OidcEngine $engine,
         private readonly IdentityProviderRepository $providers,
-        private readonly ExternalIdentityRepository $identities,
         private readonly ProfileEmailRepository $emails,
         private readonly HostResolver $hostResolver,
         private readonly JwtParser $jwtParser,
         private readonly EncryptedSecretStore $secrets,
         private readonly AuthHandler $auth,
+        private readonly FederatedIdentityLinker $linker,
         private readonly string $appUrl,
     ) {
     }
@@ -197,28 +199,46 @@ final class SsoAuthHandler
             return $this->fail('failed');
         }
 
-        // Map the verified external identity → a LINKED local profile. A5c does not
-        // provision/link a first-time identity (that is WC-f3b17bd2) — bounce it.
-        $link = $this->identities->findByIssuerSubject($identity->issuer, $identity->subject);
-        if ($link === null) {
-            return $this->fail('not_linked');
+        // Resolve the verified identity to a local profile (WC-f3b17bd2), applying
+        // the provider's TRUST TIER: a system-tenant (operator) provider is
+        // global-trust; any other tenant's provider is tenant-trust and may only
+        // reach its own active members. See FederatedIdentityLinker.
+        $ctx = new FederatedProviderContext(
+            $providerId,
+            $providerKey,
+            $tenantId,
+        );
+        $resolution = $this->linker->resolveForLogin($identity, $ctx);
+        switch ($resolution['status']) {
+            case 'refused_unverified':
+                return $this->fail('email_unverified');
+            case 'refused_conflict':
+                return $this->fail('link_conflict');
+            case 'refused_no_account':
+                // Tenant-trust IdP with no reachable local account in this tenant.
+                return $this->fail('no_account');
         }
-        $this->identities->touchLastLogin((int) $link['id']);
 
-        $profileId = (int) $link['profile_id'];
+        // Non-refused statuses (existing/linked/provisioned) always carry a profile_id.
+        $profileId = $resolution['profile_id'] ?? null;
+        if ($profileId === null) {
+            return $this->fail('failed');
+        }
+        // last_login_at is stamped inside the linker on the resolved link.
 
-        // Profile-centric session semantics (intentional): completeFederatedLogin
-        // resolves the profile's OWN active memberships and mints a session into
-        // them — it does NOT restrict to the flow's tenant_id. A federated identity
-        // (issuer, subject) is global (per-person, not per-tenant), so a link made
-        // under any tenant logs the person into their own account; the membership
-        // chokepoint still bounds the session to tenants they actually belong to.
         $email = $this->loginEmailFor($profileId, $identity->normalizedEmail());
 
-        // Mint the session (sets cookies as a side effect). Translate the JSON
-        // result into a browser redirect: dashboard on success, tenant-selection or
-        // a generic error otherwise.
-        $result = $this->auth->completeFederatedLogin($profileId, $email, $request);
+        // Mint the session (sets cookies as a side effect). Global-trust logs the
+        // person into their own memberships (per-person identity, ADR 0005);
+        // tenant-trust CONFINES the session to the configuring tenant so a
+        // bring-your-own IdP cannot mint a session into another of the person's
+        // tenants. Translate the JSON result into a browser redirect.
+        $result = $this->auth->completeFederatedLogin(
+            $profileId,
+            $email,
+            $request,
+            $ctx->isGlobalTrust() ? null : $tenantId,
+        );
         return $this->redirectForLoginResult($result);
     }
 
