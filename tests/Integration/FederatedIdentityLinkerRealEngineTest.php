@@ -74,6 +74,12 @@ final class FederatedIdentityLinkerRealEngineTest extends TestCase
         $stmt->execute([$profileId, $tenantId, $roleId, $status]);
     }
 
+    private function membershipStatus(int $profileId, int $tenantId): ?string
+    {
+        $v = $this->col("SELECT status FROM memberships WHERE profile_id = {$profileId} AND tenant_id = {$tenantId}");
+        return $v === false ? null : (string) $v;
+    }
+
     private function identity(string $sub, ?string $email, bool $verified): ExternalIdentity
     {
         return new ExternalIdentity(self::ISS, $sub, $email, $verified, 'Name');
@@ -203,6 +209,49 @@ final class FederatedIdentityLinkerRealEngineTest extends TestCase
             $this->identities->findGlobalByIssuerSubject(self::ISS, 'sub-t2'),
             'a tenant-trust link must never appear in the global namespace'
         );
+    }
+
+    public function testTenantJitAcceptsInvitedMemberAndLinks(): void
+    {
+        // Acme's admin invited carol@acme.com (status 'invited'); she signs in via
+        // Acme's IdP → the pending invite is JIT-accepted and the identity linked.
+        $tenant = $this->seedTenant('Acme');
+        $pid = $this->seedProfile();
+        $this->emails->insert($pid, 'carol@acme.com', true, true);
+        $this->seedMembership($pid, $tenant, 'invited');
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-inv', 'carol@acme.com', true), $this->tenantCtx($tenant));
+        self::assertSame('linked', $r['status']);
+        self::assertSame($pid, $r['profile_id'] ?? null);
+        self::assertSame('active', $this->membershipStatus($pid, $tenant), 'the invite was JIT-accepted');
+    }
+
+    public function testTenantCannotAcceptInviteFromAnotherTenant(): void
+    {
+        // X != Y: the profile is invited to tenant OTHER, but signs in via ACME's
+        // IdP. Acme's IdP must NOT be able to accept Other's invite.
+        $acme  = $this->seedTenant('Acme');
+        $other = $this->seedTenant('Other');
+        $pid = $this->seedProfile();
+        $this->emails->insert($pid, 'dave@shared.com', true, true);
+        $this->seedMembership($pid, $other, 'invited');
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-xy', 'dave@shared.com', true), $this->tenantCtx($acme));
+        self::assertSame('refused_no_account', $r['status']);
+        self::assertSame('invited', $this->membershipStatus($pid, $other), "Other's invite is untouched");
+        self::assertNull($this->identities->findByProviderSubject(self::TENANT_PROVIDER_ID, 'sub-xy'));
+    }
+
+    public function testTenantRefusesSuspendedMember(): void
+    {
+        $tenant = $this->seedTenant('Acme');
+        $pid = $this->seedProfile();
+        $this->emails->insert($pid, 'suspended@acme.com', true, true);
+        $this->seedMembership($pid, $tenant, 'suspended');
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-susp', 'suspended@acme.com', true), $this->tenantCtx($tenant));
+        self::assertSame('refused_no_account', $r['status']);
+        self::assertNull($this->identities->findByProviderSubject(self::TENANT_PROVIDER_ID, 'sub-susp'));
     }
 
     public function testTenantRefusesVerifiedEmailOfNonMember(): void

@@ -43,15 +43,19 @@ final class TenantEmailDomainsRepository
         int $defaultRoleId,
         bool $autoProvision = true,
     ): int {
+        // `auto_provision` is a CONTROLLED boolean (never user text), so it is
+        // inlined as a TRUE/FALSE literal — portable across Postgres + the SQLite
+        // test shim. Binding an int/PHP-bool to a PG boolean column is the classic
+        // 42804 trap (and PHP false binds as '' which PG rejects), so avoid it.
+        $autoProvisionLiteral = $autoProvision ? 'TRUE' : 'FALSE';
         $stmt = $this->db->prepare(
-            'INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
-             VALUES (:tenant_id, :domain, :default_role_id, :auto_provision, NOW())'
+            "INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
+             VALUES (:tenant_id, :domain, :default_role_id, {$autoProvisionLiteral}, NOW())"
         );
         $stmt->execute([
             ':tenant_id'       => $tenantId,
             ':domain'          => strtolower($domain),
             ':default_role_id' => $defaultRoleId,
-            ':auto_provision'  => $autoProvision ? 1 : 0,
         ]);
         return (int) $this->db->lastInsertId();
     }
@@ -151,8 +155,20 @@ final class TenantEmailDomainsRepository
             'tenant_id'       => (int) $row['tenant_id'],
             'domain'          => (string) $row['domain'],
             'default_role_id' => (int) $row['default_role_id'],
-            'auto_provision'  => (bool) $row['auto_provision'],
+            'auto_provision'  => self::toBool($row['auto_provision']),
             'created_at'      => (string) $row['created_at'],
         ];
+    }
+
+    /**
+     * Coerce a DB boolean to PHP bool across drivers. pdo_pgsql returns a boolean
+     * column as the STRING 't'/'f' — and `(bool) 'f' === true` — so a naive cast
+     * reports EVERY Postgres row as auto_provision=true, silently forcing
+     * auto-provisioning even where an admin set it FALSE. Match the canonical
+     * true-set explicitly (mirrors IdentityProviderRepository::toBool()).
+     */
+    private static function toBool(mixed $value): bool
+    {
+        return in_array((string) $value, ['1', 't', 'true'], true);
     }
 }

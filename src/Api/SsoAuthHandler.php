@@ -14,6 +14,7 @@ use Whity\Core\Identity\FederatedIdentityLinker;
 use Whity\Core\Identity\FederatedProviderContext;
 use Whity\Core\Identity\IdentityProviderRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
+use Whity\Core\Identity\TenantEmailDomainPolicyService;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Security\EncryptedSecretStore;
@@ -48,6 +49,7 @@ final class SsoAuthHandler
         private readonly EncryptedSecretStore $secrets,
         private readonly AuthHandler $auth,
         private readonly FederatedIdentityLinker $linker,
+        private readonly TenantEmailDomainPolicyService $domainPolicy,
         private readonly string $appUrl,
     ) {
     }
@@ -226,6 +228,17 @@ final class SsoAuthHandler
         }
         // last_login_at is stamped inside the linker on the resolved link.
 
+        // GLOBAL-TRUST JIT membership (WC-635ee381): a verified operator-IdP email
+        // whose domain a tenant has claimed provisions/accepts a membership, so the
+        // person lands in their org instead of bouncing with no_membership. This
+        // runs ONLY for the operator tier — a tenant-trust IdP's JIT is confined to
+        // the configuring tenant inside the linker, so an IdP bound to tenant X can
+        // never mint a membership in tenant Y.
+        $verifiedEmail = $identity->hasVerifiedEmail() ? $identity->normalizedEmail() : null;
+        if ($ctx->isGlobalTrust() && $verifiedEmail !== null) {
+            $this->domainPolicy->applyToVerifiedEmail($verifiedEmail, $profileId);
+        }
+
         $email = $this->loginEmailFor($profileId, $identity->normalizedEmail());
 
         // Mint the session (sets cookies as a side effect). Global-trust logs the
@@ -255,11 +268,13 @@ final class SsoAuthHandler
 
     /**
      * Resolve the tenant whose IdP config drives this /start, from the request
-     * host. An unresolved host falls back to the system tenant (0); this is benign
-     * because tenant 0 has no provider configured in a normal deployment, so
-     * findEnabledByProviderKey(0, …) returns null and /start fails closed with
-     * `provider_unavailable`. (Hardening follow-up: fail closed explicitly on an
-     * unresolved host rather than relying on the empty-config fall-through.)
+     * host. An unresolved host falls back to the system tenant (0) — this is
+     * BY DESIGN under tiered trust: tenant 0 is the operator's GLOBAL-TRUST tier,
+     * reached via the default/apex host (e.g. "Sign in with Google" configured by
+     * the deployment operator). If tenant 0 has no such provider, the lookup still
+     * fails closed (findEnabledByProviderKey(0, …) → null → `provider_unavailable`),
+     * so the fall-through can only ever reach the operator's own configuration,
+     * never another tenant's.
      */
     private function resolveTenantId(Request $request): int
     {
