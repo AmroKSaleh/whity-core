@@ -64,6 +64,7 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'DELETE /api/email-domains/{id}',
         'GET /api/email-domains',
         'POST /api/email-domains',
+        'POST /api/email-domains/{id}/verify', // WC-628738f5: DNS-TXT ownership verification; OpenAPI to follow
         // WC-e6287: per-tenant identity-provider (SSO/OIDC) admin endpoints —
         // OpenAPI schema to follow in a dedicated documentation task.
         'GET /api/identity-providers',

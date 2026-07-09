@@ -79,10 +79,11 @@ final class TenantEmailDomainPolicyRealEngineTest extends TestCase
         return $profileId;
     }
 
-    public function testAutoProvisionCreatesActiveMembership(): void
+    public function testAutoProvisionCreatesActiveMembershipForVerifiedDomain(): void
     {
         $tenantId = $this->seedTenant('Acme');
-        $this->domains->insert($tenantId, 'acme.test', $this->baseRoleId(), true);
+        $domainId = $this->domains->insert($tenantId, 'acme.test', $this->baseRoleId(), true);
+        $this->domains->markVerified($domainId, $tenantId); // ownership proven
         $profileId = $this->seedProfileWithEmail('alice@acme.test');
 
         $this->policy->applyToVerifiedEmail('alice@acme.test', $profileId);
@@ -90,6 +91,23 @@ final class TenantEmailDomainPolicyRealEngineTest extends TestCase
         $row = $this->memberships->findByProfile($profileId, $tenantId);
         self::assertNotNull($row);
         self::assertSame(MembershipRepository::STATUS_ACTIVE, $row['status']);
+    }
+
+    public function testUnverifiedDomainDoesNotAutoProvision(): void
+    {
+        // The cross-tenant harvesting guard (WC-628738f5): a tenant that has NOT
+        // proven ownership of the domain must never auto-provision a membership,
+        // even with auto_provision=true.
+        $tenantId = $this->seedTenant('Squatter');
+        $this->domains->insert($tenantId, 'notmine.test', $this->baseRoleId(), true); // unverified
+        $profileId = $this->seedProfileWithEmail('victim@notmine.test');
+
+        $this->policy->applyToVerifiedEmail('victim@notmine.test', $profileId);
+
+        self::assertNull(
+            $this->memberships->findByProfile($profileId, $tenantId),
+            'an unverified domain claim must not harvest a membership'
+        );
     }
 
     public function testAcceptsPendingInviteRegardlessOfAutoProvisionFlag(): void
@@ -138,7 +156,8 @@ final class TenantEmailDomainPolicyRealEngineTest extends TestCase
     public function testAlreadyActiveMembershipIsNotDuplicated(): void
     {
         $tenantId = $this->seedTenant('Epsilon');
-        $this->domains->insert($tenantId, 'eps.test', $this->baseRoleId(), true);
+        $domainId = $this->domains->insert($tenantId, 'eps.test', $this->baseRoleId(), true);
+        $this->domains->markVerified($domainId, $tenantId);
         $profileId = $this->seedProfileWithEmail('erin@eps.test');
         $this->memberships->insert($profileId, $tenantId, $this->baseRoleId());
 
@@ -162,7 +181,8 @@ final class TenantEmailDomainPolicyRealEngineTest extends TestCase
     public function testSuspendedMembershipIsNotReactivated(): void
     {
         $tenantId = $this->seedTenant('Theta');
-        $this->domains->insert($tenantId, 'theta.test', $this->baseRoleId(), true);
+        $domainId = $this->domains->insert($tenantId, 'theta.test', $this->baseRoleId(), true);
+        $this->domains->markVerified($domainId, $tenantId);
         $profileId = $this->seedProfileWithEmail('gina@theta.test');
         $this->memberships->insert(
             $profileId,
@@ -188,7 +208,8 @@ final class TenantEmailDomainPolicyRealEngineTest extends TestCase
         // A domain claim for the system tenant (id 0) with auto-provision on must
         // NOT grant a tenant-0 membership on verification — that would confer
         // platform-wide authority via an email-domain match.
-        $this->domains->insert(0, 'sys.test', $this->baseRoleId(), true);
+        $sysDomainId = $this->domains->insert(0, 'sys.test', $this->baseRoleId(), true);
+        $this->domains->markVerified($sysDomainId, 0); // even a verified tenant-0 claim must be skipped
         $profileId = $this->seedProfileWithEmail('intruder@sys.test');
 
         $this->policy->applyToVerifiedEmail('intruder@sys.test', $profileId);

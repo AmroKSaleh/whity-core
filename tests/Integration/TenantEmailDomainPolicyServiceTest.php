@@ -65,7 +65,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
 
     public function testAutoProvisionCreatesMembershipWhenDomainIsRegistered(): void
     {
-        $this->domains->insert(self::TENANT_A, 'acme.com', 1, true);
+        $this->domains->markVerified($this->domains->insert(self::TENANT_A, 'acme.com', 1, true), self::TENANT_A);
 
         $this->service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
 
@@ -77,7 +77,7 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
 
     public function testAutoProvisionUsesDefaultRoleIdFromDomainRegistration(): void
     {
-        $this->domains->insert(self::TENANT_A, 'corp.io', 2, true);  // role 2 (user)
+        $this->domains->markVerified($this->domains->insert(self::TENANT_A, 'corp.io', 2, true), self::TENANT_A);  // role 2 (user)
 
         $this->service->applyToVerifiedEmail('alice@corp.io', self::ALICE_PROFILE_ID);
 
@@ -162,8 +162,8 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
              VALUES (" . self::BOB_PROFILE_ID . ", 'Bob', '\$2y\$10\$fakehashb', false, 0, 0, datetime('now'), datetime('now'))"
         );
 
-        $this->domains->insert(self::TENANT_A, 'shared.com', 1, true);
-        $this->domains->insert(self::TENANT_B, 'shared.com', 2, true);
+        $this->domains->markVerified($this->domains->insert(self::TENANT_A, 'shared.com', 1, true), self::TENANT_A);
+        $this->domains->markVerified($this->domains->insert(self::TENANT_B, 'shared.com', 2, true), self::TENANT_B);
 
         $this->service->applyToVerifiedEmail('bob@shared.com', self::BOB_PROFILE_ID);
 

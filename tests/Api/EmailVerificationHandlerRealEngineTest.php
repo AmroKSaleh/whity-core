@@ -228,10 +228,13 @@ final class EmailVerificationHandlerRealEngineTest extends TestCase
 
     public function testConfirmAppliesDomainPolicyAutoJoin(): void
     {
-        // A tenant claims the email's domain with auto-provision enabled.
+        // A tenant claims the email's domain with auto-provision enabled AND has
+        // proven ownership (WC-628738f5) — the precondition for auto-join.
         $tenantId = $this->seedTenant('Acme');
         $roleId   = $this->baseRoleId();
-        (new TenantEmailDomainsRepository($this->pdo))->insert($tenantId, 'acme.test', $roleId, true);
+        $domains  = new TenantEmailDomainsRepository($this->pdo);
+        $domainId = $domains->insert($tenantId, 'acme.test', $roleId, true);
+        $domains->markVerified($domainId, $tenantId);
 
         $peid      = $this->seedEmail('newhire@acme.test', false);
         $profileId = (int) $this->col("SELECT profile_id FROM profile_emails WHERE id = {$peid}");
@@ -249,6 +252,26 @@ final class EmailVerificationHandlerRealEngineTest extends TestCase
         self::assertSame('active', (string) $this->col(
             "SELECT status FROM memberships WHERE profile_id = {$profileId} AND tenant_id = {$tenantId}"
         ));
+    }
+
+    public function testConfirmDoesNotAutoJoinUnownedDomain(): void
+    {
+        // The harvesting guard end-to-end: a tenant that claims a domain WITHOUT
+        // proving ownership must not gain a membership when a user on that domain
+        // verifies their email.
+        $tenantId = $this->seedTenant('Squatter');
+        $roleId   = $this->baseRoleId();
+        (new TenantEmailDomainsRepository($this->pdo))->insert($tenantId, 'unowned.test', $roleId, true); // unverified
+
+        $peid      = $this->seedEmail('victim@unowned.test', false);
+        $profileId = (int) $this->col("SELECT profile_id FROM profile_emails WHERE id = {$peid}");
+
+        $raw = $this->service->issue($peid);
+        self::assertSame(200, $this->confirm($raw)->getStatusCode());
+
+        self::assertSame(0, (int) $this->col(
+            "SELECT COUNT(*) FROM memberships WHERE profile_id = {$profileId} AND tenant_id = {$tenantId}"
+        ), 'an unverified domain claim must not harvest a membership on email confirmation');
     }
 
     private function seedTenant(string $name): int
