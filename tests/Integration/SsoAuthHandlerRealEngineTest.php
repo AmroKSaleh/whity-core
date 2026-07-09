@@ -23,8 +23,6 @@ use Whity\Core\Identity\FederatedIdentityLinker;
 use Whity\Core\Identity\IdentityProviderRepository;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
-use Whity\Core\Identity\TenantEmailDomainPolicyService;
-use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Request;
 use Whity\Core\Security\EncryptedSecretStore;
 
@@ -114,10 +112,6 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             new EncryptedSecretStore(['v1' => 'sso_test_key_0123456789abcdef0123456789'], 'v1'),
             $auth,
             new FederatedIdentityLinker($this->pdo, $extRepo, $emailRepo, new MembershipRepository($this->pdo)),
-            new TenantEmailDomainPolicyService(
-                new TenantEmailDomainsRepository($this->pdo),
-                new MembershipRepository($this->pdo)
-            ),
             self::APP_URL
         );
 
@@ -357,30 +351,6 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         $res = $this->runCallback();
         self::assertStringContainsString('/login?sso_error=link_conflict', $this->location($res));
         self::assertSame(0, (int) $this->col("SELECT COUNT(*) FROM external_identities WHERE subject = 'conflict-sub'"));
-    }
-
-    public function testCallbackGlobalTrustJitMembershipFromDomainClaim(): void
-    {
-        // A brand-new operator-IdP (global-trust) user whose email domain Acme has
-        // CLAIMED (auto_provision) → provisioned passwordless profile + JIT
-        // membership in Acme → lands on the dashboard instead of no_membership
-        // (WC-635ee381).
-        $roleId = (int) $this->col('SELECT id FROM roles ORDER BY id ASC LIMIT 1');
-        (new TenantEmailDomainsRepository($this->pdo))->insert($this->tenantId, 'fresh.test', $roleId, true);
-
-        $this->primeFlow(sub: 'jit-sub', email: 'newhire@fresh.test', emailVerified: true);
-        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
-
-        $res = $this->runCallback();
-        self::assertSame(self::APP_URL . '/dashboard', $this->location($res), $res->getBody());
-
-        // A membership in Acme was JIT-created for the provisioned profile.
-        $pid = (int) $this->col("SELECT profile_id FROM external_identities WHERE subject = 'jit-sub'");
-        self::assertGreaterThan(0, $pid);
-        self::assertSame(
-            '1',
-            (string) $this->col("SELECT COUNT(*) FROM memberships WHERE profile_id = {$pid} AND tenant_id = {$this->tenantId} AND status = 'active'")
-        );
     }
 
     public function testCallbackTenantTrustLinksActiveMemberAndConfinesSession(): void

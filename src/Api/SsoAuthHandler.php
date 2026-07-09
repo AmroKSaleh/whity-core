@@ -14,7 +14,6 @@ use Whity\Core\Identity\FederatedIdentityLinker;
 use Whity\Core\Identity\FederatedProviderContext;
 use Whity\Core\Identity\IdentityProviderRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
-use Whity\Core\Identity\TenantEmailDomainPolicyService;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Security\EncryptedSecretStore;
@@ -49,7 +48,6 @@ final class SsoAuthHandler
         private readonly EncryptedSecretStore $secrets,
         private readonly AuthHandler $auth,
         private readonly FederatedIdentityLinker $linker,
-        private readonly TenantEmailDomainPolicyService $domainPolicy,
         private readonly string $appUrl,
     ) {
     }
@@ -227,17 +225,13 @@ final class SsoAuthHandler
             return $this->fail('failed');
         }
         // last_login_at is stamped inside the linker on the resolved link.
-
-        // GLOBAL-TRUST JIT membership (WC-635ee381): a verified operator-IdP email
-        // whose domain a tenant has claimed provisions/accepts a membership, so the
-        // person lands in their org instead of bouncing with no_membership. This
-        // runs ONLY for the operator tier — a tenant-trust IdP's JIT is confined to
-        // the configuring tenant inside the linker, so an IdP bound to tenant X can
-        // never mint a membership in tenant Y.
-        $verifiedEmail = $identity->hasVerifiedEmail() ? $identity->normalizedEmail() : null;
-        if ($ctx->isGlobalTrust() && $verifiedEmail !== null) {
-            $this->domainPolicy->applyToVerifiedEmail($verifiedEmail, $profileId);
-        }
+        //
+        // NOTE: domain-claim JIT membership (auto-join a tenant whose email domain
+        // a person's verified address matches) is deliberately NOT wired here.
+        // Auto-provisioning from a self-asserted, unverified `tenant_email_domains`
+        // claim is a cross-tenant harvesting risk; it is deferred until domain-
+        // OWNERSHIP verification exists (WC-628738f5). Tenant-trust onboarding still
+        // works via explicit invites, JIT-accepted in FederatedIdentityLinker.
 
         $email = $this->loginEmailFor($profileId, $identity->normalizedEmail());
 

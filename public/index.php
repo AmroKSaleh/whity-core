@@ -943,7 +943,6 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
         $profileEmailRepository,
         new MembershipRepository($db->getPdo()),
     ),
-    $emailDomainPolicy,
     (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
 );
 $router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/start',    [$ssoAuthHandler, 'start'],    null);
