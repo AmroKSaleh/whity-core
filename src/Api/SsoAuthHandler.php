@@ -206,6 +206,13 @@ final class SsoAuthHandler
         $this->identities->touchLastLogin((int) $link['id']);
 
         $profileId = (int) $link['profile_id'];
+
+        // Profile-centric session semantics (intentional): completeFederatedLogin
+        // resolves the profile's OWN active memberships and mints a session into
+        // them — it does NOT restrict to the flow's tenant_id. A federated identity
+        // (issuer, subject) is global (per-person, not per-tenant), so a link made
+        // under any tenant logs the person into their own account; the membership
+        // chokepoint still bounds the session to tenants they actually belong to.
         $email = $this->loginEmailFor($profileId, $identity->normalizedEmail());
 
         // Mint the session (sets cookies as a side effect). Translate the JSON
@@ -226,6 +233,14 @@ final class SsoAuthHandler
         return preg_match('/^[a-z][a-z0-9_]{1,63}$/', $key) === 1 ? $key : null;
     }
 
+    /**
+     * Resolve the tenant whose IdP config drives this /start, from the request
+     * host. An unresolved host falls back to the system tenant (0); this is benign
+     * because tenant 0 has no provider configured in a normal deployment, so
+     * findEnabledByProviderKey(0, …) returns null and /start fails closed with
+     * `provider_unavailable`. (Hardening follow-up: fail closed explicitly on an
+     * unresolved host rather than relying on the empty-config fall-through.)
+     */
     private function resolveTenantId(Request $request): int
     {
         $host = $request->getHeader('X-Forwarded-Host') ?? $request->getHeader('Host') ?? '';
