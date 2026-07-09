@@ -10,10 +10,14 @@ namespace Whity\Core\Identity;
  * Called from the email-verification flow after a profile_email row is marked
  * verified. For each tenant that has registered the verified email's domain:
  *
- *   1. If a pending ('invited') membership already exists → accept it (status: active).
- *   2. Else if auto_provision = true and no membership exists → insert an 'active'
- *      membership with the domain registration's default_role_id.
- *   3. Otherwise (membership already active, or auto_provision = false with no invite) → no-op.
+ *   1. If a pending ('invited') membership already exists → accept it (status:
+ *      active). An explicit invite is trusted regardless of domain ownership.
+ *   2. Else if auto_provision = true AND the domain is ownership-VERIFIED and no
+ *      membership exists → insert an 'active' membership with the registration's
+ *      default_role_id. Ownership verification is mandatory here (WC-628738f5):
+ *      without it a tenant could claim a domain it does not own and harvest a
+ *      membership for every user who verifies an email on that domain.
+ *   3. Otherwise (already a member, auto_provision off, or domain UNVERIFIED) → no-op.
  *
  * This is stateless and safe for FrankenPHP worker persistence.
  */
@@ -53,6 +57,7 @@ final class TenantEmailDomainPolicyService
             $tenantId      = (int) $policy['tenant_id'];
             $defaultRoleId = (int) $policy['default_role_id'];
             $autoProvision = (bool) $policy['auto_provision'];
+            $isVerified    = ($policy['verified_at'] ?? null) !== null;
 
             // Never auto-provision or accept into the system tenant (id 0): a
             // tenant-0 membership carries platform-wide authority and must be
@@ -69,13 +74,21 @@ final class TenantEmailDomainPolicyService
 
             if ($existing !== null) {
                 if ($existing['status'] === MembershipRepository::STATUS_INVITED) {
+                    // Accepting an EXPLICIT invite is safe regardless of domain
+                    // ownership — the tenant admin already named this person.
                     $this->memberships->accept($existing['id'], $tenantId);
                 }
                 // Active or suspended: no-op.
                 continue;
             }
 
-            if ($autoProvision) {
+            // AUTO-PROVISION (no prior membership) requires PROVEN domain ownership.
+            // Without it, a tenant could register a domain it does not own (e.g.
+            // gmail.com) and harvest a membership for every verifying user — the
+            // cross-tenant harvesting hole this guard closes (WC-628738f5). An
+            // unverified claim silently does nothing here; the tenant must pass the
+            // DNS TXT challenge (DomainOwnershipVerifier) first.
+            if ($autoProvision && $isVerified) {
                 $this->memberships->insert($profileId, $tenantId, $defaultRoleId);
             }
         }

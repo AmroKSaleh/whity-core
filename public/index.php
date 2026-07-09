@@ -896,10 +896,14 @@ $router->register('POST', '/api/registrations/{id}/reject',  [$registrationsHand
 
 // 13d. Register the Tenant Email-Domain API (WC-9b87). Admin-gated; tenant-scoped
 // in the handler via TenantContext so a caller can only manage its own domains.
-$emailDomainHandler = new TenantEmailDomainApiHandler($db->getPdo());
-$router->register('GET',    '/api/email-domains',           [$emailDomainHandler, 'list'],   'admin');
-$router->register('POST',   '/api/email-domains',           [$emailDomainHandler, 'create'], 'admin');
-$router->register('DELETE', '/api/email-domains/{id:\d+}',  [$emailDomainHandler, 'delete'], 'admin');
+$emailDomainHandler = new TenantEmailDomainApiHandler(
+    $db->getPdo(),
+    new \Whity\Core\Identity\DomainOwnershipVerifier(new \Whity\Core\Identity\SystemDnsTxtResolver())
+);
+$router->register('GET',    '/api/email-domains',              [$emailDomainHandler, 'list'],   'admin');
+$router->register('POST',   '/api/email-domains',              [$emailDomainHandler, 'create'], 'admin');
+$router->register('POST',   '/api/email-domains/{id:\d+}/verify', [$emailDomainHandler, 'verify'], 'admin');
+$router->register('DELETE', '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'delete'], 'admin');
 
 // 13e. Register the per-tenant identity-provider (SSO/OIDC) admin API (WC-e6287).
 // Gated on auth_providers:manage (6th positional arg; role stays null so

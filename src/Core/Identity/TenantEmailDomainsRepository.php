@@ -33,7 +33,9 @@ final class TenantEmailDomainsRepository
     }
 
     /**
-     * Register a domain for a tenant.
+     * Register a domain for a tenant. A fresh, unguessable `verification_token` is
+     * generated so the tenant can prove ownership (DNS TXT); the row starts
+     * UNVERIFIED (`verified_at` NULL), so it never auto-provisions until verified.
      *
      * @return int The new row's id.
      */
@@ -49,15 +51,59 @@ final class TenantEmailDomainsRepository
         // 42804 trap (and PHP false binds as '' which PG rejects), so avoid it.
         $autoProvisionLiteral = $autoProvision ? 'TRUE' : 'FALSE';
         $stmt = $this->db->prepare(
-            "INSERT INTO tenant_email_domains (tenant_id, domain, default_role_id, auto_provision, created_at)
-             VALUES (:tenant_id, :domain, :default_role_id, {$autoProvisionLiteral}, NOW())"
+            "INSERT INTO tenant_email_domains
+                 (tenant_id, domain, default_role_id, auto_provision, verification_token, created_at)
+             VALUES (:tenant_id, :domain, :default_role_id, {$autoProvisionLiteral}, :token, NOW())"
         );
         $stmt->execute([
             ':tenant_id'       => $tenantId,
             ':domain'          => strtolower($domain),
             ':default_role_id' => $defaultRoleId,
+            ':token'           => self::generateToken(),
         ]);
         return (int) $this->db->lastInsertId();
+    }
+
+    /**
+     * Ensure the registration has a verification token, generating one if absent
+     * (e.g. rows created before ownership verification existed). Tenant-scoped.
+     *
+     * @return string|null The token, or null if the row does not exist for the tenant.
+     */
+    public function ensureToken(int $id, int $tenantId): ?string
+    {
+        $row = $this->findById($id, $tenantId);
+        if ($row === null) {
+            return null;
+        }
+        $existing = $row['verification_token'];
+        if (is_string($existing) && $existing !== '') {
+            return $existing;
+        }
+
+        $token = self::generateToken();
+        $stmt = $this->db->prepare(
+            'UPDATE tenant_email_domains SET verification_token = :token
+             WHERE id = :id AND tenant_id = :tenant_id'
+        );
+        $stmt->execute([':token' => $token, ':id' => $id, ':tenant_id' => $tenantId]);
+        return $token;
+    }
+
+    /**
+     * Mark a registration as ownership-verified (sets `verified_at = NOW()`).
+     * Tenant-scoped so a cross-tenant call affects zero rows.
+     *
+     * @return int Rows affected (1 on success, 0 if not found / wrong tenant).
+     */
+    public function markVerified(int $id, int $tenantId): int
+    {
+        $stmt = $this->db->prepare(
+            'UPDATE tenant_email_domains SET verified_at = NOW()
+             WHERE id = :id AND tenant_id = :tenant_id'
+        );
+        $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
+        return $stmt->rowCount();
     }
 
     /**
@@ -150,14 +196,34 @@ final class TenantEmailDomainsRepository
      */
     private function normalizeRow(array $row): array
     {
+        $verifiedAt = isset($row['verified_at']) && $row['verified_at'] !== null
+            ? (string) $row['verified_at']
+            : null;
+        $token = isset($row['verification_token']) && $row['verification_token'] !== null
+            ? (string) $row['verification_token']
+            : null;
+
         return [
-            'id'              => (int) $row['id'],
-            'tenant_id'       => (int) $row['tenant_id'],
-            'domain'          => (string) $row['domain'],
-            'default_role_id' => (int) $row['default_role_id'],
-            'auto_provision'  => self::toBool($row['auto_provision']),
-            'created_at'      => (string) $row['created_at'],
+            'id'                 => (int) $row['id'],
+            'tenant_id'          => (int) $row['tenant_id'],
+            'domain'             => (string) $row['domain'],
+            'default_role_id'    => (int) $row['default_role_id'],
+            'auto_provision'     => self::toBool($row['auto_provision']),
+            'verified_at'        => $verifiedAt,
+            'verification_token' => $token,
+            // Convenience flag: a domain is trusted for auto-provisioning ONLY when
+            // ownership has been verified.
+            'is_verified'        => $verifiedAt !== null,
+            'created_at'         => (string) $row['created_at'],
         ];
+    }
+
+    /**
+     * Generate an opaque, unguessable verification token (32 hex chars).
+     */
+    private static function generateToken(): string
+    {
+        return bin2hex(random_bytes(16));
     }
 
     /**
