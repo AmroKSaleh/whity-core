@@ -915,6 +915,32 @@ $router->register('POST',   '/api/identity-providers',          [$identityProvid
 $router->register('PATCH',  '/api/identity-providers/{id:\d+}', [$identityProvidersHandler, 'update'], null, null, CorePermissions::AUTH_PROVIDERS_MANAGE);
 $router->register('DELETE', '/api/identity-providers/{id:\d+}', [$identityProvidersHandler, 'delete'], null, null, CorePermissions::AUTH_PROVIDERS_MANAGE);
 
+// 13f. Federated sign-in ("Sign in with Google") over OIDC (WC-ae16). Two PUBLIC
+// GET routes (unauthenticated by design; a pre-login user has no session). GET is
+// CSRF-exempt; `state` is the CSRF defense. The engine's outbound fetches use the
+// SSRF-guarded HttpFetcher; JWKS are cached. The callback logs in an already-LINKED
+// identity (account linking/provisioning is WC-f3b17bd2).
+$oidcEngine = new \Whity\Auth\Oidc\OidcEngine(
+    new \Whity\Core\Http\HttpFetcher(),
+    new \Whity\Auth\Oidc\JwksProvider(
+        static fn(string $uri): array => (new \Whity\Core\Http\HttpFetcher())->getJson($uri) ?? []
+    ),
+    $jwtParser
+);
+$ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
+    $oidcEngine,
+    new \Whity\Core\Identity\IdentityProviderRepository($db->getPdo()),
+    new \Whity\Core\Identity\ExternalIdentityRepository($db->getPdo()),
+    $profileEmailRepository,
+    $hostResolver,
+    $jwtParser,
+    \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV),
+    $authHandler,
+    (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
+);
+$router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/start',    [$ssoAuthHandler, 'start'],    null);
+$router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/callback', [$ssoAuthHandler, 'callback'], null);
+
 // 14. Register the family relations API (WC-65). Reads are gated on
 // relations:read, writes on relations:manage (6th positional arg; requiredRole
 // stays null so RbacMiddleware enforces the permission). All routes are

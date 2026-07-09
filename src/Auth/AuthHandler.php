@@ -517,6 +517,51 @@ class AuthHandler
     }
 
     /**
+     * Complete a FEDERATED (SSO/OIDC) login for an already-resolved profile
+     * (WC-ae16). Called by the SSO callback AFTER the external ID token has been
+     * verified and mapped to a local profile (via external_identities). Mirrors
+     * the password path's post-authentication step (ADR 0005 §6): resolve active
+     * memberships, then single → mint session, multiple → tenant-selection prompt,
+     * zero → refuse.
+     *
+     * Deliberately does NOT re-run local 2FA: the external IdP performed the
+     * authentication, and the identity link is the proof of identity. The
+     * membership chokepoint inside issueSessionForProfile still fails closed if
+     * the caller has no active membership in the target tenant.
+     *
+     * @param int     $profileId The local profile the verified identity maps to.
+     * @param string  $email     The profile's login email (for claims/audit).
+     * @param Request $request   The callback request (for cookies / audit / IP).
+     */
+    public function completeFederatedLogin(int $profileId, string $email, Request $request): Response
+    {
+        $memberships = $this->listActiveMemberships($profileId);
+        if ($memberships === []) {
+            // No active membership (none, or all suspended/invited) → cannot mint
+            // a session. Generic message (no enumeration of link/membership state).
+            return Response::error('No active membership', 403);
+        }
+
+        $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
+        $tokenMode = self::isTokenMode($request);
+
+        if (count($memberships) > 1) {
+            return $this->requireTenantSelection($profileId, $email, $memberships, $tokenMode);
+        }
+
+        return $this->issueSessionForProfile(
+            $profileId,
+            $memberships[0]['tenant_id'],
+            $email,
+            $tokenEpoch,
+            $request,
+            $tokenMode,
+            auditAction: 'auth.login.sso',
+            recordNewSession: true,
+        );
+    }
+
+    /**
      * Resolve validated access-token claims from the request.
      *
      * Precedence (WC-ddcd16ad):
