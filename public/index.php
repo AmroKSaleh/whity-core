@@ -862,10 +862,14 @@ $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlob
 // by settings:write or settings:manage. The handler issues NO SQL — all access
 // goes through BrandingService and its repositories; the tenant always comes
 // from TenantContext (for write paths) or host resolution (for public read).
+// Storage backend selected from global instance settings (local by default; S3
+// when the operator sets storage.driver='s3' + the storage.s3.* config, secret
+// from STORAGE_S3_SECRET_KEY env). Built once and shared by the branding paths.
 $storageRoot = getenv('STORAGE_ROOT') ?: (__DIR__ . '/../storage');
+$storageDriver = \Whity\Storage\StorageDriverFactory::fromSettings($settingsService, $_ENV, $storageRoot);
 $brandingService = new \Whity\Core\Branding\BrandingService(
     $settingsService,
-    new \Whity\Storage\LocalStorageDriver($storageRoot),
+    $storageDriver,
     new \Whity\Core\Branding\BrandingAssetValidator(new \Whity\Core\Branding\SvgSanitizer())
 );
 $brandingHostRepo = new \Whity\Core\Branding\TenantHostRepository($db->getPdo());
@@ -878,7 +882,7 @@ $brandingHandler = new \Whity\Api\BrandingApiHandler(
     $hostResolver,
     $roleChecker,
     $brandingHostRepo,
-    new \Whity\Storage\LocalStorageDriver($storageRoot)
+    $storageDriver
 );
 $router->register('GET',    '/api/branding',                        [$brandingHandler, 'get'],          null, null, null);
 $router->register('GET',    '/api/branding/asset/{tenantId}/{name}', [$brandingHandler, 'serveAsset'],   null, null, null);

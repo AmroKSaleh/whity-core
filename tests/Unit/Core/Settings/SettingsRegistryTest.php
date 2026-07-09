@@ -23,7 +23,9 @@ final class SettingsRegistryTest extends TestCase
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'mcp.enabled',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
-             'auth.sso_enabled'],
+             'auth.sso_enabled',
+             'storage.driver', 'storage.s3.endpoint', 'storage.s3.region', 'storage.s3.bucket',
+             'storage.s3.access_key', 'storage.s3.path_style', 'storage.s3.public_base_url'],
             SettingsRegistry::keys()
         );
     }
@@ -45,8 +47,12 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotContains('auth.self_registration_enabled', SettingsRegistry::tenantTextKeys());
         self::assertNotContains('auth.registration_approval_required', SettingsRegistry::tenantTextKeys());
         self::assertNotContains('auth.sso_enabled', SettingsRegistry::tenantTextKeys());
+        self::assertTrue(SettingsRegistry::isGlobalOnly('storage.driver'));
+        self::assertNotContains('storage.driver', SettingsRegistry::tenantTextKeys());
+        // Only the genuinely tenant-overridable text keys remain: site_name,
+        // timezone, locale, support_email, mcp.enabled.
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
-        self::assertCount(count(SettingsRegistry::textKeys()) - 3, SettingsRegistry::tenantTextKeys());
+        self::assertCount(5, SettingsRegistry::tenantTextKeys());
 
         // Boolean flags report type 'bool' (clients render a toggle).
         self::assertSame('bool', SettingsRegistry::typeFor('auth.sso_enabled'));
@@ -163,7 +169,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(11, $describe);
+        self::assertCount(18, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
