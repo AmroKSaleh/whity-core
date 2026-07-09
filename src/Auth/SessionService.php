@@ -127,9 +127,13 @@ final class SessionService
 
         return array_values(array_map(static function (array $row) use ($currentAccessJti): array {
             $accessJti = $row['access_jti'] !== null ? (string) $row['access_jti'] : null;
+            $userAgent = $row['user_agent'] !== null ? (string) $row['user_agent'] : null;
             return [
                 'id'           => (int) $row['id'],
-                'user_agent'   => $row['user_agent'] !== null ? (string) $row['user_agent'] : null,
+                'user_agent'   => $userAgent,
+                // Friendly label parsed from the UA ("Chrome on Windows") for the
+                // sessions/devices UI, so it need not render the raw string (WC-b3330495).
+                'device'       => \Whity\Core\Http\DeviceLabel::fromUserAgent($userAgent),
                 'ip_address'   => $row['ip_address'] !== null ? (string) $row['ip_address'] : null,
                 'created_at'   => (string) $row['created_at'],
                 'last_seen_at' => (string) $row['last_seen_at'],
