@@ -80,6 +80,31 @@ final class ProfileEmailRepositoryTest extends TestCase
         self::assertTrue($row['is_primary']);
     }
 
+    /**
+     * REAL-ENGINE guard (WC-f3b17bd2): pdo_pgsql returns a BOOLEAN column as the
+     * string 'f', and `(bool) 'f' === true` — so a naive cast would report an
+     * UNVERIFIED email as verified, silently disabling the federated
+     * anti-takeover conflict refusal. This runs on Postgres in CI (make(true)),
+     * where the old cast would flip both flags to true and fail this test.
+     */
+    public function testFalseBooleansReadAsFalseOnRealEngine(): void
+    {
+        $pdo = SchemaFromMigrations::make(true);
+        $repo = new ProfileEmailRepository($pdo);
+        $pdo->exec(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES ('Carol', '\$2y\$10\$hashc', false, 0, 0, NOW(), NOW())"
+        );
+        $profileId = (int) $pdo->lastInsertId();
+
+        $id = $repo->insert($profileId, 'carol@corp.com', verified: false, isPrimary: false);
+        $row = $repo->findById($id);
+        self::assertIsArray($row);
+        self::assertFalse($row['verified'], 'an unverified email must never read as verified (PG bool trap)');
+        self::assertFalse($row['is_primary']);
+    }
+
     // ── findById ─────────────────────────────────────────────────────────────
 
     public function testFindByIdReturnsNullForMissing(): void
