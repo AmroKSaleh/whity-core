@@ -41,33 +41,46 @@ async function writeGlobal(api: APIRequestContext, key: string, value: string): 
 }
 
 /**
- * Set a literal-boolean governance flag through whichever control the registry
- * drives it as: a toggle when the backend reports `type:"bool"`, or a text input
- * (holding 'true'/'false') while it still reports `type:"string"`. This keeps the
- * test faithful to the registry-driven UI as the backend bool hints land.
+ * Resolve a governance flag's control, tolerating whichever the registry drives
+ * it as: a toggle when the backend reports `type:"bool"`, or a text input
+ * (holding 'true'/'false') while it still reports `type:"string"`.
+ *
+ * Crucially this AWAITS the control before deciding which kind it is: after a
+ * reload (or during the initial fetch) the page shows a loading skeleton with
+ * neither control, so a non-waiting `.count()` check would race — see it as
+ * "no switch", fall through to the input branch, and then never find an input in
+ * the bool case. `.or(...).first()` blocks until whichever control actually
+ * rendered is visible, so the branch below is always taken against real DOM.
  */
-async function setBooleanFlag(page: Page, key: string, value: 'true' | 'false'): Promise<void> {
+async function resolveFlag(page: Page, key: string) {
   const toggle = page.getByTestId(`setting-switch-${key}`);
-  if ((await toggle.count()) > 0) {
+  const input = page.getByTestId(`setting-row-${key}`).locator('input');
+  await expect(toggle.or(input).first()).toBeVisible();
+  return { toggle, input, isToggle: (await toggle.count()) > 0 };
+}
+
+/** Set a literal-boolean governance flag through whichever control renders it. */
+async function setBooleanFlag(page: Page, key: string, value: 'true' | 'false'): Promise<void> {
+  const { toggle, input, isToggle } = await resolveFlag(page, key);
+  if (isToggle) {
     if ((await toggle.getAttribute('aria-checked')) !== value) {
       await toggle.click();
     }
     await expect(toggle).toHaveAttribute('aria-checked', value);
     return;
   }
-  const input = page.getByTestId(`setting-row-${key}`).locator('input');
   await input.fill(value);
   await expect(input).toHaveValue(value);
 }
 
 /** Assert a governance flag reads back as `value`, whichever control renders it. */
 async function expectBooleanFlag(page: Page, key: string, value: 'true' | 'false'): Promise<void> {
-  const toggle = page.getByTestId(`setting-switch-${key}`);
-  if ((await toggle.count()) > 0) {
+  const { toggle, input, isToggle } = await resolveFlag(page, key);
+  if (isToggle) {
     await expect(toggle).toHaveAttribute('aria-checked', value);
     return;
   }
-  await expect(page.getByTestId(`setting-row-${key}`).locator('input')).toHaveValue(value);
+  await expect(input).toHaveValue(value);
 }
 
 test.describe('Global Settings — system-tenant operator (settings:manage, tenant 0)', () => {
