@@ -8,27 +8,50 @@ use PDO;
 use Whity\Sdk\Auth\ExternalIdentity;
 
 /**
- * Resolves a verified external (SSO/OIDC) identity to a local profile at
- * first login — linking to an existing account or provisioning a new one
+ * Resolves a verified external (SSO/OIDC) identity to a local profile at first
+ * login — linking to an existing account or provisioning a new one
  * (WC-f3b17bd2). This is the ANTI-TAKEOVER core of federated onboarding.
  *
- * Policy (given a verified {@see ExternalIdentity} for issuer/subject/email E):
- *   1. Already linked (issuer, subject) → that profile ("existing").
- *   2. Otherwise, an UNVERIFIED IdP email is NEVER used to link or provision — an
- *      attacker could create a provider account claiming a victim's address
- *      without proving control ("refused_unverified").
- *   3. With a verified IdP email E:
- *      a. E matches an existing, VERIFIED profile_email → link to that profile
- *         ("linked"). Verified↔verified is the only safe auto-link.
- *      b. E matches an existing but UNVERIFIED profile_email → REFUSE
- *         ("refused_conflict"): a local account claimed E without verifying it;
- *         auto-linking would let the IdP account seize a half-registered account.
- *      c. E matches no profile_email → PROVISION a new, passwordless profile with
- *         E as a verified primary email, and link ("provisioned").
+ * TIERED TRUST
+ * ------------
+ * A configured IdP is trusted only as far as WHO configured it
+ * ({@see FederatedProviderContext}), so the policy forks on the trust tier:
  *
- * The `(issuer, subject)` and `email` UNIQUE constraints make concurrent
- * first-logins safe: a losing racer's insert violates the constraint and is
- * resolved to the winner's now-existing link.
+ * GLOBAL-TRUST (operator IdP at the system tenant, e.g. real Google) — its
+ * `email_verified` is authoritative over the global profile namespace:
+ *   1. Existing global `(issuer, subject)` link → that profile ("existing").
+ *   2. Unverified IdP email → never link/provision ("refused_unverified").
+ *   3. Verified IdP email E:
+ *      a. E matches a VERIFIED profile_email → link ("linked").
+ *      b. E matches an UNVERIFIED profile_email → refuse ("refused_conflict"):
+ *         auto-linking would let the IdP seize a half-registered account.
+ *      c. E matches no profile_email → provision a passwordless profile + verified
+ *         primary email + global link ("provisioned").
+ *
+ * TENANT-TRUST (a tenant's bring-your-own IdP) — trusted ONLY within its own
+ * tenant; its assertions must never reach another tenant's accounts or the
+ * global namespace:
+ *   1. Existing `(provider_id, subject)` link → that profile ("existing").
+ *   2. Unverified IdP email → refuse ("refused_unverified").
+ *   3. Verified IdP email E matching a profile that is an ACTIVE MEMBER of the
+ *      configuring tenant:
+ *      a. …with a VERIFIED profile_email → link in the tenant namespace ("linked").
+ *      b. …with an UNVERIFIED profile_email → refuse ("refused_conflict").
+ *   4. Any other case — E owned by a profile that is NOT a member of this tenant,
+ *      or no local account at all — is REFUSED ("refused_no_account"). A
+ *      tenant-trust IdP CANNOT reach outside its tenant, and JIT provisioning
+ *      (with verified-domain gating) is deferred to WC-635ee381 (A7).
+ *
+ *   NOTE (in-tenant impersonation is by design): a tenant-trust IdP can link to
+ *   any of its own active members. That is not an escalation — the tenant admin
+ *   who runs the IdP already holds identity authority over its members. The
+ *   invariant this class guarantees is that a tenant IdP can NEVER reach a
+ *   non-member, and the session it yields is confined to the configuring tenant
+ *   (see SsoAuthHandler::callback → completeFederatedLogin(..., restrictToTenantId)).
+ *
+ * The partial UNIQUE indexes (migration 047) make concurrent first-logins safe:
+ * a losing racer's insert violates the constraint and is resolved to the winner's
+ * now-existing link.
  */
 final class FederatedIdentityLinker
 {
@@ -36,17 +59,21 @@ final class FederatedIdentityLinker
         private readonly PDO $db,
         private readonly ExternalIdentityRepository $identities,
         private readonly ProfileEmailRepository $emails,
+        private readonly MembershipRepository $memberships,
     ) {
     }
 
     /**
-     * @return array{status: 'existing'|'linked'|'provisioned'|'refused_unverified'|'refused_conflict', profile_id?: int}
+     * @return array{status: 'existing'|'linked'|'provisioned'|'refused_unverified'|'refused_conflict'|'refused_no_account', profile_id?: int}
      */
-    public function resolveForLogin(ExternalIdentity $identity, string $providerKey): array
+    public function resolveForLogin(ExternalIdentity $identity, FederatedProviderContext $ctx): array
     {
-        // 1. Already linked → log in that profile.
-        $existing = $this->identities->findByIssuerSubject($identity->issuer, $identity->subject);
+        // 1. Already linked (within this provider's trust namespace) → log in.
+        $existing = $ctx->isGlobalTrust()
+            ? $this->identities->findGlobalByIssuerSubject($identity->issuer, $identity->subject)
+            : $this->identities->findByProviderSubject($ctx->providerId, $identity->subject);
         if ($existing !== null) {
+            $this->identities->touchLastLogin((int) $existing['id']);
             return ['status' => 'existing', 'profile_id' => (int) $existing['profile_id']];
         }
 
@@ -59,33 +86,93 @@ final class FederatedIdentityLinker
         $email = $identity->normalizedEmail();
         $profileEmail = $this->emails->findByEmail($email);
 
-        // 3a/3b. An existing local email for E.
-        if ($profileEmail !== null) {
-            if ($profileEmail['verified'] !== true) {
-                // Unverified local claim on E — never auto-link (takeover risk).
-                return ['status' => 'refused_conflict'];
-            }
-            return $this->linkOrResolve($identity, $providerKey, $email, (int) $profileEmail['profile_id']);
+        if ($ctx->isGlobalTrust()) {
+            return $this->resolveGlobalTrust($identity, $ctx, $email, $profileEmail);
         }
-
-        // 3c. Brand-new identity → provision a passwordless profile.
-        return $this->provision($identity, $providerKey, $email);
+        return $this->resolveTenantTrust($identity, $ctx, $email, $profileEmail);
     }
 
     /**
-     * Link an identity to an existing profile; if a concurrent racer linked it
-     * first (UNIQUE(issuer, subject) violation), resolve to that link instead.
+     * GLOBAL-TRUST branch 3: the operator IdP may act on the global namespace.
+     *
+     * @param array<string, mixed>|null $profileEmail
+     * @return array{status: 'existing'|'linked'|'provisioned'|'refused_conflict', profile_id?: int}
+     */
+    private function resolveGlobalTrust(
+        ExternalIdentity $identity,
+        FederatedProviderContext $ctx,
+        string $email,
+        ?array $profileEmail,
+    ): array {
+        if ($profileEmail !== null) {
+            if ($profileEmail['verified'] !== true) {
+                return ['status' => 'refused_conflict'];
+            }
+            return $this->linkOrResolve($identity, $ctx, $email, (int) $profileEmail['profile_id'], null);
+        }
+        return $this->provision($identity, $ctx, $email);
+    }
+
+    /**
+     * TENANT-TRUST branch: link only to an ACTIVE MEMBER of the configuring
+     * tenant. Anything else — non-member owner, or no local account — is refused
+     * (a tenant IdP cannot reach outside its tenant; JIT provisioning is A7).
+     *
+     * @param array<string, mixed>|null $profileEmail
+     * @return array{status: 'existing'|'linked'|'refused_conflict'|'refused_no_account', profile_id?: int}
+     */
+    private function resolveTenantTrust(
+        ExternalIdentity $identity,
+        FederatedProviderContext $ctx,
+        string $email,
+        ?array $profileEmail,
+    ): array {
+        if ($profileEmail === null) {
+            return ['status' => 'refused_no_account'];
+        }
+        $profileId = (int) $profileEmail['profile_id'];
+
+        // The owning profile must be an active member of THIS tenant; otherwise a
+        // tenant-trust IdP would reach a foreign account (the cross-tenant
+        // takeover this tier defends against).
+        if (!$this->memberships->hasActiveMembership($profileId, $ctx->tenantId)) {
+            return ['status' => 'refused_no_account'];
+        }
+        if ($profileEmail['verified'] !== true) {
+            return ['status' => 'refused_conflict'];
+        }
+        return $this->linkOrResolve($identity, $ctx, $email, $profileId, $ctx->providerId);
+    }
+
+    /**
+     * Link an identity to an existing profile in the given trust namespace
+     * (`$providerId` NULL = global, non-null = tenant); on a concurrent
+     * constraint violation, resolve to the racer's link instead.
      *
      * @return array{status: 'existing'|'linked', profile_id: int}
      */
-    private function linkOrResolve(ExternalIdentity $identity, string $providerKey, string $email, int $profileId): array
-    {
+    private function linkOrResolve(
+        ExternalIdentity $identity,
+        FederatedProviderContext $ctx,
+        string $email,
+        int $profileId,
+        ?int $providerId,
+    ): array {
         try {
-            $this->identities->link($profileId, $providerKey, $identity->issuer, $identity->subject, $email);
+            $id = $this->identities->link(
+                $profileId,
+                $ctx->providerKey,
+                $identity->issuer,
+                $identity->subject,
+                $email,
+                $providerId,
+            );
+            $this->identities->touchLastLogin($id);
             return ['status' => 'linked', 'profile_id' => $profileId];
         } catch (\PDOException) {
-            $row = $this->identities->findByIssuerSubject($identity->issuer, $identity->subject);
+            $row = $this->existingLink($identity, $ctx);
             if ($row !== null) {
+                $this->identities->touchLastLogin((int) $row['id']);
                 return ['status' => 'existing', 'profile_id' => (int) $row['profile_id']];
             }
             throw new \RuntimeException('federated link failed');
@@ -93,13 +180,13 @@ final class FederatedIdentityLinker
     }
 
     /**
-     * Provision a new passwordless profile (SSO-only: empty password_hash so no
-     * password can ever verify), a verified primary email, and the identity link
-     * — atomically. On a race (another provision won), resolve to the existing link.
+     * Provision a new passwordless profile (GLOBAL-TRUST only: empty password_hash
+     * so no password can ever verify), a verified primary email, and the global
+     * identity link — atomically. On a race, resolve to the existing link.
      *
      * @return array{status: 'existing'|'provisioned', profile_id: int}
      */
-    private function provision(ExternalIdentity $identity, string $providerKey, string $email): array
+    private function provision(ExternalIdentity $identity, FederatedProviderContext $ctx, string $email): array
     {
         $displayName = $identity->displayName ?? '';
         if ($displayName === '') {
@@ -122,11 +209,20 @@ final class FederatedIdentityLinker
                 [':dn' => $displayName]
             );
             $this->emails->insert($profileId, $email, true, true);
-            $this->identities->link($profileId, $providerKey, $identity->issuer, $identity->subject, $email);
+            // Global-trust provision → global namespace (provider_id NULL).
+            $linkId = $this->identities->link(
+                $profileId,
+                $ctx->providerKey,
+                $identity->issuer,
+                $identity->subject,
+                $email,
+                null,
+            );
 
             if ($ownTx) {
                 $this->db->commit();
             }
+            $this->identities->touchLastLogin($linkId);
             return ['status' => 'provisioned', 'profile_id' => $profileId];
         } catch (\PDOException $e) {
             // Flow analysis over-narrows $ownTx to always-true here; the guard is
@@ -136,14 +232,27 @@ final class FederatedIdentityLinker
             if ($ownTx && $this->db->inTransaction()) {
                 $this->db->rollBack();
             }
-            // Lost a race on UNIQUE(issuer,subject) or UNIQUE(email) → resolve to
-            // whatever now exists rather than erroring the login.
-            $row = $this->identities->findByIssuerSubject($identity->issuer, $identity->subject);
+            // Lost a race on the global unique index → resolve to whatever now
+            // exists rather than erroring the login.
+            $row = $this->existingLink($identity, $ctx);
             if ($row !== null) {
+                $this->identities->touchLastLogin((int) $row['id']);
                 return ['status' => 'existing', 'profile_id' => (int) $row['profile_id']];
             }
             throw new \RuntimeException('federated provision failed', 0, $e);
         }
+    }
+
+    /**
+     * Tier-appropriate existing-link lookup (used for race resolution).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function existingLink(ExternalIdentity $identity, FederatedProviderContext $ctx): ?array
+    {
+        return $ctx->isGlobalTrust()
+            ? $this->identities->findGlobalByIssuerSubject($identity->issuer, $identity->subject)
+            : $this->identities->findByProviderSubject($ctx->providerId, $identity->subject);
     }
 
     /**

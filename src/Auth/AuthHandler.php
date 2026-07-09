@@ -529,12 +529,44 @@ class AuthHandler
      * membership chokepoint inside issueSessionForProfile still fails closed if
      * the caller has no active membership in the target tenant.
      *
-     * @param int     $profileId The local profile the verified identity maps to.
-     * @param string  $email     The profile's login email (for claims/audit).
-     * @param Request $request   The callback request (for cookies / audit / IP).
+     * TRUST-TIER SCOPING (WC-f3b17bd2): a GLOBAL-TRUST (operator) login passes
+     * `$restrictToTenantId = null` and gets the person-centric behaviour below —
+     * the session may target any tenant the profile belongs to. A TENANT-TRUST
+     * (bring-your-own IdP) login passes the flow's tenant id: the session is then
+     * confined to THAT tenant (fails closed if the profile is not an active
+     * member), so a tenant IdP can never mint a session into another tenant the
+     * person happens to belong to.
+     *
+     * @param int      $profileId          The local profile the verified identity maps to.
+     * @param string   $email              The profile's login email (for claims/audit).
+     * @param Request  $request            The callback request (for cookies / audit / IP).
+     * @param int|null $restrictToTenantId When non-null, confine the session to this
+     *                                     tenant (tenant-trust); when null, use the
+     *                                     profile's own memberships (global-trust).
      */
-    public function completeFederatedLogin(int $profileId, string $email, Request $request): Response
-    {
+    public function completeFederatedLogin(
+        int $profileId,
+        string $email,
+        Request $request,
+        ?int $restrictToTenantId = null,
+    ): Response {
+        if ($restrictToTenantId !== null) {
+            // Tenant-trust: the session may ONLY target the configuring tenant.
+            if (!$this->hasActiveMembershipInTenant($profileId, $restrictToTenantId)) {
+                return Response::error('No active membership', 403);
+            }
+            return $this->issueSessionForProfile(
+                $profileId,
+                $restrictToTenantId,
+                $email,
+                $this->currentProfileTokenEpoch($profileId),
+                $request,
+                self::isTokenMode($request),
+                auditAction: 'auth.login.sso',
+                recordNewSession: true,
+            );
+        }
+
         $memberships = $this->listActiveMemberships($profileId);
         if ($memberships === []) {
             // No active membership (none, or all suspended/invited) → cannot mint

@@ -140,6 +140,28 @@ final class MembershipRepository
     }
 
     /**
+     * True when the profile holds an ACTIVE membership in the given tenant.
+     *
+     * Tenant-scoped existence check (WC-f3b17bd2): the tenant-trust federated
+     * login uses it to confirm an IdP may only resolve to one of ITS OWN active
+     * members before linking — the cross-tenant-takeover guard.
+     */
+    public function hasActiveMembership(int $profileId, int $tenantId): bool
+    {
+        $stmt = $this->db->prepare(
+            'SELECT 1 FROM memberships
+             WHERE profile_id = :profile_id AND tenant_id = :tenant_id AND status = :status
+             LIMIT 1'
+        );
+        $stmt->execute([
+            ':profile_id' => $profileId,
+            ':tenant_id'  => $tenantId,
+            ':status'     => self::STATUS_ACTIVE,
+        ]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * List memberships in a tenant, optionally filtered by status.
      *
      * @return list<array<string, mixed>>

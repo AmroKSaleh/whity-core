@@ -932,13 +932,17 @@ $externalIdentityRepository = new \Whity\Core\Identity\ExternalIdentityRepositor
 $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
     $oidcEngine,
     new \Whity\Core\Identity\IdentityProviderRepository($db->getPdo()),
-    $externalIdentityRepository,
     $profileEmailRepository,
     $hostResolver,
     $jwtParser,
     \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV),
     $authHandler,
-    new \Whity\Core\Identity\FederatedIdentityLinker($db->getPdo(), $externalIdentityRepository, $profileEmailRepository),
+    new \Whity\Core\Identity\FederatedIdentityLinker(
+        $db->getPdo(),
+        $externalIdentityRepository,
+        $profileEmailRepository,
+        new MembershipRepository($db->getPdo()),
+    ),
     (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
 );
 $router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/start',    [$ssoAuthHandler, 'start'],    null);
