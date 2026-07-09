@@ -115,6 +115,32 @@ class PluginsApiHandlerTest extends TestCase
         $this->assertIsArray($payload['data']);
     }
 
+    public function testListDeduplicatesPluginPresentAsBothEnabledAndDisabled(): void
+    {
+        // A plugin can transiently exist as BOTH Foo.php and Foo.php.disabled
+        // (interrupted enable/disable, or a stale leftover). The listing must
+        // return it ONCE — a duplicate id breaks the admin UI's keyed rendering
+        // (WC: React "two children with the same key"). The enabled file wins.
+        file_put_contents($this->tempDir . '/DupePlugin.php', "<?php\n");
+        file_put_contents($this->tempDir . '/DupePlugin.php.disabled', "<?php\n");
+
+        $apiHandler = new PluginsApiHandler($this->tempDir);
+        $response = $apiHandler->list(new Request('GET', '/api/plugins'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $payload = json_decode($response->getBody(), true);
+        $dupes = array_values(array_filter(
+            $payload['data'],
+            static fn(array $p): bool => $p['id'] === 'DupePlugin'
+        ));
+        $this->assertCount(1, $dupes, 'a plugin present as both .php and .php.disabled must be listed once');
+        $this->assertTrue($dupes[0]['enabled'], 'the enabled file is authoritative over the stale .disabled');
+
+        // No duplicate ids anywhere in the payload.
+        $ids = array_column($payload['data'], 'id');
+        $this->assertSame(array_values(array_unique($ids)), $ids, 'plugin ids must be unique');
+    }
+
     public function testReEnableWithoutLoaderReturnsServiceUnavailable(): void
     {
         $apiHandler = new PluginsApiHandler($this->tempDir);
