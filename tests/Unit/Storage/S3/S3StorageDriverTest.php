@@ -68,6 +68,26 @@ final class S3StorageDriverTest extends TestCase
         $missing->get('tenants/1/missing.pdf');
     }
 
+    public function testGetThrowsOnTruncatedBody(): void
+    {
+        // 200 with Content-Length larger than the returned body = truncated at the
+        // transport read cap or a dropped connection → must NOT return partial data.
+        $t = new FakeTransport([new ObjectHttpResponse(200, ['content-length' => '2048'], 'only-a-few-bytes')]);
+        $driver = new S3StorageDriver($this->pathStyleConfig(), $t);
+
+        $this->expectException(StorageException::class);
+        $driver->get('tenants/1/big.pdf');
+    }
+
+    public function testGetAcceptsBodyMatchingContentLength(): void
+    {
+        $body = 'exact-bytes';
+        $t = new FakeTransport([new ObjectHttpResponse(200, ['content-length' => (string) strlen($body)], $body)]);
+        $driver = new S3StorageDriver($this->pathStyleConfig(), $t);
+
+        self::assertSame($body, $driver->get('tenants/1/ok.pdf'));
+    }
+
     public function testExistsMapsStatus(): void
     {
         self::assertTrue(

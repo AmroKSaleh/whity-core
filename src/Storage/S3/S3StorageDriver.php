@@ -51,6 +51,7 @@ final class S3StorageDriver implements StorageDriverInterface
     {
         $res = $this->request('GET', $key);
         $this->assertOk($res, $key, 'read');
+        $this->assertComplete($res, $key);
         return $res->body;
     }
 
@@ -213,6 +214,26 @@ final class S3StorageDriver implements StorageDriverInterface
     private function amzDate(): string
     {
         return gmdate('Ymd\THis\Z');
+    }
+
+    /**
+     * Data-integrity guard for reads: the bytes returned MUST match the object's
+     * declared Content-Length. Catches a body truncated at the transport's read
+     * cap (a >cap object) or a connection dropped mid-transfer — either would
+     * otherwise return a corrupt/partial object as a successful 200, silently
+     * corrupting a stored document. (Adversarial review WC-b8c5a271, finding #1/#2.)
+     */
+    private function assertComplete(ObjectHttpResponse $res, string $key): void
+    {
+        $declared = $res->header('content-length');
+        if ($declared !== null && ctype_digit($declared) && strlen($res->body) !== (int) $declared) {
+            throw new StorageException(sprintf(
+                'S3StorageDriver: incomplete read for %s (got %d of %s bytes)',
+                $key,
+                strlen($res->body),
+                $declared,
+            ));
+        }
     }
 
     private function assertOk(ObjectHttpResponse $res, string $key, string $op): void
