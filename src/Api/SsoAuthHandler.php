@@ -225,6 +225,13 @@ final class SsoAuthHandler
             return $this->fail('failed');
         }
         // last_login_at is stamped inside the linker on the resolved link.
+        //
+        // NOTE: domain-claim JIT membership (auto-join a tenant whose email domain
+        // a person's verified address matches) is deliberately NOT wired here.
+        // Auto-provisioning from a self-asserted, unverified `tenant_email_domains`
+        // claim is a cross-tenant harvesting risk; it is deferred until domain-
+        // OWNERSHIP verification exists (WC-628738f5). Tenant-trust onboarding still
+        // works via explicit invites, JIT-accepted in FederatedIdentityLinker.
 
         $email = $this->loginEmailFor($profileId, $identity->normalizedEmail());
 
@@ -255,11 +262,13 @@ final class SsoAuthHandler
 
     /**
      * Resolve the tenant whose IdP config drives this /start, from the request
-     * host. An unresolved host falls back to the system tenant (0); this is benign
-     * because tenant 0 has no provider configured in a normal deployment, so
-     * findEnabledByProviderKey(0, …) returns null and /start fails closed with
-     * `provider_unavailable`. (Hardening follow-up: fail closed explicitly on an
-     * unresolved host rather than relying on the empty-config fall-through.)
+     * host. An unresolved host falls back to the system tenant (0) — this is
+     * BY DESIGN under tiered trust: tenant 0 is the operator's GLOBAL-TRUST tier,
+     * reached via the default/apex host (e.g. "Sign in with Google" configured by
+     * the deployment operator). If tenant 0 has no such provider, the lookup still
+     * fails closed (findEnabledByProviderKey(0, …) → null → `provider_unavailable`),
+     * so the fall-through can only ever reach the operator's own configuration,
+     * never another tenant's.
      */
     private function resolveTenantId(Request $request): int
     {

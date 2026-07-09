@@ -33,14 +33,16 @@ use Whity\Sdk\Auth\ExternalIdentity;
  * global namespace:
  *   1. Existing `(provider_id, subject)` link → that profile ("existing").
  *   2. Unverified IdP email → refuse ("refused_unverified").
- *   3. Verified IdP email E matching a profile that is an ACTIVE MEMBER of the
- *      configuring tenant:
+ *   3. Verified IdP email E matching a profile that is a MEMBER of the configuring
+ *      tenant (active, or INVITED — in which case the pending invite is
+ *      JIT-accepted, WC-635ee381):
  *      a. …with a VERIFIED profile_email → link in the tenant namespace ("linked").
  *      b. …with an UNVERIFIED profile_email → refuse ("refused_conflict").
- *   4. Any other case — E owned by a profile that is NOT a member of this tenant,
- *      or no local account at all — is REFUSED ("refused_no_account"). A
- *      tenant-trust IdP CANNOT reach outside its tenant, and JIT provisioning
- *      (with verified-domain gating) is deferred to WC-635ee381 (A7).
+ *   4. Any other case — E owned by a profile that is NOT a member of this tenant
+ *      (incl. members of OTHER tenants), a SUSPENDED member, or no local account
+ *      at all — is REFUSED ("refused_no_account"). A tenant-trust IdP CANNOT reach
+ *      outside its tenant, and domain-claim JIT PROVISIONING of a brand-new
+ *      profile is deferred until domain-ownership verification exists.
  *
  *   NOTE (in-tenant impersonation is by design): a tenant-trust IdP can link to
  *   any of its own active members. That is not an escalation — the tenant admin
@@ -114,9 +116,17 @@ final class FederatedIdentityLinker
     }
 
     /**
-     * TENANT-TRUST branch: link only to an ACTIVE MEMBER of the configuring
-     * tenant. Anything else — non-member owner, or no local account — is refused
-     * (a tenant IdP cannot reach outside its tenant; JIT provisioning is A7).
+     * TENANT-TRUST branch: link only to a member of the CONFIGURING tenant —
+     * either already active, or explicitly INVITED by that tenant's admin (whose
+     * pending invite we JIT-accept, WC-635ee381). Anything else — a profile that
+     * is not a member of this tenant (incl. members of OTHER tenants), a suspended
+     * member, or no local account — is refused. This is the "an IdP bound to
+     * tenant X can never mint a membership in tenant Y" guarantee: this branch
+     * only ever touches memberships in `$ctx->tenantId`.
+     *
+     * (Domain-claim JIT provisioning of a brand-new profile is deferred until
+     * domain-OWNERSHIP verification exists — a self-asserted `tenant_email_domains`
+     * claim must not let a tenant harvest a domain it does not own.)
      *
      * @param array<string, mixed>|null $profileEmail
      * @return array{status: 'existing'|'linked'|'refused_conflict'|'refused_no_account', profile_id?: int}
@@ -132,14 +142,25 @@ final class FederatedIdentityLinker
         }
         $profileId = (int) $profileEmail['profile_id'];
 
-        // The owning profile must be an active member of THIS tenant; otherwise a
-        // tenant-trust IdP would reach a foreign account (the cross-tenant
-        // takeover this tier defends against).
-        if (!$this->memberships->hasActiveMembership($profileId, $ctx->tenantId)) {
+        // The owning profile must be a member of THIS tenant (active or invited);
+        // otherwise a tenant-trust IdP would reach a foreign account (the
+        // cross-tenant takeover this tier defends against).
+        $membership = $this->memberships->findByProfile($profileId, $ctx->tenantId);
+        if ($membership === null) {
             return ['status' => 'refused_no_account'];
         }
         if ($profileEmail['verified'] !== true) {
             return ['status' => 'refused_conflict'];
+        }
+
+        $status = (string) $membership['status'];
+        if ($status === MembershipRepository::STATUS_SUSPENDED) {
+            // Suspended in this tenant → no login (fails closed, same as a non-member).
+            return ['status' => 'refused_no_account'];
+        }
+        if ($status === MembershipRepository::STATUS_INVITED) {
+            // JIT-accept the invite tenant X's admin already extended.
+            $this->memberships->accept((int) $membership['id'], $ctx->tenantId);
         }
         return $this->linkOrResolve($identity, $ctx, $email, $profileId, $ctx->providerId);
     }
