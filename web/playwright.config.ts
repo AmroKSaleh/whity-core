@@ -75,7 +75,7 @@ export default defineConfig({
     },
     {
       name: 'admin',
-      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso)\.spec\.ts/,
+      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso|email-settings)\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },
