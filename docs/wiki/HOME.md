@@ -14,6 +14,7 @@ Welcome to the Whity Core documentation.
 - **[Permission System](PERMISSION_SYSTEM.md)** — RBAC permissions, registry, role hierarchy, enforcement.
 - **[Tenant Isolation](TENANT_ISOLATION.md)** — Multi-tenancy, `TenantContext`, query scoping.
 - **[Sign in with Google (SSO)](SSO-Google-Setup.md)** — End-to-end federated sign-in setup: Google OAuth client, provider config, trust tiers, first-login behaviour, troubleshooting.
+- **[Email (SMTP) Setup](Email-SMTP-Setup.md)** — Configure outbound email end to end: cPanel/SMTP credentials, the `mail.*` settings + write-only encrypted password, local Mailpit testing, troubleshooting.
 - **[Hook System](HOOK_SYSTEM.md)** — Plugin event/extension mechanism.
 - **[Plugin UI Blocks](Plugin-UI-Blocks.md)** — Server-driven UI: the platform-neutral block contract (display / data-bound / interactive) plugins declare and each platform renders.
 - **[Family Relations](RELATIONS.md)** — Person-node graph, relationship types, the relations API + admin hub.
