@@ -264,6 +264,36 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         self::assertStringContainsString('access_type=offline', $loc);
     }
 
+    public function testProvidersListsEnabledForTenantWithoutSecrets(): void
+    {
+        // No Host → tenant 0; the seeded GLOBAL google provider (enabled) is listed.
+        $res = $this->handler->providers(new Request('GET', '/api/v1/auth/sso/providers', [], ''));
+        self::assertSame(200, $res->getStatusCode());
+        $data = json_decode($res->getBody(), true)['data'];
+        self::assertNotSame([], $data);
+        self::assertSame('google', $data[0]['provider_key']);
+        self::assertSame('Google', $data[0]['display_name']);
+        // Display-safe only — never client_id/secret/issuer/has_secret.
+        self::assertArrayNotHasKey('client_id', $data[0]);
+        self::assertArrayNotHasKey('client_secret', $data[0]);
+        self::assertArrayNotHasKey('has_secret', $data[0]);
+        self::assertArrayNotHasKey('issuer', $data[0]);
+    }
+
+    public function testProvidersEmptyWhenSsoDisabledGlobally(): void
+    {
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::SSO_ENABLED, 'false');
+        $res = $this->handler->providers(new Request('GET', '/api/v1/auth/sso/providers', [], ''));
+        self::assertSame([], json_decode($res->getBody(), true)['data']);
+    }
+
+    public function testProvidersOmitsDisabledProviders(): void
+    {
+        (new IdentityProviderRepository($this->pdo))->update($this->providerId, 0, ['enabled' => false]);
+        $res = $this->handler->providers(new Request('GET', '/api/v1/auth/sso/providers', [], ''));
+        self::assertSame([], json_decode($res->getBody(), true)['data']);
+    }
+
     public function testStartBouncesWhenSsoDisabledGlobally(): void
     {
         // Operator kill-switch (WC-28fb2e19): SSO off instance-wide.

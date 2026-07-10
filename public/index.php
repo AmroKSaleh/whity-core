@@ -959,6 +959,9 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
     $settingsService,
     (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
 );
+// Public list of ENABLED providers for the current tenant, so the login page can
+// render "Sign in with …" buttons (display-safe fields only; no secrets).
+$router->register('GET', '/api/auth/sso/providers',                      [$ssoAuthHandler, 'providers'], null);
 $router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/start',    [$ssoAuthHandler, 'start'],    null);
 $router->register('GET', '/api/auth/sso/{provider:[a-z0-9_]+}/callback', [$ssoAuthHandler, 'callback'], null);
 

@@ -266,6 +266,33 @@ final class SsoAuthHandler
         return $this->redirectForLoginResult($result);
     }
 
+    /**
+     * PUBLIC: the ENABLED SSO providers for the current tenant, for the login
+     * screen to render "Sign in with …" buttons. Resolves the tenant by host (as
+     * /start does) and returns only display-safe fields — provider_key +
+     * display_name — NEVER client_id/secret/issuer. Returns an empty list when SSO
+     * is globally disabled, so the login UI shows no buttons.
+     */
+    public function providers(Request $request): Response
+    {
+        if (!$this->ssoEnabled()) {
+            return Response::json(['data' => []]);
+        }
+
+        $tenantId = $this->resolveTenantId($request);
+        $out = [];
+        foreach ($this->providers->listForTenant($tenantId) as $row) {
+            if (($row['enabled'] ?? false) === true) {
+                $out[] = [
+                    'provider_key' => (string) $row['provider_key'],
+                    'display_name' => (string) $row['display_name'],
+                ];
+            }
+        }
+
+        return Response::json(['data' => $out]);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     /**
