@@ -134,19 +134,16 @@ error detail is written to the server log, never returned to the client).
 
 ## Testing locally without a real server (Mailpit)
 
-The dev stack ships an opt-in **Mailpit** SMTP sink so nothing leaves your
-machine:
+The dev stack ships a **Mailpit** SMTP sink so nothing leaves your machine. It
+runs as part of the default stack (`docker compose up`), so it's already
+available — no extra flag needed.
 
-```bash
-docker compose --profile mail up -d mailpit
-```
-
-Then configure the instance to point at it:
+Configure the instance to point at it:
 
 | Field | Value |
 |---|---|
 | Transport | `SMTP` |
-| Host | `mailpit` (from inside the compose network) |
+| Host | `mailpit` (the compose **service name** — the backend connects from inside the compose network, so this is *not* `localhost`) |
 | Port | `1025` |
 | Encryption | `none` |
 | From address | any address, e.g. `no-reply@whity.local` |
