@@ -40,8 +40,14 @@ export type SettingsValueMap = components['schemas']['SettingsValueMap'];
 export type SettingKey = keyof SettingsValueMap;
 export type AddToast = ReturnType<typeof useToast>['addToast'];
 
-/** One registry descriptor as published by the backend settings endpoints. */
-export type RegistryEntry = components['schemas']['SettingsRegistryEntry'];
+/**
+ * One registry descriptor as published by the backend settings endpoints.
+ * `options` accompanies `type:"enum"` (the allowed values); it is optional so a
+ * backend that has not yet added enum support degrades to a text input.
+ */
+export type RegistryEntry = components['schemas']['SettingsRegistryEntry'] & {
+  options?: string[];
+};
 
 /**
  * The value map is registry-driven and open-ended: beyond the four typed
@@ -129,6 +135,29 @@ export const FIELD_META: Record<string, FieldMeta> = {
   'storage.s3.public_base_url': {
     label: 'S3 public base URL',
     help: 'Public base URL used to serve stored assets, when it differs from the endpoint.',
+  },
+  // Outgoing email (managed on the dedicated Email settings page).
+  'mail.transport': {
+    label: 'Transport',
+    help: 'How outgoing email is delivered.',
+  },
+  'mail.smtp.host': { label: 'SMTP host' },
+  'mail.smtp.port': { label: 'SMTP port', help: '587 = STARTTLS · 465 = SSL · 25 / 1025 = none' },
+  'mail.smtp.encryption': { label: 'Encryption' },
+  'mail.smtp.username': { label: 'SMTP username', help: 'Optional — leave blank for unauthenticated relays.' },
+  'mail.from_address': { label: 'From address', help: 'The address recipients see messages come from.' },
+  'mail.from_name': { label: 'From name', help: 'The display name shown alongside the from address.' },
+  'mail.events.welcome_enabled': {
+    label: 'Welcome email',
+    help: 'Send a welcome message when a new account is created.',
+  },
+  'mail.events.approval_enabled': {
+    label: 'Approval decision email',
+    help: 'Notify a registrant when their account is approved or rejected.',
+  },
+  'mail.events.invitation_enabled': {
+    label: 'Workspace invitation email',
+    help: 'Email people when they are invited to a workspace.',
   },
 };
 
@@ -223,7 +252,12 @@ export function groupRegistry(registry: readonly RegistryEntry[]): RegistrySecti
     }
   }
 
-  const leftover = registry.filter((entry) => !claimed.has(entry.key));
+  // `mail.*` keys are managed on the dedicated Email settings page (transport-
+  // conditional layout + write-only password + test-send), so they are excluded
+  // from this generic form rather than dumped into "Other settings".
+  const leftover = registry.filter(
+    (entry) => !claimed.has(entry.key) && !entry.key.startsWith('mail.')
+  );
   if (leftover.length > 0) {
     sections.push({ section: OTHER_SECTION, entries: leftover });
   }
@@ -248,6 +282,16 @@ export function fieldMetaFor(key: string): FieldMeta {
 /** A boolean setting is the literal string 'true'. */
 export function isTruthyFlag(value: string): boolean {
   return value === 'true';
+}
+
+/** Common protocol acronyms shown uppercased in enum dropdowns. */
+const ENUM_ACRONYMS = new Set(['smtp', 'tls', 'ssl', 's3', 'oidc', 'mcp']);
+
+/** Human-facing label for an enum option value (e.g. "smtp" → "SMTP"). */
+export function enumOptionLabel(option: string): string {
+  const lower = option.toLowerCase();
+  if (ENUM_ACRONYMS.has(lower)) return option.toUpperCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 const LOCALE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
@@ -569,6 +613,27 @@ export function RegistrySettingControl({
           describedBy={describedBy}
           onChange={onChange}
         />
+      ) : type === 'enum' && entry.options && entry.options.length > 0 ? (
+        <select
+          id={id}
+          value={value}
+          disabled={disabled}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy}
+          onChange={(e) => onChange(e.target.value)}
+          className={NATIVE_SELECT_CLASS}
+        >
+          {/* Keep an out-of-range stored value selectable rather than silently
+              snapping it to the first option. */}
+          {!entry.options.includes(value) && value !== '' && (
+            <option value={value}>{value}</option>
+          )}
+          {entry.options.map((option) => (
+            <option key={option} value={option}>
+              {enumOptionLabel(option)}
+            </option>
+          ))}
+        </select>
       ) : (
         <Input
           id={id}

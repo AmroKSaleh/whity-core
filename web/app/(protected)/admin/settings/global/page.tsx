@@ -10,7 +10,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { IconAlertCircle, IconDeviceFloppy, IconRocket } from '@tabler/icons-react';
+import { IconAlertCircle, IconDeviceFloppy, IconMail, IconRocket } from '@tabler/icons-react';
 import { BrandingSettings } from '@/components/branding-settings';
 import {
   SETTINGS_MANAGE,
@@ -92,6 +92,20 @@ export default function GlobalSettingsPage() {
         }
       />
       <GlobalSettingsForm addToast={addToast} />
+      <Link
+        href="/admin/settings/email"
+        className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 p-4 text-sm hover:bg-muted/70 transition-colors"
+      >
+        <span className="p-2 bg-primary/10 rounded-lg text-primary">
+          <IconMail className="w-5 h-5" />
+        </span>
+        <span>
+          <span className="font-medium text-foreground">Email (SMTP)</span>
+          <span className="block text-muted-foreground">
+            Configure outgoing email and send a test message →
+          </span>
+        </span>
+      </Link>
       <BrandingSettings variant="global" />
     </div>
   );

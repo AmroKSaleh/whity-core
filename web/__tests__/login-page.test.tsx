@@ -11,6 +11,13 @@ jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
 }));
 
+// Stub the federated-login buttons: they fetch the public providers list on
+// mount, which would otherwise consume one of the queued fetch mocks below and
+// desync the login sequence. Their behaviour is covered by e2e (sso.spec.ts).
+jest.mock('@/components/sso-login-buttons', () => ({
+  SsoLoginButtons: () => null,
+}));
+
 // Mock global fetch
 global.fetch = jest.fn();
 

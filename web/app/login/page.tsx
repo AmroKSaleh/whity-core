@@ -11,6 +11,30 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { SsoLoginButtons } from '@/components/sso-login-buttons';
+
+/**
+ * Friendly, non-enumerating messages for the SSO return markers the backend
+ * appends to /login?sso_error=… (see SsoAuthHandler). Unknown reasons fall back
+ * to a generic failure so a new backend reason never surfaces a raw slug.
+ */
+const SSO_ERROR_MESSAGES: Record<string, string> = {
+  sso_disabled: 'Single sign-on is currently disabled for this instance.',
+  provider_unavailable: 'That sign-in provider is unavailable right now. Please try again later.',
+  unknown_provider: 'That sign-in provider is not available.',
+  email_unverified: 'Your email with that provider is not verified. Verify it and try again.',
+  link_conflict: 'An account with that email already exists. Sign in with your password to link it.',
+  no_account: 'No account here matches that identity. Ask an administrator for an invite.',
+  no_membership: 'Your account has no active workspace yet. Ask an administrator for access.',
+  state_mismatch: 'Your sign-in session could not be verified. Please try again.',
+  expired: 'Your sign-in attempt timed out. Please try again.',
+  denied: 'Sign-in was cancelled.',
+  failed: 'Sign-in failed. Please try again.',
+};
+
+function ssoErrorMessage(reason: string): string {
+  return SSO_ERROR_MESSAGES[reason] ?? 'Sign-in failed. Please try again.';
+}
 
 /**
  * Backup/recovery codes are issued by BackupCodesService in the exact form
@@ -83,6 +107,27 @@ export default function LoginPage() {
       router.push('/dashboard');
     }
   }, [isAuthenticated, router, isMounted]);
+
+  // Surface the SSO return markers the backend appends on a hosted-login bounce
+  // (…/login?sso_error=<reason> or ?sso=select), then strip them from the URL so
+  // a refresh or back-navigation does not re-toast. Runs once on mount.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ssoError = params.get('sso_error');
+    const ssoFlow = params.get('sso');
+    if (!ssoError && ssoFlow !== 'select') {
+      return;
+    }
+    if (ssoError) {
+      addToast(ssoErrorMessage(ssoError), 'error');
+    } else {
+      addToast('Your account has multiple workspaces — sign in to choose one.', 'info');
+    }
+    params.delete('sso_error');
+    params.delete('sso');
+    const query = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+  }, [addToast]);
 
   const validateFields = (): boolean => {
     const errors: { email?: string; password?: string } = {};
@@ -363,6 +408,10 @@ export default function LoginPage() {
                   Create a workspace
                 </Link>
               </p>
+
+              {/* Federated sign-in: one button per enabled provider (renders
+                  nothing when none are configured). */}
+              <SsoLoginButtons />
             </form>
           )}
 

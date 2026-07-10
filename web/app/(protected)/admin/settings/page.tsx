@@ -10,7 +10,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { IconAlertCircle, IconDeviceFloppy, IconInfoCircle, IconWorld } from '@tabler/icons-react';
+import { IconAlertCircle, IconDeviceFloppy, IconInfoCircle, IconShieldLock, IconWorld } from '@tabler/icons-react';
 import { BrandingSettings } from '@/components/branding-settings';
 import {
   SETTINGS_READ,
@@ -39,6 +39,7 @@ export default function AdminSettingsPage() {
 
   const canRead = hasPermission(SETTINGS_READ);
   const canWrite = hasPermission(SETTINGS_WRITE);
+  const canManageProviders = hasPermission('auth_providers:manage');
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   // Fetch tenant_overridable at the page level so it can be passed to
@@ -93,6 +94,22 @@ export default function AdminSettingsPage() {
             <span className="font-medium text-foreground">Global defaults (system-wide)</span>
             <span className="block text-muted-foreground">
               Manage the platform-wide defaults applied to every tenant →
+            </span>
+          </span>
+        </Link>
+      )}
+      {canManageProviders && (
+        <Link
+          href="/admin/settings/sso"
+          className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 p-4 text-sm hover:bg-muted/70 transition-colors"
+        >
+          <span className="p-2 bg-primary/10 rounded-lg text-primary">
+            <IconShieldLock className="w-5 h-5" />
+          </span>
+          <span>
+            <span className="font-medium text-foreground">Single sign-on (SSO)</span>
+            <span className="block text-muted-foreground">
+              Configure &ldquo;Sign in with&hellip;&rdquo; identity providers →
             </span>
           </span>
         </Link>
