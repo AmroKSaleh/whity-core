@@ -8,6 +8,7 @@ use PDO;
 use Whity\Core\Identity\AccountActivationPolicy;
 use Whity\Core\Identity\EmailVerificationPolicy;
 use Whity\Core\Identity\EmailVerificationProvider;
+use Whity\Core\Hooks\HookManager;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\NullEmailVerificationProvider;
 use Whity\Core\PasswordPolicy;
@@ -48,11 +49,13 @@ final class RegisterApiHandler
     private PDO $db;
     private SettingsService $settings;
     private EmailVerificationProvider $verificationProvider;
+    private ?HookManager $hooks;
 
     public function __construct(
         PDO $db,
         SettingsService $settings,
         ?EmailVerificationProvider $verificationProvider = null,
+        ?HookManager $hooks = null,
     ) {
         $this->db = $db;
         // Instance-governance flags (self-registration open? approval required?)
@@ -61,6 +64,9 @@ final class RegisterApiHandler
         // Default to the MVP no-op provider; a real one is bound in the
         // composition root when EMAIL_VERIFICATION_ENFORCED is turned on.
         $this->verificationProvider = $verificationProvider ?? new NullEmailVerificationProvider();
+        // Optional: dispatches the `registration.completed` lifecycle hook (drives
+        // the welcome email). Null in tests that don't exercise notifications.
+        $this->hooks = $hooks;
     }
 
     public function register(Request $request): Response
@@ -243,6 +249,24 @@ final class RegisterApiHandler
                     $this->verificationProvider->sendVerification($profileId, $email);
                 } catch (\Throwable $e) {
                     error_log('[register] verification dispatch failed for profile ' . $profileId . ': ' . $e->getMessage());
+                }
+            }
+
+            // Lifecycle hook (drives the welcome email + any plugin reaction).
+            // Best-effort and post-commit: a listener failure must never undo the
+            // created account. The subscriber decides whether to send (e.g. it
+            // holds the welcome when approval is still pending).
+            if ($this->hooks !== null) {
+                try {
+                    $this->hooks->dispatch('registration.completed', [
+                        'email'                 => $email,
+                        'name'                  => $displayName,
+                        'tenant_name'           => $tenantName,
+                        'approval_required'     => $approvalRequired,
+                        'verification_required' => $enforced,
+                    ]);
+                } catch (\Throwable $e) {
+                    error_log('[register] registration.completed hook failed: ' . $e->getMessage());
                 }
             }
 
