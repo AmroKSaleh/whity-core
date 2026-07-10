@@ -171,6 +171,21 @@ test.describe('SSO login button + return markers (unauthenticated)', () => {
     // The marker is removed so a refresh/back does not re-toast.
     await expect(page).toHaveURL(/\/login$/);
   });
+
+  test('the Next proxy RELAYS SSO redirects to the browser (does not follow them)', async ({
+    page,
+  }) => {
+    // Regression guard: the hosted-login flow needs the proxy to pass 3xx through.
+    // A callback with no flow-state cookie bounces to /login?sso_error=expired —
+    // a same-origin redirect (no provider/network needed). If the proxy followed
+    // it (undici default), the browser would get a 200 with the cookie swallowed
+    // and the flow would hang; here it must see the raw 302 + Location.
+    const res = await page.request.get('/api/v1/auth/sso/google/callback', {
+      maxRedirects: 0,
+    });
+    expect(res.status(), 'proxy must relay the backend 302, not follow it').toBe(302);
+    expect(res.headers()['location']).toContain('/login?sso_error=');
+  });
 });
 
 test.describe('SSO providers — permission gating', () => {

@@ -79,9 +79,21 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
       headers.set('Cookie', cookieHeader);
     }
 
+    // A reverse proxy must RELAY upstream redirects, not follow them. The SSO
+    // hosted-login routes 302 the browser to the provider (…/start) and, on
+    // return, to /dashboard or /login?sso_error=… (…/callback) — and they set the
+    // flow-state / session cookie ON THAT 302. If we followed it here (undici's
+    // default), the proxy would fetch the provider's page (or /dashboard) and
+    // hand the browser a 200 with the Set-Cookie swallowed, so the flow can never
+    // complete (the user gets stuck on …/start showing the provider's markup).
+    // 'manual' surfaces the 3xx so its Location + Set-Cookie are forwarded and
+    // the browser navigates itself. Scoped to the SSO routes to leave every other
+    // proxied call's behaviour unchanged.
+    const isSsoRedirectRoute = /(^|\/)auth\/sso\//.test(pathWithoutApi);
     const options: RequestInit & { duplex?: string } = {
       method,
       headers,
+      redirect: isSsoRedirectRoute ? 'manual' : 'follow',
     };
 
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
@@ -120,10 +132,14 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
     // forwarded WITHOUT a body, or `new Response(...)` throws and the proxy
     // surfaces a 500. Read/forward the body only for statuses that allow one.
     const isNullBody = NULL_BODY_STATUSES.has(response.status);
+    // A relayed redirect (from redirect:'manual' above) carries only Location +
+    // Set-Cookie; forward it with a null body so `new Response` never chokes on a
+    // redirect-with-body and the browser just follows the Location.
+    const isRedirect = response.status >= 300 && response.status < 400;
     // Use arrayBuffer() so binary responses (PNG/WEBP/ICO/SVG) are forwarded
     // byte-exact. text() would UTF-8-decode then re-encode, corrupting any
     // non-UTF-8 bytes. arrayBuffer() is also lossless for JSON/text bodies.
-    const responseBody = isNullBody ? null : await response.arrayBuffer();
+    const responseBody = isNullBody || isRedirect ? null : await response.arrayBuffer();
 
     const result = new Response(responseBody, {
       status: response.status,
