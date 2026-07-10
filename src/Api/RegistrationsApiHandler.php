@@ -6,6 +6,7 @@ namespace Whity\Api;
 
 use PDO;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Hooks\HookManager;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
@@ -43,11 +44,15 @@ final class RegistrationsApiHandler
 
     private PDO $db;
     private RoleChecker $roleChecker;
+    private ?HookManager $hooks;
 
-    public function __construct(PDO $db, RoleChecker $roleChecker)
+    public function __construct(PDO $db, RoleChecker $roleChecker, ?HookManager $hooks = null)
     {
         $this->db = $db;
         $this->roleChecker = $roleChecker;
+        // Optional: dispatches registration.approved / .rejected (drives the
+        // decision email). Null in tests that don't exercise notifications.
+        $this->hooks = $hooks;
     }
 
     /**
@@ -175,10 +180,54 @@ final class RegistrationsApiHandler
                 return Response::error('No pending registration found for that id', 404);
             }
 
+            // Notify the owner of the decision (best-effort, post-transition).
+            $this->dispatchDecision($membershipId, $verb);
+
             return Response::json(['data' => ['membership_id' => $membershipId, 'status' => $newStatus]], 200);
         } catch (\Throwable $e) {
             error_log('[registrations] ' . $verb . ' failed: ' . $e->getMessage());
             return Response::error('Failed to update the registration', 500);
+        }
+    }
+
+    /**
+     * Dispatch the decision hook (registration.approved / .rejected) that drives
+     * the owner-notification email. Looks up the owner's primary email + name for
+     * the (just-transitioned) membership. Best-effort: a lookup/dispatch failure
+     * is logged and swallowed — it must never fail the approve/reject request.
+     */
+    private function dispatchDecision(int $membershipId, string $verb): void
+    {
+        if ($this->hooks === null) {
+            return;
+        }
+
+        try {
+            // Cross-tenant platform read (mirrors the transition UPDATE): the owner
+            // of a pending registration lives in the new tenant, not the acting
+            // system tenant, so a tenant predicate would be wrong here.
+            // @tenant-guard-ignore: system-tenant platform op — reads a pending registration's owner in another tenant to notify them (WC-email)
+            $stmt = $this->db->prepare(
+                'SELECT p.display_name AS name, pe.email AS email
+                   FROM memberships m
+                   JOIN profiles p ON p.id = m.profile_id
+                   LEFT JOIN profile_emails pe ON pe.profile_id = p.id AND pe.is_primary = true
+                  WHERE m.id = :id'
+            );
+            $stmt->execute([':id' => $membershipId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            $email = is_array($row) ? trim((string) ($row['email'] ?? '')) : '';
+            if ($email === '') {
+                return;
+            }
+
+            $this->hooks->dispatch('registration.' . $verb, [
+                'email' => $email,
+                'name'  => is_array($row) ? (string) ($row['name'] ?? '') : '',
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[registrations] decision notify failed: ' . $e->getMessage());
         }
     }
 
