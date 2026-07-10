@@ -172,6 +172,51 @@ final class EmailNotificationsTest extends TestCase
         $this->subject->onUserCreated(['email' => 'invitee@example.com', 'tenant_name' => 'Acme Team']);
         self::assertCount(0, $this->mailer->sent);
     }
+
+    public function testSendsFarewellOnUserDeleted(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_DELETION, 'true');
+
+        $this->subject->onUserDeleted([
+            'email' => 'gone@example.com',
+            'tenant_name' => 'Acme Team',
+            'reason' => '',
+        ]);
+
+        self::assertCount(1, $this->mailer->sent);
+        [$to, $subject, , $html] = $this->mailer->sent[0];
+        self::assertSame('gone@example.com', $to);
+        self::assertStringContainsString('removed from Acme Team', $subject);
+        self::assertStringContainsString('Sorry to see you go', (string) $html);
+        // Friendly farewell doesn't mention terms of service.
+        self::assertStringNotContainsString('terms of service', (string) $html);
+    }
+
+    public function testSendsTerminationOnUserDeletedForTosViolation(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_DELETION, 'true');
+        $this->settings->setGlobal(SettingsRegistry::SUPPORT_EMAIL, 'appeals@example.test');
+
+        $this->subject->onUserDeleted([
+            'email' => 'banned@example.com',
+            'tenant_name' => 'Acme Team',
+            'reason' => 'terms_violation',
+        ]);
+
+        self::assertCount(1, $this->mailer->sent);
+        [$to, , , $html] = $this->mailer->sent[0];
+        self::assertSame('banned@example.com', $to);
+        self::assertStringContainsString('violation of our terms of service', (string) $html);
+        self::assertStringContainsString('appeals@example.test', (string) $html); // appeal contact
+        self::assertStringNotContainsString('Sorry to see you go', (string) $html);
+    }
+
+    public function testDeletionRespectsToggle(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_DELETION, 'false');
+        $this->subject->onUserDeleted(['email' => 'gone@example.com', 'reason' => 'terms_violation']);
+        self::assertCount(0, $this->mailer->sent);
+    }
 }
 
 final class CapturingMailer implements Mailer

@@ -30,6 +30,7 @@ final class SettingsRegistryTest extends TestCase
              'mail.smtp.username', 'mail.from_address', 'mail.from_name',
              'mail.events.welcome_enabled', 'mail.events.approval_enabled',
              'mail.events.invitation_enabled', 'mail.events.verification_enabled',
+             'mail.events.deletion_enabled',
              'mail.brand_color', 'mail.footer_text'],
             SettingsRegistry::keys()
         );
@@ -174,7 +175,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(31, $describe);
+        self::assertCount(32, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
@@ -189,6 +190,7 @@ final class SettingsRegistryTest extends TestCase
                   'mail.smtp.username', 'mail.from_address', 'mail.from_name',
                   'mail.events.welcome_enabled', 'mail.events.approval_enabled',
                   'mail.events.invitation_enabled', 'mail.events.verification_enabled',
+                  'mail.events.deletion_enabled',
                   'mail.brand_color', 'mail.footer_text'] as $key) {
             self::assertTrue(SettingsRegistry::isGlobalOnly($key), "{$key} must be global-only");
             self::assertNotContains($key, SettingsRegistry::tenantTextKeys());

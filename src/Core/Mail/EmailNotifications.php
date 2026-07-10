@@ -47,6 +47,71 @@ final class EmailNotifications
         $hooks->listen('registration.approved', [$this, 'onRegistrationApproved']);
         $hooks->listen('registration.rejected', [$this, 'onRegistrationRejected']);
         $hooks->listen('user.created', [$this, 'onUserCreated']);
+        $hooks->listen('user.deleted', [$this, 'onUserDeleted']);
+    }
+
+    /**
+     * A user's access to a workspace was removed. Sends either a friendly
+     * "sorry to see you go" farewell, or — when reason is 'terms_violation' — a
+     * firm-but-fair termination notice with an appeal contact. Gated on
+     * mail.events.deletion_enabled.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    public function onUserDeleted(array $data, array $context = []): array
+    {
+        if (!$this->eventEnabled(SettingsRegistry::MAIL_EVENT_DELETION)) {
+            return $data;
+        }
+        $email = trim((string) ($data['email'] ?? ''));
+        if ($email === '') {
+            return $data;
+        }
+        $branding = EmailBranding::fromSettings($this->settings);
+        $workspace = trim((string) ($data['tenant_name'] ?? ''));
+        $where = $workspace !== '' ? $workspace : 'your workspace';
+        $isTermination = (string) ($data['reason'] ?? '') === 'terms_violation';
+
+        if ($isTermination) {
+            $paragraphs = [
+                'Your access to ' . $where . ' on ' . $branding->siteName
+                    . ' has been removed following a violation of our terms of service.',
+            ];
+            $appeal = $branding->supportEmail !== '' ? $branding->supportEmail : '';
+            $paragraphs[] = $appeal !== ''
+                ? 'If you believe this was a mistake, please contact ' . $appeal . '.'
+                : 'If you believe this was a mistake, please reply to this message.';
+
+            $this->trySend(
+                $email,
+                'Your ' . $branding->siteName . ' access has been removed',
+                new EmailContent(
+                    heading: 'Your access to ' . $where . ' was removed',
+                    paragraphs: $paragraphs,
+                ),
+                $branding,
+            );
+
+            return $data;
+        }
+
+        // Friendly farewell.
+        $this->trySend(
+            $email,
+            'You\'ve been removed from ' . $where,
+            new EmailContent(
+                heading: 'Sorry to see you go',
+                paragraphs: [
+                    'Your access to ' . $where . ' on ' . $branding->siteName . ' has been removed.',
+                    'Thanks for being part of it — you\'re always welcome back.',
+                ],
+            ),
+            $branding,
+        );
+
+        return $data;
     }
 
     /**

@@ -92,6 +92,9 @@ final class SettingsRegistry
     public const MAIL_EVENT_APPROVAL = 'mail.events.approval_enabled';
     public const MAIL_EVENT_INVITATION = 'mail.events.invitation_enabled';
     public const MAIL_EVENT_VERIFICATION = 'mail.events.verification_enabled';
+    // Account/tenant removal notices — the friendly "sorry to see you go" farewell
+    // and the terms-of-service termination notice (both fire on membership removal).
+    public const MAIL_EVENT_DELETION = 'mail.events.deletion_enabled';
     // Email TEMPLATE branding (WC-email): the customisation surface for the
     // transactional email layout. brand_color is a #RRGGBB hex; footer_text is a
     // free-form line shown in every message footer.
@@ -143,6 +146,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_APPROVAL,
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
+        self::MAIL_EVENT_DELETION,
         self::MAIL_BRAND_COLOR,
         self::MAIL_FOOTER_TEXT,
     ];
@@ -163,6 +167,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_APPROVAL,
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
+        self::MAIL_EVENT_DELETION,
     ];
 
     /**
@@ -222,6 +227,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_APPROVAL => 'true',
         self::MAIL_EVENT_INVITATION => 'true',
         self::MAIL_EVENT_VERIFICATION => 'true',
+        self::MAIL_EVENT_DELETION => 'true',
         // Email template branding: on-brand default; operator-overridable.
         self::MAIL_BRAND_COLOR => '#2B6CD2',
         self::MAIL_FOOTER_TEXT => '',
@@ -458,7 +464,8 @@ final class SettingsRegistry
             self::MAIL_EVENT_WELCOME,
             self::MAIL_EVENT_APPROVAL,
             self::MAIL_EVENT_INVITATION,
-            self::MAIL_EVENT_VERIFICATION => self::validateBoolean($value, $key),
+            self::MAIL_EVENT_VERIFICATION,
+            self::MAIL_EVENT_DELETION => self::validateBoolean($value, $key),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,

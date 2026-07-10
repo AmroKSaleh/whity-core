@@ -717,10 +717,36 @@ class UsersApiHandler
             // invalidate the worker-level cache.
             RoleChecker::clearCache();
 
+            // Resolve the removed user's email + workspace name for the farewell /
+            // termination email, and the optional removal reason. Best-effort — a
+            // lookup failure must not fail the removal. The profile + email are
+            // GLOBAL (survive the membership delete), and the tenant row survives.
+            $recipientEmail = '';
+            $tenantName = '';
+            try {
+                // @tenant-guard-ignore: profile_emails is a sanctioned GLOBAL table (ADR 0005 §2)
+                $peStmt = $this->db->prepare(
+                    'SELECT email FROM profile_emails WHERE profile_id = :pid AND is_primary = true'
+                );
+                $peStmt->execute([':pid' => $profileId]);
+                $recipientEmail = (string) ($peStmt->fetchColumn() ?: '');
+
+                $tnStmt = $this->db->prepare('SELECT name FROM tenants WHERE id = :id');
+                $tnStmt->execute([':id' => $ownerTenantId]);
+                $tenantName = (string) ($tnStmt->fetchColumn() ?: '');
+            } catch (\Throwable) {
+                // leave blank; the subscriber no-ops without a recipient.
+            }
+            $reason = strtolower(trim((string) (JsonBody::parsed($request)['reason'] ?? '')));
+
             // Notify listeners (e.g. the audit trail, WC-34) after removal.
             $this->hookManager->dispatch('user.deleted', [
                 'id' => $profileId,
                 'tenant_id' => $ownerTenantId,
+                'email' => $recipientEmail,
+                'tenant_name' => $tenantName,
+                // '' (friendly farewell) or 'terms_violation' (ToS termination).
+                'reason' => $reason,
             ]);
 
             return Response::json(['data' => ['id' => $profileId, 'message' => 'User deleted']], 200);
