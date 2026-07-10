@@ -46,6 +46,12 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Dev-only: Next 16 blocks dev/HMR (_next/*) requests from non-localhost
+  // origins unless they are allow-listed. When the dev server is reached over a
+  // LAN/public IP (e.g. remote testing), the HMR WebSocket is rejected and the
+  // page loads without hot-reload. Allow-list the hosts used for local testing.
+  // Ignored in production builds.
+  allowedDevOrigins: ["81.21.12.237", "192.168.100.7"],
   // Extend Turbopack's filesystem boundary to the workspace root so that the
   // hoisted root node_modules and the ../packages/ui workspace are in scope.
   outputFileTracingRoot: path.join(__dirname, ".."),
