@@ -142,9 +142,12 @@ function EmailSettingsForm({
     const res = await apiClient('/api/v1/settings/mail/status');
     if (!res.ok) return { has_smtp_password: false };
     const body: unknown = await res.json();
+    // The API wraps payloads in a { data: ... } envelope.
+    const payload =
+      body && typeof body === 'object' ? (body as { data?: unknown }).data : undefined;
     return {
       has_smtp_password: Boolean(
-        body && typeof body === 'object' && (body as { has_smtp_password?: unknown }).has_smtp_password
+        payload && typeof payload === 'object' && (payload as { has_smtp_password?: unknown }).has_smtp_password
       ),
     };
   }, []);

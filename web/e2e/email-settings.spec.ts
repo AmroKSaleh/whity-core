@@ -85,7 +85,9 @@ test.describe('Email settings — save / password / send-test round-trip', () =>
 
     await page.goto('/admin/settings/email');
     await page.locator('#email-mail-transport').selectOption('smtp');
-    await page.locator('#email-mail-smtp-host').fill('localhost');
+    // The BACKEND opens the SMTP connection from inside the compose network, so
+    // the host is the Mailpit service name, not localhost.
+    await page.locator('#email-mail-smtp-host').fill('mailpit');
     await page.locator('#email-mail-smtp-port').fill('1025'); // Mailpit
     await page.locator('#email-mail-smtp-encryption').selectOption('none');
     await page.locator('#email-mail-from_address').fill('noreply@example.test');
@@ -111,7 +113,7 @@ test.describe('Email settings — save / password / send-test round-trip', () =>
     // Reload: values persist; the password never round-trips (input stays blank).
     await page.reload();
     await expect(page.locator('#email-mail-transport')).toHaveValue('smtp');
-    await expect(page.locator('#email-mail-smtp-host')).toHaveValue('localhost');
+    await expect(page.locator('#email-mail-smtp-host')).toHaveValue('mailpit');
     await expect(page.locator('#email-smtp-password')).toHaveValue('');
     await expect(page.getByTestId('email-password-status')).toContainText(/is set/i);
 

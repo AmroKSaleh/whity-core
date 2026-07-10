@@ -597,13 +597,17 @@ $secretStore = \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV);
 
 // WC-email: the Mailer is built from the GLOBAL instance mail.* settings
 // (transport none/log/smtp; SMTP password decrypted from the encrypted-secret
-// store), replacing the old MAIL_TRANSPORT-env-only wiring. Built once at boot —
-// changing mail settings takes effect for verification/notification mail on the
-// next worker cycle; the admin "send test" endpoint always rebuilds from current
-// settings, so operators can validate config without a restart. A misconfigured
-// or disabled transport degrades to NullMailer (email is best-effort), never a
-// boot failure.
-$mailer = MailerFactory::fromSettings($settingsService, $globalSettingsRepository, $secretStore, $logger);
+// store), replacing the old MAIL_TRANSPORT-env-only wiring. It is built LAZILY,
+// per send, via LazyMailer: reading the settings hits the database, and doing
+// that at worker boot would let a transient DB issue (or a migration lagging a
+// deploy) crash every worker — and would freeze the transport until a restart.
+// Building per send instead means boot never touches the DB for mail, settings
+// changes take effect immediately, and a settings-read failure degrades to a
+// no-op (email is best-effort) rather than taking down the process.
+$mailer = new \Whity\Core\Mail\LazyMailer(
+    static fn(): \Whity\Core\Mail\Mailer =>
+        MailerFactory::fromSettings($settingsService, $globalSettingsRepository, $secretStore, $logger)
+);
 $emailVerificationService = new EmailVerificationService($db->getPdo());
 $profileEmailRepository = new ProfileEmailRepository($db->getPdo());
 $verifyUrlBase = (string) ($_ENV['EMAIL_VERIFICATION_URL'] ?? getenv('EMAIL_VERIFICATION_URL')
