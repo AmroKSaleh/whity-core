@@ -121,6 +121,29 @@ services:
           sleep 86400;
         done
 
+  # Local SMTP sink for email testing (WC-email). Mailpit captures every message
+  # the app sends so nothing leaves the machine — SMTP on :1025, a web inbox on
+  # http://localhost:8025. Opt-in (profile `mail`) so the default `docker compose
+  # up --wait` used by the e2e job never gates on it (same reasoning as `cron`).
+  #
+  #   docker compose --profile mail up -d mailpit
+  #
+  # Then point the instance at it via the admin Email settings (or the settings
+  # API): transport=smtp, host=mailpit, port=1025, encryption=none, and any
+  # from_address. No auth/password needed. Messages appear in the :8025 inbox.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: whity_mailpit
+    profiles:
+      - mail
+    ports:
+      - "1025:1025"  # SMTP submission (host=mailpit inside the compose network)
+      - "8025:8025"  # web inbox UI
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    restart: unless-stopped
+
   # Dev-only one-shot bootstrap (#174): on `docker compose up`, wait for Postgres then —
   # only when APP_ENV=development — run migrations + seed so a fresh/empty dev DB is
   # immediately usable (no manual `make setup`). Idempotent: migrations are IF NOT EXISTS

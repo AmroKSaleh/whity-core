@@ -93,6 +93,11 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'DELETE /api/admin/mcp/tokens/{jti}',
         'GET /api/admin/mcp/tokens',
         'GET /api/admin/mcp/tools',
+        // WC-email: operator-only email settings — SMTP write-only password +
+        // live send-test. OpenAPI schema to follow in a documentation task.
+        'GET /api/settings/mail/status',
+        'PUT /api/settings/mail/smtp-password',
+        'POST /api/settings/mail/test',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

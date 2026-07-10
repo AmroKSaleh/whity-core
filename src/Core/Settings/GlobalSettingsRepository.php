@@ -61,6 +61,23 @@ final class GlobalSettingsRepository
     }
 
     /**
+     * A single stored global setting, or null when the key has no stored row.
+     *
+     * Used for out-of-registry values (e.g. the encrypted SMTP password) that are
+     * persisted in `app_settings` but deliberately not part of the typed
+     * {@see SettingsRegistry} surface, so they never leak through the settings API.
+     */
+    public function get(string $key): ?string
+    {
+        // @tenant-guard-ignore: app_settings is a sanctioned global table (no tenant_id column); platform-wide defaults by design.
+        $stmt = $this->db->prepare('SELECT value FROM app_settings WHERE setting_key = :key');
+        $stmt->execute([':key' => $key]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false ? null : (string) $value;
+    }
+
+    /**
      * Upsert a single global setting (insert or update its value + timestamp).
      */
     public function set(string $key, string $value): void

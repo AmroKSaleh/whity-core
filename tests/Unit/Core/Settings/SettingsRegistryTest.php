@@ -25,7 +25,11 @@ final class SettingsRegistryTest extends TestCase
              'auth.self_registration_enabled', 'auth.registration_approval_required',
              'auth.sso_enabled',
              'storage.driver', 'storage.s3.endpoint', 'storage.s3.region', 'storage.s3.bucket',
-             'storage.s3.access_key', 'storage.s3.path_style', 'storage.s3.public_base_url'],
+             'storage.s3.access_key', 'storage.s3.path_style', 'storage.s3.public_base_url',
+             'mail.transport', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.encryption',
+             'mail.smtp.username', 'mail.from_address', 'mail.from_name',
+             'mail.events.welcome_enabled', 'mail.events.approval_enabled',
+             'mail.events.invitation_enabled', 'mail.events.verification_enabled'],
             SettingsRegistry::keys()
         );
     }
@@ -169,11 +173,81 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(18, $describe);
+        self::assertCount(29, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
         );
+    }
+
+    // ---- email settings (WC-email) ----
+
+    public function testMailKeysAreGlobalOnly(): void
+    {
+        foreach (['mail.transport', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.encryption',
+                  'mail.smtp.username', 'mail.from_address', 'mail.from_name',
+                  'mail.events.welcome_enabled', 'mail.events.approval_enabled',
+                  'mail.events.invitation_enabled', 'mail.events.verification_enabled'] as $key) {
+            self::assertTrue(SettingsRegistry::isGlobalOnly($key), "{$key} must be global-only");
+            self::assertNotContains($key, SettingsRegistry::tenantTextKeys());
+        }
+    }
+
+    public function testMailDefaultsAreOffAndSubmissionShaped(): void
+    {
+        self::assertSame('none', SettingsRegistry::defaultFor('mail.transport'));
+        self::assertSame('587', SettingsRegistry::defaultFor('mail.smtp.port'));
+        self::assertSame('tls', SettingsRegistry::defaultFor('mail.smtp.encryption'));
+        self::assertSame('true', SettingsRegistry::defaultFor('mail.events.welcome_enabled'));
+    }
+
+    public function testEnumTypeAndOptionsPublished(): void
+    {
+        self::assertSame('enum', SettingsRegistry::typeFor('mail.transport'));
+        self::assertSame('enum', SettingsRegistry::typeFor('mail.smtp.encryption'));
+        self::assertSame(['none', 'log', 'smtp'], SettingsRegistry::optionsFor('mail.transport'));
+        self::assertSame(['none', 'tls', 'ssl'], SettingsRegistry::optionsFor('mail.smtp.encryption'));
+        self::assertNull(SettingsRegistry::optionsFor('mail.smtp.host'));
+
+        // Enum descriptors carry an options list; non-enum descriptors do not.
+        $byKey = [];
+        foreach (SettingsRegistry::describe() as $d) {
+            $byKey[$d['key']] = $d;
+        }
+        self::assertSame(['none', 'log', 'smtp'], $byKey['mail.transport']['options'] ?? null);
+        self::assertArrayNotHasKey('options', $byKey['site_name']);
+    }
+
+    public function testMailTransportValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('mail.transport', 'smtp'));
+        self::assertNull(SettingsRegistry::validate('mail.transport', 'none'));
+        self::assertNotNull(SettingsRegistry::validate('mail.transport', 'sendmail'));
+    }
+
+    public function testMailPortValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('mail.smtp.port', '587'));
+        self::assertNull(SettingsRegistry::validate('mail.smtp.port', '1'));
+        self::assertNull(SettingsRegistry::validate('mail.smtp.port', '65535'));
+        self::assertNotNull(SettingsRegistry::validate('mail.smtp.port', '0'));
+        self::assertNotNull(SettingsRegistry::validate('mail.smtp.port', '70000'));
+        self::assertNotNull(SettingsRegistry::validate('mail.smtp.port', 'abc'));
+        self::assertNotNull(SettingsRegistry::validate('mail.smtp.port', ''));
+    }
+
+    public function testMailFromAddressValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('mail.from_address', ''));
+        self::assertNull(SettingsRegistry::validate('mail.from_address', 'no-reply@example.com'));
+        self::assertNotNull(SettingsRegistry::validate('mail.from_address', 'not-an-email'));
+    }
+
+    public function testMailEventTogglesAreBoolean(): void
+    {
+        self::assertSame('bool', SettingsRegistry::typeFor('mail.events.welcome_enabled'));
+        self::assertNull(SettingsRegistry::validate('mail.events.welcome_enabled', 'true'));
+        self::assertNotNull(SettingsRegistry::validate('mail.events.welcome_enabled', 'yes'));
     }
 
     // ---- mcp.enabled (WC-149b2fc9) ----
