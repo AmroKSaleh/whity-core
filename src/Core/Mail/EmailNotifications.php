@@ -44,6 +44,8 @@ final class EmailNotifications
     public function subscribe(HookManager $hooks): void
     {
         $hooks->listen('registration.completed', [$this, 'onRegistrationCompleted']);
+        $hooks->listen('registration.approved', [$this, 'onRegistrationApproved']);
+        $hooks->listen('registration.rejected', [$this, 'onRegistrationRejected']);
     }
 
     /**
@@ -84,6 +86,87 @@ final class EmailNotifications
                 ],
                 ctaLabel: $this->appUrl !== '' ? 'Open your workspace' : null,
                 ctaUrl: $this->appUrl !== '' ? $this->appUrl : null,
+            ),
+            $branding,
+        );
+
+        return $data;
+    }
+
+    /**
+     * A pending registration was approved → the account is now active. Sends the
+     * "approved, sign in" email. Gated on mail.events.approval_enabled.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    public function onRegistrationApproved(array $data, array $context = []): array
+    {
+        if (!$this->eventEnabled(SettingsRegistry::MAIL_EVENT_APPROVAL)) {
+            return $data;
+        }
+        $email = trim((string) ($data['email'] ?? ''));
+        if ($email === '') {
+            return $data;
+        }
+        $name = trim((string) ($data['name'] ?? ''));
+        $branding = EmailBranding::fromSettings($this->settings);
+
+        $this->trySend(
+            $email,
+            'Your ' . $branding->siteName . ' account is approved',
+            new EmailContent(
+                heading: 'Your account is approved' . ($name !== '' ? ', ' . $name : ''),
+                paragraphs: [
+                    'An administrator has approved your registration. Your workspace on '
+                        . $branding->siteName . ' is now active and ready to use.',
+                    'Sign in to get started.',
+                ],
+                ctaLabel: $this->appUrl !== '' ? 'Sign in to ' . $branding->siteName : null,
+                ctaUrl: $this->appUrl !== '' ? $this->appUrl : null,
+            ),
+            $branding,
+        );
+
+        return $data;
+    }
+
+    /**
+     * A pending registration was rejected. Sends a brief, respectful decline.
+     * Gated on mail.events.approval_enabled (same operator switch as approvals).
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    public function onRegistrationRejected(array $data, array $context = []): array
+    {
+        if (!$this->eventEnabled(SettingsRegistry::MAIL_EVENT_APPROVAL)) {
+            return $data;
+        }
+        $email = trim((string) ($data['email'] ?? ''));
+        if ($email === '') {
+            return $data;
+        }
+        $name = trim((string) ($data['name'] ?? ''));
+        $branding = EmailBranding::fromSettings($this->settings);
+
+        $paragraphs = [
+            'Thank you for your interest in ' . $branding->siteName
+                . '. After review, your registration was not approved at this time.',
+        ];
+        if ($branding->supportEmail !== '') {
+            $paragraphs[] = 'If you think this was a mistake, reply to this message or contact '
+                . $branding->supportEmail . '.';
+        }
+
+        $this->trySend(
+            $email,
+            'Update on your ' . $branding->siteName . ' registration',
+            new EmailContent(
+                heading: 'About your registration' . ($name !== '' ? ', ' . $name : ''),
+                paragraphs: $paragraphs,
             ),
             $branding,
         );

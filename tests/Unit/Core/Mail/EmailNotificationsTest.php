@@ -111,6 +111,41 @@ final class EmailNotificationsTest extends TestCase
         self::assertCount(1, $this->mailer->sent);
         self::assertSame('via-hook@example.com', $this->mailer->sent[0][0]);
     }
+
+    public function testSendsApprovedWhenEnabled(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_APPROVAL, 'true');
+
+        $this->subject->onRegistrationApproved(['email' => 'owner@example.com', 'name' => 'Amro']);
+
+        self::assertCount(1, $this->mailer->sent);
+        [$to, $subject, , $html] = $this->mailer->sent[0];
+        self::assertSame('owner@example.com', $to);
+        self::assertStringContainsString('approved', $subject);
+        self::assertStringContainsString('Your account is approved, Amro', (string) $html);
+    }
+
+    public function testApprovedRespectsToggle(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_APPROVAL, 'false');
+        $this->subject->onRegistrationApproved(['email' => 'owner@example.com']);
+        self::assertCount(0, $this->mailer->sent);
+    }
+
+    public function testSendsRejectedWhenEnabled(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_APPROVAL, 'true');
+
+        $this->subject->onRegistrationRejected(['email' => 'owner@example.com', 'name' => 'Amro']);
+
+        self::assertCount(1, $this->mailer->sent);
+        [$to, $subject, , $html] = $this->mailer->sent[0];
+        self::assertSame('owner@example.com', $to);
+        self::assertStringContainsString('registration', $subject);
+        self::assertStringContainsString('About your registration, Amro', (string) $html);
+        // A rejection carries no sign-in CTA.
+        self::assertStringNotContainsString('https://app.example.test', (string) $html);
+    }
 }
 
 final class CapturingMailer implements Mailer

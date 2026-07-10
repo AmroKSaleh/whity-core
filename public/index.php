@@ -950,7 +950,7 @@ $router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHa
 // SYSTEM tenant (id 0): approving a registration activates another tenant's
 // owner, a platform operation a regular tenant admin must never perform. Active
 // only matters when ADMIN_APPROVAL_ENFORCED is on; the routes are always wired.
-$registrationsHandler = new \Whity\Api\RegistrationsApiHandler($db->getPdo(), $roleChecker);
+$registrationsHandler = new \Whity\Api\RegistrationsApiHandler($db->getPdo(), $roleChecker, $hookManager);
 $router->register('GET',  '/api/registrations/pending',      [$registrationsHandler, 'listPending'], null, null, CorePermissions::REGISTRATIONS_APPROVE);
 $router->register('POST', '/api/registrations/{id}/approve', [$registrationsHandler, 'approve'],     null, null, CorePermissions::REGISTRATIONS_APPROVE);
 $router->register('POST', '/api/registrations/{id}/reject',  [$registrationsHandler, 'reject'],      null, null, CorePermissions::REGISTRATIONS_APPROVE);
