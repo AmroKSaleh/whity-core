@@ -19,12 +19,18 @@ namespace Whity\Core\Mail;
 interface Mailer
 {
     /**
-     * Send a plain-text email. Best-effort; may throw on transport failure (the
-     * caller is expected to treat delivery as non-critical and catch).
+     * Send an email. Best-effort; may throw on transport failure (the caller is
+     * expected to treat delivery as non-critical and catch).
      *
-     * @param string $toEmail   Recipient address (already validated/normalized).
-     * @param string $subject   Message subject.
-     * @param string $textBody  Plain-text body.
+     * A plain-text body is ALWAYS required (text-only clients + deliverability).
+     * When $htmlBody is provided the message is sent as multipart/alternative —
+     * the client shows the HTML and falls back to text — so the two MUST convey
+     * the same information.
+     *
+     * @param string      $toEmail   Recipient address (already validated/normalized).
+     * @param string      $subject   Message subject.
+     * @param string      $textBody  Plain-text body (always sent).
+     * @param string|null $htmlBody  Optional HTML alternative; null = text-only.
      */
-    public function send(string $toEmail, string $subject, string $textBody): void;
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void;
 }

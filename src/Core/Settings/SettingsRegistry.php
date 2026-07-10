@@ -92,6 +92,11 @@ final class SettingsRegistry
     public const MAIL_EVENT_APPROVAL = 'mail.events.approval_enabled';
     public const MAIL_EVENT_INVITATION = 'mail.events.invitation_enabled';
     public const MAIL_EVENT_VERIFICATION = 'mail.events.verification_enabled';
+    // Email TEMPLATE branding (WC-email): the customisation surface for the
+    // transactional email layout. brand_color is a #RRGGBB hex; footer_text is a
+    // free-form line shown in every message footer.
+    public const MAIL_BRAND_COLOR = 'mail.brand_color';
+    public const MAIL_FOOTER_TEXT = 'mail.footer_text';
 
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
@@ -138,6 +143,8 @@ final class SettingsRegistry
         self::MAIL_EVENT_APPROVAL,
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
+        self::MAIL_BRAND_COLOR,
+        self::MAIL_FOOTER_TEXT,
     ];
 
     /**
@@ -215,6 +222,9 @@ final class SettingsRegistry
         self::MAIL_EVENT_APPROVAL => 'true',
         self::MAIL_EVENT_INVITATION => 'true',
         self::MAIL_EVENT_VERIFICATION => 'true',
+        // Email template branding: on-brand default; operator-overridable.
+        self::MAIL_BRAND_COLOR => '#2B6CD2',
+        self::MAIL_FOOTER_TEXT => '',
     ];
 
     /**
@@ -449,11 +459,25 @@ final class SettingsRegistry
             self::MAIL_EVENT_APPROVAL,
             self::MAIL_EVENT_INVITATION,
             self::MAIL_EVENT_VERIFICATION => self::validateBoolean($value, $key),
+            self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
-            self::MAIL_FROM_NAME => null, // free-form strings (SMTP dial validated at send)
+            self::MAIL_FROM_NAME,
+            self::MAIL_FOOTER_TEXT => null, // free-form strings
             default => "Unknown setting key: {$key}",
         };
+    }
+
+    /**
+     * Validate a #RRGGBB hex colour.
+     */
+    private static function validateHexColor(string $value): ?string
+    {
+        if (preg_match('/^#[0-9A-Fa-f]{6}$/', $value) !== 1) {
+            return 'mail.brand_color must be a #RRGGBB hex colour (e.g. #2B6CD2).';
+        }
+
+        return null;
     }
 
     /**

@@ -29,7 +29,8 @@ final class SettingsRegistryTest extends TestCase
              'mail.transport', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.encryption',
              'mail.smtp.username', 'mail.from_address', 'mail.from_name',
              'mail.events.welcome_enabled', 'mail.events.approval_enabled',
-             'mail.events.invitation_enabled', 'mail.events.verification_enabled'],
+             'mail.events.invitation_enabled', 'mail.events.verification_enabled',
+             'mail.brand_color', 'mail.footer_text'],
             SettingsRegistry::keys()
         );
     }
@@ -173,7 +174,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(29, $describe);
+        self::assertCount(31, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
@@ -187,10 +188,24 @@ final class SettingsRegistryTest extends TestCase
         foreach (['mail.transport', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.encryption',
                   'mail.smtp.username', 'mail.from_address', 'mail.from_name',
                   'mail.events.welcome_enabled', 'mail.events.approval_enabled',
-                  'mail.events.invitation_enabled', 'mail.events.verification_enabled'] as $key) {
+                  'mail.events.invitation_enabled', 'mail.events.verification_enabled',
+                  'mail.brand_color', 'mail.footer_text'] as $key) {
             self::assertTrue(SettingsRegistry::isGlobalOnly($key), "{$key} must be global-only");
             self::assertNotContains($key, SettingsRegistry::tenantTextKeys());
         }
+    }
+
+    public function testMailBrandColorValidation(): void
+    {
+        self::assertSame('#2B6CD2', SettingsRegistry::defaultFor('mail.brand_color'));
+        self::assertNull(SettingsRegistry::validate('mail.brand_color', '#2B6CD2'));
+        self::assertNull(SettingsRegistry::validate('mail.brand_color', '#abc123'));
+        self::assertNotNull(SettingsRegistry::validate('mail.brand_color', '2B6CD2'));   // no #
+        self::assertNotNull(SettingsRegistry::validate('mail.brand_color', '#FFF'));     // shorthand not allowed
+        self::assertNotNull(SettingsRegistry::validate('mail.brand_color', 'red'));
+        // footer_text is free-form.
+        self::assertNull(SettingsRegistry::validate('mail.footer_text', 'Acme Inc · 123 St'));
+        self::assertNull(SettingsRegistry::validate('mail.footer_text', ''));
     }
 
     public function testMailDefaultsAreOffAndSubmissionShaped(): void

@@ -37,8 +37,8 @@ final class LazyMailer implements Mailer
         $this->factory = $factory;
     }
 
-    public function send(string $toEmail, string $subject, string $textBody): void
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
     {
-        ($this->factory)()->send($toEmail, $subject, $textBody);
+        ($this->factory)()->send($toEmail, $subject, $textBody, $htmlBody);
     }
 }
