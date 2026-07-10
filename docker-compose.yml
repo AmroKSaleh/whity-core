@@ -123,25 +123,30 @@ services:
 
   # Local SMTP sink for email testing (WC-email). Mailpit captures every message
   # the app sends so nothing leaves the machine — SMTP on :1025, a web inbox on
-  # http://localhost:8025. Opt-in (profile `mail`) so the default `docker compose
-  # up --wait` used by the e2e job never gates on it (same reasoning as `cron`).
+  # http://localhost:8025. Part of the default stack (with a healthcheck so
+  # `docker compose up --wait` — used by the e2e job — waits for it cleanly), so
+  # email "just works" in dev and the send-test e2e has a sink.
   #
-  #   docker compose --profile mail up -d mailpit
-  #
-  # Then point the instance at it via the admin Email settings (or the settings
-  # API): transport=smtp, host=mailpit, port=1025, encryption=none, and any
-  # from_address. No auth/password needed. Messages appear in the :8025 inbox.
+  # Point the instance at it via the admin Email settings (or the settings API):
+  # transport=smtp, host=mailpit, port=1025, encryption=none, any from_address.
+  # No auth/password needed. Messages appear in the :8025 inbox. NOTE: inside the
+  # compose network the SMTP host is the service name `mailpit`, not `localhost`
+  # (the backend, not your browser, opens the SMTP connection).
   mailpit:
     image: axllent/mailpit:latest
     container_name: whity_mailpit
-    profiles:
-      - mail
     ports:
       - "1025:1025"  # SMTP submission (host=mailpit inside the compose network)
       - "8025:8025"  # web inbox UI
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "1"
       MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8025/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
   # Dev-only one-shot bootstrap (#174): on `docker compose up`, wait for Postgres then —

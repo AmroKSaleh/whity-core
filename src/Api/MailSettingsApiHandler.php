@@ -84,7 +84,8 @@ final class MailSettingsApiHandler
      *
      * Body: `{ "password": "<secret>" | null }`. A null or empty value clears the
      * stored password; a non-empty value is encrypted at rest and stored. The
-     * value is never echoed back.
+     * value is never echoed back — success is 204 No Content, and clients re-read
+     * `has_smtp_password` from GET /mail/status.
      */
     public function setPassword(Request $request): Response
     {
@@ -113,7 +114,9 @@ final class MailSettingsApiHandler
                 );
             }
 
-            return Response::json(['data' => ['has_smtp_password' => $this->hasStoredPassword()]], 200);
+            // 204 No Content: the password is write-only, so there is nothing to
+            // return. Clients re-read has_smtp_password from GET /mail/status.
+            return Response::json([], 204);
         } catch (\Throwable $e) {
             // Never log the password or crypto detail.
             $this->logger->error('[MailSettingsApiHandler] setPassword failed: ' . $e->getMessage());
@@ -165,11 +168,11 @@ final class MailSettingsApiHandler
 
             return Response::json(['data' => ['sent' => true]], 200);
         } catch (MailException $e) {
-            // The transport/protocol detail goes to the SERVER log only — client
-            // responses never carry raw exception text (WC-186). The operator
-            // reads the worker log to see the exact SMTP failure.
+            // The exact transport detail goes to the SERVER log; the client gets a
+            // curated, safe hint (never raw exception text — WC-186) so the
+            // operator who clicked "send test" can act without reading logs.
             $this->logger->warning('[MailSettingsApiHandler] test send failed: ' . $e->getMessage());
-            return Response::error('Test email failed to send; check the server logs for the SMTP error detail', 502);
+            return Response::error('Test email failed: ' . $e->publicHint(), 502);
         } catch (\Throwable $e) {
             $this->logger->error('[MailSettingsApiHandler] test send error: ' . $e->getMessage());
             return Response::error('Test email failed', 502);

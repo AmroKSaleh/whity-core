@@ -52,6 +52,8 @@ jobs:
           languages: javascript-typescript
           # security-and-quality adds maintainability queries on top of security.
           queries: security-extended
+          # Excludes vendored/generated assets (e.g. the MSW service worker).
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Analyze
         uses: github/codeql-action/analyze@v3

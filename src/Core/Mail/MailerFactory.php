@@ -72,7 +72,18 @@ final class MailerFactory
         EncryptedSecretStore $secrets,
         LoggerInterface $logger,
     ): Mailer {
-        $global = $settings->getGlobal();
+        // Reading the settings hits the database. A failure here (transient DB
+        // outage, a migration lagging behind a deploy) must NOT propagate — email
+        // is best-effort, so degrade to a no-op rather than break the caller. This
+        // is what makes it safe to (re)build the mailer on every send.
+        try {
+            $global = $settings->getGlobal();
+        } catch (\Throwable $e) {
+            $logger->warning('[mail] could not read mail settings; email disabled for this send: ' . $e->getMessage());
+
+            return new NullMailer();
+        }
+
         $transport = (string) ($global[SettingsRegistry::MAIL_TRANSPORT] ?? 'none');
 
         if ($transport === 'none') {

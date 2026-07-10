@@ -103,11 +103,14 @@ final class MailSettingsApiRealEngineTest extends TestCase
             $this->req('PUT', '/api/settings/mail/smtp-password', ['password' => 'hunter2'], self::USER_FULL, self::SYSTEM_TENANT)
         );
 
-        self::assertSame(200, $response->getStatusCode(), $response->getBody());
-        $data = $this->decode($response)['data'];
-        self::assertTrue($data['has_smtp_password']);
-        // The plaintext must never appear in the response.
+        // 204 No Content — the write-only password is never echoed back.
+        self::assertSame(204, $response->getStatusCode(), $response->getBody());
         self::assertStringNotContainsString('hunter2', $response->getBody());
+        // Status now reports the password is set.
+        $status = $this->handler->status(
+            $this->req('GET', '/api/settings/mail/status', null, self::USER_FULL, self::SYSTEM_TENANT)
+        );
+        self::assertTrue($this->decode($status)['data']['has_smtp_password']);
 
         // Stored value is ciphertext (prefixed keyId), not the plaintext.
         $stored = (string) $this->scalar(
@@ -131,14 +134,19 @@ final class MailSettingsApiRealEngineTest extends TestCase
             $this->req('PUT', '/api/settings/mail/smtp-password', ['password' => null], self::USER_FULL, self::SYSTEM_TENANT)
         );
 
-        self::assertSame(200, $response->getStatusCode());
-        self::assertFalse($this->decode($response)['data']['has_smtp_password']);
+        self::assertSame(204, $response->getStatusCode());
+        // The stored password row is gone.
         self::assertSame(
             0,
             (int) $this->scalar(
                 "SELECT COUNT(*) FROM app_settings WHERE setting_key = '" . MailerFactory::SMTP_PASSWORD_SETTING_KEY . "'"
             )
         );
+        // And status reflects it.
+        $status = $this->handler->status(
+            $this->req('GET', '/api/settings/mail/status', null, self::USER_FULL, self::SYSTEM_TENANT)
+        );
+        self::assertFalse($this->decode($status)['data']['has_smtp_password']);
     }
 
     public function testSetPasswordRequiresPasswordField(): void
