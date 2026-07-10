@@ -12,6 +12,7 @@ use Whity\Core\Identity\FederatedIdentityLinker;
 use Whity\Core\Identity\FederatedProviderContext;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
+use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Sdk\Auth\ExternalIdentity;
 
 /**
@@ -34,17 +35,20 @@ final class FederatedIdentityLinkerRealEngineTest extends TestCase
     private FederatedIdentityLinker $linker;
     private ExternalIdentityRepository $identities;
     private ProfileEmailRepository $emails;
+    private TenantEmailDomainsRepository $domains;
 
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make(true);
         $this->identities = new ExternalIdentityRepository($this->pdo);
         $this->emails = new ProfileEmailRepository($this->pdo);
+        $this->domains = new TenantEmailDomainsRepository($this->pdo);
         $this->linker = new FederatedIdentityLinker(
             $this->pdo,
             $this->identities,
             $this->emails,
             new MembershipRepository($this->pdo),
+            $this->domains,
         );
     }
 
@@ -78,6 +82,16 @@ final class FederatedIdentityLinkerRealEngineTest extends TestCase
     {
         $v = $this->col("SELECT status FROM memberships WHERE profile_id = {$profileId} AND tenant_id = {$tenantId}");
         return $v === false ? null : (string) $v;
+    }
+
+    /** Register a domain claim for a tenant; mark it verified when $verified. */
+    private function claimDomain(int $tenantId, string $domain, bool $verified, bool $autoProvision = true): void
+    {
+        $roleId = (int) $this->col("SELECT id FROM roles WHERE name = 'user'");
+        $id = $this->domains->insert($tenantId, $domain, $roleId, $autoProvision);
+        if ($verified) {
+            $this->domains->markVerified($id, $tenantId);
+        }
     }
 
     private function identity(string $sub, ?string $email, bool $verified): ExternalIdentity
@@ -224,6 +238,82 @@ final class FederatedIdentityLinkerRealEngineTest extends TestCase
         self::assertSame('linked', $r['status']);
         self::assertSame($pid, $r['profile_id'] ?? null);
         self::assertSame('active', $this->membershipStatus($pid, $tenant), 'the invite was JIT-accepted');
+    }
+
+    // ── domain-claim JIT provisioning (WC-ab821c60) ─────────────────────────────
+
+    public function testTenantJitProvisionsNewProfileForVerifiedOwnedDomain(): void
+    {
+        // No local account; Acme OWNS (verified) acme.com with auto_provision → a
+        // brand-new passwordless profile is provisioned into Acme + linked.
+        $tenant = $this->seedTenant('Acme');
+        $this->claimDomain($tenant, 'acme.com', verified: true);
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-jit', 'newhire@acme.com', true), $this->tenantCtx($tenant));
+        self::assertSame('provisioned', $r['status']);
+        $pid = $r['profile_id'] ?? 0;
+        self::assertGreaterThan(0, $pid);
+        // Passwordless, active member of Acme, linked in the tenant namespace.
+        self::assertSame('', (string) $this->col("SELECT password_hash FROM profiles WHERE id = {$pid}"));
+        self::assertSame('active', $this->membershipStatus($pid, $tenant));
+        $link = $this->identities->findByProviderSubject(self::TENANT_PROVIDER_ID, 'sub-jit');
+        self::assertNotNull($link);
+        self::assertSame($pid, (int) $link['profile_id']);
+        self::assertNull($this->identities->findGlobalByIssuerSubject(self::ISS, 'sub-jit'), 'never the global namespace');
+    }
+
+    public function testTenantJitAddsExistingNonMemberForVerifiedOwnedDomain(): void
+    {
+        // An existing profile (member of ANOTHER tenant) whose verified email domain
+        // Acme owns → Acme adds them as a member + links; session confined to Acme.
+        $acme  = $this->seedTenant('Acme');
+        $other = $this->seedTenant('Other');
+        $this->claimDomain($acme, 'acme.com', verified: true);
+        $pid = $this->seedProfile();
+        $this->emails->insert($pid, 'existing@acme.com', true, true);
+        $this->seedMembership($pid, $other); // member of Other only
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-add', 'existing@acme.com', true), $this->tenantCtx($acme));
+        self::assertSame('linked', $r['status']);
+        self::assertSame($pid, $r['profile_id'] ?? null);
+        self::assertSame('active', $this->membershipStatus($pid, $acme), 'added as an Acme member');
+        self::assertSame('active', $this->membershipStatus($pid, $other), 'Other membership untouched');
+    }
+
+    public function testTenantDoesNotProvisionForUNVERIFIEDOwnedDomain(): void
+    {
+        // Acme claims acme.com but has NOT proven ownership → NO provisioning
+        // (the harvesting guard). Refused, nothing created.
+        $tenant = $this->seedTenant('Acme');
+        $this->claimDomain($tenant, 'acme.com', verified: false);
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-unv', 'x@acme.com', true), $this->tenantCtx($tenant));
+        self::assertSame('refused_no_account', $r['status']);
+        self::assertNull($this->identities->findByProviderSubject(self::TENANT_PROVIDER_ID, 'sub-unv'));
+    }
+
+    public function testTenantCannotProvisionViaDomainVerifiedByAnotherTenant(): void
+    {
+        // X != Y: OTHER verified-owns acme.com; ACME's IdP presents an @acme.com
+        // email. Acme has NO claim of its own → must NOT provision.
+        $acme  = $this->seedTenant('Acme');
+        $other = $this->seedTenant('Other');
+        $this->claimDomain($other, 'acme.com', verified: true); // Other's claim, not Acme's
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-xy2', 'user@acme.com', true), $this->tenantCtx($acme));
+        self::assertSame('refused_no_account', $r['status']);
+        self::assertNull($this->identities->findByProviderSubject(self::TENANT_PROVIDER_ID, 'sub-xy2'));
+        // Nothing minted in Other either.
+        self::assertSame(0, (int) $this->col("SELECT COUNT(*) FROM memberships WHERE tenant_id = {$other}"));
+    }
+
+    public function testTenantJitRespectsAutoProvisionFalse(): void
+    {
+        $tenant = $this->seedTenant('Acme');
+        $this->claimDomain($tenant, 'acme.com', verified: true, autoProvision: false);
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-noap', 'x@acme.com', true), $this->tenantCtx($tenant));
+        self::assertSame('refused_no_account', $r['status']);
     }
 
     public function testTenantCannotAcceptInviteFromAnotherTenant(): void

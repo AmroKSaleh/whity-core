@@ -954,6 +954,7 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
         $externalIdentityRepository,
         $profileEmailRepository,
         new MembershipRepository($db->getPdo()),
+        new \Whity\Core\Identity\TenantEmailDomainsRepository($db->getPdo()),
     ),
     $settingsService,
     (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
