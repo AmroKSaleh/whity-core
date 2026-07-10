@@ -154,9 +154,12 @@ async function proxyRequest(request: Request, method: string): Promise<Response>
 
     return result;
   } catch (error) {
+    // Log the full detail server-side only; never return the error (which may
+    // carry a stack trace or internal host/URL) to the client (CodeQL: info
+    // exposure through a stack trace).
     console.error('Proxy error:', error);
     return new Response(
-      JSON.stringify({ error: String(error) }),
+      JSON.stringify({ error: 'Upstream request failed' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
