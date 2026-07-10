@@ -117,9 +117,15 @@ final class SmtpMailer implements Mailer
      */
     private function buildMessage(string $toEmail, string $subject, string $textBody): string
     {
+        // Addresses go into headers verbatim, so a CR/LF in them would be header
+        // injection (smuggling a Bcc:, extra body, etc.). Reject rather than strip —
+        // a newline in an email address is always malformed and signals an attack.
+        $fromEmail = self::assertNoCrlf($this->config->fromEmail, 'from address');
+        $toEmail = self::assertNoCrlf($toEmail, 'recipient address');
+
         $from = $this->config->fromName !== ''
-            ? sprintf('%s <%s>', self::encodeHeader($this->config->fromName), $this->config->fromEmail)
-            : $this->config->fromEmail;
+            ? sprintf('%s <%s>', self::encodeHeader($this->config->fromName), $fromEmail)
+            : $fromEmail;
 
         $headers = [
             'From: ' . $from,
@@ -135,11 +141,33 @@ final class SmtpMailer implements Mailer
     }
 
     /**
-     * RFC 2047-encode a header value when it contains non-ASCII, so subjects and
-     * display names with unicode survive intact.
+     * Reject a value containing a CR or LF (email header injection). Returns the
+     * value unchanged when clean.
+     *
+     * @throws MailException When $value contains a CR or LF.
+     */
+    private static function assertNoCrlf(string $value, string $label): string
+    {
+        if (strpbrk($value, "\r\n") !== false) {
+            throw new MailException(sprintf('invalid %s: contains a line break', $label));
+        }
+
+        return $value;
+    }
+
+    /**
+     * Encode a header value safely: any CR/LF is stripped first (a header value is
+     * single-line, and a newline here would be header injection), then the value is
+     * RFC 2047-encoded when it contains non-ASCII so unicode subjects and display
+     * names survive intact.
      */
     private static function encodeHeader(string $value): string
     {
+        // Fold away any embedded line breaks — a header value is a single line, and
+        // display names / subjects are free text that must never break the header.
+        // A run of CR/LF collapses to one space.
+        $value = (string) preg_replace('/[\r\n]+/', ' ', $value);
+
         if (preg_match('/[\x80-\xFF]/', $value) === 1) {
             return '=?UTF-8?B?' . base64_encode($value) . '?=';
         }

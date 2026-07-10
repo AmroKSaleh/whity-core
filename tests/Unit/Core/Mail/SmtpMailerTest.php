@@ -99,6 +99,38 @@ final class SmtpMailerTest extends TestCase
         $mailer->send('nobody@example.com', 'S', 'B');
     }
 
+    public function testRejectsCrlfInRecipientAddress(): void
+    {
+        // A CR/LF in the recipient would smuggle extra headers (Bcc:, etc.).
+        $conn = new FakeSmtpConnection(['220 ready', '250 hi']);
+        $mailer = new SmtpMailer(
+            new SmtpConfig('h', 25, 'f@x.com', '', 'none'),
+            fn(): SmtpConnection => $conn,
+        );
+
+        $this->expectException(MailException::class);
+        $mailer->send("victim@example.com\r\nBcc: attacker@evil.com", 'S', 'B');
+    }
+
+    public function testSubjectWithNewlineCannotInjectHeaders(): void
+    {
+        $conn = new FakeSmtpConnection([
+            '220 ready', '250 hi', '250 OK', '250 OK', '354 go', '250 queued', '221 bye',
+        ]);
+        $mailer = new SmtpMailer(
+            new SmtpConfig('h', 25, 'f@x.com', '', 'none'),
+            fn(): SmtpConnection => $conn,
+        );
+
+        $mailer->send('a@b.com', "Hi\r\nBcc: attacker@evil.com", 'body');
+
+        $sent = $conn->written();
+        // The injected header must NOT appear as a real header line: the newline is
+        // folded to a space inside the Subject, so "Bcc:" never starts a line.
+        self::assertStringNotContainsString("\r\nBcc:", $sent);
+        self::assertStringContainsString('Subject: Hi Bcc: attacker@evil.com', $sent);
+    }
+
     public function testDotStuffingAndUnicodeSubject(): void
     {
         $conn = new FakeSmtpConnection([
