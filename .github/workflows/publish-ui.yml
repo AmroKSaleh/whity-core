@@ -26,8 +26,20 @@ jobs:
         working-directory: packages/ui
         run: npm install
 
-      - name: Publish
+      # Idempotent publish: this workflow runs on any push touching packages/ui,
+      # but a change without a version bump must NOT fail (npm returns 409
+      # "cannot publish over existing version"). Publish only when the current
+      # version isn't already in the registry; otherwise skip with a notice.
+      - name: Publish if the version is new
         working-directory: packages/ui
-        run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::$NAME@$VERSION is already published — skipping. Bump the version in packages/ui/package.json to publish a new release."
+          else
+            echo "Publishing $NAME@$VERSION"
+            npm publish
+          fi
