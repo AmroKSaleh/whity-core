@@ -13,6 +13,7 @@ Welcome to the Whity Core documentation.
 - **[Architecture](Architecture.md)** — Full system guide: request lifecycle, plugins, RBAC, multi-tenancy, schema, deployment (start here).
 - **[Permission System](PERMISSION_SYSTEM.md)** — RBAC permissions, registry, role hierarchy, enforcement.
 - **[Tenant Isolation](TENANT_ISOLATION.md)** — Multi-tenancy, `TenantContext`, query scoping.
+- **[Sign in with Google (SSO)](SSO-Google-Setup.md)** — End-to-end federated sign-in setup: Google OAuth client, provider config, trust tiers, first-login behaviour, troubleshooting.
 - **[Hook System](HOOK_SYSTEM.md)** — Plugin event/extension mechanism.
 - **[Plugin UI Blocks](Plugin-UI-Blocks.md)** — Server-driven UI: the platform-neutral block contract (display / data-bound / interactive) plugins declare and each platform renders.
 - **[Family Relations](RELATIONS.md)** — Person-node graph, relationship types, the relations API + admin hub.
