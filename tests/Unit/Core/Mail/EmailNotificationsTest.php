@@ -146,6 +146,32 @@ final class EmailNotificationsTest extends TestCase
         // A rejection carries no sign-in CTA.
         self::assertStringNotContainsString('https://app.example.test', (string) $html);
     }
+
+    public function testSendsInvitationOnUserCreatedWhenEnabled(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_INVITATION, 'true');
+
+        $this->subject->onUserCreated([
+            'email' => 'invitee@example.com',
+            'tenant_id' => 5,
+            'tenant_name' => 'Acme Team',
+        ]);
+
+        self::assertCount(1, $this->mailer->sent);
+        [$to, $subject, , $html] = $this->mailer->sent[0];
+        self::assertSame('invitee@example.com', $to);
+        self::assertStringContainsString('Acme Team', $subject);
+        // The heading's apostrophe is HTML-escaped, so match the stable portion.
+        self::assertStringContainsString('been added to Acme Team', (string) $html);
+        self::assertStringContainsString('https://app.example.test', (string) $html); // sign-in CTA
+    }
+
+    public function testInvitationRespectsToggle(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::MAIL_EVENT_INVITATION, 'false');
+        $this->subject->onUserCreated(['email' => 'invitee@example.com', 'tenant_name' => 'Acme Team']);
+        self::assertCount(0, $this->mailer->sent);
+    }
 }
 
 final class CapturingMailer implements Mailer

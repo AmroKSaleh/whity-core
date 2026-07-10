@@ -46,6 +46,47 @@ final class EmailNotifications
         $hooks->listen('registration.completed', [$this, 'onRegistrationCompleted']);
         $hooks->listen('registration.approved', [$this, 'onRegistrationApproved']);
         $hooks->listen('registration.rejected', [$this, 'onRegistrationRejected']);
+        $hooks->listen('user.created', [$this, 'onUserCreated']);
+    }
+
+    /**
+     * An admin added a user to a workspace → send the "you've been added"
+     * invitation email. Gated on mail.events.invitation_enabled.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    public function onUserCreated(array $data, array $context = []): array
+    {
+        if (!$this->eventEnabled(SettingsRegistry::MAIL_EVENT_INVITATION)) {
+            return $data;
+        }
+        $email = trim((string) ($data['email'] ?? ''));
+        if ($email === '') {
+            return $data;
+        }
+        $branding = EmailBranding::fromSettings($this->settings);
+        $workspace = trim((string) ($data['tenant_name'] ?? ''));
+        $where = $workspace !== '' ? 'the ' . $workspace . ' workspace' : 'a workspace';
+
+        $this->trySend(
+            $email,
+            'You\'ve been added to ' . ($workspace !== '' ? $workspace : $branding->siteName),
+            new EmailContent(
+                heading: $workspace !== '' ? 'You\'ve been added to ' . $workspace : 'You\'ve been added to a workspace',
+                paragraphs: [
+                    'An administrator added you to ' . $where . ' on ' . $branding->siteName . '.',
+                    'Sign in to get started.',
+                ],
+                ctaLabel: $this->appUrl !== '' ? 'Sign in to ' . $branding->siteName : null,
+                ctaUrl: $this->appUrl !== '' ? $this->appUrl : null,
+                callout: $workspace !== '' ? 'Workspace: ' . $workspace : null,
+            ),
+            $branding,
+        );
+
+        return $data;
     }
 
     /**

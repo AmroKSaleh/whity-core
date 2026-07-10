@@ -386,6 +386,17 @@ class UsersApiHandler
                 throw $e;
             }
 
+            // Resolve the workspace name for listeners (drives the invitation
+            // email). Best-effort — a lookup failure must not fail user creation.
+            $tenantName = '';
+            try {
+                $tnStmt = $this->db->prepare('SELECT name FROM tenants WHERE id = :id');
+                $tnStmt->execute([':id' => (int) $tenantId]);
+                $tenantName = (string) ($tnStmt->fetchColumn() ?: '');
+            } catch (\Throwable) {
+                $tenantName = '';
+            }
+
             // Dispatch synchronous hook after the user is created. `id` is the
             // canonical profile_id (ADR 0005 hard cutover).
             $this->hookManager->dispatch('user.created', [
@@ -393,6 +404,7 @@ class UsersApiHandler
                 'email' => $email,
                 'role_id' => $roleId,
                 'tenant_id' => (int)$tenantId,
+                'tenant_name' => $tenantName,
             ]);
 
             // Dispatch asynchronous hook for background tasks.
