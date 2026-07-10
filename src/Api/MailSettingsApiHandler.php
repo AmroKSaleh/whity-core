@@ -84,7 +84,8 @@ final class MailSettingsApiHandler
      *
      * Body: `{ "password": "<secret>" | null }`. A null or empty value clears the
      * stored password; a non-empty value is encrypted at rest and stored. The
-     * value is never echoed back.
+     * value is never echoed back — success is 204 No Content, and clients re-read
+     * `has_smtp_password` from GET /mail/status.
      */
     public function setPassword(Request $request): Response
     {
@@ -113,7 +114,9 @@ final class MailSettingsApiHandler
                 );
             }
 
-            return Response::json(['data' => ['has_smtp_password' => $this->hasStoredPassword()]], 200);
+            // 204 No Content: the password is write-only, so there is nothing to
+            // return. Clients re-read has_smtp_password from GET /mail/status.
+            return Response::json([], 204);
         } catch (\Throwable $e) {
             // Never log the password or crypto detail.
             $this->logger->error('[MailSettingsApiHandler] setPassword failed: ' . $e->getMessage());
