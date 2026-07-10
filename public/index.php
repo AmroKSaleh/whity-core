@@ -622,7 +622,21 @@ $emailVerificationProvider = new TokenEmailVerificationProvider(
     new \Whity\Core\Mail\EmailLayout(),
     $settingsService
 );
-$registerHandler = new RegisterApiHandler($db->getPdo(), $settingsService, $emailVerificationProvider);
+// WC-email: customer lifecycle emails. The subscriber listens on lifecycle hooks
+// (welcome on registration today; approval/invitation to follow) and sends via
+// the branded EmailLayout, gated per-event on the mail.events.* toggles. Sends
+// are best-effort — a failure can never break the originating request.
+$appUrl = rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/');
+$emailNotifications = new \Whity\Core\Mail\EmailNotifications(
+    $mailer,
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService,
+    $appUrl,
+    $logger
+);
+$emailNotifications->subscribe($hookManager);
+
+$registerHandler = new RegisterApiHandler($db->getPdo(), $settingsService, $emailVerificationProvider, $hookManager);
 $router->register('POST', '/api/register', [$registerHandler, 'register'], null);
 
 // WC-235: public email verification — (re)send a link + confirm a token. Both are
