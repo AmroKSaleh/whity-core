@@ -73,6 +73,7 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'DELETE /api/identity-providers/{id}',
         // WC-ae16: public federated sign-in (OIDC) — browser redirect + callback;
         // OpenAPI schema not applicable (302 redirect flow, not a JSON API).
+        'GET /api/auth/sso/providers', // WC-28fb2e19: public enabled-providers list for the login screen
         'GET /api/auth/sso/{provider}/start',
         'GET /api/auth/sso/{provider}/callback',
         // WC-f3b17bd2: authenticated connected-accounts management — OpenAPI schema
