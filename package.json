@@ -7,7 +7,14 @@
     "web",
     "packages/*"
   ],
+  "scripts": {
+    "changeset": "changeset",
+    "version-packages": "changeset version"
+  },
   "overrides": {
     "postcss": "^8.5.10"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.0"
   }
 }
