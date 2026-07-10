@@ -50,6 +50,34 @@ final class SmtpMailerTest extends TestCase
         self::assertStringEndsWith("\r\n.\r\nQUIT\r\n", $sent);
     }
 
+    public function testMultipartAlternativeWhenHtmlProvided(): void
+    {
+        $conn = new FakeSmtpConnection([
+            '220 mailpit ready', '250 mailpit', '250 OK', '250 OK',
+            '354 go', '250 queued', '221 Bye',
+        ]);
+        $mailer = new SmtpMailer(
+            new SmtpConfig('mailpit', 1025, 'no-reply@whity.local', 'Whity', 'none'),
+            fn(): SmtpConnection => $conn,
+        );
+
+        $mailer->send('alice@example.com', 'Hi', "text fallback", "<p>rich body</p>");
+
+        $sent = $conn->written();
+        // multipart/alternative envelope with a boundary, both parts present.
+        self::assertMatchesRegularExpression(
+            '/Content-Type: multipart\/alternative; boundary="=_whity_[0-9a-f]{24}"/',
+            $sent
+        );
+        self::assertStringContainsString('Content-Type: text/plain; charset=UTF-8', $sent);
+        self::assertStringContainsString('Content-Type: text/html; charset=UTF-8', $sent);
+        self::assertStringContainsString('text fallback', $sent);
+        self::assertStringContainsString('<p>rich body</p>', $sent);
+        // Text part precedes the HTML part (clients pick the last supported = HTML).
+        self::assertLessThan(strpos($sent, 'text/html'), strpos($sent, 'text/plain'));
+        self::assertStringEndsWith("\r\n.\r\nQUIT\r\n", $sent);
+    }
+
     public function testStartTlsAndAuthDialogue(): void
     {
         $conn = new FakeSmtpConnection([

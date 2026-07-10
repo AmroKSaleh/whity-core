@@ -35,7 +35,7 @@ final class SmtpMailer implements Mailer
         $this->connector = $connector ?? static fn(SmtpConfig $c): SmtpConnection => StreamSmtpConnection::connect($c);
     }
 
-    public function send(string $toEmail, string $subject, string $textBody): void
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
     {
         // Validate the addresses BEFORE opening the socket / writing any command.
         // A CR/LF in an address would inject SMTP commands into the MAIL FROM /
@@ -63,7 +63,10 @@ final class SmtpMailer implements Mailer
             // 250 = ok, 251 = will forward — both accept the recipient.
             $this->command($conn, 'RCPT TO:<' . $toEmail . '>', 250, 251);
             $this->command($conn, 'DATA', 354);
-            $conn->write($this->buildMessage($toEmail, $subject, $textBody) . "\r\n.\r\n");
+            // Dot-stuff the WHOLE payload (headers + body) once, so a body line
+            // starting with '.' — in either MIME part — cannot end DATA early.
+            $message = self::dotStuff($this->buildMessage($toEmail, $fromEmail, $subject, $textBody, $htmlBody));
+            $conn->write($message . "\r\n.\r\n");
             $this->expect($conn, 250);            // message accepted
 
             // Politely end the session; a QUIT failure must not fail a sent message.
@@ -130,17 +133,18 @@ final class SmtpMailer implements Mailer
     }
 
     /**
-     * Build the RFC 5322 message: minimal headers + a plain-text UTF-8 body with
-     * CRLF line endings and SMTP dot-stuffing.
+     * Build the RFC 5322 message: minimal headers + body. Text-only when
+     * $htmlBody is null, otherwise multipart/alternative (text + HTML). Bodies use
+     * CRLF; the caller dot-stuffs the whole payload once. $fromEmail/$toEmail are
+     * already CRLF-validated by send().
      */
-    private function buildMessage(string $toEmail, string $subject, string $textBody): string
-    {
-        // Addresses go into headers verbatim, so a CR/LF in them would be header
-        // injection (smuggling a Bcc:, extra body, etc.). Reject rather than strip —
-        // a newline in an email address is always malformed and signals an attack.
-        $fromEmail = self::assertNoCrlf($this->config->fromEmail, 'from address');
-        $toEmail = self::assertNoCrlf($toEmail, 'recipient address');
-
+    private function buildMessage(
+        string $toEmail,
+        string $fromEmail,
+        string $subject,
+        string $textBody,
+        ?string $htmlBody,
+    ): string {
         $from = $this->config->fromName !== ''
             ? sprintf('%s <%s>', self::encodeHeader($this->config->fromName), $fromEmail)
             : $fromEmail;
@@ -151,11 +155,34 @@ final class SmtpMailer implements Mailer
             'Subject: ' . self::encodeHeader($subject),
             'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000',
             'MIME-Version: 1.0',
-            'Content-Type: text/plain; charset=UTF-8',
-            'Content-Transfer-Encoding: 8bit',
         ];
 
-        return implode("\r\n", $headers) . "\r\n\r\n" . self::prepareBody($textBody);
+        if ($htmlBody === null) {
+            $headers[] = 'Content-Type: text/plain; charset=UTF-8';
+            $headers[] = 'Content-Transfer-Encoding: 8bit';
+
+            return implode("\r\n", $headers) . "\r\n\r\n" . self::normalizeCrlf($textBody);
+        }
+
+        // multipart/alternative: text first (fallback), HTML second (preferred).
+        $boundary = '=_whity_' . bin2hex(random_bytes(12));
+        $headers[] = 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+
+        $parts = [
+            '--' . $boundary,
+            'Content-Type: text/plain; charset=UTF-8',
+            'Content-Transfer-Encoding: 8bit',
+            '',
+            self::normalizeCrlf($textBody),
+            '--' . $boundary,
+            'Content-Type: text/html; charset=UTF-8',
+            'Content-Transfer-Encoding: 8bit',
+            '',
+            self::normalizeCrlf($htmlBody),
+            '--' . $boundary . '--',
+        ];
+
+        return implode("\r\n", $headers) . "\r\n\r\n" . implode("\r\n", $parts);
     }
 
     /**
@@ -193,13 +220,21 @@ final class SmtpMailer implements Mailer
     }
 
     /**
-     * Normalise to CRLF and dot-stuff (a line starting with '.' gets an extra '.')
-     * so a body line cannot prematurely terminate the DATA phase.
+     * Normalise any mix of CR / LF / CRLF to canonical CRLF line endings.
      */
-    private static function prepareBody(string $body): string
+    private static function normalizeCrlf(string $body): string
     {
-        $body = str_replace(["\r\n", "\r", "\n"], ["\n", "\n", "\r\n"], $body);
-        $lines = explode("\r\n", $body);
+        return (string) str_replace(["\r\n", "\r", "\n"], ["\n", "\n", "\r\n"], $body);
+    }
+
+    /**
+     * Normalise to CRLF and dot-stuff (a line starting with '.' gets an extra '.')
+     * so no content line — in any MIME part — can prematurely terminate the DATA
+     * phase. Applied once to the whole message payload.
+     */
+    private static function dotStuff(string $message): string
+    {
+        $lines = explode("\r\n", self::normalizeCrlf($message));
         foreach ($lines as $i => $line) {
             if (isset($line[0]) && $line[0] === '.') {
                 $lines[$i] = '.' . $line;

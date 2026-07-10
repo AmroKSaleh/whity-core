@@ -45,12 +45,12 @@ final class EmailVerificationHandlerRealEngineTest extends TestCase
         $this->emails = new ProfileEmailRepository($this->pdo);
 
         $this->mailer = new class implements Mailer {
-            /** @var list<array{to: string, subject: string, body: string}> */
+            /** @var list<array{to: string, subject: string, body: string, html: ?string}> */
             public array $sent = [];
 
-            public function send(string $toEmail, string $subject, string $textBody): void
+            public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
             {
-                $this->sent[] = ['to' => $toEmail, 'subject' => $subject, 'body' => $textBody];
+                $this->sent[] = ['to' => $toEmail, 'subject' => $subject, 'body' => $textBody, 'html' => $htmlBody];
             }
         };
 

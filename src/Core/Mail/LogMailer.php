@@ -23,12 +23,13 @@ final class LogMailer implements Mailer
 {
     public function __construct(private readonly LoggerInterface $logger) {}
 
-    public function send(string $toEmail, string $subject, string $textBody): void
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
     {
         $this->logger->info('[mail] would send email', [
-            'to'      => $toEmail,
-            'subject' => $subject,
-            'body'    => $textBody,
+            'to'          => $toEmail,
+            'subject'     => $subject,
+            'body'        => $textBody,
+            'has_html'    => $htmlBody !== null,
         ]);
     }
 }

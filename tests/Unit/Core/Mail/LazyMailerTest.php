@@ -26,11 +26,11 @@ final class LazyMailerTest extends TestCase
         self::assertSame(0, $builds, 'factory must not run until a send happens');
 
         $mailer->send('a@b.com', 'S1', 'B1');
-        $mailer->send('c@d.com', 'S2', 'B2');
+        $mailer->send('c@d.com', 'S2', 'B2', '<p>html</p>');
 
         self::assertSame(2, $builds, 'the transport is rebuilt on every send');
         self::assertSame(
-            [['a@b.com', 'S1', 'B1'], ['c@d.com', 'S2', 'B2']],
+            [['a@b.com', 'S1', 'B1', null], ['c@d.com', 'S2', 'B2', '<p>html</p>']],
             $inner->sent,
         );
     }
@@ -41,7 +41,7 @@ final class LazyMailerTest extends TestCase
         // mailer whose send() fails still surfaces the error to the caller, which
         // treats mail as best-effort.
         $mailer = new LazyMailer(static fn (): Mailer => new class implements Mailer {
-            public function send(string $toEmail, string $subject, string $textBody): void
+            public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
             {
                 throw new \RuntimeException('transport down');
             }
@@ -54,11 +54,11 @@ final class LazyMailerTest extends TestCase
 
 final class RecordingMailer implements Mailer
 {
-    /** @var list<array{0:string,1:string,2:string}> */
+    /** @var list<array{0:string,1:string,2:string,3:?string}> */
     public array $sent = [];
 
-    public function send(string $toEmail, string $subject, string $textBody): void
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
     {
-        $this->sent[] = [$toEmail, $subject, $textBody];
+        $this->sent[] = [$toEmail, $subject, $textBody, $htmlBody];
     }
 }

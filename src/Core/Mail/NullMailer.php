@@ -14,7 +14,7 @@ namespace Whity\Core\Mail;
  */
 final class NullMailer implements Mailer
 {
-    public function send(string $toEmail, string $subject, string $textBody): void
+    public function send(string $toEmail, string $subject, string $textBody, ?string $htmlBody = null): void
     {
         // Intentionally empty: no transport configured.
     }
