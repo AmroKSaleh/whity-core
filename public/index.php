@@ -616,7 +616,11 @@ $emailVerificationProvider = new TokenEmailVerificationProvider(
     $emailVerificationService,
     $profileEmailRepository,
     $mailer,
-    $verifyUrlBase
+    $verifyUrlBase,
+    // WC-email: render the link as a branded HTML email (with a text fallback),
+    // driven by the instance branding/mail settings.
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService
 );
 $registerHandler = new RegisterApiHandler($db->getPdo(), $settingsService, $emailVerificationProvider);
 $router->register('POST', '/api/register', [$registerHandler, 'register'], null);
