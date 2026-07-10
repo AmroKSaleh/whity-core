@@ -116,7 +116,7 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             $this->jwtParser,
             new EncryptedSecretStore(['v1' => 'sso_test_key_0123456789abcdef0123456789'], 'v1'),
             $auth,
-            new FederatedIdentityLinker($this->pdo, $extRepo, $emailRepo, new MembershipRepository($this->pdo)),
+            new FederatedIdentityLinker($this->pdo, $extRepo, $emailRepo, new MembershipRepository($this->pdo), new \Whity\Core\Identity\TenantEmailDomainsRepository($this->pdo)),
             $this->settings,
             self::APP_URL
         );

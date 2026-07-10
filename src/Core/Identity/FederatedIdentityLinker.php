@@ -38,11 +38,13 @@ use Whity\Sdk\Auth\ExternalIdentity;
  *      JIT-accepted, WC-635ee381):
  *      a. …with a VERIFIED profile_email → link in the tenant namespace ("linked").
  *      b. …with an UNVERIFIED profile_email → refuse ("refused_conflict").
- *   4. Any other case — E owned by a profile that is NOT a member of this tenant
- *      (incl. members of OTHER tenants), a SUSPENDED member, or no local account
- *      at all — is REFUSED ("refused_no_account"). A tenant-trust IdP CANNOT reach
- *      outside its tenant, and domain-claim JIT PROVISIONING of a brand-new
- *      profile is deferred until domain-ownership verification exists.
+ *   4. E owned by a profile that is NOT a member of this tenant, OR no local
+ *      account at all: onboarded via DOMAIN-CLAIM JIT (WC-ab821c60) ONLY when the
+ *      configuring tenant has a VERIFIED-owned (DNS-proven) domain claim on E's
+ *      domain with auto_provision — an existing profile gains a membership + link
+ *      ("linked"), a brand-new one is provisioned passwordless ("provisioned").
+ *      Without such a claim it is REFUSED ("refused_no_account"). A SUSPENDED
+ *      member is always refused. Every path touches ONLY `$ctx->tenantId`.
  *
  *   NOTE (in-tenant impersonation is by design): a tenant-trust IdP can link to
  *   any of its own active members. That is not an escalation — the tenant admin
@@ -62,6 +64,7 @@ final class FederatedIdentityLinker
         private readonly ExternalIdentityRepository $identities,
         private readonly ProfileEmailRepository $emails,
         private readonly MembershipRepository $memberships,
+        private readonly TenantEmailDomainsRepository $domains,
     ) {
     }
 
@@ -124,12 +127,16 @@ final class FederatedIdentityLinker
      * tenant X can never mint a membership in tenant Y" guarantee: this branch
      * only ever touches memberships in `$ctx->tenantId`.
      *
-     * (Domain-claim JIT provisioning of a brand-new profile is deferred until
-     * domain-OWNERSHIP verification exists — a self-asserted `tenant_email_domains`
-     * claim must not let a tenant harvest a domain it does not own.)
+     * DOMAIN-CLAIM JIT (WC-ab821c60): additionally, when the CONFIGURING tenant has
+     * a VERIFIED (DNS-proven, WC-628738f5) `tenant_email_domains` claim on the IdP
+     * email's domain with auto_provision, a person who is NOT yet a member is
+     * onboarded into THIS tenant: an existing profile gains a membership + link, or
+     * a brand-new one is provisioned (passwordless). Ownership verification is
+     * mandatory — a self-asserted claim never onboards. Still touches ONLY
+     * `$ctx->tenantId` (the X≠Y invariant), and the session is confined there.
      *
      * @param array<string, mixed>|null $profileEmail
-     * @return array{status: 'existing'|'linked'|'refused_conflict'|'refused_no_account', profile_id?: int}
+     * @return array{status: 'existing'|'linked'|'provisioned'|'refused_conflict'|'refused_no_account', profile_id?: int}
      */
     private function resolveTenantTrust(
         ExternalIdentity $identity,
@@ -138,15 +145,28 @@ final class FederatedIdentityLinker
         ?array $profileEmail,
     ): array {
         if ($profileEmail === null) {
+            // No local account. Onboard ONLY if this tenant owns the (verified)
+            // email domain with auto_provision → provision a passwordless profile.
+            $claim = $this->ownedVerifiedClaim($ctx->tenantId, $email);
+            if ($claim !== null) {
+                return $this->provisionTenantMember($identity, $ctx, $email, (int) $claim['default_role_id']);
+            }
             return ['status' => 'refused_no_account'];
         }
         $profileId = (int) $profileEmail['profile_id'];
 
-        // The owning profile must be a member of THIS tenant (active or invited);
-        // otherwise a tenant-trust IdP would reach a foreign account (the
-        // cross-tenant takeover this tier defends against).
         $membership = $this->memberships->findByProfile($profileId, $ctx->tenantId);
         if ($membership === null) {
+            // The profile exists but is NOT a member of this tenant. A tenant-trust
+            // IdP may reach it ONLY via a VERIFIED-owned-domain claim (else this
+            // would be the cross-tenant takeover this tier defends against).
+            if ($profileEmail['verified'] !== true) {
+                return ['status' => 'refused_conflict'];
+            }
+            $claim = $this->ownedVerifiedClaim($ctx->tenantId, $email);
+            if ($claim !== null) {
+                return $this->addTenantMember($identity, $ctx, $email, $profileId, (int) $claim['default_role_id']);
+            }
             return ['status' => 'refused_no_account'];
         }
         if ($profileEmail['verified'] !== true) {
@@ -163,6 +183,120 @@ final class FederatedIdentityLinker
             $this->memberships->accept((int) $membership['id'], $ctx->tenantId);
         }
         return $this->linkOrResolve($identity, $ctx, $email, $profileId, $ctx->providerId);
+    }
+
+    /**
+     * The CONFIGURING tenant's domain claim on `$email`'s domain, but ONLY when it
+     * is ownership-VERIFIED and auto_provision is on. Returns the claim row (for
+     * its default_role_id) or null. This is the gate that lets domain-claim JIT
+     * onboard without letting a tenant harvest a domain it has not proven it owns.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function ownedVerifiedClaim(int $tenantId, string $email): ?array
+    {
+        $at = strrpos($email, '@');
+        if ($at === false) {
+            return null;
+        }
+        $domain = strtolower(substr($email, $at + 1));
+        $claim = $this->domains->findByDomain($domain, $tenantId);
+        if ($claim === null) {
+            return null;
+        }
+        $verified = ($claim['verified_at'] ?? null) !== null;
+        return ($verified && ($claim['auto_provision'] ?? false) === true) ? $claim : null;
+    }
+
+    /**
+     * Add an EXISTING profile as a member of the configuring tenant (idempotent on
+     * the membership) and link the identity in the tenant namespace.
+     *
+     * @return array{status: 'existing'|'linked', profile_id: int}
+     */
+    private function addTenantMember(
+        ExternalIdentity $identity,
+        FederatedProviderContext $ctx,
+        string $email,
+        int $profileId,
+        int $roleId,
+    ): array {
+        try {
+            $this->memberships->insert($profileId, $ctx->tenantId, $roleId);
+        } catch (\PDOException) {
+            // Already a member (UNIQUE(profile_id, tenant_id)) — fine, proceed to link.
+        }
+        return $this->linkOrResolve($identity, $ctx, $email, $profileId, $ctx->providerId);
+    }
+
+    /**
+     * Provision a brand-new passwordless profile + verified email + membership in
+     * the configuring tenant + tenant-namespaced link — atomically. On a race
+     * (another provider/racer, or another tenant that co-owns a split domain won
+     * the email UNIQUE), resolve gracefully: to the existing link, or by adopting
+     * the now-existing profile into THIS tenant. Never 500s a login.
+     *
+     * @return array{status: 'existing'|'linked'|'provisioned', profile_id: int}
+     */
+    private function provisionTenantMember(
+        ExternalIdentity $identity,
+        FederatedProviderContext $ctx,
+        string $email,
+        int $roleId,
+    ): array {
+        $displayName = $identity->displayName ?? '';
+        if ($displayName === '') {
+            $at = strpos($email, '@');
+            $displayName = $at !== false ? substr($email, 0, $at) : $email;
+        }
+
+        $ownTx = !$this->db->inTransaction();
+        if ($ownTx) {
+            $this->db->beginTransaction();
+        }
+        try {
+            $profileId = $this->insertReturningId(
+                "INSERT INTO profiles
+                    (display_name, password_hash, two_factor_enabled, two_factor_secret,
+                     two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+                 VALUES (:dn, '', false, NULL, 0, 0, NOW(), NOW())",
+                [':dn' => $displayName]
+            );
+            $this->emails->insert($profileId, $email, true, true);
+            $this->memberships->insert($profileId, $ctx->tenantId, $roleId);
+            $linkId = $this->identities->link(
+                $profileId,
+                $ctx->providerKey,
+                $identity->issuer,
+                $identity->subject,
+                $email,
+                $ctx->providerId,
+            );
+
+            if ($ownTx) {
+                $this->db->commit();
+            }
+            $this->identities->touchLastLogin($linkId);
+            return ['status' => 'provisioned', 'profile_id' => $profileId];
+        } catch (\PDOException $e) {
+            // @phpstan-ignore booleanAnd.leftAlwaysTrue
+            if ($ownTx && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            // Lost a race. Prefer an existing tenant-namespaced link; otherwise the
+            // email was taken by a concurrent racer (split-domain) — adopt that
+            // profile into THIS tenant rather than erroring.
+            $row = $this->identities->findByProviderSubject($ctx->providerId, $identity->subject);
+            if ($row !== null) {
+                $this->identities->touchLastLogin((int) $row['id']);
+                return ['status' => 'existing', 'profile_id' => (int) $row['profile_id']];
+            }
+            $existingEmail = $this->emails->findByEmail($email);
+            if ($existingEmail !== null) {
+                return $this->addTenantMember($identity, $ctx, $email, (int) $existingEmail['profile_id'], $roleId);
+            }
+            throw new \RuntimeException('federated tenant provision failed', 0, $e);
+        }
     }
 
     /**
