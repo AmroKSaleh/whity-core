@@ -581,7 +581,29 @@ $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // off to it only when EMAIL_VERIFICATION_ENFORCED=1; the resend/confirm endpoints
 // below share the same service. Binding a real provider here is harmless while
 // the flag is off (RegisterApiHandler only calls it when enforcement is on).
-$mailer = MailerFactory::fromEnv($_ENV, $logger);
+// Global settings service (also reused by the settings/branding/mail handlers
+// below). RegisterApiHandler reads the instance-governance flags (self-registration
+// open? approval required?) from it — closed by default on a fresh instance.
+// Constructed here (ahead of the mailer) because the mail transport is now
+// settings-driven (WC-email). The global repo + shared secret store are held in
+// their own variables so the mail-settings handler can read the out-of-registry
+// encrypted SMTP password and decrypt it.
+$globalSettingsRepository = new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo());
+$settingsService = new \Whity\Core\Settings\SettingsService(
+    $globalSettingsRepository,
+    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
+);
+$secretStore = \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV);
+
+// WC-email: the Mailer is built from the GLOBAL instance mail.* settings
+// (transport none/log/smtp; SMTP password decrypted from the encrypted-secret
+// store), replacing the old MAIL_TRANSPORT-env-only wiring. Built once at boot —
+// changing mail settings takes effect for verification/notification mail on the
+// next worker cycle; the admin "send test" endpoint always rebuilds from current
+// settings, so operators can validate config without a restart. A misconfigured
+// or disabled transport degrades to NullMailer (email is best-effort), never a
+// boot failure.
+$mailer = MailerFactory::fromSettings($settingsService, $globalSettingsRepository, $secretStore, $logger);
 $emailVerificationService = new EmailVerificationService($db->getPdo());
 $profileEmailRepository = new ProfileEmailRepository($db->getPdo());
 $verifyUrlBase = (string) ($_ENV['EMAIL_VERIFICATION_URL'] ?? getenv('EMAIL_VERIFICATION_URL')
@@ -591,13 +613,6 @@ $emailVerificationProvider = new TokenEmailVerificationProvider(
     $profileEmailRepository,
     $mailer,
     $verifyUrlBase
-);
-// Global settings service (also reused by the settings/branding handlers below).
-// RegisterApiHandler reads the instance-governance flags (self-registration
-// open? approval required?) from it — closed by default on a fresh instance.
-$settingsService = new \Whity\Core\Settings\SettingsService(
-    new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
-    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
 );
 $registerHandler = new RegisterApiHandler($db->getPdo(), $settingsService, $emailVerificationProvider);
 $router->register('POST', '/api/register', [$registerHandler, 'register'], null);
@@ -854,6 +869,22 @@ $router->register('GET',   '/api/settings',        [$settingsHandler, 'get'],   
 $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'],       null, null, CorePermissions::SETTINGS_WRITE);
 $router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlobal'], null, null, CorePermissions::SETTINGS_MANAGE);
+
+// 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
+// plaintext mail.* config is edited via /api/settings/global above; these add the
+// write-only SMTP password (encrypted at rest, never returned) and a live "send
+// test" against the current transport. All three require settings:manage AND —
+// enforced in the handler — the system tenant (global mail config is instance-wide).
+$mailSettingsHandler = new \Whity\Api\MailSettingsApiHandler(
+    $settingsService,
+    $globalSettingsRepository,
+    $secretStore,
+    $roleChecker,
+    $logger
+);
+$router->register('GET', '/api/settings/mail/status',        [$mailSettingsHandler, 'status'],      null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('PUT', '/api/settings/mail/smtp-password', [$mailSettingsHandler, 'setPassword'], null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('POST', '/api/settings/mail/test',         [$mailSettingsHandler, 'test'],        null, null, CorePermissions::SETTINGS_MANAGE);
 
 // 13c. Register the Tenant Branding API (WC-233). Public GET /api/v1/branding
 // resolves the caller's tenant by JWT context → custom branding_host → slug

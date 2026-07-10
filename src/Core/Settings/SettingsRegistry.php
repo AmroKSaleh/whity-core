@@ -73,6 +73,26 @@ final class SettingsRegistry
     public const STORAGE_S3_PATH_STYLE = 'storage.s3.path_style';
     public const STORAGE_S3_PUBLIC_BASE_URL = 'storage.s3.public_base_url';
 
+    // Email transport + notification settings (WC-email). Global/operator-level:
+    // mail is configured once for the whole instance. `mail.transport` selects
+    // the backend (none/log/smtp); the smtp.* keys configure the server. The
+    // SMTP PASSWORD is deliberately NOT a registry setting — it is stored
+    // write-only and encrypted at rest ({@see \Whity\Core\Security\EncryptedSecretStore})
+    // under the app_settings key `mail.smtp.password_encrypted`, never exposed on
+    // the settings API. The events.* toggles gate the individual customer
+    // notifications dispatched from platform hooks.
+    public const MAIL_TRANSPORT = 'mail.transport';
+    public const MAIL_SMTP_HOST = 'mail.smtp.host';
+    public const MAIL_SMTP_PORT = 'mail.smtp.port';
+    public const MAIL_SMTP_ENCRYPTION = 'mail.smtp.encryption';
+    public const MAIL_SMTP_USERNAME = 'mail.smtp.username';
+    public const MAIL_FROM_ADDRESS = 'mail.from_address';
+    public const MAIL_FROM_NAME = 'mail.from_name';
+    public const MAIL_EVENT_WELCOME = 'mail.events.welcome_enabled';
+    public const MAIL_EVENT_APPROVAL = 'mail.events.approval_enabled';
+    public const MAIL_EVENT_INVITATION = 'mail.events.invitation_enabled';
+    public const MAIL_EVENT_VERIFICATION = 'mail.events.verification_enabled';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -107,6 +127,17 @@ final class SettingsRegistry
         self::STORAGE_S3_ACCESS_KEY,
         self::STORAGE_S3_PATH_STYLE,
         self::STORAGE_S3_PUBLIC_BASE_URL,
+        self::MAIL_TRANSPORT,
+        self::MAIL_SMTP_HOST,
+        self::MAIL_SMTP_PORT,
+        self::MAIL_SMTP_ENCRYPTION,
+        self::MAIL_SMTP_USERNAME,
+        self::MAIL_FROM_ADDRESS,
+        self::MAIL_FROM_NAME,
+        self::MAIL_EVENT_WELCOME,
+        self::MAIL_EVENT_APPROVAL,
+        self::MAIL_EVENT_INVITATION,
+        self::MAIL_EVENT_VERIFICATION,
     ];
 
     /**
@@ -121,6 +152,21 @@ final class SettingsRegistry
         self::REGISTRATION_APPROVAL_REQUIRED,
         self::SSO_ENABLED,
         self::STORAGE_S3_PATH_STYLE,
+        self::MAIL_EVENT_WELCOME,
+        self::MAIL_EVENT_APPROVAL,
+        self::MAIL_EVENT_INVITATION,
+        self::MAIL_EVENT_VERIFICATION,
+    ];
+
+    /**
+     * Enum-valued keys and their allowed values. Reported with type 'enum' and an
+     * `options` list so clients render a fixed-choice selector.
+     *
+     * @var array<string, list<string>>
+     */
+    private const ENUM_OPTIONS = [
+        self::MAIL_TRANSPORT => ['none', 'log', 'smtp'],
+        self::MAIL_SMTP_ENCRYPTION => ['none', 'tls', 'ssl'],
     ];
 
     /**
@@ -153,6 +199,22 @@ final class SettingsRegistry
         self::STORAGE_S3_ACCESS_KEY => '',
         self::STORAGE_S3_PATH_STYLE => 'true',
         self::STORAGE_S3_PUBLIC_BASE_URL => '',
+        // Email off by default (no transport) — the operator configures SMTP and
+        // opts in explicitly. STARTTLS on port 587 is the submission default.
+        self::MAIL_TRANSPORT => 'none',
+        self::MAIL_SMTP_HOST => '',
+        self::MAIL_SMTP_PORT => '587',
+        self::MAIL_SMTP_ENCRYPTION => 'tls',
+        self::MAIL_SMTP_USERNAME => '',
+        self::MAIL_FROM_ADDRESS => '',
+        self::MAIL_FROM_NAME => '',
+        // Notification toggles default ON: once a transport is configured, the
+        // standard customer emails fire. (With transport 'none' nothing is sent
+        // regardless, so this is safe.)
+        self::MAIL_EVENT_WELCOME => 'true',
+        self::MAIL_EVENT_APPROVAL => 'true',
+        self::MAIL_EVENT_INVITATION => 'true',
+        self::MAIL_EVENT_VERIFICATION => 'true',
     ];
 
     /**
@@ -195,20 +257,33 @@ final class SettingsRegistry
      * Intended for the settings API handler so asset-kind keys are not published
      * on the GET /api/v1/settings surface.
      *
-     * @return list<array{key: string, type: string, default: string}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
      */
     public static function describeText(): array
     {
-        $descriptors = [];
-        foreach (self::textKeys() as $key) {
-            $descriptors[] = [
-                'key' => $key,
-                'type' => self::typeFor($key),
-                'default' => self::defaultFor($key),
-            ];
+        return array_map([self::class, 'descriptorFor'], self::textKeys());
+    }
+
+    /**
+     * Build the API descriptor for a single key: key + type + default, plus an
+     * `options` list for enum-type keys.
+     *
+     * @return array{key: string, type: string, default: string, options?: list<string>}
+     */
+    private static function descriptorFor(string $key): array
+    {
+        $descriptor = [
+            'key' => $key,
+            'type' => self::typeFor($key),
+            'default' => self::defaultFor($key),
+        ];
+
+        $options = self::optionsFor($key);
+        if ($options !== null) {
+            $descriptor['options'] = $options;
         }
 
-        return $descriptors;
+        return $descriptor;
     }
 
     /**
@@ -246,20 +321,11 @@ final class SettingsRegistry
      * Like {@see describeText()} but restricted to the tenant-overridable keys
      * (excludes global-only governance keys) for the per-tenant settings API.
      *
-     * @return list<array{key: string, type: string, default: string}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
      */
     public static function describeTenantText(): array
     {
-        $descriptors = [];
-        foreach (self::tenantTextKeys() as $key) {
-            $descriptors[] = [
-                'key' => $key,
-                'type' => self::typeFor($key),
-                'default' => self::defaultFor($key),
-            ];
-        }
-
-        return $descriptors;
+        return array_map([self::class, 'descriptorFor'], self::tenantTextKeys());
     }
 
     /**
@@ -313,28 +379,34 @@ final class SettingsRegistry
         if (self::kindFor($key) === 'asset') {
             return 'asset';
         }
+        // Fixed-choice keys report 'enum' (with options in the descriptor).
+        if (array_key_exists($key, self::ENUM_OPTIONS)) {
+            return 'enum';
+        }
         // Boolean flags report 'bool' so clients render a toggle, not a text field.
         return in_array($key, self::BOOL_KEYS, true) ? 'bool' : 'string';
     }
 
     /**
-     * The registry descriptor list the API publishes alongside effective values:
-     * one entry per key with its type and default.
+     * The allowed values for an enum-type key, or null when the key is not an
+     * enum. Published in the API descriptor so clients render a fixed selector.
      *
-     * @return list<array{key: string, type: string, default: string}>
+     * @return list<string>|null
+     */
+    public static function optionsFor(string $key): ?array
+    {
+        return self::ENUM_OPTIONS[$key] ?? null;
+    }
+
+    /**
+     * The registry descriptor list the API publishes alongside effective values:
+     * one entry per key with its type and default (plus `options` for enums).
+     *
+     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
      */
     public static function describe(): array
     {
-        $descriptors = [];
-        foreach (self::keys() as $key) {
-            $descriptors[] = [
-                'key' => $key,
-                'type' => self::typeFor($key),
-                'default' => self::defaultFor($key),
-            ];
-        }
-
-        return $descriptors;
+        return array_map([self::class, 'descriptorFor'], self::keys());
     }
 
     /**
@@ -369,8 +441,63 @@ final class SettingsRegistry
             self::STORAGE_S3_BUCKET,
             self::STORAGE_S3_ACCESS_KEY,
             self::STORAGE_S3_PUBLIC_BASE_URL => null, // free-form strings (validated at driver build)
+            self::MAIL_TRANSPORT,
+            self::MAIL_SMTP_ENCRYPTION => self::validateEnum($key, $value),
+            self::MAIL_SMTP_PORT => self::validatePort($value),
+            self::MAIL_FROM_ADDRESS => self::validateFromAddress($value),
+            self::MAIL_EVENT_WELCOME,
+            self::MAIL_EVENT_APPROVAL,
+            self::MAIL_EVENT_INVITATION,
+            self::MAIL_EVENT_VERIFICATION => self::validateBoolean($value, $key),
+            self::MAIL_SMTP_HOST,
+            self::MAIL_SMTP_USERNAME,
+            self::MAIL_FROM_NAME => null, // free-form strings (SMTP dial validated at send)
             default => "Unknown setting key: {$key}",
         };
+    }
+
+    /**
+     * Validate a value against a key's fixed enum options.
+     */
+    private static function validateEnum(string $key, string $value): ?string
+    {
+        $options = self::ENUM_OPTIONS[$key] ?? [];
+        if (!in_array($value, $options, true)) {
+            return "{$key} must be one of: " . implode(', ', $options) . '.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate an SMTP TCP port (1–65535).
+     */
+    private static function validatePort(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'mail.smtp.port must be a whole number.';
+        }
+        $port = (int) $value;
+        if ($port < 1 || $port > 65535) {
+            return 'mail.smtp.port must be between 1 and 65535.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate the From address: a valid email, or empty to leave unconfigured.
+     */
+    private static function validateFromAddress(string $value): ?string
+    {
+        if ($value === '') {
+            return null;
+        }
+        if (filter_var($value, FILTER_VALIDATE_EMAIL) === false) {
+            return 'mail.from_address must be a valid email address (or empty).';
+        }
+
+        return null;
     }
 
     /**
