@@ -22,6 +22,7 @@ Welcome to the Whity Core documentation.
 ## Contributing
 
 - **[Development Workflow](Development-Workflow.md)** — How work is planned and shipped: the Instruction Set (IS) and the Tasker flow (`WC-XX` numbering, task lifecycle, parallel execution).
+- **[Package Releases](Package-Releases.md)** — How the publishable packages (`@amroksaleh/ui`, the PHP plugin SDK) are versioned and released: monorepo + independently-versioned packages, changesets, version-gated publish.
 - **[CONTRIBUTING.md](../../CONTRIBUTING.md)** — Dev setup, coding standards, testing, and the PR process.
 - **[Plugin Development](Plugin-Development.md)** — Build plugins against `PluginInterface`.
 
