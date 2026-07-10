@@ -113,7 +113,7 @@ test.describe('Email settings — save / password / send-test round-trip', () =>
     // Reload: values persist; the password never round-trips (input stays blank).
     await page.reload();
     await expect(page.locator('#email-mail-transport')).toHaveValue('smtp');
-    await expect(page.locator('#email-mail-smtp-host')).toHaveValue('localhost');
+    await expect(page.locator('#email-mail-smtp-host')).toHaveValue('mailpit');
     await expect(page.locator('#email-smtp-password')).toHaveValue('');
     await expect(page.getByTestId('email-password-status')).toContainText(/is set/i);
 
