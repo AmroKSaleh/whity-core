@@ -99,17 +99,37 @@ final class SmtpMailerTest extends TestCase
         $mailer->send('nobody@example.com', 'S', 'B');
     }
 
-    public function testRejectsCrlfInRecipientAddress(): void
+    public function testRejectsCrlfInRecipientBeforeWritingEnvelope(): void
     {
-        // A CR/LF in the recipient would smuggle extra headers (Bcc:, etc.).
-        $conn = new FakeSmtpConnection(['220 ready', '250 hi']);
+        // A CR/LF in the recipient would smuggle extra SMTP commands into the
+        // MAIL FROM / RCPT TO envelope (recipient smuggling). The guard must run
+        // BEFORE anything is written to the socket — not just before the DATA phase.
+        $conn = new FakeSmtpConnection(['220 ready', '250 hi', '250 OK', '250 OK', '354 go', '250 ok', '221 bye']);
         $mailer = new SmtpMailer(
             new SmtpConfig('h', 25, 'f@x.com', '', 'none'),
             fn(): SmtpConnection => $conn,
         );
 
+        try {
+            $mailer->send("victim@example.com\r\nRCPT TO:<bcc@evil.com>", 'S', 'B');
+            self::fail('expected MailException for CRLF in recipient');
+        } catch (MailException) {
+            // Expected — and crucially NOTHING was written to the socket, so no
+            // smuggled RCPT ever reached the server.
+            self::assertSame('', $conn->written(), 'no bytes may be sent when the recipient is rejected');
+        }
+    }
+
+    public function testRejectsCrlfInFromAddress(): void
+    {
+        $conn = new FakeSmtpConnection(['220 ready', '250 hi']);
+        $mailer = new SmtpMailer(
+            new SmtpConfig('h', 25, "spoof@x.com\r\nMAIL FROM:<evil@x.com>", '', 'none'),
+            fn(): SmtpConnection => $conn,
+        );
+
         $this->expectException(MailException::class);
-        $mailer->send("victim@example.com\r\nBcc: attacker@evil.com", 'S', 'B');
+        $mailer->send('a@b.com', 'S', 'B');
     }
 
     public function testSubjectWithNewlineCannotInjectHeaders(): void

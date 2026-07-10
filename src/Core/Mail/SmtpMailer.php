@@ -37,6 +37,13 @@ final class SmtpMailer implements Mailer
 
     public function send(string $toEmail, string $subject, string $textBody): void
     {
+        // Validate the addresses BEFORE opening the socket / writing any command.
+        // A CR/LF in an address would inject SMTP commands into the MAIL FROM /
+        // RCPT TO envelope (recipient smuggling), which are written well before
+        // the DATA phase — so the guard must run here, not inside buildMessage().
+        $fromEmail = self::assertNoCrlf($this->config->fromEmail, 'from address');
+        $toEmail = self::assertNoCrlf($toEmail, 'recipient address');
+
         $conn = ($this->connector)($this->config);
         try {
             $this->expect($conn, 220);            // server greeting
@@ -52,7 +59,7 @@ final class SmtpMailer implements Mailer
                 $this->authLogin($conn);
             }
 
-            $this->command($conn, 'MAIL FROM:<' . $this->config->fromEmail . '>', 250);
+            $this->command($conn, 'MAIL FROM:<' . $fromEmail . '>', 250);
             // 250 = ok, 251 = will forward — both accept the recipient.
             $this->command($conn, 'RCPT TO:<' . $toEmail . '>', 250, 251);
             $this->command($conn, 'DATA', 354);
@@ -93,6 +100,13 @@ final class SmtpMailer implements Mailer
     }
 
     /**
+     * Cap on continuation lines in one SMTP reply — a hostile/misconfigured server
+     * must not be able to pin the worker in the read loop with endless "code-"
+     * lines (each within the socket read timeout, so the timeout alone never trips).
+     */
+    private const MAX_REPLY_LINES = 100;
+
+    /**
      * Read a (possibly multi-line) SMTP reply and assert its 3-digit status code
      * is one of $accepted. Multi-line replies use "code-" continuation and a final
      * "code " line.
@@ -100,7 +114,11 @@ final class SmtpMailer implements Mailer
     private function expect(SmtpConnection $conn, int ...$accepted): void
     {
         $code = null;
+        $lines = 0;
         do {
+            if (++$lines > self::MAX_REPLY_LINES) {
+                throw new MailException('SMTP reply exceeded the maximum number of continuation lines');
+            }
             $line = $conn->readLine();
             $code = (int) substr($line, 0, 3);
             $continues = isset($line[3]) && $line[3] === '-';

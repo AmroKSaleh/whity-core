@@ -47,9 +47,16 @@ final class StreamSmtpConnection implements SmtpConnection
         return new self($stream);
     }
 
+    /**
+     * Upper bound on one reply line. RFC 5321 caps reply lines at 512 octets; a
+     * generous limit still prevents an unbounded buffer read from a server that
+     * never sends a newline.
+     */
+    private const MAX_LINE_BYTES = 8192;
+
     public function readLine(): string
     {
-        $line = fgets($this->stream);
+        $line = fgets($this->stream, self::MAX_LINE_BYTES);
         if ($line === false) {
             $meta = stream_get_meta_data($this->stream);
             $why = $meta['timed_out'] ? 'timeout' : 'connection closed';
