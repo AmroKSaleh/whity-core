@@ -509,7 +509,7 @@ test.describe('Document & Label Designer', () => {
     await page.getByTestId('doc-start-from').selectOption('invoice');
     await expect(page.getByTestId('doc-name')).toHaveValue('Invoice');
     expect(await el.count()).toBeGreaterThan(5);
-    await expect(page.getByTestId('doc-page').getByText('INVOICE')).toBeVisible();
+    await expect(page.getByTestId('doc-page').getByText('INVOICE').first()).toBeVisible();
   });
 
   test('setting element opacity applies it on the canvas', async ({ page }) => {
