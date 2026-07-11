@@ -13,6 +13,10 @@ import {
   IconChevronUp,
   IconChevronDown,
   IconTrash,
+  IconLock,
+  IconLockOpen,
+  IconEye,
+  IconEyeOff,
 } from '@tabler/icons-react';
 
 const ADD_ITEMS: ReadonlyArray<{ type: ElementType; label: string; Icon: typeof IconTypography }> = [
@@ -52,6 +56,8 @@ export function Palette({
   onAdd,
   onSelect,
   onReorder,
+  onToggleLock,
+  onToggleHidden,
   onDelete,
 }: {
   elements: DocElement[];
@@ -59,6 +65,8 @@ export function Palette({
   onAdd: (type: ElementType) => void;
   onSelect: (id: string) => void;
   onReorder: (id: string, dir: 'up' | 'down') => void;
+  onToggleLock: (id: string) => void;
+  onToggleHidden: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const frontToBack = [...elements].sort((a, b) => b.z - a.z);
@@ -101,11 +109,37 @@ export function Palette({
             >
               <button
                 type="button"
-                className="min-w-0 flex-1 truncate text-left"
+                className={`min-w-0 flex-1 truncate text-left ${el.hidden ? 'text-muted-foreground line-through' : ''}`}
                 onClick={() => onSelect(el.id)}
                 title={elementLabel(el)}
               >
                 {elementLabel(el)}
+              </button>
+              <button
+                type="button"
+                data-testid={`doc-layer-lock-${el.id}`}
+                aria-label={el.locked ? 'Unlock element' : 'Lock element'}
+                aria-pressed={!!el.locked}
+                onClick={() => onToggleLock(el.id)}
+              >
+                {el.locked ? (
+                  <IconLock className="h-3.5 w-3.5 text-primary" />
+                ) : (
+                  <IconLockOpen className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                )}
+              </button>
+              <button
+                type="button"
+                data-testid={`doc-layer-hide-${el.id}`}
+                aria-label={el.hidden ? 'Show element' : 'Hide element'}
+                aria-pressed={!!el.hidden}
+                onClick={() => onToggleHidden(el.id)}
+              >
+                {el.hidden ? (
+                  <IconEyeOff className="h-3.5 w-3.5 text-primary" />
+                ) : (
+                  <IconEye className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                )}
               </button>
               <button type="button" aria-label="Bring forward" onClick={() => onReorder(el.id, 'up')}>
                 <IconChevronUp className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
@@ -113,7 +147,13 @@ export function Palette({
               <button type="button" aria-label="Send backward" onClick={() => onReorder(el.id, 'down')}>
                 <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
               </button>
-              <button type="button" aria-label="Delete element" onClick={() => onDelete(el.id)}>
+              <button
+                type="button"
+                aria-label="Delete element"
+                disabled={el.locked}
+                className="disabled:opacity-30"
+                onClick={() => onDelete(el.id)}
+              >
                 <IconTrash className="h-3.5 w-3.5 text-destructive/80 hover:text-destructive" />
               </button>
             </div>

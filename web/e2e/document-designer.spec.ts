@@ -106,6 +106,50 @@ test.describe('Document & Label Designer', () => {
     await page.getByTestId('doc-cut').click();
     await expect(el).toHaveCount(1);
   });
+
+  test('locking an element blocks nudge and delete until it is unlocked', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    const el = page.locator('[data-testid^="doc-el-"]');
+    await expect(el).toHaveCount(1);
+    await el.first().click();
+
+    const leftMm = async () => {
+      const m = ((await el.first().getAttribute('style')) ?? '').match(/left:\s*([\d.]+)mm/);
+      return m ? parseFloat(m[1]) : NaN;
+    };
+    const x0 = await leftMm();
+
+    // Lock from the layers panel.
+    const lockToggle = page.locator('[data-testid^="doc-layer-lock-"]');
+    await lockToggle.click();
+
+    // Nudge and Delete are ignored while locked.
+    await el.first().click();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(leftMm).toBeCloseTo(x0, 1);
+    await page.keyboard.press('Delete');
+    await expect(el).toHaveCount(1);
+
+    // Unlock → nudge works again.
+    await lockToggle.click();
+    await el.first().click();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(leftMm).toBeCloseTo(x0 + 1, 1);
+  });
+
+  test('hiding an element removes it from Preview', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-dynamicText').click();
+    const canvas = page.getByTestId('doc-page');
+    await expect(canvas.getByText('{{company_name}}')).toBeVisible();
+
+    // Hide from the layers panel, then switch to Preview — it's gone.
+    await page.locator('[data-testid^="doc-layer-hide-"]').click();
+    await page.getByTestId('doc-preview-toggle').click();
+    await expect(canvas.getByText('Acme Corp')).toHaveCount(0);
+    await expect(canvas.getByText('{{company_name}}')).toHaveCount(0);
+  });
 });
 
 test.describe('Document designer — requires auth', () => {

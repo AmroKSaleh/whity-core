@@ -35,6 +35,10 @@ interface ElementCommon {
   rotation: number;
   /** Stacking order (higher = front). */
   z: number;
+  /** Locked elements can't be moved, resized, nudged, aligned or deleted. */
+  locked?: boolean;
+  /** Hidden elements are omitted from Preview and print (still shown, dimmed, while editing). */
+  hidden?: boolean;
 }
 
 export interface TextElement extends ElementCommon {

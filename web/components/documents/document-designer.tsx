@@ -142,6 +142,8 @@ export function DocumentDesigner() {
         x: src.x + 3,
         y: src.y + 3,
         z: maxZ + 1,
+        locked: false,
+        hidden: false,
       } as DocElement;
       setSelectedId(clone.id);
       return { ...t, elements: [...t.elements, clone] };
@@ -230,15 +232,18 @@ export function DocumentDesigner() {
         }
       }
       const { selectedId: sid, preview: pv, template: tpl } = kbRef.current;
-      if (pv || !sid || !tpl.elements.some((x) => x.id === sid)) return;
+      const selEl = tpl.elements.find((x) => x.id === sid);
+      if (pv || !selEl) return;
+      if (e.key === 'Escape') {
+        setSelectedId(null);
+        return;
+      }
+      // Locked elements ignore delete / nudge (unlock via the layers panel).
+      if (selEl.locked) return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         commit('delete');
         setTemplate((t) => ({ ...t, elements: t.elements.filter((x) => x.id !== sid) }));
-        setSelectedId(null);
-        return;
-      }
-      if (e.key === 'Escape') {
         setSelectedId(null);
         return;
       }
@@ -290,7 +295,7 @@ export function DocumentDesigner() {
   };
 
   const alignSelected = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vmiddle' | 'bottom') => {
-    if (!selected) return;
+    if (!selected || selected.locked) return;
     const { widthMm: W, heightMm: H } = template.page;
     const patch: Partial<DocElement> =
       kind === 'left'
@@ -305,6 +310,22 @@ export function DocumentDesigner() {
                 ? { y: Math.max(0, (H - selected.h) / 2) }
                 : { y: Math.max(0, H - selected.h) };
     patchElement(selected.id, patch);
+  };
+
+  const toggleLock = (id: string) => {
+    commit('lock');
+    setTemplate((t) => ({
+      ...t,
+      elements: t.elements.map((e) => (e.id === id ? ({ ...e, locked: !e.locked } as DocElement) : e)),
+    }));
+  };
+
+  const toggleHidden = (id: string) => {
+    commit('hide');
+    setTemplate((t) => ({
+      ...t,
+      elements: t.elements.map((e) => (e.id === id ? ({ ...e, hidden: !e.hidden } as DocElement) : e)),
+    }));
   };
 
   const reorder = (id: string, dir: 'up' | 'down') => {
@@ -494,6 +515,8 @@ export function DocumentDesigner() {
             onAdd={addElement}
             onSelect={setSelectedId}
             onReorder={reorder}
+            onToggleLock={toggleLock}
+            onToggleHidden={toggleHidden}
             onDelete={(id) => {
               deleteElement(id);
               if (selectedId === id) setSelectedId(null);
