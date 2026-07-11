@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '@/lib/documents/types';
 import { BARCODE_SYMBOLOGIES } from '@/lib/documents/types';
 import { generateSequence, type SequenceConfig } from '@/lib/documents/batch';
+import { parseDelimited, parseJsonRows } from '@/lib/documents/csv';
 import { PAGE_PRESETS } from '@/lib/documents/presets';
 import { Input } from '@amroksaleh/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
@@ -29,6 +30,7 @@ export function Inspector({
   onChangePage,
   onChangePlaceholders,
   onGenerateBatch,
+  onLoadBatchRecords,
   onClearBatch,
   onBatchIndex,
 }: {
@@ -39,6 +41,7 @@ export function Inspector({
   onChangePage: (patch: Partial<PageSpec>) => void;
   onChangePlaceholders: (list: Placeholder[]) => void;
   onGenerateBatch: (cfg: SequenceConfig) => void;
+  onLoadBatchRecords: (records: Record<string, string>[]) => void;
   onClearBatch: () => void;
   onBatchIndex: (i: number) => void;
 }) {
@@ -69,6 +72,7 @@ export function Inspector({
             placeholders={template.placeholders}
             batch={batch}
             onGenerate={onGenerateBatch}
+            onLoadRecords={onLoadBatchRecords}
             onClear={onClearBatch}
             onIndex={onBatchIndex}
           />
@@ -352,19 +356,24 @@ function DataTab({ placeholders, onChange }: { placeholders: Placeholder[]; onCh
   );
 }
 
+type BatchMode = 'sequence' | 'csv' | 'paste';
+
 function BatchTab({
   placeholders,
   batch,
   onGenerate,
+  onLoadRecords,
   onClear,
   onIndex,
 }: {
   placeholders: Placeholder[];
   batch: BatchState;
   onGenerate: (cfg: SequenceConfig) => void;
+  onLoadRecords: (records: Record<string, string>[]) => void;
   onClear: () => void;
   onIndex: (i: number) => void;
 }) {
+  const [mode, setMode] = useState<BatchMode>('sequence');
   const [key, setKey] = useState(placeholders[0]?.key ?? '');
   const [prefix, setPrefix] = useState('SN-');
   const [start, setStart] = useState(1);
@@ -372,62 +381,144 @@ function BatchTab({
   const [step, setStep] = useState(1);
   const [padding, setPadding] = useState(4);
   const [suffix, setSuffix] = useState('');
+  const [paste, setPaste] = useState('');
+  const [parseError, setParseError] = useState('');
 
   const cfg: SequenceConfig = { key, prefix, start, count, step, padding, suffix };
   const canGenerate = key !== '' && count > 0;
   const sample = canGenerate ? generateSequence({ ...cfg, count: Math.min(count, 3) }) : [];
 
+  const loadCsvFile = async (file: File) => {
+    setParseError('');
+    try {
+      const { rows } = parseDelimited(await file.text());
+      onLoadRecords(rows);
+    } catch {
+      setParseError('Could not read that file.');
+    }
+  };
+
+  const loadPaste = () => {
+    setParseError('');
+    const text = paste.trim();
+    if (text === '') return;
+    try {
+      // A leading [ or { is treated as JSON; otherwise delimited (CSV/TSV).
+      const records = text.startsWith('[') || text.startsWith('{') ? parseJsonRows(text) : parseDelimited(text).rows;
+      onLoadRecords(records);
+    } catch {
+      setParseError('Could not parse — expected CSV rows or a JSON array of objects.');
+    }
+  };
+
   return (
     <>
-      <p className="text-xs text-muted-foreground">
-        Generate a run of serial numbers (or any sequence) into a placeholder — one label per value.
-        <span className="block">Preview pages through the rows; Print outputs one copy per row.</span>
-      </p>
-      <Field label="Fill placeholder">
-        <select
-          className={SELECT_CLASS}
-          data-testid="doc-batch-key"
-          value={key}
-          onChange={(e) => setKey(e.target.value)}
-        >
-          {placeholders.length === 0 && <option value="">(add a placeholder in the Data tab)</option>}
-          {placeholders.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label} ({`{{${p.key}}}`})
-            </option>
-          ))}
-        </select>
-      </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Prefix">
-          <Input data-testid="doc-batch-prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
-        </Field>
-        <Field label="Suffix">
-          <Input data-testid="doc-batch-suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} />
-        </Field>
+      <div className="flex gap-1 rounded-md bg-muted/40 p-0.5 text-xs">
+        {(['sequence', 'csv', 'paste'] as BatchMode[]).map((m) => (
+          <button
+            key={m}
+            type="button"
+            data-testid={`doc-batch-mode-${m}`}
+            onClick={() => setMode(m)}
+            className={`flex-1 rounded px-2 py-1 capitalize ${mode === m ? 'bg-card font-medium text-foreground shadow-sm' : 'text-muted-foreground'}`}
+          >
+            {m === 'csv' ? 'CSV' : m}
+          </button>
+        ))}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Num label="Start" value={start} onChange={setStart} testId="doc-batch-start" />
-        <Num label="Count" value={count} onChange={setCount} testId="doc-batch-count" />
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Num label="Step" value={step} onChange={setStep} />
-        <Num label="Zero-pad" value={padding} onChange={setPadding} />
-      </div>
-      {sample.length > 0 && (
-        <p className="text-[10px] text-muted-foreground">
-          Example: <span className="font-medium">{sample.join(', ')}{count > 3 ? ', …' : ''}</span>
-        </p>
+
+      {mode === 'sequence' && (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Generate a run of serial numbers (or any sequence) into a placeholder — one label per value.
+          </p>
+          <Field label="Fill placeholder">
+            <select
+              className={SELECT_CLASS}
+              data-testid="doc-batch-key"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+            >
+              {placeholders.length === 0 && <option value="">(add a placeholder in the Data tab)</option>}
+              {placeholders.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label} ({`{{${p.key}}}`})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Prefix">
+              <Input data-testid="doc-batch-prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+            </Field>
+            <Field label="Suffix">
+              <Input data-testid="doc-batch-suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Start" value={start} onChange={setStart} testId="doc-batch-start" />
+            <Num label="Count" value={count} onChange={setCount} testId="doc-batch-count" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Step" value={step} onChange={setStep} />
+            <Num label="Zero-pad" value={padding} onChange={setPadding} />
+          </div>
+          {sample.length > 0 && (
+            <p className="text-[10px] text-muted-foreground">
+              Example: <span className="font-medium">{sample.join(', ')}{count > 3 ? ', …' : ''}</span>
+            </p>
+          )}
+          <Button
+            size="sm"
+            className="w-full"
+            data-testid="doc-batch-generate"
+            disabled={!canGenerate}
+            onClick={() => onGenerate(cfg)}
+          >
+            Generate rows
+          </Button>
+        </>
       )}
-      <Button
-        size="sm"
-        className="w-full"
-        data-testid="doc-batch-generate"
-        disabled={!canGenerate}
-        onClick={() => onGenerate(cfg)}
-      >
-        Generate rows
-      </Button>
+
+      {mode === 'csv' && (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Upload a CSV/TSV whose header row names placeholders (e.g. <span className="font-medium">serial,model</span>).
+            Each data row becomes one label; columns fill matching <span className="font-mono">{'{{tokens}}'}</span>.
+          </p>
+          <input
+            type="file"
+            accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain"
+            data-testid="doc-batch-csv-file"
+            className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-input file:bg-input/20 file:px-2 file:py-1 file:text-xs"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void loadCsvFile(f);
+              e.target.value = '';
+            }}
+          />
+        </>
+      )}
+
+      {mode === 'paste' && (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Paste CSV rows (with a header) or a JSON array of objects, then load them as rows.
+          </p>
+          <textarea
+            data-testid="doc-batch-paste"
+            className={`${SELECT_CLASS} h-28 py-1 font-mono`}
+            placeholder={'serial,model\nSN-1,Widget\nSN-2,Gadget'}
+            value={paste}
+            onChange={(e) => setPaste(e.target.value)}
+          />
+          <Button size="sm" className="w-full" data-testid="doc-batch-load-paste" disabled={paste.trim() === ''} onClick={loadPaste}>
+            Load rows
+          </Button>
+        </>
+      )}
+
+      {parseError !== '' && <p className="text-xs text-destructive" data-testid="doc-batch-error">{parseError}</p>}
 
       {batch.active && (
         <div className="space-y-1.5 rounded-md border border-primary/40 bg-primary/5 p-2" data-testid="doc-batch-active">

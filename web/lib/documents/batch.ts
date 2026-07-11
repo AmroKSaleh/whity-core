@@ -54,3 +54,14 @@ export function rowsFromValues(
 ): Record<string, string>[] {
   return values.map((v) => ({ ...base, [key]: v }));
 }
+
+/**
+ * Layer parsed records (from CSV/JSON) over the shared `base` sample data, so
+ * columns present in the file win and unrelated placeholders still resolve.
+ */
+export function rowsFromRecords(
+  records: Record<string, string>[],
+  base: Record<string, string>
+): Record<string, string>[] {
+  return records.map((r) => ({ ...base, ...r }));
+}
