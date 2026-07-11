@@ -12,10 +12,13 @@ export function BarcodeSvg({
   symbology,
   value,
   showText = false,
+  eclevel,
 }: {
   symbology: string;
   value: string;
   showText?: boolean;
+  /** QR error-correction level (qrcode only). */
+  eclevel?: 'L' | 'M' | 'Q' | 'H';
 }) {
   const svg = useMemo(() => {
     const text = value.trim();
@@ -29,12 +32,13 @@ export function BarcodeSvg({
         textxalign: 'center',
         scale: 3,
         ...(isMatrix ? {} : { height: 10 }),
+        ...(symbology === 'qrcode' && eclevel ? { eclevel } : {}),
       });
       return normalizeSvg(raw);
     } catch {
       return null;
     }
-  }, [symbology, value, showText]);
+  }, [symbology, value, showText, eclevel]);
 
   if (svg === null) {
     return (
