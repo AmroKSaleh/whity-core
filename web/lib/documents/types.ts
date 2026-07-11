@@ -10,6 +10,9 @@
  * distinct from the app's own chrome, which uses design tokens only.
  */
 
+import type { SheetSpec } from './sheet';
+import type { SequenceConfig } from './batch';
+
 export type ElementType = 'text' | 'dynamicText' | 'image' | 'barcode' | 'qr' | 'rect' | 'line';
 
 /** CSS renders 1mm at 96dpi → this many px. Used to convert pointer deltas. */
@@ -129,6 +132,10 @@ export interface DocTemplate {
   page: PageSpec;
   placeholders: Placeholder[];
   pages: DocPage[];
+  /** Saved N-up label-sheet layout (print-time), if the operator configured one. */
+  sheet?: SheetSpec;
+  /** Saved serial/sequence generator settings, for repeatable batch runs. */
+  sequence?: SequenceConfig;
 }
 
 /** The barcode symbologies offered in the properties panel (bwip-js ids). */

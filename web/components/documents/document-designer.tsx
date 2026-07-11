@@ -17,8 +17,14 @@ import {
   saveTemplate,
   type SavedTemplate,
 } from '@/lib/documents/storage';
-import { generateSequence, rowsFromRecords, rowsFromValues, type SequenceConfig } from '@/lib/documents/batch';
-import type { SheetSpec } from '@/lib/documents/sheet';
+import {
+  DEFAULT_SEQUENCE,
+  generateSequence,
+  rowsFromRecords,
+  rowsFromValues,
+  type SequenceConfig,
+} from '@/lib/documents/batch';
+import { DEFAULT_SHEET, type SheetSpec } from '@/lib/documents/sheet';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
@@ -100,19 +106,11 @@ export function DocumentDesigner() {
   const [batchRows, setBatchRows] = useState<Record<string, string>[] | null>(null);
   const [batchIndex, setBatchIndex] = useState(0);
 
-  // N-up label-sheet layout (print-time). Disabled by default = one label per
-  // physical page. Runtime-only, like the batch.
-  const [sheet, setSheet] = useState<SheetSpec>({
-    enabled: false,
-    cols: 3,
-    rows: 8,
-    sheetWidthMm: 210,
-    sheetHeightMm: 297,
-    marginXMm: 7,
-    marginYMm: 13,
-    gutterXMm: 2.5,
-    gutterYMm: 0,
-  });
+  // N-up label-sheet layout + serial-sequence settings. Unlike the generated
+  // batch rows (runtime-only), these are saved with the template so a label
+  // template is reusable — reopen it and just change the serial range.
+  const [sheet, setSheet] = useState<SheetSpec>(DEFAULT_SHEET);
+  const [sequence, setSequence] = useState<SequenceConfig>(DEFAULT_SEQUENCE);
 
   // Current page + its elements. `currentPage` may briefly exceed the page count
   // after an undo/delete, so read through a clamped `pageIndex`. ALL element
@@ -474,8 +472,11 @@ export function DocumentDesigner() {
     setSelectedId(null);
   };
 
+  // Fold the runtime print settings into the template for save/export.
+  const withSettings = (t: DocTemplate): DocTemplate => ({ ...t, sheet, sequence });
+
   const doSave = () => {
-    const id = saveTemplate(template, currentId ?? undefined);
+    const id = saveTemplate(withSettings(template), currentId ?? undefined);
     setCurrentId(id);
     setSaved(listSaved());
     addToast('Template saved.', 'success');
@@ -485,6 +486,8 @@ export function DocumentDesigner() {
     const entry = listSaved().find((s) => s.id === id);
     if (!entry) return;
     setTemplate(entry.data);
+    setSheet(entry.data.sheet ?? DEFAULT_SHEET);
+    setSequence(entry.data.sequence ?? DEFAULT_SEQUENCE);
     setCurrentId(entry.id);
     setCurrentPage(0);
     setSelectedId(null);
@@ -496,6 +499,8 @@ export function DocumentDesigner() {
 
   const doNew = () => {
     setTemplate(blankTemplate());
+    setSheet(DEFAULT_SHEET);
+    setSequence(DEFAULT_SEQUENCE);
     setCurrentId(null);
     setCurrentPage(0);
     setSelectedId(null);
@@ -511,7 +516,10 @@ export function DocumentDesigner() {
         addToast('That file is not a valid template.', 'error');
         return;
       }
-      setTemplate(migrateTemplate(parsed));
+      const migrated = migrateTemplate(parsed);
+      setTemplate(migrated);
+      setSheet(migrated.sheet ?? DEFAULT_SHEET);
+      setSequence(migrated.sequence ?? DEFAULT_SEQUENCE);
       setCurrentId(null);
       setCurrentPage(0);
       setSelectedId(null);
@@ -609,7 +617,7 @@ export function DocumentDesigner() {
           </Button>
         )}
         <span className="mx-1 h-5 w-px bg-border" />
-        <Button variant="outline" size="sm" className="gap-1" onClick={() => exportTemplateJson(template)}>
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => exportTemplateJson(withSettings(template))}>
           <IconDownload className="h-3.5 w-3.5" /> Export
         </Button>
         <Button variant="outline" size="sm" className="gap-1" onClick={() => fileRef.current?.click()}>
@@ -804,11 +812,13 @@ export function DocumentDesigner() {
               setTemplate((t) => ({ ...t, placeholders: list }));
             }}
             sheet={sheet}
+            sequence={sequence}
             onGenerateBatch={generateBatch}
             onLoadBatchRecords={loadBatchRecords}
             onClearBatch={clearBatch}
             onBatchIndex={setBatchIndex}
             onChangeSheet={(patch) => setSheet((s) => ({ ...s, ...patch }))}
+            onChangeSequence={(patch) => setSequence((s) => ({ ...s, ...patch }))}
           />
         </aside>
       </div>

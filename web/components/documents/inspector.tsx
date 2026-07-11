@@ -28,6 +28,7 @@ export function Inspector({
   selected,
   batch,
   sheet,
+  sequence,
   onChangeSelected,
   onChangePage,
   onChangePlaceholders,
@@ -36,11 +37,13 @@ export function Inspector({
   onClearBatch,
   onBatchIndex,
   onChangeSheet,
+  onChangeSequence,
 }: {
   template: DocTemplate;
   selected: DocElement | null;
   batch: BatchState;
   sheet: SheetSpec;
+  sequence: SequenceConfig;
   onChangeSelected: (patch: Partial<DocElement>) => void;
   onChangePage: (patch: Partial<PageSpec>) => void;
   onChangePlaceholders: (list: Placeholder[]) => void;
@@ -49,6 +52,7 @@ export function Inspector({
   onClearBatch: () => void;
   onBatchIndex: (i: number) => void;
   onChangeSheet: (patch: Partial<SheetSpec>) => void;
+  onChangeSequence: (patch: Partial<SequenceConfig>) => void;
 }) {
   const [tab, setTab] = useState<Tab>('element');
   const unitsTotal = (batch.active ? batch.total : 1) * template.pages.length;
@@ -77,10 +81,12 @@ export function Inspector({
           <BatchTab
             placeholders={template.placeholders}
             batch={batch}
+            sequence={sequence}
             onGenerate={onGenerateBatch}
             onLoadRecords={onLoadBatchRecords}
             onClear={onClearBatch}
             onIndex={onBatchIndex}
+            onChangeSequence={onChangeSequence}
           />
         )}
         {tab === 'sheet' && <SheetTab sheet={sheet} unitsTotal={unitsTotal} onChange={onChangeSheet} />}
@@ -435,29 +441,29 @@ type BatchMode = 'sequence' | 'csv' | 'paste';
 function BatchTab({
   placeholders,
   batch,
+  sequence,
   onGenerate,
   onLoadRecords,
   onClear,
   onIndex,
+  onChangeSequence,
 }: {
   placeholders: Placeholder[];
   batch: BatchState;
+  sequence: SequenceConfig;
   onGenerate: (cfg: SequenceConfig) => void;
   onLoadRecords: (records: Record<string, string>[]) => void;
   onClear: () => void;
   onIndex: (i: number) => void;
+  onChangeSequence: (patch: Partial<SequenceConfig>) => void;
 }) {
   const [mode, setMode] = useState<BatchMode>('sequence');
-  const [key, setKey] = useState(placeholders[0]?.key ?? '');
-  const [prefix, setPrefix] = useState('SN-');
-  const [start, setStart] = useState(1);
-  const [count, setCount] = useState(10);
-  const [step, setStep] = useState(1);
-  const [padding, setPadding] = useState(4);
-  const [suffix, setSuffix] = useState('');
   const [paste, setPaste] = useState('');
   const [parseError, setParseError] = useState('');
 
+  // Fall back to the first placeholder until the operator picks one.
+  const key = sequence.key || placeholders[0]?.key || '';
+  const { prefix, start, count, step, padding, suffix } = sequence;
   const cfg: SequenceConfig = { key, prefix, start, count, step, padding, suffix };
   const canGenerate = key !== '' && count > 0;
   const sample = canGenerate ? generateSequence({ ...cfg, count: Math.min(count, 3) }) : [];
@@ -511,7 +517,7 @@ function BatchTab({
               className={SELECT_CLASS}
               data-testid="doc-batch-key"
               value={key}
-              onChange={(e) => setKey(e.target.value)}
+              onChange={(e) => onChangeSequence({ key: e.target.value })}
             >
               {placeholders.length === 0 && <option value="">(add a placeholder in the Data tab)</option>}
               {placeholders.map((p) => (
@@ -523,19 +529,19 @@ function BatchTab({
           </Field>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Prefix">
-              <Input data-testid="doc-batch-prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+              <Input data-testid="doc-batch-prefix" value={prefix} onChange={(e) => onChangeSequence({ prefix: e.target.value })} />
             </Field>
             <Field label="Suffix">
-              <Input data-testid="doc-batch-suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} />
+              <Input data-testid="doc-batch-suffix" value={suffix} onChange={(e) => onChangeSequence({ suffix: e.target.value })} />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <Num label="Start" value={start} onChange={setStart} testId="doc-batch-start" />
-            <Num label="Count" value={count} onChange={setCount} testId="doc-batch-count" />
+            <Num label="Start" value={start} onChange={(v) => onChangeSequence({ start: v })} testId="doc-batch-start" />
+            <Num label="Count" value={count} onChange={(v) => onChangeSequence({ count: v })} testId="doc-batch-count" />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <Num label="Step" value={step} onChange={setStep} />
-            <Num label="Zero-pad" value={padding} onChange={setPadding} />
+            <Num label="Step" value={step} onChange={(v) => onChangeSequence({ step: v })} />
+            <Num label="Zero-pad" value={padding} onChange={(v) => onChangeSequence({ padding: v })} />
           </div>
           {sample.length > 0 && (
             <p className="text-[10px] text-muted-foreground">
