@@ -977,12 +977,12 @@ parameters:
 
 		-
 			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
-			count: 1
+			count: 2
 			path: tests/Integration/TwoFactorFlowTest.php
 
 		-
 			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
-			count: 2
+			count: 3
 			path: tests/Integration/TwoFactorFlowTest.php
 
 		-

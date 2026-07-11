@@ -280,6 +280,22 @@ class TwoFactorHandler
                 return Response::error('Invalid token claims', 401);
             }
 
+            // Reject a re-confirm when 2FA is ALREADY enabled. Without this guard
+            // a valid-token holder can call confirm() directly (bypassing setup(),
+            // which does check) to silently rotate the second factor onto a secret
+            // THEY control — a full 2FA takeover — and the unconditional write below
+            // would also reset backup_codes_version to 1 and strand the prior code
+            // set. Enabling 2FA a second time must go through disable() first (which
+            // clears the secret and invalidates the old codes). dbTruthy(), not a
+            // raw cast: on PG two_factor_enabled is "t"/"f" and (bool)"f" is TRUE.
+            $identity = $this->readIdentityRow($profileId);
+            if ($identity === null) {
+                return Response::error('User not found', 404);
+            }
+            if (self::dbTruthy($identity['two_factor_enabled'])) {
+                return Response::error('2FA is already enabled for this user', 409);
+            }
+
             // Parse request body (envelope validated upstream, WC-189).
             $body = JsonBody::parsed($request);
 
