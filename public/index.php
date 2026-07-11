@@ -929,6 +929,27 @@ $router->register('GET',    '/api/storage-config', [$tenantStorageConfigHandler,
 $router->register('PUT',    '/api/storage-config', [$tenantStorageConfigHandler, 'put'],    null, null, CorePermissions::STORAGE_MANAGE);
 $router->register('DELETE', '/api/storage-config', [$tenantStorageConfigHandler, 'delete'], null, null, CorePermissions::STORAGE_MANAGE);
 
+// 13a-quater. Operator subscription-plan admin API (WC-plans, ADR 0010): catalog
+// CRUD of plans + their entitlement bundles, and applying a plan to a target
+// tenant (which materialises the bundle into that tenant's entitlements). Gated
+// on plans:manage (RbacMiddleware) AND — enforced in the handler — the system
+// tenant (id 0), so a regular tenant admin can never touch the catalog or another
+// tenant's plan.
+$planService = new \Whity\Core\Plan\PlanService(
+    new \Whity\Core\Plan\PlanRepository($db->getPdo()),
+    $entitlementService,
+    $db->getPdo()
+);
+$plansHandler = new \Whity\Api\PlansApiHandler($planService, $roleChecker, $db->getPdo());
+$router->register('GET',    '/api/plans',                       [$plansHandler, 'list'],            null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/plans',                       [$plansHandler, 'create'],          null, null, CorePermissions::PLANS_MANAGE);
+$router->register('GET',    '/api/plans/{id:\d+}',              [$plansHandler, 'show'],            null, null, CorePermissions::PLANS_MANAGE);
+$router->register('PATCH',  '/api/plans/{id:\d+}',              [$plansHandler, 'update'],          null, null, CorePermissions::PLANS_MANAGE);
+$router->register('DELETE', '/api/plans/{id:\d+}',              [$plansHandler, 'destroy'],         null, null, CorePermissions::PLANS_MANAGE);
+$router->register('PUT',    '/api/plans/{id:\d+}/entitlements', [$plansHandler, 'setEntitlements'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
+
 // 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
 // plaintext mail.* config is edited via /api/settings/global above; these add the
 // write-only SMTP password (encrypted at rest, never returned) and a live "send

@@ -28,6 +28,12 @@ final class PlanService
     /** System tenant (0) is implicitly unlimited; it is never assigned a plan. */
     private const SYSTEM_TENANT_ID = 0;
 
+    /** The system tenant id — the operator authority tenant (for gate checks). */
+    public static function systemTenantId(): int
+    {
+        return self::SYSTEM_TENANT_ID;
+    }
+
     private PlanRepository $plans;
     private EntitlementService $entitlements;
     private PDO $db;
@@ -93,6 +99,16 @@ final class PlanService
     public function deletePlan(int $id): bool
     {
         return $this->plans->deletePlan($id) > 0;
+    }
+
+    /**
+     * List plans in catalog order.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listPlans(bool $activeOnly = false): array
+    {
+        return $this->plans->listPlans($activeOnly);
     }
 
     /**

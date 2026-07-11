@@ -94,7 +94,8 @@ final class CoreApiSchemas
             self::brandingRoutes(),
             self::identityRoutes(),
             self::tenantEntitlementRoutes(),
-            self::tenantStorageRoutes()
+            self::tenantStorageRoutes(),
+            self::planRoutes()
         );
     }
 
@@ -1620,6 +1621,67 @@ final class CoreApiSchemas
                 'public_base_url' => ['type' => 'string', 'format' => 'uri', 'nullable' => true],
             ], ['endpoint', 'region', 'bucket', 'access_key']),
 
+            // ── Subscription plans (WC-plans, ADR 0010) ───────────────────────
+            // A plan row (list shape — no entitlement bundle).
+            'PlanSummary' => self::object([
+                'id' => self::int(),
+                'plan_key' => self::str(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'is_active' => self::bool(),
+                'sort_order' => self::int(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'plan_key', 'name', 'is_active', 'sort_order', 'created_at', 'updated_at']),
+            // A plan WITH its entitlement bundle (detail shape). `entitlements` maps
+            // an entitlement key → typed value (bool | int).
+            'Plan' => self::object([
+                'id' => self::int(),
+                'plan_key' => self::str(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'is_active' => self::bool(),
+                'sort_order' => self::int(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+                'entitlements' => [
+                    'type' => 'object',
+                    'additionalProperties' => ['oneOf' => [['type' => 'boolean'], ['type' => 'integer']]],
+                ],
+            ], ['id', 'plan_key', 'name', 'is_active', 'sort_order', 'created_at', 'updated_at', 'entitlements']),
+            'PlanListResponse' => self::listEnvelope('PlanSummary'),
+            'PlanResponse' => self::dataEnvelope(SchemaBuilder::ref('Plan')),
+            'PlanCreateRequest' => self::object([
+                'plan_key' => self::str(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'is_active' => self::bool(),
+                'sort_order' => self::int(),
+            ], ['plan_key', 'name']),
+            'PlanUpdateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+                'is_active' => self::bool(),
+                'sort_order' => self::int(),
+            ], []),
+            // A map of entitlement key → value (string/bool/int) or null to remove.
+            'PlanEntitlementsPutRequest' => self::object([
+                'entitlements' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['entitlements']),
+            'PlanApplyRequest' => self::object([
+                'plan_id' => self::int(),
+            ], ['plan_id']),
+            // The tenant's plan assignment; the enclosing data is null when the
+            // tenant has no plan.
+            'TenantPlan' => self::object([
+                'tenant_id' => self::int(),
+                'plan_id' => self::int(true),
+                'assigned_by' => self::int(true),
+                'assigned_at' => self::str(),
+                'plan' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('PlanSummary')]],
+            ], ['tenant_id', 'plan_id', 'assigned_at']),
+            'TenantPlanResponse' => self::dataEnvelope(['nullable' => true, 'allOf' => [SchemaBuilder::ref('TenantPlan')]]),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -2267,6 +2329,90 @@ final class CoreApiSchemas
                     204 => ['description' => 'Storage configuration removed'],
                     400 => self::errorResponse('Tenant context is required'),
                     404 => self::errorResponse('No storage configuration to remove'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Operator subscription-plan admin routes (WC-plans, ADR 0010): catalog CRUD +
+     * entitlement bundles + applying a plan to a target tenant. Gated on
+     * `plans:manage` AND (in the handler) the system tenant.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function planRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/plans', 'plans:manage', [
+                'summary' => 'List subscription plans (operator)',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The plan catalog', 'PlanListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/plans', 'plans:manage', [
+                'summary' => 'Create a subscription plan (operator)',
+                'tags' => ['plans'],
+                'request' => 'PlanCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created plan', 'PlanResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/plans/{id:\d+}', 'plans:manage', [
+                'summary' => 'Get a plan and its entitlement bundle (operator)',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The plan and its entitlement bundle', 'PlanResponse'),
+                    404 => self::errorResponse('Plan not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/plans/{id:\d+}', 'plans:manage', [
+                'summary' => 'Update a plan (operator)',
+                'tags' => ['plans'],
+                'request' => 'PlanUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated plan', 'PlanResponse'),
+                    404 => self::errorResponse('Plan not found'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/plans/{id:\d+}', 'plans:manage', [
+                'summary' => 'Delete a plan (operator)',
+                'tags' => ['plans'],
+                'responses' => [
+                    204 => ['description' => 'Plan deleted'],
+                    404 => self::errorResponse('Plan not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/plans/{id:\d+}/entitlements', 'plans:manage', [
+                'summary' => 'Set a plan\'s entitlement bundle (operator)',
+                'tags' => ['plans'],
+                'request' => 'PlanEntitlementsPutRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The plan with its updated bundle', 'PlanResponse'),
+                    400 => self::errorResponse('Body must include a non-empty "entitlements" object'),
+                    404 => self::errorResponse('Plan not found'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/tenants/{id:\d+}/plan', 'plans:manage', [
+                'summary' => 'Apply a plan to a tenant (operator)',
+                'tags' => ['plans'],
+                'request' => 'PlanApplyRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s plan assignment', 'TenantPlanResponse'),
+                    404 => self::errorResponse('Tenant not found'),
+                    422 => self::errorResponse('plan_id missing, unknown, or the system tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/tenants/{id:\d+}/plan', 'plans:manage', [
+                'summary' => 'Get a tenant\'s current plan (operator)',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s plan assignment (null when unassigned)', 'TenantPlanResponse'),
+                    404 => self::errorResponse('Tenant not found'),
                 ] + self::authErrors(),
             ]),
         ];
