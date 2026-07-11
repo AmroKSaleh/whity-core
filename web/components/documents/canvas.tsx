@@ -33,6 +33,48 @@ const HANDLES: HandleDef[] = [
 const MIN_MM = 1;
 /** Alignment-guide snap tolerance, in millimetres (edge/centre to target). */
 const SNAP_MM = 1.5;
+/** Ruler thickness in CSS px. */
+const RULER = 16;
+
+/** A mm ruler along the top (x) or left (y) of the page, ticked every 10mm. */
+function RulerBar({ axis, lengthMm, zoom }: { axis: 'x' | 'y'; lengthMm: number; zoom: number }) {
+  const pxPerMm = PX_PER_MM * zoom;
+  const marks: number[] = [];
+  for (let mm = 0; mm <= lengthMm + 0.01; mm += 10) marks.push(Math.round(mm));
+  return (
+    <div
+      data-testid={`doc-ruler-${axis}`}
+      aria-hidden
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        background: 'var(--color-muted)',
+        borderInlineEnd: axis === 'y' ? '1px solid var(--color-border)' : undefined,
+        borderBlockEnd: axis === 'x' ? '1px solid var(--color-border)' : undefined,
+        ...(axis === 'x'
+          ? { width: `${lengthMm * pxPerMm}px`, height: `${RULER}px` }
+          : { height: `${lengthMm * pxPerMm}px`, width: `${RULER}px` }),
+      }}
+    >
+      {marks.map((mm) => (
+        <div
+          key={mm}
+          style={{
+            position: 'absolute',
+            color: 'var(--color-muted-foreground)',
+            fontSize: '7px',
+            lineHeight: 1,
+            ...(axis === 'x'
+              ? { left: `${mm * pxPerMm}px`, top: 0, bottom: 0, borderInlineStart: '1px solid var(--color-border)', paddingInlineStart: '1px' }
+              : { top: `${mm * pxPerMm}px`, left: 0, right: 0, borderBlockStart: '1px solid var(--color-border)', paddingInlineStart: '1px' }),
+          }}
+        >
+          {mm}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 interface Interaction {
   kind: 'move' | 'resize';
@@ -54,6 +96,7 @@ export function Canvas({
   zoom,
   gridMm,
   showGrid,
+  showRulers,
   preview,
   onSelect,
   onChange,
@@ -68,6 +111,7 @@ export function Canvas({
   zoom: number;
   gridMm: number;
   showGrid: boolean;
+  showRulers: boolean;
   preview: boolean;
   onSelect: (id: string | null, additive?: boolean) => void;
   onChange: (id: string, patch: Partial<DocElement>) => void;
@@ -192,7 +236,7 @@ export function Canvas({
 
   const ordered = [...elements].sort((a, b) => a.z - b.z);
 
-  return (
+  const pageBlock = (
     <div
       className="mx-auto"
       style={{ width: `calc(${page.widthMm}mm * ${zoom})`, height: `calc(${page.heightMm}mm * ${zoom})` }}
@@ -341,6 +385,17 @@ export function Canvas({
           );
         })}
       </div>
+    </div>
+  );
+
+  // Rulers are an edit-time aid; skip them in preview.
+  if (!showRulers || preview) return pageBlock;
+  return (
+    <div className="mx-auto grid w-max" style={{ gridTemplateColumns: `${RULER}px auto`, gridTemplateRows: `${RULER}px auto` }}>
+      <div style={{ width: RULER, height: RULER, background: 'var(--color-muted)', borderInlineEnd: '1px solid var(--color-border)', borderBlockEnd: '1px solid var(--color-border)' }} />
+      <RulerBar axis="x" lengthMm={page.widthMm} zoom={zoom} />
+      <RulerBar axis="y" lengthMm={page.heightMm} zoom={zoom} />
+      {pageBlock}
     </div>
   );
 }

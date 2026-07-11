@@ -96,6 +96,7 @@ export function DocumentDesigner() {
   const [zoom, setZoom] = useState(1);
   const [snap, setSnap] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
+  const [showRulers, setShowRulers] = useState(false);
   const [saved, setSaved] = useState<SavedTemplate[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -928,6 +929,9 @@ export function DocumentDesigner() {
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             Grid <Switch data-testid="doc-grid-toggle" checked={showGrid} onCheckedChange={setShowGrid} />
           </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            Rulers <Switch data-testid="doc-rulers-toggle" checked={showRulers} onCheckedChange={setShowRulers} />
+          </label>
           <span className="flex items-center gap-1">
             <Button variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}>
               <IconZoomOut className="h-4 w-4" />
@@ -1026,6 +1030,7 @@ export function DocumentDesigner() {
             zoom={zoom}
             gridMm={snap ? 1 : 0}
             showGrid={showGrid}
+            showRulers={showRulers}
             preview={preview}
             onSelect={selectOne}
             onChange={patchElement}
