@@ -149,7 +149,11 @@ final class FederatedIdentityLinker
             // email domain with auto_provision → provision a passwordless profile.
             $claim = $this->ownedVerifiedClaim($ctx->tenantId, $email);
             if ($claim !== null) {
-                return $this->provisionTenantMember($identity, $ctx, $email, (int) $claim['default_role_id']);
+                $roleId = $this->resolveSafeRoleId((int) $claim['default_role_id'], $ctx->tenantId);
+                if ($roleId === null) {
+                    return ['status' => 'refused_no_account'];
+                }
+                return $this->provisionTenantMember($identity, $ctx, $email, $roleId);
             }
             return ['status' => 'refused_no_account'];
         }
@@ -165,7 +169,11 @@ final class FederatedIdentityLinker
             }
             $claim = $this->ownedVerifiedClaim($ctx->tenantId, $email);
             if ($claim !== null) {
-                return $this->addTenantMember($identity, $ctx, $email, $profileId, (int) $claim['default_role_id']);
+                $roleId = $this->resolveSafeRoleId((int) $claim['default_role_id'], $ctx->tenantId);
+                if ($roleId === null) {
+                    return ['status' => 'refused_no_account'];
+                }
+                return $this->addTenantMember($identity, $ctx, $email, $profileId, $roleId);
             }
             return ['status' => 'refused_no_account'];
         }
@@ -223,10 +231,52 @@ final class FederatedIdentityLinker
     ): array {
         try {
             $this->memberships->insert($profileId, $ctx->tenantId, $roleId);
-        } catch (\PDOException) {
-            // Already a member (UNIQUE(profile_id, tenant_id)) — fine, proceed to link.
+        } catch (\PDOException $e) {
+            // ONLY a duplicate membership (UNIQUE(profile_id, tenant_id)) is benign
+            // here — proceed to link. Any other DB error (bad role FK, connection,
+            // etc.) must surface, not be silently swallowed.
+            if (!self::isUniqueViolation($e)) {
+                throw $e;
+            }
         }
         return $this->linkOrResolve($identity, $ctx, $email, $profileId, $ctx->providerId);
+    }
+
+    /**
+     * Whether the claimed default role is safe to assign in this tenant: it must be
+     * a role OWNED by `$tenantId` or a GLOBAL role (tenant_id IS NULL). Otherwise a
+     * misconfigured or hostile domain claim could grant a foreign tenant's role (or
+     * an over-privileged one) to a JIT-provisioned member. Returns the claimed id
+     * when valid, else the least-privilege global `user` role, else null (the
+     * caller then refuses to onboard rather than assign an unsafe role).
+     */
+    private function resolveSafeRoleId(int $claimedRoleId, int $tenantId): ?int
+    {
+        $stmt = $this->db->prepare(
+            'SELECT 1 FROM roles WHERE id = :rid AND (tenant_id = :tid OR tenant_id IS NULL)'
+        );
+        $stmt->execute([':rid' => $claimedRoleId, ':tid' => $tenantId]);
+        if ($stmt->fetchColumn() !== false) {
+            return $claimedRoleId;
+        }
+
+        // Fail safe to the base global 'user' role (least privilege).
+        $fallback = $this->db->query("SELECT id FROM roles WHERE name = 'user' AND tenant_id IS NULL LIMIT 1");
+        $id = $fallback !== false ? $fallback->fetchColumn() : false;
+
+        return $id !== false ? (int) $id : null;
+    }
+
+    /**
+     * Whether a PDOException is a UNIQUE / integrity-constraint violation (a benign
+     * "row already exists"), as opposed to any other database failure. Portable
+     * across PostgreSQL (SQLSTATE 23505) and SQLite (23000).
+     */
+    private static function isUniqueViolation(\PDOException $e): bool
+    {
+        $sqlState = (string) $e->getCode();
+
+        return $sqlState === '23505' || $sqlState === '23000';
     }
 
     /**
