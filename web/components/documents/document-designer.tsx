@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DocElement, DocTemplate, ElementType, PageSpec, Placeholder } from '@/lib/documents/types';
 import {
   blankTemplate,
+  newPageId,
 } from '@/lib/documents/presets';
 import {
   deleteSaved,
   exportTemplateJson,
   isDocTemplate,
   listSaved,
+  migrateTemplate,
   newElement,
   sampleDataOf,
   saveTemplate,
@@ -35,6 +37,11 @@ import {
   IconZoomOut,
   IconArrowBackUp,
   IconArrowForwardUp,
+  IconPlus,
+  IconTrash,
+  IconChevronLeft,
+  IconChevronRight,
+  IconFiles,
   IconLayoutAlignLeft,
   IconLayoutAlignCenter,
   IconLayoutAlignRight,
@@ -45,13 +52,24 @@ import {
 import { Canvas } from './canvas';
 import { Palette } from './palette';
 import { Inspector } from './inspector';
+import { PrintDocument } from './print-document';
 
 const SELECT_CLASS =
   'h-7 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30';
 
+/** Immutably replace the elements of one page within a template. */
+function withPageElements(
+  t: DocTemplate,
+  idx: number,
+  fn: (els: DocElement[]) => DocElement[]
+): DocTemplate {
+  return { ...t, pages: t.pages.map((p, i) => (i === idx ? { ...p, elements: fn(p.elements) } : p)) };
+}
+
 export function DocumentDesigner() {
   const { addToast } = useToast();
   const [template, setTemplate] = useState<DocTemplate>(() => blankTemplate());
+  const [currentPage, setCurrentPage] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -74,6 +92,13 @@ export function DocumentDesigner() {
   const pasteSeq = useRef(0);
   const [hasClipboard, setHasClipboard] = useState(false);
 
+  // Current page + its elements. `currentPage` may briefly exceed the page count
+  // after an undo/delete, so read through a clamped `pageIndex`. ALL element
+  // operations target this page.
+  const pageIndex = Math.min(currentPage, template.pages.length - 1);
+  const elements = template.pages[pageIndex]?.elements ?? [];
+  const selected = elements.find((e) => e.id === selectedId) ?? null;
+
   // Read the saved-template list from localStorage after mount (client-only).
   // Deferred off the synchronous effect tick to stay clear of the
   // set-state-in-effect rule while still populating on first render.
@@ -85,9 +110,9 @@ export function DocumentDesigner() {
   // Live state for the once-attached keyboard listener + history snapshots,
   // kept fresh by a per-render effect (so the stable listener/callbacks read
   // current values without re-subscribing — lint-safe).
-  const kbRef = useRef({ selectedId, preview, template, past, future });
+  const kbRef = useRef({ selectedId, preview, template, past, future, pageIndex });
   useEffect(() => {
-    kbRef.current = { selectedId, preview, template, past, future };
+    kbRef.current = { selectedId, preview, template, past, future, pageIndex };
   });
 
   // Snapshot the pre-mutation template onto the undo stack. Call BEFORE applying
@@ -134,8 +159,10 @@ export function DocumentDesigner() {
   // Append a clone of `src` to the template with a fresh id, nudged +3mm and
   // raised to the top; selects it. Shared by duplicate and paste.
   const appendClone = useCallback((src: DocElement) => {
+    const idx = kbRef.current.pageIndex;
     setTemplate((t) => {
-      const maxZ = t.elements.reduce((m, e) => Math.max(m, e.z), 0);
+      const els = t.pages[idx]?.elements ?? [];
+      const maxZ = els.reduce((m, e) => Math.max(m, e.z), 0);
       const clone = {
         ...src,
         id: `${src.type}-${Date.now()}-${(pasteSeq.current += 1)}`,
@@ -146,26 +173,26 @@ export function DocumentDesigner() {
         hidden: false,
       } as DocElement;
       setSelectedId(clone.id);
-      return { ...t, elements: [...t.elements, clone] };
+      return withPageElements(t, idx, (e) => [...e, clone]);
     });
   }, []);
 
   const copySelected = useCallback(() => {
-    const { selectedId: sid, template: tpl } = kbRef.current;
-    const el = tpl.elements.find((x) => x.id === sid);
+    const { selectedId: sid, template: tpl, pageIndex: idx } = kbRef.current;
+    const el = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
     if (!el) return;
     clipboardRef.current = el;
     setHasClipboard(true);
   }, []);
 
   const cutSelected = useCallback(() => {
-    const { selectedId: sid, template: tpl } = kbRef.current;
-    const el = tpl.elements.find((x) => x.id === sid);
+    const { selectedId: sid, template: tpl, pageIndex: idx } = kbRef.current;
+    const el = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
     if (!el) return;
     clipboardRef.current = el;
     setHasClipboard(true);
     commit('cut');
-    setTemplate((t) => ({ ...t, elements: t.elements.filter((x) => x.id !== sid) }));
+    setTemplate((t) => withPageElements(t, idx, (e) => e.filter((x) => x.id !== sid)));
     setSelectedId(null);
   }, [commit]);
 
@@ -177,8 +204,8 @@ export function DocumentDesigner() {
   }, [commit, appendClone]);
 
   const duplicateSelected = useCallback(() => {
-    const { selectedId: sid, template: tpl } = kbRef.current;
-    const src = tpl.elements.find((x) => x.id === sid);
+    const { selectedId: sid, template: tpl, pageIndex: idx } = kbRef.current;
+    const src = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
     if (!src) return;
     commit('duplicate');
     appendClone(src);
@@ -231,8 +258,8 @@ export function DocumentDesigner() {
           return;
         }
       }
-      const { selectedId: sid, preview: pv, template: tpl } = kbRef.current;
-      const selEl = tpl.elements.find((x) => x.id === sid);
+      const { selectedId: sid, preview: pv, template: tpl, pageIndex: idx } = kbRef.current;
+      const selEl = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
       if (pv || !selEl) return;
       if (e.key === 'Escape') {
         setSelectedId(null);
@@ -243,7 +270,7 @@ export function DocumentDesigner() {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         commit('delete');
-        setTemplate((t) => ({ ...t, elements: t.elements.filter((x) => x.id !== sid) }));
+        setTemplate((t) => withPageElements(t, idx, (e2) => e2.filter((x) => x.id !== sid)));
         setSelectedId(null);
         return;
       }
@@ -258,10 +285,11 @@ export function DocumentDesigner() {
       if (d) {
         e.preventDefault();
         commit('nudge');
-        setTemplate((t) => ({
-          ...t,
-          elements: t.elements.map((x) => (x.id === sid ? { ...x, x: Math.max(0, x.x + d[0]), y: Math.max(0, x.y + d[1]) } : x)),
-        }));
+        setTemplate((t) =>
+          withPageElements(t, idx, (e2) =>
+            e2.map((x) => (x.id === sid ? { ...x, x: Math.max(0, x.x + d[0]), y: Math.max(0, x.y + d[1]) } : x))
+          )
+        );
       }
     };
     window.addEventListener('keydown', onKey);
@@ -269,29 +297,29 @@ export function DocumentDesigner() {
   }, [undo, redo, commit, copySelected, cutSelected, pasteClipboard, duplicateSelected]);
 
   const data = useMemo(() => sampleDataOf(template), [template]);
-  const selected = template.elements.find((e) => e.id === selectedId) ?? null;
 
   const patchElement = (id: string, patch: Partial<DocElement>) => {
     // Label by field set so a continuous drag / same-field typing coalesces.
     commit(`patch:${Object.keys(patch).sort().join(',')}`);
-    setTemplate((t) => ({
-      ...t,
-      elements: t.elements.map((e) => (e.id === id ? ({ ...e, ...patch } as DocElement) : e)),
-    }));
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) =>
+        els.map((e) => (e.id === id ? ({ ...e, ...patch } as DocElement) : e))
+      )
+    );
   };
 
   const addElement = (type: ElementType) => {
     commit('add');
     setTemplate((t) => {
-      const el = newElement(type, t.elements);
+      const el = newElement(type, t.pages[pageIndex]?.elements ?? []);
       setSelectedId(el.id);
-      return { ...t, elements: [...t.elements, el] };
+      return withPageElements(t, pageIndex, (els) => [...els, el]);
     });
   };
 
   const deleteElement = (id: string) => {
     commit('delete');
-    setTemplate((t) => ({ ...t, elements: t.elements.filter((e) => e.id !== id) }));
+    setTemplate((t) => withPageElements(t, pageIndex, (els) => els.filter((e) => e.id !== id)));
   };
 
   const alignSelected = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vmiddle' | 'bottom') => {
@@ -314,27 +342,86 @@ export function DocumentDesigner() {
 
   const toggleLock = (id: string) => {
     commit('lock');
-    setTemplate((t) => ({
-      ...t,
-      elements: t.elements.map((e) => (e.id === id ? ({ ...e, locked: !e.locked } as DocElement) : e)),
-    }));
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) =>
+        els.map((e) => (e.id === id ? ({ ...e, locked: !e.locked } as DocElement) : e))
+      )
+    );
   };
 
   const toggleHidden = (id: string) => {
     commit('hide');
-    setTemplate((t) => ({
-      ...t,
-      elements: t.elements.map((e) => (e.id === id ? ({ ...e, hidden: !e.hidden } as DocElement) : e)),
-    }));
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) =>
+        els.map((e) => (e.id === id ? ({ ...e, hidden: !e.hidden } as DocElement) : e))
+      )
+    );
   };
 
   const reorder = (id: string, dir: 'up' | 'down') => {
     commit('reorder');
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) => {
+        const zs = els.map((e) => e.z);
+        const target = dir === 'up' ? Math.max(...zs) + 1 : Math.min(...zs) - 1;
+        return els.map((e) => (e.id === id ? { ...e, z: target } : e));
+      })
+    );
+  };
+
+  // ── page operations ─────────────────────────────────────────────────────
+  const addPage = () => {
+    commit('page-add');
+    const at = pageIndex + 1;
+    setTemplate((t) => ({
+      ...t,
+      pages: [...t.pages.slice(0, at), { id: newPageId(), elements: [] }, ...t.pages.slice(at)],
+    }));
+    setSelectedId(null);
+    setCurrentPage(at);
+  };
+
+  const duplicatePage = () => {
+    commit('page-duplicate');
+    const at = pageIndex;
     setTemplate((t) => {
-      const zs = t.elements.map((e) => e.z);
-      const target = dir === 'up' ? Math.max(...zs) + 1 : Math.min(...zs) - 1;
-      return { ...t, elements: t.elements.map((e) => (e.id === id ? { ...e, z: target } : e)) };
+      const src = t.pages[at];
+      const cloned = src.elements.map((el, i) => ({ ...el, id: `${el.type}-${Date.now()}-${i}` }) as DocElement);
+      return {
+        ...t,
+        pages: [...t.pages.slice(0, at + 1), { id: newPageId(), elements: cloned }, ...t.pages.slice(at + 1)],
+      };
     });
+    setSelectedId(null);
+    setCurrentPage(at + 1);
+  };
+
+  const deletePage = () => {
+    if (template.pages.length <= 1) return;
+    commit('page-delete');
+    const at = pageIndex;
+    setTemplate((t) => ({ ...t, pages: t.pages.filter((_, i) => i !== at) }));
+    setSelectedId(null);
+    setCurrentPage(Math.max(0, at - 1));
+  };
+
+  const movePage = (dir: 'left' | 'right') => {
+    const at = pageIndex;
+    const to = dir === 'left' ? at - 1 : at + 1;
+    if (to < 0 || to >= template.pages.length) return;
+    commit('page-move');
+    setTemplate((t) => {
+      const pages = [...t.pages];
+      const [p] = pages.splice(at, 1);
+      pages.splice(to, 0, p);
+      return { ...t, pages };
+    });
+    setCurrentPage(to);
+  };
+
+  const goToPage = (i: number) => {
+    setCurrentPage(i);
+    setSelectedId(null);
   };
 
   const doSave = () => {
@@ -349,6 +436,7 @@ export function DocumentDesigner() {
     if (!entry) return;
     setTemplate(entry.data);
     setCurrentId(entry.id);
+    setCurrentPage(0);
     setSelectedId(null);
     resetHistory();
     addToast(`Loaded “${entry.name}”.`, 'info');
@@ -357,6 +445,7 @@ export function DocumentDesigner() {
   const doNew = () => {
     setTemplate(blankTemplate());
     setCurrentId(null);
+    setCurrentPage(0);
     setSelectedId(null);
     resetHistory();
   };
@@ -368,8 +457,9 @@ export function DocumentDesigner() {
         addToast('That file is not a valid template.', 'error');
         return;
       }
-      setTemplate(parsed);
+      setTemplate(migrateTemplate(parsed));
       setCurrentId(null);
+      setCurrentPage(0);
       setSelectedId(null);
       resetHistory();
       addToast('Template imported.', 'success');
@@ -379,9 +469,8 @@ export function DocumentDesigner() {
   };
 
   const doPrint = () => {
-    setPreview(true);
-    // Let the resolved (preview) render commit before invoking print.
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+    // The off-screen PrintDocument (all pages) is always mounted; just print.
+    requestAnimationFrame(() => window.print());
   };
 
   return (
@@ -506,11 +595,68 @@ export function DocumentDesigner() {
         </span>
       </div>
 
+      {/* Page navigator */}
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1.5" data-testid="doc-page-nav">
+        <span className="mr-1 text-xs font-medium text-muted-foreground">Pages</span>
+        {template.pages.map((pg, i) => (
+          <button
+            key={pg.id}
+            type="button"
+            data-testid={`doc-page-tab-${i}`}
+            aria-current={i === pageIndex}
+            onClick={() => goToPage(i)}
+            className={`h-7 min-w-7 rounded-md border px-2 text-xs tabular-nums ${
+              i === pageIndex ? 'border-primary bg-primary/10 font-medium text-foreground' : 'border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {i + 1}
+          </button>
+        ))}
+        <Button variant="outline" size="icon-sm" aria-label="Add page" data-testid="doc-add-page" onClick={addPage}>
+          <IconPlus className="h-4 w-4" />
+        </Button>
+        <span className="mx-1 h-5 w-px bg-border" />
+        <Button variant="ghost" size="icon-sm" aria-label="Duplicate page" data-testid="doc-duplicate-page" onClick={duplicatePage}>
+          <IconFiles className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Move page left"
+          disabled={pageIndex === 0}
+          onClick={() => movePage('left')}
+        >
+          <IconChevronLeft className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Move page right"
+          disabled={pageIndex >= template.pages.length - 1}
+          onClick={() => movePage('right')}
+        >
+          <IconChevronRight className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Delete page"
+          data-testid="doc-delete-page"
+          disabled={template.pages.length <= 1}
+          onClick={deletePage}
+        >
+          <IconTrash className="h-4 w-4 text-destructive/80" />
+        </Button>
+        <span className="ml-auto text-xs text-muted-foreground">
+          Page {pageIndex + 1} of {template.pages.length}
+        </span>
+      </div>
+
       {/* Editor body */}
       <div className="grid h-[74vh] grid-cols-[13rem_1fr_18rem] gap-3">
         <aside className="overflow-hidden rounded-lg border border-border bg-card p-3">
           <Palette
-            elements={template.elements}
+            elements={elements}
             selectedId={selectedId}
             onAdd={addElement}
             onSelect={setSelectedId}
@@ -526,7 +672,8 @@ export function DocumentDesigner() {
 
         <main className="overflow-auto rounded-lg border border-border bg-muted/30 p-6">
           <Canvas
-            template={template}
+            elements={elements}
+            page={template.page}
             data={data}
             selectedId={selectedId}
             zoom={zoom}
@@ -594,13 +741,19 @@ export function DocumentDesigner() {
         </aside>
       </div>
 
-      {/* Print stylesheet: isolate the page and set the physical @page size.
-          Rendered as a text child (not innerHTML); the interpolated dims are
-          plain numbers from state. */}
-      <style>{`@media print {
+      {/* Off-screen, all-pages render used only for printing. */}
+      <PrintDocument template={template} data={data} />
+
+      {/* Print stylesheet: hide the app chrome and emit each page at the physical
+          @page size with a break between pages. Rendered as a text child (not
+          innerHTML); the interpolated dims are plain numbers from state. */}
+      <style>{`.doc-print-doc { display: none; }
+      @media print {
         body * { visibility: hidden !important; }
-        #doc-print-root, #doc-print-root * { visibility: visible !important; }
-        #doc-print-root { position: fixed !important; left: 0; top: 0; transform: none !important; box-shadow: none !important; }
+        .doc-print-doc, .doc-print-doc * { visibility: visible !important; }
+        .doc-print-doc { display: block !important; position: absolute; left: 0; top: 0; }
+        .doc-print-page { break-after: page; box-shadow: none !important; }
+        .doc-print-page:last-child { break-after: auto; }
         @page { size: ${template.page.widthMm}mm ${template.page.heightMm}mm; margin: 0; }
       }`}</style>
     </div>

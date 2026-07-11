@@ -116,12 +116,19 @@ export interface PageSpec {
   background: string;
 }
 
+/** One page of a template: an ordered list of elements on the shared page size. */
+export interface DocPage {
+  id: string;
+  elements: DocElement[];
+}
+
 export interface DocTemplate {
-  version: 1;
+  version: 2;
   name: string;
+  /** Page size/background/margin, shared by every page (uniform documents). */
   page: PageSpec;
   placeholders: Placeholder[];
-  elements: DocElement[];
+  pages: DocPage[];
 }
 
 /** The barcode symbologies offered in the properties panel (bwip-js ids). */

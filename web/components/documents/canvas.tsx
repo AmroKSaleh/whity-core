@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { DocElement, DocTemplate, PageSpec } from '@/lib/documents/types';
+import type { DocElement, PageSpec } from '@/lib/documents/types';
 import { PX_PER_MM } from '@/lib/documents/types';
 import { snapMove } from '@/lib/documents/geometry';
 import { ElementContent } from './element-content';
@@ -42,7 +42,8 @@ interface Interaction {
 }
 
 export function Canvas({
-  template,
+  elements,
+  page,
   data,
   selectedId,
   zoom,
@@ -51,7 +52,8 @@ export function Canvas({
   onSelect,
   onChange,
 }: {
-  template: DocTemplate;
+  elements: DocElement[];
+  page: PageSpec;
   data: Record<string, string>;
   selectedId: string | null;
   zoom: number;
@@ -60,7 +62,6 @@ export function Canvas({
   onSelect: (id: string | null) => void;
   onChange: (id: string, patch: Partial<DocElement>) => void;
 }) {
-  const { page } = template;
   const [drag, setDrag] = useState<Interaction | null>(null);
   // Alignment guide lines to draw while dragging (x/y positions in mm).
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
@@ -68,10 +69,10 @@ export function Canvas({
   // Live scene + change callback read by the drag listener via refs, so the
   // listener subscribes ONCE per drag instead of re-subscribing on every render
   // (which would drop fast pointer events in the unsubscribe gap).
-  const sceneRef = useRef({ elements: template.elements, page });
+  const sceneRef = useRef({ elements, page });
   const onChangeRef = useRef(onChange);
   useEffect(() => {
-    sceneRef.current = { elements: template.elements, page };
+    sceneRef.current = { elements, page };
     onChangeRef.current = onChange;
   });
 
@@ -136,7 +137,7 @@ export function Canvas({
     setDrag({ kind, handle, id: el.id, startX: e.clientX, startY: e.clientY, orig: { x: el.x, y: el.y, w: el.w, h: el.h } });
   };
 
-  const ordered = [...template.elements].sort((a, b) => a.z - b.z);
+  const ordered = [...elements].sort((a, b) => a.z - b.z);
 
   return (
     <div
@@ -144,7 +145,6 @@ export function Canvas({
       style={{ width: `calc(${page.widthMm}mm * ${zoom})`, height: `calc(${page.heightMm}mm * ${zoom})` }}
     >
       <div
-        id="doc-print-root"
         data-testid="doc-page"
         onPointerDown={() => !preview && onSelect(null)}
         style={{
