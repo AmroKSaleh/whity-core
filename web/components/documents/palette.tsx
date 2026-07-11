@@ -52,7 +52,7 @@ function elementLabel(el: DocElement): string {
 
 export function Palette({
   elements,
-  selectedId,
+  selectedIds,
   onAdd,
   onSelect,
   onReorder,
@@ -61,15 +61,16 @@ export function Palette({
   onDelete,
 }: {
   elements: DocElement[];
-  selectedId: string | null;
+  selectedIds: string[];
   onAdd: (type: ElementType) => void;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, additive?: boolean) => void;
   onReorder: (id: string, dir: 'up' | 'down') => void;
   onToggleLock: (id: string) => void;
   onToggleHidden: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const frontToBack = [...elements].sort((a, b) => b.z - a.z);
+  const selectedSet = new Set(selectedIds);
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -104,13 +105,14 @@ export function Palette({
             <div
               key={el.id}
               className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${
-                el.id === selectedId ? 'border-primary bg-primary/10' : 'border-border bg-card'
+                selectedSet.has(el.id) ? 'border-primary bg-primary/10' : 'border-border bg-card'
               }`}
             >
               <button
                 type="button"
+                data-testid={`doc-layer-select-${el.id}`}
                 className={`min-w-0 flex-1 truncate text-start ${el.hidden ? 'text-muted-foreground line-through' : ''}`}
-                onClick={() => onSelect(el.id)}
+                onClick={(e) => onSelect(el.id, e.shiftKey || e.metaKey || e.ctrlKey)}
                 title={elementLabel(el)}
               >
                 {elementLabel(el)}

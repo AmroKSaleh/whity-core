@@ -78,7 +78,7 @@ export function DocumentDesigner() {
   const { addToast } = useToast();
   const [template, setTemplate] = useState<DocTemplate>(() => blankTemplate());
   const [currentPage, setCurrentPage] = useState(0);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [preview, setPreview] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [snap, setSnap] = useState(true);
@@ -97,7 +97,7 @@ export function DocumentDesigner() {
   // our own clipboard rather than the async system Clipboard API to avoid
   // permission prompts and keep paste deterministic/offline. `pasteSeq` keeps
   // pasted ids unique even within the same millisecond.
-  const clipboardRef = useRef<DocElement | null>(null);
+  const clipboardRef = useRef<DocElement[] | null>(null);
   const pasteSeq = useRef(0);
   const [hasClipboard, setHasClipboard] = useState(false);
 
@@ -118,7 +118,20 @@ export function DocumentDesigner() {
   // operations target this page.
   const pageIndex = Math.min(currentPage, template.pages.length - 1);
   const elements = template.pages[pageIndex]?.elements ?? [];
-  const selected = elements.find((e) => e.id === selectedId) ?? null;
+  // Single-element affordances (inspector, resize, size readout) apply only when
+  // exactly one element is selected; group affordances read the full set.
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
+  const selected = selectedId ? elements.find((e) => e.id === selectedId) ?? null : null;
+
+  // Selection helpers. Plain select replaces the set; additive (shift/⌘-click)
+  // toggles one element in/out for multi-select.
+  const selectOne = (id: string | null, additive = false) => {
+    if (id === null) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds((prev) => (additive ? (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]) : [id]));
+  };
 
   // Read the saved-template list from localStorage after mount (client-only).
   // Deferred off the synchronous effect tick to stay clear of the
@@ -131,9 +144,9 @@ export function DocumentDesigner() {
   // Live state for the once-attached keyboard listener + history snapshots,
   // kept fresh by a per-render effect (so the stable listener/callbacks read
   // current values without re-subscribing — lint-safe).
-  const kbRef = useRef({ selectedId, preview, template, past, future, pageIndex });
+  const kbRef = useRef({ selectedIds, preview, template, past, future, pageIndex });
   useEffect(() => {
-    kbRef.current = { selectedId, preview, template, past, future, pageIndex };
+    kbRef.current = { selectedIds, preview, template, past, future, pageIndex };
   });
 
   // Snapshot the pre-mutation template onto the undo stack. Call BEFORE applying
@@ -163,7 +176,7 @@ export function DocumentDesigner() {
     setPast(p.slice(0, -1));
     setFuture([cur, ...f]);
     setTemplate(p[p.length - 1]);
-    setSelectedId(null);
+    setSelectedIds([]);
     historyRef.current.lastLabel = '';
   }, []);
 
@@ -173,64 +186,73 @@ export function DocumentDesigner() {
     setFuture(f.slice(1));
     setPast([...p, cur]);
     setTemplate(f[0]);
-    setSelectedId(null);
+    setSelectedIds([]);
     historyRef.current.lastLabel = '';
   }, []);
 
-  // Append a clone of `src` to the template with a fresh id, nudged +3mm and
-  // raised to the top; selects it. Shared by duplicate and paste.
-  const appendClone = useCallback((src: DocElement) => {
+  // Append clones of `srcs` to the current page with fresh ids, nudged +3mm and
+  // stacked on top; selects the clones. Shared by duplicate and paste.
+  const appendClones = useCallback((srcs: DocElement[]) => {
+    if (srcs.length === 0) return;
     const idx = kbRef.current.pageIndex;
     setTemplate((t) => {
       const els = t.pages[idx]?.elements ?? [];
-      const maxZ = els.reduce((m, e) => Math.max(m, e.z), 0);
-      const clone = {
-        ...src,
-        id: `${src.type}-${Date.now()}-${(pasteSeq.current += 1)}`,
-        x: src.x + 3,
-        y: src.y + 3,
-        z: maxZ + 1,
-        locked: false,
-        hidden: false,
-      } as DocElement;
-      setSelectedId(clone.id);
-      return withPageElements(t, idx, (e) => [...e, clone]);
+      let maxZ = els.reduce((m, e) => Math.max(m, e.z), 0);
+      const clones = srcs.map((src) => {
+        maxZ += 1;
+        return {
+          ...src,
+          id: `${src.type}-${Date.now()}-${(pasteSeq.current += 1)}`,
+          x: src.x + 3,
+          y: src.y + 3,
+          z: maxZ,
+          locked: false,
+          hidden: false,
+        } as DocElement;
+      });
+      setSelectedIds(clones.map((c) => c.id));
+      return withPageElements(t, idx, (e) => [...e, ...clones]);
     });
   }, []);
 
-  const copySelected = useCallback(() => {
-    const { selectedId: sid, template: tpl, pageIndex: idx } = kbRef.current;
-    const el = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
-    if (!el) return;
-    clipboardRef.current = el;
-    setHasClipboard(true);
+  /** The currently-selected elements on the current page, in document order. */
+  const currentSelection = useCallback((): DocElement[] => {
+    const { selectedIds: ids, template: tpl, pageIndex: idx } = kbRef.current;
+    const els = tpl.pages[idx]?.elements ?? [];
+    return els.filter((e) => ids.includes(e.id));
   }, []);
 
-  const cutSelected = useCallback(() => {
-    const { selectedId: sid, template: tpl, pageIndex: idx } = kbRef.current;
-    const el = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
-    if (!el) return;
-    clipboardRef.current = el;
+  const copySelected = useCallback(() => {
+    const sel = currentSelection();
+    if (sel.length === 0) return;
+    clipboardRef.current = sel;
     setHasClipboard(true);
+  }, [currentSelection]);
+
+  const cutSelected = useCallback(() => {
+    const sel = currentSelection();
+    if (sel.length === 0) return;
+    clipboardRef.current = sel;
+    setHasClipboard(true);
+    const ids = new Set(sel.map((e) => e.id));
     commit('cut');
-    setTemplate((t) => withPageElements(t, idx, (e) => e.filter((x) => x.id !== sid)));
-    setSelectedId(null);
-  }, [commit]);
+    setTemplate((t) => withPageElements(t, kbRef.current.pageIndex, (e) => e.filter((x) => !ids.has(x.id))));
+    setSelectedIds([]);
+  }, [commit, currentSelection]);
 
   const pasteClipboard = useCallback(() => {
     const src = clipboardRef.current;
-    if (!src) return;
+    if (!src || src.length === 0) return;
     commit('paste');
-    appendClone(src);
-  }, [commit, appendClone]);
+    appendClones(src);
+  }, [commit, appendClones]);
 
   const duplicateSelected = useCallback(() => {
-    const { selectedId: sid, template: tpl, pageIndex: idx } = kbRef.current;
-    const src = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
-    if (!src) return;
+    const sel = currentSelection();
+    if (sel.length === 0) return;
     commit('duplicate');
-    appendClone(src);
-  }, [commit, appendClone]);
+    appendClones(sel);
+  }, [commit, appendClones, currentSelection]);
 
   // Keyboard: Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo (work without a
   // selection); Delete removes, arrows nudge (Shift = 5mm), Escape deselects.
@@ -279,20 +301,23 @@ export function DocumentDesigner() {
           return;
         }
       }
-      const { selectedId: sid, preview: pv, template: tpl, pageIndex: idx } = kbRef.current;
-      const selEl = (tpl.pages[idx]?.elements ?? []).find((x) => x.id === sid);
-      if (pv || !selEl) return;
+      const { selectedIds: ids, preview: pv, template: tpl, pageIndex: idx } = kbRef.current;
+      const els = tpl.pages[idx]?.elements ?? [];
+      const sel = els.filter((x) => ids.includes(x.id));
+      if (pv || sel.length === 0) return;
       if (e.key === 'Escape') {
-        setSelectedId(null);
+        setSelectedIds([]);
         return;
       }
-      // Locked elements ignore delete / nudge (unlock via the layers panel).
-      if (selEl.locked) return;
+      // Locked elements are skipped by delete / nudge (unlock via the layers panel).
+      const movable = sel.filter((x) => !x.locked);
+      if (movable.length === 0) return;
+      const movableIds = new Set(movable.map((x) => x.id));
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         commit('delete');
-        setTemplate((t) => withPageElements(t, idx, (e2) => e2.filter((x) => x.id !== sid)));
-        setSelectedId(null);
+        setTemplate((t) => withPageElements(t, idx, (e2) => e2.filter((x) => !movableIds.has(x.id))));
+        setSelectedIds([]);
         return;
       }
       const step = e.shiftKey ? 5 : 1;
@@ -308,7 +333,7 @@ export function DocumentDesigner() {
         commit('nudge');
         setTemplate((t) =>
           withPageElements(t, idx, (e2) =>
-            e2.map((x) => (x.id === sid ? { ...x, x: Math.max(0, x.x + d[0]), y: Math.max(0, x.y + d[1]) } : x))
+            e2.map((x) => (movableIds.has(x.id) ? { ...x, x: Math.max(0, x.x + d[0]), y: Math.max(0, x.y + d[1]) } : x))
           )
         );
       }
@@ -361,7 +386,7 @@ export function DocumentDesigner() {
     commit('add');
     setTemplate((t) => {
       const el = newElement(type, t.pages[pageIndex]?.elements ?? []);
-      setSelectedId(el.id);
+      setSelectedIds([el.id]);
       return withPageElements(t, pageIndex, (els) => [...els, el]);
     });
   };
@@ -369,24 +394,46 @@ export function DocumentDesigner() {
   const deleteElement = (id: string) => {
     commit('delete');
     setTemplate((t) => withPageElements(t, pageIndex, (els) => els.filter((e) => e.id !== id)));
+    setSelectedIds((prev) => prev.filter((x) => x !== id));
   };
 
+  // Batch position/size update for a group drag — one coalesced history step.
+  const changeMany = (updates: Array<{ id: string; patch: Partial<DocElement> }>) => {
+    commit('drag-group');
+    const map = new Map(updates.map((u) => [u.id, u.patch]));
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) =>
+        els.map((e) => (map.has(e.id) ? ({ ...e, ...map.get(e.id) } as DocElement) : e))
+      )
+    );
+  };
+
+  // Align every selected element (skipping locked) to a page edge/centre.
   const alignSelected = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vmiddle' | 'bottom') => {
-    if (!selected || selected.locked) return;
+    const ids = new Set(selectedIds);
+    if (!elements.some((e) => ids.has(e.id) && !e.locked)) return;
     const { widthMm: W, heightMm: H } = template.page;
-    const patch: Partial<DocElement> =
-      kind === 'left'
-        ? { x: 0 }
-        : kind === 'hcenter'
-          ? { x: Math.max(0, (W - selected.w) / 2) }
-          : kind === 'right'
-            ? { x: Math.max(0, W - selected.w) }
-            : kind === 'top'
-              ? { y: 0 }
-              : kind === 'vmiddle'
-                ? { y: Math.max(0, (H - selected.h) / 2) }
-                : { y: Math.max(0, H - selected.h) };
-    patchElement(selected.id, patch);
+    commit('align');
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) =>
+        els.map((e) => {
+          if (!ids.has(e.id) || e.locked) return e;
+          const patch: Partial<DocElement> =
+            kind === 'left'
+              ? { x: 0 }
+              : kind === 'hcenter'
+                ? { x: Math.max(0, (W - e.w) / 2) }
+                : kind === 'right'
+                  ? { x: Math.max(0, W - e.w) }
+                  : kind === 'top'
+                    ? { y: 0 }
+                    : kind === 'vmiddle'
+                      ? { y: Math.max(0, (H - e.h) / 2) }
+                      : { y: Math.max(0, H - e.h) };
+          return { ...e, ...patch } as DocElement;
+        })
+      )
+    );
   };
 
   const toggleLock = (id: string) => {
@@ -426,7 +473,7 @@ export function DocumentDesigner() {
       ...t,
       pages: [...t.pages.slice(0, at), { id: newPageId(), elements: [] }, ...t.pages.slice(at)],
     }));
-    setSelectedId(null);
+    setSelectedIds([]);
     setCurrentPage(at);
   };
 
@@ -441,7 +488,7 @@ export function DocumentDesigner() {
         pages: [...t.pages.slice(0, at + 1), { id: newPageId(), elements: cloned }, ...t.pages.slice(at + 1)],
       };
     });
-    setSelectedId(null);
+    setSelectedIds([]);
     setCurrentPage(at + 1);
   };
 
@@ -450,7 +497,7 @@ export function DocumentDesigner() {
     commit('page-delete');
     const at = pageIndex;
     setTemplate((t) => ({ ...t, pages: t.pages.filter((_, i) => i !== at) }));
-    setSelectedId(null);
+    setSelectedIds([]);
     setCurrentPage(Math.max(0, at - 1));
   };
 
@@ -470,7 +517,7 @@ export function DocumentDesigner() {
 
   const goToPage = (i: number) => {
     setCurrentPage(i);
-    setSelectedId(null);
+    setSelectedIds([]);
   };
 
   // Fold the runtime print settings into the template for save/export.
@@ -491,7 +538,7 @@ export function DocumentDesigner() {
     setSequence(entry.data.sequence ?? DEFAULT_SEQUENCE);
     setCurrentId(entry.id);
     setCurrentPage(0);
-    setSelectedId(null);
+    setSelectedIds([]);
     setBatchRows(null);
     setBatchIndex(0);
     resetHistory();
@@ -504,7 +551,7 @@ export function DocumentDesigner() {
     setSequence(DEFAULT_SEQUENCE);
     setCurrentId(null);
     setCurrentPage(0);
-    setSelectedId(null);
+    setSelectedIds([]);
     setBatchRows(null);
     setBatchIndex(0);
     resetHistory();
@@ -523,7 +570,7 @@ export function DocumentDesigner() {
       setSequence(migrated.sequence ?? DEFAULT_SEQUENCE);
       setCurrentId(null);
       setCurrentPage(0);
-      setSelectedId(null);
+      setSelectedIds([]);
       setBatchRows(null);
       setBatchIndex(0);
       resetHistory();
@@ -734,16 +781,13 @@ export function DocumentDesigner() {
         <aside className="overflow-hidden rounded-lg border border-border bg-card p-3">
           <Palette
             elements={elements}
-            selectedId={selectedId}
+            selectedIds={selectedIds}
             onAdd={addElement}
-            onSelect={setSelectedId}
+            onSelect={selectOne}
             onReorder={reorder}
             onToggleLock={toggleLock}
             onToggleHidden={toggleHidden}
-            onDelete={(id) => {
-              deleteElement(id);
-              if (selectedId === id) setSelectedId(null);
-            }}
+            onDelete={deleteElement}
           />
         </aside>
 
@@ -752,19 +796,25 @@ export function DocumentDesigner() {
             elements={elements}
             page={template.page}
             data={activeData}
-            selectedId={selectedId}
+            selectedIds={selectedIds}
             zoom={zoom}
             gridMm={snap ? 1 : 0}
             showGrid={showGrid}
             preview={preview}
-            onSelect={setSelectedId}
+            onSelect={selectOne}
             onChange={patchElement}
+            onChangeMany={changeMany}
           />
         </main>
 
         <aside className="overflow-hidden rounded-lg border border-border bg-card p-3">
-          {selected && (
+          {selectedIds.length > 0 && (
             <div className="mb-2 space-y-1.5" data-testid="doc-selected-actions">
+              {selectedIds.length > 1 && (
+                <p className="text-xs font-medium text-primary" data-testid="doc-selection-count">
+                  {selectedIds.length} elements selected
+                </p>
+              )}
               <div className="flex items-center gap-0.5">
                 <Button variant="outline" size="icon-sm" aria-label="Align left" onClick={() => alignSelected('left')}>
                   <IconLayoutAlignLeft className="h-4 w-4" />
@@ -806,6 +856,7 @@ export function DocumentDesigner() {
           <Inspector
             template={template}
             selected={selected}
+            selectedCount={selectedIds.length}
             batch={{ active: batchActive, index: batchClampIndex, total: rows.length }}
             onChangeSelected={(patch) => selectedId && patchElement(selectedId, patch)}
             onChangePage={(patch: Partial<PageSpec>) => {
