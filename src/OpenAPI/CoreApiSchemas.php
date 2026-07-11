@@ -92,7 +92,8 @@ final class CoreApiSchemas
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
             self::brandingRoutes(),
-            self::identityRoutes()
+            self::identityRoutes(),
+            self::tenantEntitlementRoutes()
         );
     }
 
@@ -1543,6 +1544,40 @@ final class CoreApiSchemas
             ], ['id', 'provider_key', 'linked_at']),
             'MeIdentityListResponse' => self::listEnvelope('MeIdentity'),
 
+            // ── Operator per-tenant entitlements (WC-ent) ─────────────────────
+            // One catalogue entry: how to render + interpret an entitlement.
+            'EntitlementCatalogueEntry' => self::object([
+                'type' => ['type' => 'string', 'enum' => ['bool', 'int']],
+                'default' => self::str(),
+                'description' => self::str(),
+            ], ['type', 'default', 'description']),
+            // effective: a map of entitlement key → typed value (bool | int, where
+            // -1 on an int means unlimited). registry: key → catalogue entry.
+            'TenantEntitlementsResponse' => self::dataEnvelope(self::object([
+                'tenant_id' => self::int(),
+                'effective' => [
+                    'type' => 'object',
+                    'additionalProperties' => ['oneOf' => [['type' => 'boolean'], ['type' => 'integer']]],
+                ],
+                'overridden' => ['type' => 'array', 'items' => self::str()],
+                'registry' => [
+                    'type' => 'object',
+                    'additionalProperties' => SchemaBuilder::ref('EntitlementCatalogueEntry'),
+                ],
+            ], ['tenant_id', 'effective', 'overridden', 'registry'])),
+            'TenantEntitlementsMutationResponse' => self::dataEnvelope(self::object([
+                'tenant_id' => self::int(),
+                'effective' => [
+                    'type' => 'object',
+                    'additionalProperties' => ['oneOf' => [['type' => 'boolean'], ['type' => 'integer']]],
+                ],
+                'overridden' => ['type' => 'array', 'items' => self::str()],
+            ], ['tenant_id', 'effective', 'overridden'])),
+            // A map of entitlement key → value (string/bool/int) or null to clear.
+            'TenantEntitlementsPatchRequest' => self::object([
+                'entitlements' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['entitlements']),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -2116,6 +2151,40 @@ final class CoreApiSchemas
             $ssoProviders,
             $meIdentitiesList,
             $meIdentitiesUnlink,
+        ];
+    }
+
+    /**
+     * Operator per-tenant entitlements admin routes (WC-ent). The platform owner
+     * grants/limits a TARGET tenant's capabilities per subscription tier. Gated
+     * on `entitlements:manage` AND (in the handler) the system tenant; the target
+     * tenant is the `{id}` path parameter, never the body.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tenantEntitlementRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/tenants/{id:\d+}/entitlements', 'entitlements:manage', [
+                'summary' => 'Get a tenant\'s effective entitlements (operator)',
+                'tags' => ['entitlements'],
+                'responses' => [
+                    200 => self::jsonResponse('The target tenant\'s effective entitlements, overrides, and the catalogue', 'TenantEntitlementsResponse'),
+                    404 => self::errorResponse('Tenant not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/tenants/{id:\d+}/entitlements', 'entitlements:manage', [
+                'summary' => 'Set a tenant\'s entitlement overrides (operator)',
+                'tags' => ['entitlements'],
+                'request' => 'TenantEntitlementsPatchRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated effective entitlements', 'TenantEntitlementsMutationResponse'),
+                    400 => self::errorResponse('Body must include a non-empty "entitlements" object'),
+                    404 => self::errorResponse('Tenant not found'),
+                    409 => self::errorResponse('The system tenant is implicitly unlimited and has no overrides'),
+                    422 => self::errorResponse('Validation failed (unknown key or invalid value)'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 

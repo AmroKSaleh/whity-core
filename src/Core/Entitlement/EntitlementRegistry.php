@@ -140,6 +140,27 @@ final class EntitlementRegistry
     }
 
     /**
+     * The full catalogue for the operator admin UI: every key mapped to its
+     * type, baseline default, and description. Lets the client render an editor
+     * (checkbox for bool, number for int) and show the free-tier baseline.
+     *
+     * @return array<string, array{type: string, default: string, description: string}>
+     */
+    public static function catalogue(): array
+    {
+        $out = [];
+        foreach (self::keys() as $key) {
+            $out[$key] = [
+                'type'        => self::TYPES[$key],
+                'default'     => self::DEFAULTS[$key],
+                'description' => self::DESCRIPTIONS[$key],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * Validate a raw TEXT value for a key. Returns null when valid, or a
      * human-readable reason string otherwise. Never throws (mirrors
      * SettingsRegistry::validate) so the API layer can surface a 422.
