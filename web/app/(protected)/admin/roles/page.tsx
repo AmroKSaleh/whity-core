@@ -37,6 +37,9 @@ export default function RolesPage() {
   const [isPermissionsPanelOpen, setIsPermissionsPanelOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [query, setQuery] = useState('');
+  const [cloneInitial, setCloneInitial] = useState<
+    { name: string; description: string; permissionIds: number[] } | undefined
+  >(undefined);
 
   const { data, loading: isLoading, error, refetch: fetchRoles } = useFetch(async () => {
     const response = await apiClient('/api/v1/roles');
@@ -76,6 +79,28 @@ export default function RolesPage() {
     setIsDeleteModalOpen(true);
   };
 
+  // Clone: open the Create modal prefilled with the source role's permissions
+  // (works even for non-manageable global base roles — the clone is a new
+  // tenant role). Uses the existing create API; no new endpoint.
+  const handleCloneClick = async (role: Role) => {
+    try {
+      const response = await apiClient(`/api/v1/roles/${role.id}`);
+      if (!response.ok) throw new Error('Failed to load role to clone');
+      const detail = await response.json();
+      const permissionIds: number[] = (detail.data?.permissions ?? []).map(
+        (p: { id: number }) => p.id
+      );
+      setCloneInitial({
+        name: `${role.name} (copy)`,
+        description: role.description,
+        permissionIds,
+      });
+      setIsCreateModalOpen(true);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to clone role', 'error');
+    }
+  };
+
   const columns: Column<Role>[] = [
     { key: 'name', label: 'Name', sortable: true },
     { key: 'description', label: 'Description', sortable: true },
@@ -103,6 +128,11 @@ export default function RolesPage() {
           <DropdownMenuItem onClick={() => handleViewPermissions(role)}>
             View Permissions
           </DropdownMenuItem>
+          {canCreate && (
+            <DropdownMenuItem onClick={() => void handleCloneClick(role)}>
+              Clone
+            </DropdownMenuItem>
+          )}
           {canEdit && (
             <DropdownMenuItem
               disabled={editDisabled}
@@ -180,9 +210,14 @@ export default function RolesPage() {
 
       <CreateRoleModal
         isOpen={isCreateModalOpen}
-        onOpenChange={setIsCreateModalOpen}
+        initial={cloneInitial}
+        onOpenChange={(open) => {
+          setIsCreateModalOpen(open);
+          if (!open) setCloneInitial(undefined);
+        }}
         onSuccess={() => {
           setIsCreateModalOpen(false);
+          setCloneInitial(undefined);
           fetchRoles();
         }}
       />
