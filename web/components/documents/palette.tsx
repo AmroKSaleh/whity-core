@@ -1,7 +1,7 @@
 'use client';
 
 import type { DocElement, ElementType } from '@/lib/documents/types';
-import type { DocBlock } from '@/lib/documents/blocks';
+import { BLOCK_SCOPES, type BlockScope, type DocBlock } from '@/lib/documents/blocks';
 import { Button } from '@amroksaleh/ui/button';
 import {
   IconTypography,
@@ -66,6 +66,7 @@ export function Palette({
   onDelete,
   onInsertBlock,
   onDeleteBlock,
+  onSetBlockScope,
 }: {
   elements: DocElement[];
   selectedIds: string[];
@@ -78,6 +79,7 @@ export function Palette({
   onDelete: (id: string) => void;
   onInsertBlock: (blockId: string) => void;
   onDeleteBlock: (blockId: string) => void;
+  onSetBlockScope: (blockId: string, scope: BlockScope) => void;
 }) {
   const frontToBack = [...elements].sort((a, b) => b.z - a.z);
   const selectedSet = new Set(selectedIds);
@@ -104,35 +106,53 @@ export function Palette({
       </div>
 
       {blocks.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Blocks</h3>
-          <div className="space-y-1">
-            {blocks.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs"
-              >
-                <button
-                  type="button"
-                  data-testid={`doc-block-insert-${b.id}`}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-start"
-                  title={`Insert “${b.name}”`}
-                  onClick={() => onInsertBlock(b.id)}
-                >
-                  <IconComponents className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{b.name}</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label="Delete block"
-                  data-testid={`doc-block-delete-${b.id}`}
-                  onClick={() => onDeleteBlock(b.id)}
-                >
-                  <IconTrash className="h-3.5 w-3.5 text-destructive/80 hover:text-destructive" />
-                </button>
-              </div>
-            ))}
-          </div>
+        <div className="space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Blocks</h3>
+          {BLOCK_SCOPES.filter((s) => blocks.some((b) => b.scope === s.id)).map((s) => (
+            <div key={s.id} className="space-y-1">
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">{s.label}</div>
+              {blocks
+                .filter((b) => b.scope === s.id)
+                .map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs"
+                  >
+                    <button
+                      type="button"
+                      data-testid={`doc-block-insert-${b.id}`}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-start"
+                      title={`Insert “${b.name}”`}
+                      onClick={() => onInsertBlock(b.id)}
+                    >
+                      <IconComponents className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{b.name}</span>
+                    </button>
+                    <select
+                      data-testid={`doc-block-scope-${b.id}`}
+                      aria-label={`Scope for ${b.name}`}
+                      className="h-6 rounded border border-input bg-input/20 px-1 text-[10px] outline-none focus-visible:ring-1 focus-visible:ring-ring/40"
+                      value={b.scope}
+                      onChange={(e) => onSetBlockScope(b.id, e.target.value as BlockScope)}
+                    >
+                      {BLOCK_SCOPES.map((sc) => (
+                        <option key={sc.id} value={sc.id}>
+                          {sc.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      aria-label="Delete block"
+                      data-testid={`doc-block-delete-${b.id}`}
+                      onClick={() => onDeleteBlock(b.id)}
+                    >
+                      <IconTrash className="h-3.5 w-3.5 text-destructive/80 hover:text-destructive" />
+                    </button>
+                  </div>
+                ))}
+            </div>
+          ))}
         </div>
       )}
 

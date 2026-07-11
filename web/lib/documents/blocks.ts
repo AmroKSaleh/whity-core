@@ -10,9 +10,24 @@ import type { BlockInstanceElement, DocElement } from './types';
  * backend store + tenant-wide publishing is the follow-up (Tasker ca1d8c03).
  */
 
+/**
+ * Visibility tier of a block. `personal` = the creator's own library; `tenant`
+ * = published to everyone in the tenant; `global` = operator-wide. Only personal
+ * is meaningful in the localStorage MVP; tenant/global become real once the
+ * tenant-scoped backend store + RBAC (who may publish) land (Tasker ca1d8c03).
+ */
+export type BlockScope = 'personal' | 'tenant' | 'global';
+
+export const BLOCK_SCOPES: ReadonlyArray<{ id: BlockScope; label: string }> = [
+  { id: 'personal', label: 'Personal' },
+  { id: 'tenant', label: 'Tenant-wide' },
+  { id: 'global', label: 'Global' },
+];
+
 export interface DocBlock {
   id: string;
   name: string;
+  scope: BlockScope;
   /** Intrinsic size (bounding box of the block's elements), in millimetres. */
   w: number;
   h: number;
@@ -32,7 +47,9 @@ export function listBlocks(): DocBlock[] {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as DocBlock[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    // Back-compat: blocks saved before scoping default to personal.
+    return (parsed as DocBlock[]).map((b) => ({ ...b, scope: b.scope ?? 'personal' }));
   } catch {
     return [];
   }
@@ -72,7 +89,7 @@ export function makeBlockFromElements(name: string, els: DocElement[]): DocBlock
   const maxX = Math.max(...flat.map((e) => e.x + e.w));
   const maxY = Math.max(...flat.map((e) => e.y + e.h));
   const elements = flat.map((e) => ({ ...e, x: e.x - minX, y: e.y - minY }));
-  return { id: uid(), name: name.trim() || 'Block', w: maxX - minX, h: maxY - minY, elements };
+  return { id: uid(), name: name.trim() || 'Block', scope: 'personal', w: maxX - minX, h: maxY - minY, elements };
 }
 
 /**

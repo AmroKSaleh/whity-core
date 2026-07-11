@@ -402,6 +402,19 @@ test.describe('Document & Label Designer', () => {
     await expect(canvas.getByText('LOGO')).toHaveCount(0);
   });
 
+  test('block scoping: a saved block defaults to Personal and can be published tenant-wide', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-save-block').click();
+
+    const scope = page.locator('[data-testid^="doc-block-scope-"]').first();
+    await expect(scope).toHaveValue('personal');
+
+    // Publish it tenant-wide; the choice sticks (it moves under the Tenant group).
+    await scope.selectOption('tenant');
+    await expect(page.locator('[data-testid^="doc-block-scope-"]').first()).toHaveValue('tenant');
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
