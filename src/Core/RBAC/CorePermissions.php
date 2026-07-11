@@ -130,6 +130,15 @@ final class CorePermissions
     // (id 0). Mirrors ENTITLEMENTS_MANAGE.
     public const PLANS_MANAGE = 'plans:manage';
 
+    // Operator subscription (billing-state) management (WC-billing). Gates setting
+    // a TARGET tenant's subscription status / plan / enforcement mode — the point
+    // where an out-of-band payment is reflected in-app, and where the system admin
+    // sets their own tenant's tier in a sovereign deployment. PLATFORM capability:
+    // the handler additionally requires acting in the system tenant (id 0). A
+    // tenant admin's read-only view of its OWN subscription is gated separately on
+    // settings:read (and is exempt from the payment wall so it stays reachable).
+    public const SUBSCRIPTIONS_MANAGE = 'subscriptions:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -172,6 +181,7 @@ final class CorePermissions
             self::ENTITLEMENTS_MANAGE,
             self::STORAGE_MANAGE,
             self::PLANS_MANAGE,
+            self::SUBSCRIPTIONS_MANAGE,
         ];
     }
 }

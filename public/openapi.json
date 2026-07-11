@@ -8201,6 +8201,92 @@
                 ]
             }
         },
+        "/api/v1/subscription": {
+            "get": {
+                "operationId": "get_api_v1_subscription",
+                "summary": "Get the caller tenant's own subscription (read-only)",
+                "tags": [
+                    "subscription"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The caller tenant's subscription",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SelfSubscriptionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/tenants": {
             "get": {
                 "operationId": "get_api_v1_tenants",
@@ -9111,6 +9197,216 @@
                     },
                     "422": {
                         "description": "plan_id missing, unknown, or the system tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tenants/{id}/subscription": {
+            "get": {
+                "operationId": "get_api_v1_tenants_id_subscription",
+                "summary": "Get a tenant's subscription (operator)",
+                "tags": [
+                    "subscription"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The tenant's subscription + billing state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SubscriptionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "operationId": "put_api_v1_tenants_id_subscription",
+                "summary": "Set a tenant's subscription / apply a plan (operator)",
+                "tags": [
+                    "subscription"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SubscriptionPutRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The updated subscription",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SubscriptionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Tenant not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The system tenant is never subscribed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed (bad status/mode/plan)",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -11557,6 +11853,25 @@
                     "data"
                 ]
             },
+            "PlanRef": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "plan_key": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "plan_key",
+                    "name"
+                ]
+            },
             "PlanResponse": {
                 "type": "object",
                 "properties": {
@@ -12177,6 +12492,56 @@
                     "tenant_id"
                 ]
             },
+            "SelfSubscription": {
+                "type": "object",
+                "properties": {
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "status": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "plan": {
+                        "nullable": true,
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PlanRef"
+                            }
+                        ]
+                    },
+                    "current_period_end": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "effective_enforcement_mode": {
+                        "type": "string",
+                        "enum": [
+                            "off",
+                            "warn",
+                            "block_writes",
+                            "block_all"
+                        ]
+                    }
+                },
+                "required": [
+                    "tenant_id",
+                    "status",
+                    "plan",
+                    "effective_enforcement_mode"
+                ]
+            },
+            "SelfSubscriptionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/SelfSubscription"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "SessionUserResponse": {
                 "type": "object",
                 "properties": {
@@ -12489,6 +12854,110 @@
                             "entitled",
                             "drivers"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "Subscription": {
+                "type": "object",
+                "properties": {
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "status": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "plan": {
+                        "nullable": true,
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PlanRef"
+                            }
+                        ]
+                    },
+                    "current_period_end": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "effective_enforcement_mode": {
+                        "type": "string",
+                        "enum": [
+                            "off",
+                            "warn",
+                            "block_writes",
+                            "block_all"
+                        ]
+                    },
+                    "enforcement_mode": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "grace_until": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "external_ref": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "tenant_id",
+                    "status",
+                    "plan",
+                    "effective_enforcement_mode"
+                ]
+            },
+            "SubscriptionPutRequest": {
+                "type": "object",
+                "properties": {
+                    "plan_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                            "trialing",
+                            "active",
+                            "past_due",
+                            "canceled",
+                            "expired"
+                        ]
+                    },
+                    "enforcement_mode": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                            "off",
+                            "warn",
+                            "block_writes",
+                            "block_all"
+                        ]
+                    },
+                    "current_period_end": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "grace_until": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "external_ref": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
+            "SubscriptionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/Subscription"
                     }
                 },
                 "required": [
