@@ -169,6 +169,19 @@ test.describe('Document & Label Designer', () => {
     expect(top).toBeLessThanOrEqual(1);
   });
 
+  test('setting element opacity applies it on the canvas', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-rect').click();
+    const el = page.locator('[data-testid^="doc-el-"]').first();
+    await expect(el).toBeVisible();
+    await expect(el).toHaveCSS('opacity', '1');
+
+    const opacity = page.getByTestId('doc-opacity');
+    await opacity.fill('40');
+    await opacity.blur();
+    await expect(el).toHaveCSS('opacity', '0.4');
+  });
+
   test('hiding an element removes it from Preview', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-dynamicText').click();

@@ -213,7 +213,8 @@ export function Canvas({
                 transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                 zIndex: el.z,
                 cursor: preview || el.locked ? 'default' : 'move',
-                opacity: el.hidden ? 0.4 : undefined,
+                // Hidden (edit-only) dims to 0.4; otherwise honour the element's own opacity.
+                opacity: el.hidden ? 0.4 : el.opacity ?? undefined,
                 outline: selected ? '1px solid var(--color-primary)' : undefined,
               }}
             >

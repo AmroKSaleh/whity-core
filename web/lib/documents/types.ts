@@ -39,6 +39,8 @@ interface ElementCommon {
   locked?: boolean;
   /** Hidden elements are omitted from Preview and print (still shown, dimmed, while editing). */
   hidden?: boolean;
+  /** Opacity 0–1 (undefined = fully opaque). Applies in edit, Preview and print. */
+  opacity?: number;
 }
 
 export interface TextElement extends ElementCommon {

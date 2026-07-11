@@ -86,7 +86,16 @@ function ElementTab({
         <Num label="W" value={el.w} onChange={(v) => onChange({ w: v })} />
         <Num label="H" value={el.h} onChange={(v) => onChange({ h: v })} />
       </div>
-      <Num label="Rotation (°)" value={el.rotation} onChange={(v) => onChange({ rotation: v })} />
+      <div className="grid grid-cols-2 gap-2">
+        <Num label="Rotation (°)" value={el.rotation} onChange={(v) => onChange({ rotation: v })} />
+        <Num
+          label="Opacity (%)"
+          testId="doc-opacity"
+          value={Math.round((el.opacity ?? 1) * 100)}
+          step={5}
+          onChange={(v) => onChange({ opacity: Math.min(1, Math.max(0, v / 100)) })}
+        />
+      </div>
 
       {(el.type === 'text' || el.type === 'dynamicText') && (
         <>
@@ -330,12 +339,25 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Num({ label, value, onChange, step = 1 }: { label: string; value: number; onChange: (v: number) => void; step?: number }) {
+function Num({
+  label,
+  value,
+  onChange,
+  step = 1,
+  testId,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  step?: number;
+  testId?: string;
+}) {
   return (
     <Field label={label}>
       <Input
         type="number"
         step={step}
+        data-testid={testId}
         value={Number.isFinite(value) ? Math.round(value * 100) / 100 : 0}
         onChange={(e) => {
           const v = parseFloat(e.target.value);
