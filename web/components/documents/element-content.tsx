@@ -27,9 +27,10 @@ export function ElementContent({
     case 'dynamicText':
       return <TextBox style={el.style}>{preview ? interpolate(el.template, data) : el.template}</TextBox>;
     case 'image': {
-      const resolved = resolveBound(el.binding, el.src, data);
-      // Only render http(s) or image data-URIs — never javascript:/other schemes.
-      const src = /^(https?:\/\/|data:image\/)/i.test(resolved) ? resolved : '';
+      // Only render absolute http(s) image URLs — parse-and-check the protocol so
+      // javascript:/data: (incl. script-carrying SVG data-URIs) can't reach the
+      // <img>. (Uploaded/data-URI logos await the backend image-upload endpoint.)
+      const src = safeImageSrc(resolveBound(el.binding, el.src, data));
       if (src === '') {
         return (
           <div className="flex h-full w-full items-center justify-center rounded-sm border border-dashed border-border bg-muted/30 text-[8px] text-muted-foreground">
@@ -72,6 +73,16 @@ export function ElementContent({
       const _exhaustive: never = el;
       return <>{String(_exhaustive)}</>;
     }
+  }
+}
+
+/** Allow only absolute http(s) image URLs into the <img> src (XSS-safe sink). */
+function safeImageSrc(raw: string): string {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : '';
+  } catch {
+    return '';
   }
 }
 
