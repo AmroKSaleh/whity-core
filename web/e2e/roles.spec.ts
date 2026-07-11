@@ -101,6 +101,28 @@ test.describe('Roles CRUD (admin)', () => {
     await expect(panel.getByText(/ous:read/)).toBeVisible();
   });
 
+  test('clone a role prefills the create dialog with its permissions', async ({ adminPage, page }) => {
+    await adminPage.shell.clickNav('Roles');
+    await page.waitForURL('**/admin/roles');
+
+    // Clone the seeded admin role via its row-actions menu.
+    const adminRow = page.getByRole('row', { name: /^admin/ });
+    await adminRow.getByRole('button').click();
+    await page.getByRole('menuitem', { name: 'Clone' }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Create New Role')).toBeVisible();
+    // Name is prefilled and the source permissions are carried over.
+    await expect(dialog.getByLabel('Role Name')).toHaveValue('admin (copy)');
+    await dialog.getByTestId('perm-toggle').click();
+    await expect(dialog.getByTestId('perm-summary')).not.toHaveText(/^0 of/);
+    await dialog.getByTestId('perm-toggle').click();
+
+    // Cancel — nothing persisted (the clone was never submitted).
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+  });
+
   // WC-99 regression guard: the Create Role modal must POST the selected
   // permissions under the canonical key `permissions` (the same key the Edit
   // modal uses), not `permissionIds`. Verified: `POST /api/roles` honours

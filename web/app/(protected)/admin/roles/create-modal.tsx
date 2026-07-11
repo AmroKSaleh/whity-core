@@ -39,12 +39,15 @@ interface CreateRoleModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  /** Optional prefill (used by "Clone role"); resets the form when the modal opens. */
+  initial?: { name: string; description: string; permissionIds: number[] };
 }
 
 export function CreateRoleModal({
   isOpen,
   onOpenChange,
   onSuccess,
+  initial,
 }: CreateRoleModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
@@ -86,6 +89,18 @@ export function CreateRoleModal({
       void (async () => { await fetchPermissions(); })();
     }
   }, [isOpen, permissions.length, fetchPermissions]);
+
+  // On open, seed the form: a clone prefills name/description/permissions, a
+  // plain create resets to blanks.
+  useEffect(() => {
+    if (isOpen) {
+      form.reset({
+        name: initial?.name ?? '',
+        description: initial?.description ?? '',
+        permissionIds: initial?.permissionIds ?? [],
+      });
+    }
+  }, [isOpen, initial, form]);
 
   const onSubmit = async (data: CreateRoleFormData) => {
     try {
