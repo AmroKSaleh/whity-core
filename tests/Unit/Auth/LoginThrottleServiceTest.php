@@ -25,6 +25,29 @@ final class LoginThrottleServiceTest extends TestCase
         $this->throttle = new LoginThrottleService($this->store);
     }
 
+    // ── configurable thresholds ──────────────────────────────────────────────
+
+    public function testHonorsConfiguredUserThreshold(): void
+    {
+        $throttle = new LoginThrottleService($this->store, userThreshold: 3);
+        for ($i = 0; $i < 2; $i++) {
+            $throttle->recordFailure(7, null);
+        }
+        self::assertFalse($throttle->isThrottled(7, null), 'below the configured threshold');
+        $throttle->recordFailure(7, null);
+        self::assertTrue($throttle->isThrottled(7, null), 'at the configured threshold of 3');
+    }
+
+    public function testClampsNonPositiveThresholdToOne(): void
+    {
+        // A misconfigured 0 must NOT disable protection — it clamps to 1.
+        $throttle = new LoginThrottleService($this->store, userThreshold: 0, ipThreshold: 0);
+        self::assertFalse($throttle->isThrottled(9, '9.9.9.9'));
+        $throttle->recordFailure(9, '9.9.9.9');
+        self::assertTrue($throttle->isThrottled(9, null));
+        self::assertTrue($throttle->isThrottled(null, '9.9.9.9'));
+    }
+
     // ── isThrottled: fresh state ─────────────────────────────────────────────
 
     public function testNotThrottledWithNoFailures(): void

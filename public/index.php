@@ -569,7 +569,14 @@ $deploymentManager = new DeploymentManager($db->getPdo(), __DIR__ . '/../storage
 // Inject the shared $totpService (built at step 3b) so the login-path 2FA validation uses the
 // SAME encryption key as the setup/confirm path (WC-95).
 // WC-0abcc29f: brute-force throttle uses the shared DatabaseSharedStore.
-$loginThrottle = new LoginThrottleService(new DatabaseSharedStore($db->getPdo()));
+// Brute-force login throttle thresholds are operator-configurable (like the HTTP
+// RATE_LIMIT_* rules); unset falls back to the service defaults (10/20/900s).
+$loginThrottle = new LoginThrottleService(
+    new DatabaseSharedStore($db->getPdo()),
+    (int) ($_ENV['LOGIN_THROTTLE_USER_THRESHOLD']  ?? getenv('LOGIN_THROTTLE_USER_THRESHOLD')  ?: LoginThrottleService::DEFAULT_USER_THRESHOLD),
+    (int) ($_ENV['LOGIN_THROTTLE_IP_THRESHOLD']    ?? getenv('LOGIN_THROTTLE_IP_THRESHOLD')    ?: LoginThrottleService::DEFAULT_IP_THRESHOLD),
+    (int) ($_ENV['LOGIN_THROTTLE_WINDOW_SECONDS']  ?? getenv('LOGIN_THROTTLE_WINDOW_SECONDS')  ?: LoginThrottleService::DEFAULT_WINDOW_SECONDS),
+);
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // WC-235: public self-service registration — provisions a new tenant + owner
