@@ -30,6 +30,12 @@ import {
   IconCopy,
   IconZoomIn,
   IconZoomOut,
+  IconLayoutAlignLeft,
+  IconLayoutAlignCenter,
+  IconLayoutAlignRight,
+  IconLayoutAlignTop,
+  IconLayoutAlignMiddle,
+  IconLayoutAlignBottom,
 } from '@tabler/icons-react';
 import { Canvas } from './canvas';
 import { Palette } from './palette';
@@ -55,6 +61,55 @@ export function DocumentDesigner() {
   useEffect(() => {
     const p = Promise.resolve().then(() => setSaved(listSaved()));
     void p;
+  }, []);
+
+  // Keyboard shortcuts on the canvas: Delete/Backspace removes, arrows nudge
+  // (Shift = 5mm), Escape deselects. A once-attached listener reads the latest
+  // state through a ref that a per-render effect keeps fresh (lint-safe).
+  const kbRef = useRef({ selectedId, preview, template });
+  useEffect(() => {
+    kbRef.current = { selectedId, preview, template };
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const { selectedId: sid, preview: pv, template: tpl } = kbRef.current;
+      if (pv || !sid) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+      ) {
+        return;
+      }
+      if (!tpl.elements.some((x) => x.id === sid)) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        setTemplate((t) => ({ ...t, elements: t.elements.filter((x) => x.id !== sid) }));
+        setSelectedId(null);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setSelectedId(null);
+        return;
+      }
+      const step = e.shiftKey ? 5 : 1;
+      const delta: Record<string, [number, number]> = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      };
+      const d = delta[e.key];
+      if (d) {
+        e.preventDefault();
+        setTemplate((t) => ({
+          ...t,
+          elements: t.elements.map((x) => (x.id === sid ? { ...x, x: Math.max(0, x.x + d[0]), y: Math.max(0, x.y + d[1]) } : x)),
+        }));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const data = useMemo(() => sampleDataOf(template), [template]);
@@ -84,6 +139,24 @@ export function DocumentDesigner() {
       setSelectedId(clone.id);
       return { ...t, elements: [...t.elements, clone] };
     });
+  };
+
+  const alignSelected = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vmiddle' | 'bottom') => {
+    if (!selected) return;
+    const { widthMm: W, heightMm: H } = template.page;
+    const patch: Partial<DocElement> =
+      kind === 'left'
+        ? { x: 0 }
+        : kind === 'hcenter'
+          ? { x: Math.max(0, (W - selected.w) / 2) }
+          : kind === 'right'
+            ? { x: Math.max(0, W - selected.w) }
+            : kind === 'top'
+              ? { y: 0 }
+              : kind === 'vmiddle'
+                ? { y: Math.max(0, (H - selected.h) / 2) }
+                : { y: Math.max(0, H - selected.h) };
+    patchElement(selected.id, patch);
   };
 
   const reorder = (id: string, dir: 'up' | 'down') =>
@@ -255,10 +328,34 @@ export function DocumentDesigner() {
 
         <aside className="overflow-hidden rounded-lg border border-border bg-card p-3">
           {selected && (
-            <div className="mb-2 flex gap-1">
-              <Button variant="outline" size="sm" className="flex-1 gap-1" onClick={duplicateSelected}>
+            <div className="mb-2 space-y-1.5" data-testid="doc-selected-actions">
+              <div className="flex items-center gap-0.5">
+                <Button variant="outline" size="icon-sm" aria-label="Align left" onClick={() => alignSelected('left')}>
+                  <IconLayoutAlignLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon-sm" aria-label="Align horizontal center" onClick={() => alignSelected('hcenter')}>
+                  <IconLayoutAlignCenter className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon-sm" aria-label="Align right" onClick={() => alignSelected('right')}>
+                  <IconLayoutAlignRight className="h-4 w-4" />
+                </Button>
+                <span className="mx-0.5 h-4 w-px bg-border" />
+                <Button variant="outline" size="icon-sm" aria-label="Align top" onClick={() => alignSelected('top')}>
+                  <IconLayoutAlignTop className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon-sm" aria-label="Align vertical middle" onClick={() => alignSelected('vmiddle')}>
+                  <IconLayoutAlignMiddle className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon-sm" aria-label="Align bottom" onClick={() => alignSelected('bottom')}>
+                  <IconLayoutAlignBottom className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button variant="outline" size="sm" className="w-full gap-1" onClick={duplicateSelected}>
                 <IconCopy className="h-3.5 w-3.5" /> Duplicate
               </Button>
+              <p className="text-[10px] leading-tight text-muted-foreground">
+                Tip: arrow keys nudge (Shift = 5mm), Delete removes, Esc deselects.
+              </p>
             </div>
           )}
           <Inspector

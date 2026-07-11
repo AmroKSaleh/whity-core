@@ -45,6 +45,32 @@ test.describe('Document & Label Designer', () => {
     // Switching to A4 makes the page tall; just assert the control is wired.
     await expect(page.getByTestId('doc-tab-page')).toBeVisible();
   });
+
+  test('keyboard nudge, align-to-page, and Delete act on the selected element', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    const el = page.locator('[data-testid^="doc-el-"]');
+    await expect(el).toHaveCount(1);
+    await el.click(); // select + move focus off the Add button
+
+    const leftMm = async () => {
+      const m = ((await el.getAttribute('style')) ?? '').match(/left:\s*([\d.]+)mm/);
+      return m ? parseFloat(m[1]) : NaN;
+    };
+    const x0 = await leftMm();
+
+    // Arrow key nudges 1mm.
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(leftMm).toBeCloseTo(x0 + 1, 1);
+
+    // Align-right pushes it toward the page's right edge.
+    await page.getByRole('button', { name: 'Align right' }).click();
+    await expect.poll(leftMm).toBeGreaterThan(x0 + 5);
+
+    // Delete removes it.
+    await page.keyboard.press('Delete');
+    await expect(el).toHaveCount(0);
+  });
 });
 
 test.describe('Document designer — requires auth', () => {
