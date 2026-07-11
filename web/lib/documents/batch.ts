@@ -26,6 +26,17 @@ export interface SequenceConfig {
 /** Hard cap on generated rows — a runaway-input backstop, not a product limit. */
 export const MAX_BATCH_ROWS = 100000;
 
+/** Starting-point sequence settings (key resolved to a placeholder in the UI). */
+export const DEFAULT_SEQUENCE: SequenceConfig = {
+  key: '',
+  prefix: 'SN-',
+  start: 1,
+  count: 10,
+  step: 1,
+  padding: 4,
+  suffix: '',
+};
+
 /** Zero-pad a (possibly negative) integer's magnitude to `width` digits. */
 function padNumber(n: number, width: number): string {
   const digits = Math.abs(Math.trunc(n)).toString().padStart(Math.max(0, width), '0');

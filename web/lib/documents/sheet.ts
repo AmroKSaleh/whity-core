@@ -30,6 +30,19 @@ export interface CellPos {
   y: number;
 }
 
+/** Default sheet layout (disabled = one label per page). */
+export const DEFAULT_SHEET: SheetSpec = {
+  enabled: false,
+  cols: 3,
+  rows: 8,
+  sheetWidthMm: 210,
+  sheetHeightMm: 297,
+  marginXMm: 7,
+  marginYMm: 13,
+  gutterXMm: 2.5,
+  gutterYMm: 0,
+};
+
 /** Common label-sheet presets (label/cell size is the template page size). */
 export const SHEET_PRESETS: ReadonlyArray<{ id: string; label: string; spec: Omit<SheetSpec, 'enabled'> }> = [
   {

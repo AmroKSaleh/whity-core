@@ -132,9 +132,15 @@ export function migrateTemplate(value: DocTemplate): DocTemplate {
     placeholders: Placeholder[];
     elements?: DocElement[];
     pages?: DocPage[];
+    sheet?: DocTemplate['sheet'];
+    sequence?: DocTemplate['sequence'];
+  };
+  const extras = {
+    ...(t.sheet ? { sheet: t.sheet } : {}),
+    ...(t.sequence ? { sequence: t.sequence } : {}),
   };
   if (Array.isArray(t.pages)) {
-    return { version: 2, name: t.name, page: t.page, placeholders: t.placeholders, pages: t.pages };
+    return { version: 2, name: t.name, page: t.page, placeholders: t.placeholders, pages: t.pages, ...extras };
   }
   return {
     version: 2,
@@ -142,6 +148,7 @@ export function migrateTemplate(value: DocTemplate): DocTemplate {
     page: t.page,
     placeholders: t.placeholders,
     pages: [{ id: newPageId(), elements: t.elements ?? [] }],
+    ...extras,
   };
 }
 

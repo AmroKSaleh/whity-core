@@ -271,6 +271,34 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-sheet-cell')).toHaveCount(4);
   });
 
+  test('saves and restores the sheet + sequence settings with the template', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-name').fill('Device label persist test');
+
+    // Configure a serial prefix and enable a 4-column label sheet.
+    await page.getByTestId('doc-tab-batch').click();
+    await page.getByTestId('doc-batch-prefix').fill('DEV-');
+    await page.getByTestId('doc-tab-sheet').click();
+    await page.getByTestId('doc-sheet-enable').click();
+    await page.getByTestId('doc-sheet-cols').fill('4');
+    await page.getByTestId('doc-save').click();
+
+    // New resets everything: the sheet is off (its fields disappear) and the
+    // serial prefix returns to the default.
+    await page.getByRole('button', { name: 'New' }).click();
+    await page.getByTestId('doc-tab-sheet').click();
+    await expect(page.getByTestId('doc-sheet-cols')).toHaveCount(0);
+    await page.getByTestId('doc-tab-batch').click();
+    await expect(page.getByTestId('doc-batch-prefix')).toHaveValue('SN-');
+
+    // Loading the saved template restores both settings.
+    await page.getByLabel('Load saved template').selectOption({ label: 'Device label persist test' });
+    await page.getByTestId('doc-tab-sheet').click();
+    await expect(page.getByTestId('doc-sheet-cols')).toHaveValue('4');
+    await page.getByTestId('doc-tab-batch').click();
+    await expect(page.getByTestId('doc-batch-prefix')).toHaveValue('DEV-');
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
