@@ -1,5 +1,5 @@
-import type { DocElement, DocTemplate, ElementType } from './types';
-import { DEFAULT_TEXT_STYLE } from './presets';
+import type { DocElement, DocPage, DocTemplate, ElementType, PageSpec, Placeholder } from './types';
+import { DEFAULT_TEXT_STYLE, newPageId } from './presets';
 
 /**
  * Client-side template persistence + helpers for the document designer.
@@ -80,7 +80,9 @@ export function listSaved(): SavedTemplate[] {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as SavedTemplate[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    // Migrate persisted templates to the current shape on read.
+    return (parsed as SavedTemplate[]).map((s) => ({ ...s, data: migrateTemplate(s.data) }));
   } catch {
     return [];
   }
@@ -102,18 +104,45 @@ export function deleteSaved(id: string): void {
   localStorage.setItem(STORE_KEY, JSON.stringify(listSaved().filter((s) => s.id !== id)));
 }
 
-/** Minimal structural validation of an imported template. */
+/** Minimal structural validation of a template (accepts legacy v1 and v2). */
 export function isDocTemplate(value: unknown): value is DocTemplate {
   if (!value || typeof value !== 'object') return false;
   const t = value as Record<string, unknown>;
+  const versionOk = t.version === 1 || t.version === 2;
+  const hasBody = Array.isArray(t.elements) || Array.isArray(t.pages); // v1 has elements, v2 has pages
   return (
-    t.version === 1 &&
+    versionOk &&
     typeof t.name === 'string' &&
     typeof t.page === 'object' &&
     t.page !== null &&
-    Array.isArray(t.elements) &&
-    Array.isArray(t.placeholders)
+    Array.isArray(t.placeholders) &&
+    hasBody
   );
+}
+
+/**
+ * Normalise any accepted template to the current v2 shape. v1 templates (a flat
+ * top-level `elements` array) become a single-page v2 template. Idempotent for
+ * templates already at v2.
+ */
+export function migrateTemplate(value: DocTemplate): DocTemplate {
+  const t = value as unknown as {
+    name: string;
+    page: PageSpec;
+    placeholders: Placeholder[];
+    elements?: DocElement[];
+    pages?: DocPage[];
+  };
+  if (Array.isArray(t.pages)) {
+    return { version: 2, name: t.name, page: t.page, placeholders: t.placeholders, pages: t.pages };
+  }
+  return {
+    version: 2,
+    name: t.name,
+    page: t.page,
+    placeholders: t.placeholders,
+    pages: [{ id: newPageId(), elements: t.elements ?? [] }],
+  };
 }
 
 export function exportTemplateJson(template: DocTemplate): void {

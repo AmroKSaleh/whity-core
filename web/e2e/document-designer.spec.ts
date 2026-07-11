@@ -169,6 +169,36 @@ test.describe('Document & Label Designer', () => {
     expect(top).toBeLessThanOrEqual(1);
   });
 
+  test('supports multiple pages with independent elements and print output', async ({ page }) => {
+    await page.goto('/admin/documents');
+    const el = page.locator('[data-testid^="doc-el-"]');
+
+    // Page 1: add a text element.
+    await page.getByTestId('doc-add-text').click();
+    await expect(el).toHaveCount(1);
+
+    // Add a second page — it starts empty and becomes the current page.
+    await page.getByTestId('doc-add-page').click();
+    await expect(page.getByTestId('doc-page-tab-1')).toBeVisible();
+    await expect(el).toHaveCount(0);
+
+    // Add an element on page 2.
+    await page.getByTestId('doc-add-qr').click();
+    await expect(el).toHaveCount(1);
+
+    // Switch back to page 1 — its own element is still there (pages are independent).
+    await page.getByTestId('doc-page-tab-0').click();
+    await expect(el).toHaveCount(1);
+
+    // The print document renders both pages.
+    await expect(page.getByTestId('doc-print-page')).toHaveCount(2);
+
+    // Deleting page 2 leaves a single page.
+    await page.getByTestId('doc-page-tab-1').click();
+    await page.getByTestId('doc-delete-page').click();
+    await expect(page.getByTestId('doc-print-page')).toHaveCount(1);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

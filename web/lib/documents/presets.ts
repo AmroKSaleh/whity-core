@@ -21,10 +21,10 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   color: '#111111',
 };
 
-/** A blank template — a small shipping-label sized page by default. */
+/** A blank template — a single small shipping-label sized page by default. */
 export function blankTemplate(): DocTemplate {
   return {
-    version: 1,
+    version: 2,
     name: 'Untitled template',
     page: { widthMm: 101.6, heightMm: 152.4, marginMm: 5, background: '#ffffff' },
     placeholders: [
@@ -32,6 +32,13 @@ export function blankTemplate(): DocTemplate {
       { key: 'sku', label: 'SKU', sample: 'WID-001' },
       { key: 'logo_url', label: 'Logo URL', sample: '' },
     ],
-    elements: [],
+    pages: [{ id: newPageId(), elements: [] }],
   };
+}
+
+let pageSeq = 0;
+/** Generate a stable-ish page id (client-side; uniqueness within a session). */
+export function newPageId(): string {
+  pageSeq += 1;
+  return `page-${Date.now().toString(36)}-${pageSeq}`;
 }
