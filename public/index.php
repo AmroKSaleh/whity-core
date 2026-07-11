@@ -899,6 +899,22 @@ $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'], 
 $router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlobal'], null, null, CorePermissions::SETTINGS_MANAGE);
 
+// 13a-bis. Operator per-tenant entitlements API (WC-ent): the platform owner
+// grants/limits a TARGET tenant's capabilities per subscription tier. Gated on
+// entitlements:manage (RbacMiddleware) AND — enforced in the handler — the system
+// tenant (id 0), so a regular tenant admin can never reach another tenant's
+// entitlements. The target tenant comes from the path, never the body.
+$entitlementService = new \Whity\Core\Entitlement\EntitlementService(
+    new \Whity\Core\Entitlement\TenantEntitlementRepository($db->getPdo())
+);
+$tenantEntitlementsHandler = new \Whity\Api\TenantEntitlementsApiHandler(
+    $db->getPdo(),
+    $entitlementService,
+    $roleChecker
+);
+$router->register('GET',   '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'get'],   null, null, CorePermissions::ENTITLEMENTS_MANAGE);
+$router->register('PATCH', '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'patch'], null, null, CorePermissions::ENTITLEMENTS_MANAGE);
+
 // 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
 // plaintext mail.* config is edited via /api/settings/global above; these add the
 // write-only SMTP password (encrypted at rest, never returned) and a live "send

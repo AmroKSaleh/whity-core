@@ -108,6 +108,14 @@ final class CorePermissions
     // tenant's providers.
     public const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
+    // Operator per-tenant entitlement management (WC-ent). Gates the operator API
+    // that grants/limits a TARGET tenant's capabilities per subscription tier.
+    // Necessary but not sufficient — the handler additionally requires the caller
+    // to be acting in the system tenant (id 0), so a regular tenant admin (who
+    // also holds this on the global admin role) can never edit another tenant's
+    // entitlements. Mirrors REGISTRATIONS_APPROVE.
+    public const ENTITLEMENTS_MANAGE = 'entitlements:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -147,6 +155,7 @@ final class CorePermissions
             self::MCP_TOKENS_MANAGE,
             self::REGISTRATIONS_APPROVE,
             self::AUTH_PROVIDERS_MANAGE,
+            self::ENTITLEMENTS_MANAGE,
         ];
     }
 }

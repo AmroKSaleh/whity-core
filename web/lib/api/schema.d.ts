@@ -1183,6 +1183,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{id}/entitlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a tenant's effective entitlements (operator) */
+        get: operations["get_api_v1_tenants_id_entitlements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Set a tenant's entitlement overrides (operator) */
+        patch: operations["patch_api_v1_tenants_id_entitlements"];
+        trace?: never;
+    };
     "/api/v1/uikit/demo/echo": {
         parameters: {
             query?: never;
@@ -1370,6 +1388,12 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        EntitlementCatalogueEntry: {
+            /** @enum {string} */
+            type: "bool" | "int";
+            default: string;
+            description: string;
         };
         Error: {
             error: string;
@@ -1895,6 +1919,32 @@ export interface components {
         TenantCreateRequest: {
             name: string;
             slug?: string;
+        };
+        TenantEntitlementsMutationResponse: {
+            data: {
+                tenant_id: number;
+                effective: {
+                    [key: string]: boolean | number;
+                };
+                overridden: string[];
+            };
+        };
+        TenantEntitlementsPatchRequest: {
+            entitlements: {
+                [key: string]: unknown;
+            };
+        };
+        TenantEntitlementsResponse: {
+            data: {
+                tenant_id: number;
+                effective: {
+                    [key: string]: boolean | number;
+                };
+                overridden: string[];
+                registry: {
+                    [key: string]: components["schemas"]["EntitlementCatalogueEntry"];
+                };
+            };
         };
         TenantListResponse: {
             data: components["schemas"]["Tenant"][];
@@ -8511,6 +8561,171 @@ export interface operations {
                 };
             };
             /** @description Invalid hostname format */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_tenants_id_entitlements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The target tenant's effective entitlements, overrides, and the catalogue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantEntitlementsResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tenant not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_tenants_id_entitlements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantEntitlementsPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated effective entitlements */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantEntitlementsMutationResponse"];
+                };
+            };
+            /** @description Body must include a non-empty "entitlements" object */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tenant not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The system tenant is implicitly unlimited and has no overrides */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed (unknown key or invalid value) */
             422: {
                 headers: {
                     [name: string]: unknown;
