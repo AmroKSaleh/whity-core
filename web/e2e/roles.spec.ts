@@ -116,9 +116,7 @@ test.describe('Roles CRUD (admin)', () => {
     // "Select permissions..." to "N permissions selected"; match either state
     // so the same stable locator works before and after selection. The toggle
     // is type="button" (WC-99), so opening it must NOT submit the form.
-    const permsToggle = dialog
-      .getByRole('button')
-      .filter({ hasText: /permission/i });
+    const permsToggle = dialog.getByTestId('perm-toggle');
     await permsToggle.click();
 
     // Each permission is a <label> wrapping a controlled checkbox + its name;
@@ -183,9 +181,7 @@ test.describe('Roles CRUD (admin)', () => {
     const editDialog = page.getByRole('dialog');
     await expect(editDialog.getByRole('heading', { name: 'Edit Role' })).toBeVisible();
 
-    const permsToggle = editDialog
-      .getByRole('button')
-      .filter({ hasText: /Select permissions|permission/i });
+    const permsToggle = editDialog.getByTestId('perm-toggle');
     await permsToggle.click();
     const rolesReadLabel = editDialog.locator('label', { hasText: 'roles:read' });
     await expect(rolesReadLabel).toBeVisible();
@@ -226,7 +222,7 @@ test.describe('Roles CRUD (admin)', () => {
     await dialog.getByLabel('Role Name').fill(createdRoleName);
     await dialog.getByLabel('Description').fill('Select-all probe');
 
-    const permsToggle = dialog.getByRole('button').filter({ hasText: /permission/i });
+    const permsToggle = dialog.getByTestId('perm-toggle');
     await permsToggle.click();
 
     // Select All: the toggle label switches to "Deselect All" and the trigger
@@ -242,6 +238,42 @@ test.describe('Roles CRUD (admin)', () => {
     await expect(permsToggle).toHaveText(/Select permissions/);
 
     // Cancel without creating: this role was never persisted.
+    await permsToggle.click();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+    createdRoleName = null;
+  });
+
+  // The picker groups permissions by resource, filters on a live search, and
+  // offers a per-group select-all — the granular-RBAC ergonomics (WC-roles-ux).
+  test('permission picker groups by resource with search and per-group select-all', async ({
+    adminPage,
+    page,
+  }) => {
+    createdRoleName = `e2e-role-group-${uniqueSuffix()}`;
+
+    await adminPage.shell.clickNav('Roles');
+    await page.waitForURL('**/admin/roles');
+
+    await page.getByRole('button', { name: 'Create Role' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Role Name').fill(createdRoleName);
+    await dialog.getByLabel('Description').fill('Grouping probe');
+
+    const permsToggle = dialog.getByTestId('perm-toggle');
+    await permsToggle.click();
+
+    // Live search narrows the list to the users:* group.
+    await dialog.getByTestId('perm-search').fill('users:');
+    await expect(dialog.locator('label', { hasText: 'users:read' })).toBeVisible();
+    await expect(dialog.locator('label', { hasText: 'roles:read' })).toHaveCount(0);
+
+    // Per-group select-all checks the whole users group; the summary updates.
+    await expect(dialog.getByTestId('perm-summary')).toHaveText(/^0 of/);
+    await dialog.getByTestId('perm-group-toggle-users').check();
+    await expect(dialog.getByTestId('perm-summary')).not.toHaveText(/^0 of/);
+
+    // Close the dropdown so its panel no longer overlays the footer, then cancel.
     await permsToggle.click();
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
