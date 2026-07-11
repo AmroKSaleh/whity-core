@@ -28,6 +28,9 @@ import {
   IconEye,
   IconEyeOff,
   IconCopy,
+  IconClipboardCopy,
+  IconClipboard,
+  IconScissors,
   IconZoomIn,
   IconZoomOut,
   IconArrowBackUp,
@@ -62,6 +65,14 @@ export function DocumentDesigner() {
   const [past, setPast] = useState<DocTemplate[]>([]);
   const [future, setFuture] = useState<DocTemplate[]>([]);
   const historyRef = useRef({ lastLabel: '', lastTime: 0 });
+
+  // In-app clipboard: a single copied/cut element (deep-cloned on paste). We use
+  // our own clipboard rather than the async system Clipboard API to avoid
+  // permission prompts and keep paste deterministic/offline. `pasteSeq` keeps
+  // pasted ids unique even within the same millisecond.
+  const clipboardRef = useRef<DocElement | null>(null);
+  const pasteSeq = useRef(0);
+  const [hasClipboard, setHasClipboard] = useState(false);
 
   // Read the saved-template list from localStorage after mount (client-only).
   // Deferred off the synchronous effect tick to stay clear of the
@@ -120,6 +131,57 @@ export function DocumentDesigner() {
     historyRef.current.lastLabel = '';
   }, []);
 
+  // Append a clone of `src` to the template with a fresh id, nudged +3mm and
+  // raised to the top; selects it. Shared by duplicate and paste.
+  const appendClone = useCallback((src: DocElement) => {
+    setTemplate((t) => {
+      const maxZ = t.elements.reduce((m, e) => Math.max(m, e.z), 0);
+      const clone = {
+        ...src,
+        id: `${src.type}-${Date.now()}-${(pasteSeq.current += 1)}`,
+        x: src.x + 3,
+        y: src.y + 3,
+        z: maxZ + 1,
+      } as DocElement;
+      setSelectedId(clone.id);
+      return { ...t, elements: [...t.elements, clone] };
+    });
+  }, []);
+
+  const copySelected = useCallback(() => {
+    const { selectedId: sid, template: tpl } = kbRef.current;
+    const el = tpl.elements.find((x) => x.id === sid);
+    if (!el) return;
+    clipboardRef.current = el;
+    setHasClipboard(true);
+  }, []);
+
+  const cutSelected = useCallback(() => {
+    const { selectedId: sid, template: tpl } = kbRef.current;
+    const el = tpl.elements.find((x) => x.id === sid);
+    if (!el) return;
+    clipboardRef.current = el;
+    setHasClipboard(true);
+    commit('cut');
+    setTemplate((t) => ({ ...t, elements: t.elements.filter((x) => x.id !== sid) }));
+    setSelectedId(null);
+  }, [commit]);
+
+  const pasteClipboard = useCallback(() => {
+    const src = clipboardRef.current;
+    if (!src) return;
+    commit('paste');
+    appendClone(src);
+  }, [commit, appendClone]);
+
+  const duplicateSelected = useCallback(() => {
+    const { selectedId: sid, template: tpl } = kbRef.current;
+    const src = tpl.elements.find((x) => x.id === sid);
+    if (!src) return;
+    commit('duplicate');
+    appendClone(src);
+  }, [commit, appendClone]);
+
   // Keyboard: Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo (work without a
   // selection); Delete removes, arrows nudge (Shift = 5mm), Escape deselects.
   // Ignored while typing in a form field (native undo there).
@@ -142,6 +204,30 @@ export function DocumentDesigner() {
         e.preventDefault();
         redo();
         return;
+      }
+      // Clipboard shortcuts. Paste works with no selection; copy/cut/duplicate
+      // are no-ops without one. Skipped in preview (view-only).
+      if (mod && !kbRef.current.preview) {
+        if (e.key === 'c' || e.key === 'C') {
+          e.preventDefault();
+          copySelected();
+          return;
+        }
+        if (e.key === 'x' || e.key === 'X') {
+          e.preventDefault();
+          cutSelected();
+          return;
+        }
+        if (e.key === 'v' || e.key === 'V') {
+          e.preventDefault();
+          pasteClipboard();
+          return;
+        }
+        if (e.key === 'd' || e.key === 'D') {
+          e.preventDefault();
+          duplicateSelected();
+          return;
+        }
       }
       const { selectedId: sid, preview: pv, template: tpl } = kbRef.current;
       if (pv || !sid || !tpl.elements.some((x) => x.id === sid)) return;
@@ -175,7 +261,7 @@ export function DocumentDesigner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, commit]);
+  }, [undo, redo, commit, copySelected, cutSelected, pasteClipboard, duplicateSelected]);
 
   const data = useMemo(() => sampleDataOf(template), [template]);
   const selected = template.elements.find((e) => e.id === selectedId) ?? null;
@@ -201,17 +287,6 @@ export function DocumentDesigner() {
   const deleteElement = (id: string) => {
     commit('delete');
     setTemplate((t) => ({ ...t, elements: t.elements.filter((e) => e.id !== id) }));
-  };
-
-  const duplicateSelected = () => {
-    if (!selected) return;
-    commit('duplicate');
-    setTemplate((t) => {
-      const maxZ = t.elements.reduce((m, e) => Math.max(m, e.z), 0);
-      const clone = { ...selected, id: `${selected.id}-copy-${Date.now()}`, x: selected.x + 3, y: selected.y + 3, z: maxZ + 1 } as DocElement;
-      setSelectedId(clone.id);
-      return { ...t, elements: [...t.elements, clone] };
-    });
   };
 
   const alignSelected = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vmiddle' | 'bottom') => {
@@ -329,6 +404,17 @@ export function DocumentDesigner() {
         <Button size="sm" className="gap-1" data-testid="doc-save" onClick={doSave}>
           <IconDeviceFloppy className="h-3.5 w-3.5" /> Save
         </Button>
+        {hasClipboard && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1"
+            data-testid="doc-paste"
+            onClick={pasteClipboard}
+          >
+            <IconClipboard className="h-3.5 w-3.5" /> Paste
+          </Button>
+        )}
         <select
           className={SELECT_CLASS}
           aria-label="Load saved template"
@@ -452,11 +538,20 @@ export function DocumentDesigner() {
                   <IconLayoutAlignBottom className="h-4 w-4" />
                 </Button>
               </div>
-              <Button variant="outline" size="sm" className="w-full gap-1" onClick={duplicateSelected}>
-                <IconCopy className="h-3.5 w-3.5" /> Duplicate
-              </Button>
+              <div className="flex items-center gap-0.5">
+                <Button variant="outline" size="icon-sm" aria-label="Copy" data-testid="doc-copy" onClick={copySelected}>
+                  <IconClipboardCopy className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon-sm" aria-label="Cut" data-testid="doc-cut" onClick={cutSelected}>
+                  <IconScissors className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="icon-sm" aria-label="Duplicate" data-testid="doc-duplicate" onClick={duplicateSelected}>
+                  <IconCopy className="h-4 w-4" />
+                </Button>
+              </div>
               <p className="text-[10px] leading-tight text-muted-foreground">
-                Tip: arrow keys nudge (Shift = 5mm), Delete removes, Esc deselects.
+                Tip: ⌘/Ctrl+C/X/V copy/cut/paste, ⌘/Ctrl+D duplicate, arrows nudge
+                (Shift = 5mm), Delete removes, Esc deselects.
               </p>
             </div>
           )}
