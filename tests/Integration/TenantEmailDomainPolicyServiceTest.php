@@ -152,6 +152,70 @@ final class TenantEmailDomainPolicyServiceTest extends TestCase
         );
     }
 
+    // ── check-then-insert race ────────────────────────────────────────────────
+
+    /**
+     * The window between findByProfile() (sees no membership) and insert() can be
+     * lost to a concurrent racer — a second verification of the same email, or a
+     * federated/JIT provision — that inserts the membership first. The loser hits
+     * UNIQUE(profile_id, tenant_id). That is the desired end state (the member row
+     * exists), so applyToVerifiedEmail must swallow it and NOT surface a 500.
+     */
+    public function testAutoProvisionSwallowsUniqueViolationFromConcurrentInsert(): void
+    {
+        // Real domains repo on the real engine advertises a verified,
+        // auto-provisioning claim; the memberships repo is backed by a PDO that
+        // sees no existing row (lost the race) but throws 23505 on INSERT (the
+        // racer already created it). Both repos are final, so they cannot be
+        // doubled directly — we inject the failure at the PDO seam instead.
+        $this->domains->markVerified($this->domains->insert(self::TENANT_A, 'acme.com', 1, true), self::TENANT_A);
+        $memberships = new MembershipRepository($this->pdoThatThrowsOnInsert('23505'));
+        $service     = new TenantEmailDomainPolicyService($this->domains, $memberships);
+
+        // Must NOT throw — the concurrent insert already achieved the end state.
+        $service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
+        $this->addToAssertionCount(1);
+    }
+
+    /**
+     * A non-unique DB failure on insert (bad role FK, connection loss, etc.) is a
+     * real error and MUST surface — only the benign duplicate is swallowed.
+     */
+    public function testAutoProvisionRethrowsNonUniqueInsertFailure(): void
+    {
+        $this->domains->markVerified($this->domains->insert(self::TENANT_A, 'acme.com', 1, true), self::TENANT_A);
+        // 23503 = foreign-key violation — NOT a benign duplicate.
+        $memberships = new MembershipRepository($this->pdoThatThrowsOnInsert('23503'));
+        $service     = new TenantEmailDomainPolicyService($this->domains, $memberships);
+
+        $this->expectException(\PDOException::class);
+        $service->applyToVerifiedEmail('alice@acme.com', self::ALICE_PROFILE_ID);
+    }
+
+    /**
+     * A mock PDO for MembershipRepository whose findByProfile SELECT sees no row
+     * (the racer's insert isn't visible to this connection's check) but whose
+     * INSERT INTO memberships fails with the given SQLSTATE.
+     */
+    private function pdoThatThrowsOnInsert(string $sqlState): PDO
+    {
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('prepare')->willReturnCallback(function (string $sql) use ($sqlState) {
+            $stmt = $this->createMock(\PDOStatement::class);
+            if (str_contains($sql, 'INSERT INTO memberships')) {
+                $stmt->method('execute')->willThrowException(
+                    new \PDOException("SQLSTATE[$sqlState]: constraint violation", (int) $sqlState)
+                );
+            } else {
+                // findByProfile SELECT → no existing membership on this connection.
+                $stmt->method('execute')->willReturn(true);
+                $stmt->method('fetch')->willReturn(false);
+            }
+            return $stmt;
+        });
+        return $pdo;
+    }
+
     // ── multi-tenant domain ───────────────────────────────────────────────────
 
     public function testAutoProvisionForBothTenantsWhenBothClaimSameDomain(): void
