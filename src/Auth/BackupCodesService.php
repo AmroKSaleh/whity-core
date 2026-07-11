@@ -88,35 +88,44 @@ class BackupCodesService
     public function validateCode(int $profileId, string $code, int $expectedVersion): bool
     {
         try {
-            // Query for unused codes with the expected version
+            // Fetch ALL unused codes for this profile+version. A backup code may
+            // be presented in ANY order, so the submitted code must be checked
+            // against every candidate hash — not one arbitrary row (the old
+            // LIMIT 1 rejected every code except whichever the engine returned
+            // first). The code itself cannot be part of the WHERE: it is stored
+            // as a bcrypt hash and only password_verify() can match it.
             $result = $this->db->query(
                 'SELECT id, code FROM backup_codes
-                 WHERE profile_id = :profile_id AND version = :version AND used = false
-                 LIMIT 1',
+                 WHERE profile_id = :profile_id AND version = :version AND used = false',
                 [
                     'profile_id' => $profileId,
                     'version'    => $expectedVersion
                 ]
             );
 
-            $row = $result->fetch();
+            /** @var array<int, array<string, mixed>> $rows */
+            $rows = $result->fetchAll();
 
-            if (!$row) {
-                return false;
+            foreach ($rows as $row) {
+                if (!isset($row['code']) || !password_verify($code, (string) $row['code'])) {
+                    continue;
+                }
+
+                // ATOMIC single-use burn: the `AND used = false` predicate means
+                // only the request that actually flips the row wins (rowCount 1);
+                // a second concurrent request presenting the same code flips
+                // nothing (rowCount 0) and is rejected. The DB serialises the
+                // UPDATE, so one single-use code can authenticate at most once
+                // even under concurrent FrankenPHP workers.
+                $update = $this->db->query(
+                    'UPDATE backup_codes SET used = true, used_at = NOW() WHERE id = :id AND used = false',
+                    ['id' => $row['id']]
+                );
+
+                return $update->rowCount() === 1;
             }
 
-            // Verify the code matches the stored hash
-            if (!isset($row['code']) || !password_verify($code, $row['code'])) {
-                return false;
-            }
-
-            // Mark the code as used
-            $this->db->query(
-                'UPDATE backup_codes SET used = true, used_at = NOW() WHERE id = :id',
-                ['id' => $row['id']]
-            );
-
-            return true;
+            return false;
         } catch (\Exception $e) {
             return false;
         }

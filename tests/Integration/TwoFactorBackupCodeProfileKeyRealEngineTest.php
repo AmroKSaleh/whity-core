@@ -112,6 +112,59 @@ final class TwoFactorBackupCodeProfileKeyRealEngineTest extends TestCase
     }
 
     /**
+     * Regression: a backup code must be redeemable in ANY order. The previous
+     * validateCode() fetched one arbitrary unused row (LIMIT 1) and verified the
+     * submitted code against only that hash, so every code except the first was
+     * wrongly rejected.
+     */
+    public function testValidatesAnyUnusedCodeNotJustTheFirst(): void
+    {
+        $profileId = $this->seedProfile('order@corp.com', id: 80010);
+        $service = new BackupCodesService(new DatabaseQueryWrapper($this->pdo));
+
+        foreach (['AAAA-1111-AAAA', 'BBBB-2222-BBBB', 'CCCC-3333-CCCC'] as $plain) {
+            $this->insertBackupCode($profileId, $service->hashCode($plain), version: 1);
+        }
+
+        // The THIRD code (not the first the engine returns) must still validate.
+        self::assertTrue(
+            $service->validateCode($profileId, 'CCCC-3333-CCCC', 1),
+            'A backup code must be redeemable regardless of order.'
+        );
+    }
+
+    /**
+     * A single-use code cannot be redeemed twice (the atomic `AND used = false`
+     * burn), and consuming one code must not affect the others.
+     */
+    public function testCodeIsSingleUseAndDoesNotBurnSiblings(): void
+    {
+        $profileId = $this->seedProfile('single@corp.com', id: 80011);
+        $service = new BackupCodesService(new DatabaseQueryWrapper($this->pdo));
+        $this->insertBackupCode($profileId, $service->hashCode('AAAA-1111-AAAA'), version: 1);
+        $this->insertBackupCode($profileId, $service->hashCode('BBBB-2222-BBBB'), version: 1);
+
+        self::assertTrue($service->validateCode($profileId, 'AAAA-1111-AAAA', 1), 'first use succeeds');
+        self::assertFalse(
+            $service->validateCode($profileId, 'AAAA-1111-AAAA', 1),
+            'a single-use code must not be redeemable twice'
+        );
+        self::assertTrue(
+            $service->validateCode($profileId, 'BBBB-2222-BBBB', 1),
+            'burning one code must not affect the other codes'
+        );
+    }
+
+    public function testWrongBackupCodeIsRejected(): void
+    {
+        $profileId = $this->seedProfile('wrong@corp.com', id: 80012);
+        $service = new BackupCodesService(new DatabaseQueryWrapper($this->pdo));
+        $this->insertBackupCode($profileId, $service->hashCode('AAAA-1111-AAAA'), version: 1);
+
+        self::assertFalse($service->validateCode($profileId, 'ZZZZ-9999-ZZZZ', 1));
+    }
+
+    /**
      * Cascade-delete: deleting a profile must delete all its backup codes.
      */
     public function testBackupCodesCascadeDeleteOnProfileDelete(): void

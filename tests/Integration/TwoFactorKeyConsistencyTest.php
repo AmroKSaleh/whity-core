@@ -200,13 +200,16 @@ class TwoFactorKeyConsistencyTest extends TestCase
                     // and the ActiveTenantMembershipGuard membership existence check.
                     $stmt->method('fetch')->willReturn(['role' => $roleName]);
                     $stmt->method('fetchColumn')->willReturn(1);
+                } elseif (str_contains($sql, 'UPDATE backup_codes')) {
+                    // The atomic single-use burn (WHERE id AND used = false): the
+                    // row is flipped, so exactly one row is affected.
+                    $stmt->method('rowCount')->willReturn(1);
                 } elseif (str_contains($sql, 'FROM backup_codes')) {
-                    // BackupCodesService::validateCode lookup (keyed on profile_id post-038)
-                    $stmt->method('fetch')->willReturn(
-                        $hashedBackupCode !== null
-                            ? ['id' => 1, 'code' => $hashedBackupCode]
-                            : false
-                    );
+                    // BackupCodesService::validateCode fetches ALL unused rows and
+                    // password_verify()s the submitted code against each.
+                    $rows = $hashedBackupCode !== null ? [['id' => 1, 'code' => $hashedBackupCode]] : [];
+                    $stmt->method('fetch')->willReturn($rows[0] ?? false);
+                    $stmt->method('fetchAll')->willReturn($rows);
                     $stmt->method('fetchColumn')->willReturn(false);
                 } elseif (str_contains($sql, 'FROM profiles') && str_contains($sql, 'token_epoch')) {
                     // currentProfileTokenEpoch / epoch check.
