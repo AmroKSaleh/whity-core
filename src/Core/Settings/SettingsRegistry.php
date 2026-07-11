@@ -101,6 +101,11 @@ final class SettingsRegistry
     public const MAIL_BRAND_COLOR = 'mail.brand_color';
     public const MAIL_FOOTER_TEXT = 'mail.footer_text';
 
+    // Billing / payment-wall governance (WC-billing). Operator-global defaults the
+    // per-tenant subscription state falls back to.
+    public const BILLING_ENFORCEMENT_DEFAULT = 'billing.enforcement_default';
+    public const BILLING_GRACE_DAYS = 'billing.grace_days';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -149,6 +154,8 @@ final class SettingsRegistry
         self::MAIL_EVENT_DELETION,
         self::MAIL_BRAND_COLOR,
         self::MAIL_FOOTER_TEXT,
+        self::BILLING_ENFORCEMENT_DEFAULT,
+        self::BILLING_GRACE_DAYS,
     ];
 
     /**
@@ -179,6 +186,10 @@ final class SettingsRegistry
     private const ENUM_OPTIONS = [
         self::MAIL_TRANSPORT => ['none', 'log', 'smtp'],
         self::MAIL_SMTP_ENCRYPTION => ['none', 'tls', 'ssl'],
+        // Payment-wall strictness the wall applies to a LAPSED tenant. 'warn' is
+        // the safe global default (never blocks); the operator raises it globally
+        // or per-tenant. Kept in sync with SubscriptionService enforcement modes.
+        self::BILLING_ENFORCEMENT_DEFAULT => ['off', 'warn', 'block_writes', 'block_all'],
     ];
 
     /**
@@ -231,6 +242,11 @@ final class SettingsRegistry
         // Email template branding: on-brand default; operator-overridable.
         self::MAIL_BRAND_COLOR => '#2B6CD2',
         self::MAIL_FOOTER_TEXT => '',
+        // Payment wall defaults SAFE: 'warn' never blocks (a fresh/sovereign
+        // deploy is never locked out); the operator opts into blocking globally or
+        // per-tenant. A past_due tenant keeps access for grace_days days.
+        self::BILLING_ENFORCEMENT_DEFAULT => 'warn',
+        self::BILLING_GRACE_DAYS => '7',
     ];
 
     /**
@@ -466,6 +482,8 @@ final class SettingsRegistry
             self::MAIL_EVENT_INVITATION,
             self::MAIL_EVENT_VERIFICATION,
             self::MAIL_EVENT_DELETION => self::validateBoolean($value, $key),
+            self::BILLING_ENFORCEMENT_DEFAULT => self::validateEnum($key, $value),
+            self::BILLING_GRACE_DAYS => self::validateGraceDays($value),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
@@ -511,6 +529,18 @@ final class SettingsRegistry
         $port = (int) $value;
         if ($port < 1 || $port > 65535) {
             return 'mail.smtp.port must be between 1 and 65535.';
+        }
+
+        return null;
+    }
+
+    private static function validateGraceDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'billing.grace_days must be a whole number of days (0 or more).';
+        }
+        if ((int) $value > 3650) {
+            return 'billing.grace_days must be 3650 or fewer.';
         }
 
         return null;
