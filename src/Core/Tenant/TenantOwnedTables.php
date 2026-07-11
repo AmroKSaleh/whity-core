@@ -103,6 +103,13 @@ final class TenantOwnedTables
         // S3-compatible bucket a tenant owns, used only when it also holds the
         // storage.custom_backend entitlement. Every query binds tenant_id.
         'tenant_storage_config' => '053_create_tenant_storage_config.php',
+
+        // WC-plans — which subscription plan a tenant is on (migration 055).
+        // tenant_id is the PK; applying a plan materialises its entitlement
+        // bundle into tenant_entitlements (ADR 0010). Every query binds tenant_id.
+        // (plans / plan_entitlements are global catalogs with no tenant_id,
+        // unregistered like `permissions`.)
+        'tenant_plan' => '055_create_plans.php',
     ];
 
     /**
