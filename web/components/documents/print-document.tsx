@@ -2,7 +2,9 @@
 
 import type { DocElement, DocTemplate } from '@/lib/documents/types';
 import { chunkIntoSheets, cellPositions, type SheetSpec } from '@/lib/documents/sheet';
+import type { DocBlock } from '@/lib/documents/blocks';
 import { ElementContent } from './element-content';
+import { BlockInstanceContent } from './element-layer';
 
 /** One render unit: a single template page paired with one data row. */
 interface Unit {
@@ -12,7 +14,15 @@ interface Unit {
 }
 
 /** The visible content of one label/page: its resolved, non-hidden elements. */
-function LabelBody({ elements, data }: { elements: DocElement[]; data: Record<string, string> }) {
+function LabelBody({
+  elements,
+  data,
+  blocks,
+}: {
+  elements: DocElement[];
+  data: Record<string, string>;
+  blocks: Record<string, DocBlock>;
+}) {
   return (
     <>
       {[...elements]
@@ -32,7 +42,11 @@ function LabelBody({ elements, data }: { elements: DocElement[]; data: Record<st
               zIndex: el.z,
             }}
           >
-            <ElementContent el={el} data={data} preview />
+            {el.type === 'blockInstance' ? (
+              <BlockInstanceContent block={blocks[el.blockId]} data={data} preview />
+            ) : (
+              <ElementContent el={el} data={data} preview />
+            )}
           </div>
         ))}
     </>
@@ -52,10 +66,12 @@ function LabelBody({ elements, data }: { elements: DocElement[]; data: Record<st
 export function PrintDocument({
   template,
   datasets,
+  blocks,
   sheet,
 }: {
   template: DocTemplate;
   datasets: Record<string, string>[];
+  blocks: Record<string, DocBlock>;
   sheet?: SheetSpec;
 }) {
   const { page } = template;
@@ -86,7 +102,7 @@ export function PrintDocument({
               overflow: 'hidden',
             }}
           >
-            <LabelBody elements={u.elements} data={u.data} />
+            <LabelBody elements={u.elements} data={u.data} blocks={blocks} />
           </div>
         ))}
 
@@ -124,7 +140,7 @@ export function PrintDocument({
                       overflow: 'hidden',
                     }}
                   >
-                    <LabelBody elements={u.elements} data={u.data} />
+                    <LabelBody elements={u.elements} data={u.data} blocks={blocks} />
                   </div>
                 );
               })}

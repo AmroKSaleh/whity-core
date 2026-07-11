@@ -25,6 +25,14 @@ import {
   type SequenceConfig,
 } from '@/lib/documents/batch';
 import { DEFAULT_SHEET, type SheetSpec } from '@/lib/documents/sheet';
+import {
+  blocksById,
+  deleteBlock,
+  listBlocks,
+  makeBlockFromElements,
+  saveBlock,
+  type DocBlock,
+} from '@/lib/documents/blocks';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
@@ -50,6 +58,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconFiles,
+  IconComponents,
   IconLayoutAlignLeft,
   IconLayoutAlignCenter,
   IconLayoutAlignRight,
@@ -112,6 +121,16 @@ export function DocumentDesigner() {
   // template is reusable — reopen it and just change the serial range.
   const [sheet, setSheet] = useState<SheetSpec>(DEFAULT_SHEET);
   const [sequence, setSequence] = useState<SequenceConfig>(DEFAULT_SEQUENCE);
+
+  // Reusable blocks (personal, localStorage for the MVP). Documents reference a
+  // block by id via a `blockInstance` element; the block store holds the shared
+  // definition, so editing a block updates every instance.
+  const [blocks, setBlocks] = useState<DocBlock[]>([]);
+  useEffect(() => {
+    const p = Promise.resolve().then(() => setBlocks(listBlocks()));
+    void p;
+  }, []);
+  const blocksMap = useMemo(() => blocksById(blocks), [blocks]);
 
   // Current page + its elements. `currentPage` may briefly exceed the page count
   // after an undo/delete, so read through a clamped `pageIndex`. ALL element
@@ -465,6 +484,47 @@ export function DocumentDesigner() {
     );
   };
 
+  // ── reusable blocks ───────────────────────────────────────────────────────
+  const saveSelectionAsBlock = () => {
+    const sel = elements.filter((e) => selectedIds.includes(e.id));
+    const block = makeBlockFromElements(`Block ${blocks.length + 1}`, sel);
+    if (!block) {
+      addToast('Select one or more elements to save as a block.', 'info');
+      return;
+    }
+    saveBlock(block);
+    setBlocks(listBlocks());
+    addToast(`Saved block “${block.name}”.`, 'success');
+  };
+
+  const insertBlock = (blockId: string) => {
+    const b = blocksMap[blockId];
+    if (!b) return;
+    commit('insert-block');
+    setTemplate((t) => {
+      const els = t.pages[pageIndex]?.elements ?? [];
+      const inst = {
+        id: `blockInstance-${Date.now()}-${(pasteSeq.current += 1)}`,
+        type: 'blockInstance' as const,
+        blockId,
+        x: 8,
+        y: 8,
+        w: b.w,
+        h: b.h,
+        rotation: 0,
+        z: els.reduce((m, e) => Math.max(m, e.z), 0) + 1,
+      };
+      setSelectedIds([inst.id]);
+      return withPageElements(t, pageIndex, (e) => [...e, inst]);
+    });
+  };
+
+  const deleteBlockDef = (id: string) => {
+    deleteBlock(id);
+    setBlocks(listBlocks());
+    addToast('Block deleted from your library.', 'info');
+  };
+
   // ── page operations ─────────────────────────────────────────────────────
   const addPage = () => {
     commit('page-add');
@@ -782,12 +842,15 @@ export function DocumentDesigner() {
           <Palette
             elements={elements}
             selectedIds={selectedIds}
+            blocks={blocks}
             onAdd={addElement}
             onSelect={selectOne}
             onReorder={reorder}
             onToggleLock={toggleLock}
             onToggleHidden={toggleHidden}
             onDelete={deleteElement}
+            onInsertBlock={insertBlock}
+            onDeleteBlock={deleteBlockDef}
           />
         </aside>
 
@@ -796,6 +859,7 @@ export function DocumentDesigner() {
             elements={elements}
             page={template.page}
             data={activeData}
+            blocks={blocksMap}
             selectedIds={selectedIds}
             zoom={zoom}
             gridMm={snap ? 1 : 0}
@@ -847,6 +911,15 @@ export function DocumentDesigner() {
                   <IconCopy className="h-4 w-4" />
                 </Button>
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full gap-1"
+                data-testid="doc-save-block"
+                onClick={saveSelectionAsBlock}
+              >
+                <IconComponents className="h-3.5 w-3.5" /> Save as block
+              </Button>
               <p className="text-[10px] leading-tight text-muted-foreground">
                 Tip: ⌘/Ctrl+C/X/V copy/cut/paste, ⌘/Ctrl+D duplicate, arrows nudge
                 (Shift = 5mm), Delete removes, Esc deselects.
@@ -880,7 +953,7 @@ export function DocumentDesigner() {
       </div>
 
       {/* Off-screen, all-pages render used only for printing (per data row). */}
-      <PrintDocument template={template} datasets={printDatasets} sheet={sheet} />
+      <PrintDocument template={template} datasets={printDatasets} blocks={blocksMap} sheet={sheet} />
 
       {/* Print stylesheet: hide the app chrome and emit each page at the physical
           @page size with a break between pages. Rendered as a text child (not

@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { DocElement, PageSpec } from '@/lib/documents/types';
 import { PX_PER_MM } from '@/lib/documents/types';
 import { snapMove } from '@/lib/documents/geometry';
+import type { DocBlock } from '@/lib/documents/blocks';
 import { ElementContent } from './element-content';
+import { BlockInstanceContent } from './element-layer';
 
 interface HandleDef {
   name: string;
@@ -47,6 +49,7 @@ export function Canvas({
   elements,
   page,
   data,
+  blocks,
   selectedIds,
   zoom,
   gridMm,
@@ -59,6 +62,7 @@ export function Canvas({
   elements: DocElement[];
   page: PageSpec;
   data: Record<string, string>;
+  blocks: Record<string, DocBlock>;
   selectedIds: string[];
   zoom: number;
   gridMm: number;
@@ -281,7 +285,11 @@ export function Canvas({
                 outline: selected ? '1px solid var(--color-primary)' : undefined,
               }}
             >
-              <ElementContent el={el} data={data} preview={preview} />
+              {el.type === 'blockInstance' ? (
+                <BlockInstanceContent block={blocks[el.blockId]} data={data} preview={preview} />
+              ) : (
+                <ElementContent el={el} data={data} preview={preview} />
+              )}
               {solo && (
                 <span
                   data-testid="doc-readout"
@@ -307,6 +315,7 @@ export function Canvas({
               )}
               {solo &&
                 !el.locked &&
+                el.type !== 'blockInstance' &&
                 HANDLES.map((hd) => (
                   <span
                     key={hd.name}
