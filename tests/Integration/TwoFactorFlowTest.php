@@ -389,6 +389,34 @@ class TwoFactorFlowTest extends TestCase
     }
 
     /**
+     * Test 8b: Confirm rejects (409) if 2FA already enabled — a valid-token
+     * holder must not be able to bypass setup() and silently rotate the second
+     * factor onto a secret they control (2FA takeover). Re-enabling must go
+     * through disable() first.
+     */
+    public function testConfirmRejectsIfAlreadyEnabled(): void
+    {
+        $this->createAccessToken();
+        $mockPdo = $this->createMockPdo(['two_factor_enabled' => true]);
+        $tokenValidator = new TokenValidator($this->jwtParser, $mockPdo);
+        $backupCodesService = $this->createMock(BackupCodesService::class);
+        $handler = new TwoFactorHandler($mockPdo, $this->totpService, $backupCodesService, $tokenValidator);
+
+        // A valid TOTP code for an attacker-chosen secret — the guard must fire
+        // BEFORE the code is even verified, so the rotation never happens.
+        $secret = $this->totpService->generateSecret();
+        $totp = TOTP::create($secret);
+        $code = $totp->now();
+
+        $body = json_encode(['code' => $code, 'secret' => $secret]);
+        $request = new Request('POST', '/api/auth/2fa/confirm', [], $body);
+        $response = $handler->confirm($request);
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertStringContainsString('already enabled', $response->getBody());
+    }
+
+    /**
      * Test 9: Regenerate rejects if 2FA not enabled
      */
     public function testRegenerateRejectsIfNotEnabled(): void
