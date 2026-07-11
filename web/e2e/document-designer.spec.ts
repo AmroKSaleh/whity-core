@@ -299,6 +299,21 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-batch-prefix')).toHaveValue('DEV-');
   });
 
+  test('grid overlay toggles and the selected element shows a size readout', async ({ page }) => {
+    await page.goto('/admin/documents');
+
+    // Grid overlay is off by default; the toggle shows it.
+    await expect(page.getByTestId('doc-grid')).toHaveCount(0);
+    await page.getByTestId('doc-grid-toggle').click();
+    await expect(page.getByTestId('doc-grid')).toBeVisible();
+
+    // Selecting an element reveals a live size readout in millimetres.
+    await page.getByTestId('doc-add-rect').click();
+    const readout = page.getByTestId('doc-readout');
+    await expect(readout).toBeVisible();
+    await expect(readout).toContainText('mm');
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
