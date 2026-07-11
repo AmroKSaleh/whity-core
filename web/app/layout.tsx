@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/lib/auth-context";
 import { ToastProvider } from "@/lib/toast-context";
 import { NavigationProvider } from "@/lib/navigation-context";
+import { DirectionProvider } from "@/lib/direction-context";
 import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
 import { ToastContainer } from "@/components/ui/toast-container";
 import "@/lib/plugin-screens";
@@ -50,16 +51,18 @@ export default async function RootLayout({
       */}
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <BrandingProvider initial={branding}>
-          <AuthProvider>
-            <ToastProvider>
-              <NavigationProvider>
-                <PluginFeaturesProvider>
-                  {children}
-                  <ToastContainer />
-                </PluginFeaturesProvider>
-              </NavigationProvider>
-            </ToastProvider>
-          </AuthProvider>
+          <DirectionProvider>
+            <AuthProvider>
+              <ToastProvider>
+                <NavigationProvider>
+                  <PluginFeaturesProvider>
+                    {children}
+                    <ToastContainer />
+                  </PluginFeaturesProvider>
+                </NavigationProvider>
+              </ToastProvider>
+            </AuthProvider>
+          </DirectionProvider>
         </BrandingProvider>
       </body>
     </html>

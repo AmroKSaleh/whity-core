@@ -24,7 +24,7 @@ export function AdminHeader({ title, description, action, breadcrumb }: AdminHea
             </p>
           )}
         </div>
-        {action && <div className="ml-6">{action}</div>}
+        {action && <div className="ms-6">{action}</div>}
       </div>
     </div>
   );
