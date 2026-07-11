@@ -6,6 +6,8 @@ namespace Whity\Core\RateLimit;
 
 use Closure;
 use Whity\Core\Audit\AuditContext;
+use Whity\Core\Entitlement\EntitlementRegistry;
+use Whity\Core\Entitlement\EntitlementService;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Sdk\Http\Request;
 
@@ -28,19 +30,43 @@ final class RateLimitRule
     /** @var Closure(Request): ?string */
     public readonly Closure $resolve;
 
+    /** @var (Closure(Request): ?int)|null Per-request budget override; null → the fixed $limit. */
+    private readonly ?Closure $limitResolver;
+
     /**
-     * @param string                   $name    Counter namespace (e.g. 'ip', 'tenant', 'principal').
-     * @param Closure(Request): ?string $resolve Returns the dimension value, or null to skip.
-     * @param int                      $limit   Maximum hits permitted per window (≥ 1).
-     * @param int                      $window  Window length in seconds (≥ 1).
+     * @param string                    $name          Counter namespace (e.g. 'ip', 'tenant', 'principal', 'platform').
+     * @param Closure(Request): ?string $resolve       Returns the dimension value, or null to skip.
+     * @param int                       $limit         Fixed maximum hits per window (≥ 1); also the fallback budget.
+     * @param int                       $window        Window length in seconds (≥ 1).
+     * @param (Closure(Request): ?int)|null $limitResolver Optional per-request budget; when it returns null the
+     *                                                 fixed $limit is used. Lets a dimension's budget vary per
+     *                                                 request (e.g. a per-tenant limit driven by the tenant's plan).
      */
     public function __construct(
         public readonly string $name,
         Closure $resolve,
         public readonly int $limit,
         public readonly int $window,
+        ?Closure $limitResolver = null,
     ) {
         $this->resolve = $resolve;
+        $this->limitResolver = $limitResolver;
+    }
+
+    /**
+     * The budget to enforce for this request: the per-request resolver's value
+     * when present, else the fixed {@see $limit}.
+     */
+    public function limitFor(Request $request): int
+    {
+        if ($this->limitResolver !== null) {
+            $resolved = ($this->limitResolver)($request);
+            if ($resolved !== null) {
+                return $resolved;
+            }
+        }
+
+        return $this->limit;
     }
 
     /**
@@ -102,5 +128,45 @@ final class RateLimitRule
             $userId = AuditContext::getActorUserId();
             return $userId === null ? null : (string) $userId;
         }, $limit, $window);
+    }
+
+    /**
+     * Plan-driven per-tenant rule — like {@see self::tenant()} (keyed on the
+     * tenant id, skipping system tenant 0 + unauth) but the per-minute budget is
+     * the tenant's `ratelimit.rpm` entitlement, so throughput scales with the
+     * subscription tier. The entitlement default (-1) means "no plan-specific cap"
+     * and falls back to $fallbackLimit — the platform baseline — so existing
+     * behaviour is preserved until a plan sets a positive rpm.
+     */
+    public static function tenantEntitled(EntitlementService $entitlements, int $fallbackLimit, int $window): self
+    {
+        $resolve = static function (Request $r): ?string {
+            $tenantId = TenantContext::getTenantId();
+            return ($tenantId === null || $tenantId === 0) ? null : (string) $tenantId;
+        };
+        $limitResolver = static function (Request $r) use ($entitlements, $fallbackLimit): ?int {
+            $tenantId = TenantContext::getTenantId();
+            if ($tenantId === null || $tenantId === 0) {
+                return null; // dimension skipped anyway; use fallback defensively
+            }
+            $rpm = $entitlements->limit($tenantId, EntitlementRegistry::RATELIMIT_RPM);
+
+            // A positive rpm is the plan's explicit budget; -1 (default/unlimited)
+            // or any non-positive value means "no plan cap" → the platform baseline.
+            return $rpm > 0 ? $rpm : $fallbackLimit;
+        };
+
+        return new self('tenant', $resolve, $fallbackLimit, $window, $limitResolver);
+    }
+
+    /**
+     * Platform-wide rule — a single shared counter ('all') capping TOTAL request
+     * throughput across every tenant and the unauthenticated surface. A safety
+     * ceiling for the whole deployment (e.g. a sovereign single-customer box);
+     * set generously so it never throttles normal load. Never skipped.
+     */
+    public static function platform(int $limit, int $window): self
+    {
+        return new self('platform', static fn (Request $r): string => 'all', $limit, $window);
     }
 }
