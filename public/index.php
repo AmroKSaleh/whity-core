@@ -974,6 +974,24 @@ $router->register('PUT',    '/api/plans/{id:\d+}/entitlements', [$plansHandler, 
 $router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
 
+// 13a-quinquies. Subscription (billing-state) API (WC-billing). Operator routes
+// (system-tenant gated) reflect an out-of-band payment into a tenant's state and
+// apply a plan (materialising the tier's entitlements); the tenant-self GET is a
+// read-only view, gated on settings:read and EXEMPT from the payment wall so a
+// lapsed tenant can still see why it is blocked and reach billing.
+$subscriptionHandler = new \Whity\Api\SubscriptionApiHandler(
+    new \Whity\Core\Subscription\SubscriptionService(
+        new \Whity\Core\Subscription\SubscriptionRepository($db->getPdo()),
+        $settingsService
+    ),
+    $planService,
+    $roleChecker,
+    $db->getPdo()
+);
+$router->register('GET', '/api/tenants/{id:\d+}/subscription', [$subscriptionHandler, 'getForTenant'], null, null, CorePermissions::SUBSCRIPTIONS_MANAGE);
+$router->register('PUT', '/api/tenants/{id:\d+}/subscription', [$subscriptionHandler, 'setForTenant'], null, null, CorePermissions::SUBSCRIPTIONS_MANAGE);
+$router->register('GET', '/api/subscription',                  [$subscriptionHandler, 'getSelf'],      null, null, CorePermissions::SETTINGS_READ);
+
 // 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
 // plaintext mail.* config is edited via /api/settings/global above; these add the
 // write-only SMTP password (encrypted at rest, never returned) and a live "send

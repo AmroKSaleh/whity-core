@@ -95,7 +95,8 @@ final class CoreApiSchemas
             self::identityRoutes(),
             self::tenantEntitlementRoutes(),
             self::tenantStorageRoutes(),
-            self::planRoutes()
+            self::planRoutes(),
+            self::subscriptionRoutes()
         );
     }
 
@@ -1682,6 +1683,45 @@ final class CoreApiSchemas
             ], ['tenant_id', 'plan_id', 'assigned_at']),
             'TenantPlanResponse' => self::dataEnvelope(['nullable' => true, 'allOf' => [SchemaBuilder::ref('TenantPlan')]]),
 
+            // ── Subscription / billing state (WC-billing) ─────────────────────
+            'PlanRef' => self::object([
+                'id' => self::int(),
+                'plan_key' => self::str(),
+                'name' => self::str(),
+            ], ['id', 'plan_key', 'name']),
+            // Operator view: full billing state. status is null when no
+            // subscription is configured; plan is null when none is assigned.
+            'Subscription' => self::object([
+                'tenant_id' => self::int(),
+                'status' => self::str(true),
+                'plan' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('PlanRef')]],
+                'current_period_end' => self::str(true),
+                'effective_enforcement_mode' => ['type' => 'string', 'enum' => ['off', 'warn', 'block_writes', 'block_all']],
+                'enforcement_mode' => self::str(true),
+                'grace_until' => self::str(true),
+                'external_ref' => self::str(true),
+            ], ['tenant_id', 'status', 'plan', 'effective_enforcement_mode']),
+            // Tenant-self view: omits the enforcement policy + provider ref.
+            'SelfSubscription' => self::object([
+                'tenant_id' => self::int(),
+                'status' => self::str(true),
+                'plan' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('PlanRef')]],
+                'current_period_end' => self::str(true),
+                'effective_enforcement_mode' => ['type' => 'string', 'enum' => ['off', 'warn', 'block_writes', 'block_all']],
+            ], ['tenant_id', 'status', 'plan', 'effective_enforcement_mode']),
+            'SubscriptionResponse' => self::dataEnvelope(SchemaBuilder::ref('Subscription')),
+            'SelfSubscriptionResponse' => self::dataEnvelope(SchemaBuilder::ref('SelfSubscription')),
+            // All fields optional. plan_id applies a plan (materialising its
+            // entitlements); null clears a billing column.
+            'SubscriptionPutRequest' => self::object([
+                'plan_id' => self::int(true),
+                'status' => ['type' => 'string', 'nullable' => true, 'enum' => ['trialing', 'active', 'past_due', 'canceled', 'expired']],
+                'enforcement_mode' => ['type' => 'string', 'nullable' => true, 'enum' => ['off', 'warn', 'block_writes', 'block_all']],
+                'current_period_end' => self::str(true),
+                'grace_until' => self::str(true),
+                'external_ref' => self::str(true),
+            ], []),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -2415,6 +2455,54 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Tenant not found'),
                 ] + self::authErrors(),
             ]),
+        ];
+    }
+
+    /**
+     * Subscription (billing-state) routes (WC-billing): operator set/read of a
+     * tenant's subscription (gated `subscriptions:manage` + system tenant) and the
+     * tenant-self read (gated `settings:read`, payment-wall exempt).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function subscriptionRoutes(): array
+    {
+        $selfRoute = [
+            'method' => 'GET',
+            'path' => '/api/subscription',
+            'requiredRole' => null,
+            'requiredPermission' => 'settings:read',
+            'schema' => [
+                'summary' => 'Get the caller tenant\'s own subscription (read-only)',
+                'tags' => ['subscription'],
+                'responses' => [
+                    200 => self::jsonResponse('The caller tenant\'s subscription', 'SelfSubscriptionResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                ] + self::authErrors(),
+            ],
+        ];
+
+        return [
+            self::permissionRoute('GET', '/api/tenants/{id:\d+}/subscription', 'subscriptions:manage', [
+                'summary' => 'Get a tenant\'s subscription (operator)',
+                'tags' => ['subscription'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s subscription + billing state', 'SubscriptionResponse'),
+                    404 => self::errorResponse('Tenant not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/tenants/{id:\d+}/subscription', 'subscriptions:manage', [
+                'summary' => 'Set a tenant\'s subscription / apply a plan (operator)',
+                'tags' => ['subscription'],
+                'request' => 'SubscriptionPutRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated subscription', 'SubscriptionResponse'),
+                    404 => self::errorResponse('Tenant not found'),
+                    409 => self::errorResponse('The system tenant is never subscribed'),
+                    422 => self::errorResponse('Validation failed (bad status/mode/plan)'),
+                ] + self::authErrors(),
+            ]),
+            $selfRoute,
         ];
     }
 

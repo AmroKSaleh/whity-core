@@ -1203,6 +1203,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the caller tenant's own subscription (read-only) */
+        get: operations["get_api_v1_subscription"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tenants": {
         parameters: {
             query?: never;
@@ -1286,6 +1303,24 @@ export interface paths {
         put?: never;
         /** Apply a plan to a tenant (operator) */
         post: operations["post_api_v1_tenants_id_plan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{id}/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a tenant's subscription (operator) */
+        get: operations["get_api_v1_tenants_id_subscription"];
+        /** Set a tenant's subscription / apply a plan (operator) */
+        put: operations["put_api_v1_tenants_id_subscription"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1848,6 +1883,11 @@ export interface components {
         PlanListResponse: {
             data: components["schemas"]["PlanSummary"][];
         };
+        PlanRef: {
+            id: number;
+            plan_key: string;
+            name: string;
+        };
         PlanResponse: {
             data: components["schemas"]["Plan"];
         };
@@ -2002,6 +2042,17 @@ export interface components {
         SelectTenantRequest: {
             tenant_id: number;
         };
+        SelfSubscription: {
+            tenant_id: number;
+            status: string | null;
+            plan: components["schemas"]["PlanRef"] | null;
+            current_period_end?: string | null;
+            /** @enum {string} */
+            effective_enforcement_mode: "off" | "warn" | "block_writes" | "block_all";
+        };
+        SelfSubscriptionResponse: {
+            data: components["schemas"]["SelfSubscription"];
+        };
         SessionUserResponse: {
             user: {
                 id: number;
@@ -2083,6 +2134,30 @@ export interface components {
                 entitled: boolean;
                 drivers: string[];
             };
+        };
+        Subscription: {
+            tenant_id: number;
+            status: string | null;
+            plan: components["schemas"]["PlanRef"] | null;
+            current_period_end?: string | null;
+            /** @enum {string} */
+            effective_enforcement_mode: "off" | "warn" | "block_writes" | "block_all";
+            enforcement_mode?: string | null;
+            grace_until?: string | null;
+            external_ref?: string | null;
+        };
+        SubscriptionPutRequest: {
+            plan_id?: number | null;
+            /** @enum {string|null} */
+            status?: "trialing" | "active" | "past_due" | "canceled" | "expired" | null;
+            /** @enum {string|null} */
+            enforcement_mode?: "off" | "warn" | "block_writes" | "block_all" | null;
+            current_period_end?: string | null;
+            grace_until?: string | null;
+            external_ref?: string | null;
+        };
+        SubscriptionResponse: {
+            data: components["schemas"]["Subscription"];
         };
         SwitchTenantRequest: {
             tenant_id: number;
@@ -9039,6 +9114,80 @@ export interface operations {
             };
         };
     };
+    get_api_v1_subscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller tenant's subscription */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfSubscriptionResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_tenants: {
         parameters: {
             query?: never;
@@ -9765,6 +9914,171 @@ export interface operations {
                 };
             };
             /** @description plan_id missing, unknown, or the system tenant */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_tenants_id_subscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's subscription + billing state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tenant not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_tenants_id_subscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriptionPutRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated subscription */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Tenant not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The system tenant is never subscribed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed (bad status/mode/plan) */
             422: {
                 headers: {
                     [name: string]: unknown;
