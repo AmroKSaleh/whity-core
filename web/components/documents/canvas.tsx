@@ -96,9 +96,11 @@ export function Canvas({
 
   const start = (e: React.PointerEvent, kind: 'move' | 'resize', el: DocElement, handle?: HandleDef) => {
     if (preview) return;
-    e.preventDefault();
     e.stopPropagation();
     onSelect(el.id);
+    // Locked: selectable (to inspect/unlock) but not draggable/resizable.
+    if (el.locked) return;
+    e.preventDefault();
     setDrag({ kind, handle, id: el.id, startX: e.clientX, startY: e.clientY, orig: { x: el.x, y: el.y, w: el.w, h: el.h } });
   };
 
@@ -126,6 +128,8 @@ export function Canvas({
       >
         <MarginGuide page={page} preview={preview} />
         {ordered.map((el) => {
+          // Hidden elements are omitted from Preview/print, shown dimmed while editing.
+          if (preview && el.hidden) return null;
           const selected = el.id === selectedId && !preview;
           return (
             <div
@@ -140,12 +144,14 @@ export function Canvas({
                 height: `${el.h}mm`,
                 transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                 zIndex: el.z,
-                cursor: preview ? 'default' : 'move',
+                cursor: preview || el.locked ? 'default' : 'move',
+                opacity: el.hidden ? 0.4 : undefined,
                 outline: selected ? '1px solid var(--color-primary)' : undefined,
               }}
             >
               <ElementContent el={el} data={data} preview={preview} />
               {selected &&
+                !el.locked &&
                 HANDLES.map((hd) => (
                   <span
                     key={hd.name}
