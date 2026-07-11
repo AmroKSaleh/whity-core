@@ -371,6 +371,37 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-page').getByText('Text')).toBeVisible();
   });
 
+  test('block edit mode: editing a block propagates to every instance', async ({ page }) => {
+    await page.goto('/admin/documents');
+    const canvas = page.getByTestId('doc-page');
+
+    // Make a block from a text element reading "LOGO".
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-text-value').fill('LOGO');
+    await page.getByTestId('doc-save-block').click();
+
+    // Fresh doc, insert the block twice → two instances, both showing "LOGO".
+    await page.getByRole('button', { name: 'New' }).click();
+    const insert = page.locator('[data-testid^="doc-block-insert-"]').first();
+    await insert.click();
+    await insert.click();
+    await expect(canvas.getByText('LOGO')).toHaveCount(2);
+
+    // Select one instance and open block edit mode.
+    await page.locator('[data-testid^="doc-layer-select-"]').first().click();
+    await page.getByTestId('doc-block-edit').click();
+    await expect(page.getByTestId('doc-block-edit-banner')).toBeVisible();
+
+    // Edit the block's text to "BRAND" and finish.
+    await page.locator('[data-testid^="doc-layer-select-"]').first().click();
+    await page.getByTestId('doc-text-value').fill('BRAND');
+    await page.getByTestId('doc-block-edit-done').click();
+
+    // Both instances now show the edited content — the edit propagated.
+    await expect(canvas.getByText('BRAND')).toHaveCount(2);
+    await expect(canvas.getByText('LOGO')).toHaveCount(0);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

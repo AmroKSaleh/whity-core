@@ -58,6 +58,7 @@ export function Canvas({
   onSelect,
   onChange,
   onChangeMany,
+  onEditBlock,
 }: {
   elements: DocElement[];
   page: PageSpec;
@@ -71,6 +72,7 @@ export function Canvas({
   onSelect: (id: string | null, additive?: boolean) => void;
   onChange: (id: string, patch: Partial<DocElement>) => void;
   onChangeMany: (updates: Array<{ id: string; patch: Partial<DocElement> }>) => void;
+  onEditBlock: (blockId: string) => void;
 }) {
   const [drag, setDrag] = useState<Interaction | null>(null);
   // Alignment guide lines to draw while dragging (x/y positions in mm).
@@ -271,6 +273,7 @@ export function Canvas({
               key={el.id}
               data-testid={`doc-el-${el.id}`}
               onPointerDown={(e) => start(e, 'move', el)}
+              onDoubleClick={el.type === 'blockInstance' && !preview ? () => onEditBlock(el.blockId) : undefined}
               style={{
                 position: 'absolute',
                 left: `${el.x}mm`,

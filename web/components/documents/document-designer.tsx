@@ -30,6 +30,7 @@ import {
   deleteBlock,
   listBlocks,
   makeBlockFromElements,
+  resolveInstance,
   saveBlock,
   type DocBlock,
 } from '@/lib/documents/blocks';
@@ -131,6 +132,20 @@ export function DocumentDesigner() {
     void p;
   }, []);
   const blocksMap = useMemo(() => blocksById(blocks), [blocks]);
+
+  // Block edit mode: the whole designer is temporarily repurposed to edit ONE
+  // block's elements (as a single-page doc). On Done we write the elements back
+  // to the block store — every instance re-resolves, so the edit propagates.
+  // The pre-edit editor state is stashed here and restored on exit.
+  const [blockEdit, setBlockEdit] = useState<{ id: string; name: string } | null>(null);
+  const blockStashRef = useRef<{
+    template: DocTemplate;
+    currentPage: number;
+    selectedIds: string[];
+    past: DocTemplate[];
+    future: DocTemplate[];
+    currentId: string | null;
+  } | null>(null);
 
   // Current page + its elements. `currentPage` may briefly exceed the page count
   // after an undo/delete, so read through a clamped `pageIndex`. ALL element
@@ -525,6 +540,83 @@ export function DocumentDesigner() {
     addToast('Block deleted from your library.', 'info');
   };
 
+  // Enter block edit mode: stash the current editor state and load the block's
+  // elements into a synthetic single-page document sized to the block.
+  const enterBlockEdit = (blockId: string) => {
+    const b = blocksMap[blockId];
+    if (!b || blockEdit) return;
+    blockStashRef.current = {
+      template,
+      currentPage,
+      selectedIds,
+      past: kbRef.current.past,
+      future: kbRef.current.future,
+      currentId,
+    };
+    const editTemplate: DocTemplate = {
+      version: 2,
+      name: b.name,
+      page: { widthMm: Math.max(10, b.w), heightMm: Math.max(10, b.h), marginMm: 0, background: '#ffffff' },
+      placeholders: template.placeholders,
+      pages: [{ id: newPageId(), elements: b.elements }],
+    };
+    setBlockEdit({ id: b.id, name: b.name });
+    setTemplate(editTemplate);
+    setCurrentPage(0);
+    setSelectedIds([]);
+    setBatchRows(null);
+    setBatchIndex(0);
+    resetHistory();
+  };
+
+  // Leave block edit mode. `save` writes the edited elements back to the block
+  // (keeping its id, so all instances update); either way the pre-edit document
+  // is restored.
+  const exitBlockEdit = (save: boolean) => {
+    const stash = blockStashRef.current;
+    const editing = blockEdit;
+    if (!stash || !editing) return;
+    if (save) {
+      const els = template.pages[0]?.elements ?? [];
+      const rebuilt = makeBlockFromElements(editing.name, els);
+      if (rebuilt) {
+        saveBlock({ ...rebuilt, id: editing.id });
+        setBlocks(listBlocks());
+        addToast(`Block “${editing.name}” updated.`, 'success');
+      } else {
+        addToast('A block needs at least one element; discarded.', 'info');
+      }
+    }
+    setTemplate(stash.template);
+    setCurrentPage(stash.currentPage);
+    setSelectedIds(stash.selectedIds);
+    setCurrentId(stash.currentId);
+    setPast(stash.past);
+    setFuture(stash.future);
+    historyRef.current = { lastLabel: '', lastTime: 0 };
+    blockStashRef.current = null;
+    setBlockEdit(null);
+  };
+
+  // Detach a block instance: replace the pointer with independent copies of the
+  // block's elements (inlined at the instance position), unlinking it.
+  const detachInstance = (instId: string) => {
+    const inst = elements.find((e) => e.id === instId);
+    if (!inst || inst.type !== 'blockInstance') return;
+    const b = blocksMap[inst.blockId];
+    if (!b) return;
+    commit('detach');
+    const resolved = resolveInstance(inst, b).map((e, i) => ({
+      ...e,
+      id: `${e.type}-${Date.now()}-${(pasteSeq.current += 1)}-${i}`,
+      z: inst.z + i,
+    }));
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) => [...els.filter((e) => e.id !== instId), ...resolved])
+    );
+    setSelectedIds(resolved.map((e) => e.id));
+  };
+
   // ── page operations ─────────────────────────────────────────────────────
   const addPage = () => {
     commit('page-add');
@@ -647,6 +739,24 @@ export function DocumentDesigner() {
 
   return (
     <div className="flex flex-col gap-3" data-testid="document-designer">
+      {blockEdit && (
+        <div
+          className="flex items-center gap-2 rounded-lg border border-primary/50 bg-primary/10 px-3 py-2"
+          data-testid="doc-block-edit-banner"
+        >
+          <IconComponents className="h-4 w-4 text-primary" />
+          <span className="text-sm font-medium text-primary">Editing block: {blockEdit.name}</span>
+          <span className="ms-auto flex items-center gap-2">
+            <Button size="sm" variant="ghost" data-testid="doc-block-edit-cancel" onClick={() => exitBlockEdit(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" data-testid="doc-block-edit-done" onClick={() => exitBlockEdit(true)}>
+              Done
+            </Button>
+          </span>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2">
         <Input
@@ -868,6 +978,7 @@ export function DocumentDesigner() {
             onSelect={selectOne}
             onChange={patchElement}
             onChangeMany={changeMany}
+            onEditBlock={enterBlockEdit}
           />
         </main>
 
@@ -911,15 +1022,38 @@ export function DocumentDesigner() {
                   <IconCopy className="h-4 w-4" />
                 </Button>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full gap-1"
-                data-testid="doc-save-block"
-                onClick={saveSelectionAsBlock}
-              >
-                <IconComponents className="h-3.5 w-3.5" /> Save as block
-              </Button>
+              {selected?.type === 'blockInstance' ? (
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 gap-1"
+                    data-testid="doc-block-edit"
+                    onClick={() => enterBlockEdit(selected.blockId)}
+                  >
+                    <IconComponents className="h-3.5 w-3.5" /> Edit block
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    data-testid="doc-block-detach"
+                    onClick={() => detachInstance(selected.id)}
+                  >
+                    Detach
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-1"
+                  data-testid="doc-save-block"
+                  onClick={saveSelectionAsBlock}
+                >
+                  <IconComponents className="h-3.5 w-3.5" /> Save as block
+                </Button>
+              )}
               <p className="text-[10px] leading-tight text-muted-foreground">
                 Tip: ⌘/Ctrl+C/X/V copy/cut/paste, ⌘/Ctrl+D duplicate, arrows nudge
                 (Shift = 5mm), Delete removes, Esc deselects.
