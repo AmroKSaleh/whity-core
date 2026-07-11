@@ -545,6 +545,23 @@ $kernel->use(new CsrfGuard());
 $kernel->use($tenantIsolationMiddleware);
 // Post-auth limiter runs AFTER tenant/principal are resolved, before route dispatch.
 $kernel->use($postAuthRateLimiter);
+// Payment wall (WC-billing): after tenant is resolved, block a LAPSED tenant's
+// requests per its effective enforcement mode. NEVER walls the system tenant,
+// public routes, or the billing/subscription-management routes (so an admin can
+// always pay/upgrade — payment can happen externally). Dormant until a tenant has
+// a lapsed subscription AND an enforcing mode; env BILLING_WALL_ENABLED is the
+// master off switch, BILLING_URL sets the 402 Link target.
+$paymentWall = new \Whity\Http\Middleware\PaymentWall(
+    new \Whity\Core\Subscription\SubscriptionService(
+        new \Whity\Core\Subscription\SubscriptionRepository($db->getPdo()),
+        $settingsService
+    ),
+    enabled: (($_ENV['BILLING_WALL_ENABLED'] ?? '1') !== '0'),
+    exemptPrefixes: ['/api/v1/subscription'],
+    billingUrl: ($_ENV['BILLING_URL'] ?? getenv('BILLING_URL')) ?: null,
+    logger: $logger,
+);
+$kernel->use($paymentWall);
 
 // 9. Initialize plugin loader and load plugins
 // Wire the permission registry, hook manager, and logger (WC-9/WC-13) so plugin
