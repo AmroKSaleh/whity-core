@@ -444,6 +444,32 @@ test.describe('Document & Label Designer', () => {
     await expect(codes).toHaveCount(2);
   });
 
+  test('distribute evenly spaces three selected elements', async ({ page }) => {
+    await page.goto('/admin/documents');
+
+    // Three text elements at uneven X (centres 25, 125, 70 for width 50).
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-field-x').fill('0');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-field-x').fill('100');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-field-x').fill('20');
+
+    // Select all three and distribute horizontally.
+    const layers = page.locator('[data-testid^="doc-layer-select-"]');
+    await layers.nth(0).click();
+    await layers.nth(1).click({ modifiers: ['Shift'] });
+    await layers.nth(2).click({ modifiers: ['Shift'] });
+    await page.getByTestId('doc-distribute-h').click();
+
+    // Outer centres are 25 and 125 → the middle element's centre lands at 75,
+    // i.e. left = 75 - 25 = 50mm. (Ends stay at 0mm and 100mm.)
+    const canvas = page.getByTestId('doc-page');
+    await expect(canvas.locator('[data-testid^="doc-el-"][style*="left: 50mm"]')).toHaveCount(1);
+    await expect(canvas.locator('[data-testid^="doc-el-"][style*="left: 0mm"]')).toHaveCount(1);
+    await expect(canvas.locator('[data-testid^="doc-el-"][style*="left: 100mm"]')).toHaveCount(1);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
