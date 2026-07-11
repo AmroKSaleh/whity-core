@@ -116,9 +116,7 @@ test.describe('Roles CRUD (admin)', () => {
     // "Select permissions..." to "N permissions selected"; match either state
     // so the same stable locator works before and after selection. The toggle
     // is type="button" (WC-99), so opening it must NOT submit the form.
-    const permsToggle = dialog
-      .getByRole('button')
-      .filter({ hasText: /permission/i });
+    const permsToggle = dialog.getByTestId('perm-toggle');
     await permsToggle.click();
 
     // Each permission is a <label> wrapping a controlled checkbox + its name;
@@ -183,9 +181,7 @@ test.describe('Roles CRUD (admin)', () => {
     const editDialog = page.getByRole('dialog');
     await expect(editDialog.getByRole('heading', { name: 'Edit Role' })).toBeVisible();
 
-    const permsToggle = editDialog
-      .getByRole('button')
-      .filter({ hasText: /Select permissions|permission/i });
+    const permsToggle = editDialog.getByTestId('perm-toggle');
     await permsToggle.click();
     const rolesReadLabel = editDialog.locator('label', { hasText: 'roles:read' });
     await expect(rolesReadLabel).toBeVisible();
@@ -226,7 +222,7 @@ test.describe('Roles CRUD (admin)', () => {
     await dialog.getByLabel('Role Name').fill(createdRoleName);
     await dialog.getByLabel('Description').fill('Select-all probe');
 
-    const permsToggle = dialog.getByRole('button').filter({ hasText: /permission/i });
+    const permsToggle = dialog.getByTestId('perm-toggle');
     await permsToggle.click();
 
     // Select All: the toggle label switches to "Deselect All" and the trigger
@@ -264,7 +260,7 @@ test.describe('Roles CRUD (admin)', () => {
     await dialog.getByLabel('Role Name').fill(createdRoleName);
     await dialog.getByLabel('Description').fill('Grouping probe');
 
-    const permsToggle = dialog.getByRole('button').filter({ hasText: /permission/i });
+    const permsToggle = dialog.getByTestId('perm-toggle');
     await permsToggle.click();
 
     // Live search narrows the list to the users:* group.

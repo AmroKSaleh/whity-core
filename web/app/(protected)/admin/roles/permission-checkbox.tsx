@@ -79,6 +79,7 @@ export function PermissionCheckbox({ permissions, selectedIds, onChange }: Permi
       <Button
         type="button"
         variant="outline"
+        data-testid="perm-toggle"
         onClick={() => setIsOpen(!isOpen)}
         className="w-full justify-between text-start font-normal"
       >
