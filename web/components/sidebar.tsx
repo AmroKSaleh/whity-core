@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import type { Membership } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
+import { useDirection } from '@/lib/direction-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import {
@@ -28,6 +29,7 @@ import {
   IconBuilding,
   IconChevronDown,
   IconCheck,
+  IconLanguage,
 } from '@tabler/icons-react';
 import { useState, useEffect, useCallback } from 'react';
 import type { Icon } from '@tabler/icons-react';
@@ -153,7 +155,7 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
               disabled={isSwitching}
             >
               {m.tenant_id === activeTenantId && (
-                <IconCheck size={14} className="mr-1 shrink-0" />
+                <IconCheck size={14} className="me-1 shrink-0" />
               )}
               <span className="truncate">{m.tenant_name}</span>
             </DropdownMenuItem>
@@ -178,7 +180,7 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
           </span>
           <IconChevronDown
             size={14}
-            className="shrink-0 text-muted-foreground ml-auto"
+            className="shrink-0 text-muted-foreground ms-auto"
             aria-hidden
           />
         </button>
@@ -211,6 +213,7 @@ export function Sidebar() {
   const { logout, user, memberships } = useAuth();
   const { getGroupedItems } = useNavigation();
   const branding = useBranding();
+  const { dir, toggle: toggleDirection } = useDirection();
   const groupedItems = getGroupedItems();
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -250,7 +253,7 @@ export function Sidebar() {
       {/* Mobile toggle button - only show on mobile */}
       <button
         onClick={toggleSidebar}
-        className="fixed top-4 left-4 z-50 md:hidden p-2 rounded-lg bg-background border border-border hover:bg-muted transition-colors"
+        className="fixed top-4 inset-s-4 z-50 md:hidden p-2 rounded-lg bg-background border border-border hover:bg-muted transition-colors"
         aria-label="Toggle sidebar"
       >
         {isOpen ? <IconX size={24} /> : <IconMenu2 size={24} />}
@@ -268,11 +271,11 @@ export function Sidebar() {
       <aside
         className={`
           transition-all duration-300 ease-in-out
-          ${isMobile 
-            ? `fixed top-0 left-0 h-screen ${sidebarWidth} bg-muted border-r border-border flex flex-col z-40 ${
-                isOpen ? 'translate-x-0' : '-translate-x-full'
-              }` 
-            : `relative h-screen ${sidebarWidth} bg-muted border-r border-border flex flex-col`
+          ${isMobile
+            ? `fixed top-0 inset-s-0 h-screen ${sidebarWidth} bg-muted border-e border-border flex flex-col z-40 ${
+                isOpen ? 'translate-x-0' : 'ltr:-translate-x-full rtl:translate-x-full'
+              }`
+            : `relative h-screen ${sidebarWidth} bg-muted border-e border-border flex flex-col`
           }
         `}
       >
@@ -301,7 +304,7 @@ export function Sidebar() {
           {!isMobile && (
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
-              className="p-1 hover:bg-background rounded transition-colors ml-2"
+              className="p-1 hover:bg-background rounded transition-colors ms-2"
               title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               {isCollapsed ? (
@@ -347,13 +350,13 @@ export function Sidebar() {
                           className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
                           title={isCollapsed && !isMobile ? item.label : `${index + 1}. ${item.label}`}
                         >
-                          <Icon size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 shrink-0'} />
+                          <Icon size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
                           {(!isCollapsed || isMobile) && (
                             <>
-                              <span className="text-xs text-muted-foreground mr-2 w-5">
+                              <span className="text-xs text-muted-foreground me-2 w-5">
                                 {index + 1}
                               </span>
-                              <span className="flex-1 text-left">{item.label}</span>
+                              <span className="flex-1 text-start">{item.label}</span>
                             </>
                           )}
                         </Button>
@@ -379,7 +382,7 @@ export function Sidebar() {
               href="/settings"
               onClick={() => isMobile && setIsOpen(false)}
               aria-label="Account settings"
-              className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg text-center md:text-left hover:bg-background/70 transition-colors"
+              className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg text-center md:text-start hover:bg-background/70 transition-colors"
               title="Account settings"
             >
               <IconUserCog size={20} className="shrink-0 text-muted-foreground" />
@@ -404,6 +407,19 @@ export function Sidebar() {
             activeTenantId={user?.tenant_id}
             collapsed={isCollapsed && !isMobile}
           />
+          {/* Interface direction (LTR / RTL) — Arabic support (WC-rtl). */}
+          <Button
+            onClick={toggleDirection}
+            variant="outline"
+            size={isCollapsed && !isMobile ? 'icon' : 'default'}
+            className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
+            title={dir === 'rtl' ? 'Switch to left-to-right' : 'التبديل إلى العربية (RTL)'}
+            aria-label="Toggle interface direction"
+            data-testid="direction-toggle"
+          >
+            <IconLanguage size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
+            {(!isCollapsed || isMobile) && (dir === 'rtl' ? 'English (LTR)' : 'العربية (RTL)')}
+          </Button>
           <Button
             onClick={handleLogout}
             variant="outline"
@@ -411,7 +427,7 @@ export function Sidebar() {
             className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
             title={isCollapsed && !isMobile ? 'Logout' : undefined}
           >
-            <IconLogout size={20} className={isCollapsed && !isMobile ? '' : 'mr-3 shrink-0'} />
+            <IconLogout size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
             {(!isCollapsed || isMobile) && 'Logout'}
           </Button>
         </div>
