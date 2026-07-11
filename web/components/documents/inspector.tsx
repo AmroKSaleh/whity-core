@@ -199,10 +199,10 @@ function ElementTab({
   return (
     <>
       <div className="grid grid-cols-4 gap-2">
-        <Num label="X" value={el.x} onChange={(v) => onChange({ x: v })} />
-        <Num label="Y" value={el.y} onChange={(v) => onChange({ y: v })} />
-        <Num label="W" value={el.w} onChange={(v) => onChange({ w: v })} />
-        <Num label="H" value={el.h} onChange={(v) => onChange({ h: v })} />
+        <Num label="X" testId="doc-field-x" value={el.x} onChange={(v) => onChange({ x: v })} />
+        <Num label="Y" testId="doc-field-y" value={el.y} onChange={(v) => onChange({ y: v })} />
+        <Num label="W" testId="doc-field-w" value={el.w} onChange={(v) => onChange({ w: v })} />
+        <Num label="H" testId="doc-field-h" value={el.h} onChange={(v) => onChange({ h: v })} />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Num label="Rotation (°)" value={el.rotation} onChange={(v) => onChange({ rotation: v })} />

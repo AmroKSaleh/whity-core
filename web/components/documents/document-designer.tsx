@@ -67,6 +67,8 @@ import {
   IconLayoutAlignTop,
   IconLayoutAlignMiddle,
   IconLayoutAlignBottom,
+  IconArrowsHorizontal,
+  IconArrowsVertical,
 } from '@tabler/icons-react';
 import { Canvas } from './canvas';
 import { Palette } from './palette';
@@ -467,6 +469,33 @@ export function DocumentDesigner() {
                       : { y: Math.max(0, H - e.h) };
           return { ...e, ...patch } as DocElement;
         })
+      )
+    );
+  };
+
+  // Evenly space 3+ selected elements along an axis: keep the outermost two
+  // fixed and distribute the rest so their centres are equally spaced.
+  const distributeSelected = (axis: 'h' | 'v') => {
+    const sel = elements.filter((e) => selectedIds.includes(e.id) && !e.locked);
+    if (sel.length < 3) return;
+    const centre = (e: DocElement) => (axis === 'h' ? e.x + e.w / 2 : e.y + e.h / 2);
+    const sorted = [...sel].sort((a, b) => centre(a) - centre(b));
+    const first = centre(sorted[0]);
+    const last = centre(sorted[sorted.length - 1]);
+    const n = sorted.length;
+    const targets = new Map<string, number>();
+    sorted.forEach((e, i) => {
+      const c = first + ((last - first) * i) / (n - 1);
+      targets.set(e.id, axis === 'h' ? c - e.w / 2 : c - e.h / 2);
+    });
+    commit('distribute');
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) =>
+        els.map((e) =>
+          targets.has(e.id)
+            ? ({ ...e, ...(axis === 'h' ? { x: Math.max(0, targets.get(e.id)!) } : { y: Math.max(0, targets.get(e.id)!) }) } as DocElement)
+            : e
+        )
       )
     );
   };
@@ -1022,6 +1051,28 @@ export function DocumentDesigner() {
                   <IconLayoutAlignBottom className="h-4 w-4" />
                 </Button>
               </div>
+              {selectedIds.length >= 3 && (
+                <div className="flex items-center gap-0.5">
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Distribute horizontally"
+                    data-testid="doc-distribute-h"
+                    onClick={() => distributeSelected('h')}
+                  >
+                    <IconArrowsHorizontal className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Distribute vertically"
+                    data-testid="doc-distribute-v"
+                    onClick={() => distributeSelected('v')}
+                  >
+                    <IconArrowsVertical className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
               <div className="flex items-center gap-0.5">
                 <Button variant="outline" size="icon-sm" aria-label="Copy" data-testid="doc-copy" onClick={copySelected}>
                   <IconClipboardCopy className="h-4 w-4" />
