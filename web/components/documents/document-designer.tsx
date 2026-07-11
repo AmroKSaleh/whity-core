@@ -25,6 +25,7 @@ import {
   type SequenceConfig,
 } from '@/lib/documents/batch';
 import { DEFAULT_SHEET, type SheetSpec } from '@/lib/documents/sheet';
+import { STARTER_TEMPLATES } from '@/lib/documents/starters';
 import {
   blocksById,
   deleteBlock,
@@ -749,16 +750,26 @@ export function DocumentDesigner() {
     addToast(`Loaded “${entry.name}”.`, 'info');
   };
 
-  const doNew = () => {
-    setTemplate(blankTemplate());
-    setSheet(DEFAULT_SHEET);
-    setSequence(DEFAULT_SEQUENCE);
+  // Load a fresh document (blank or a starter), resetting all editor state.
+  const loadFreshTemplate = (t: DocTemplate) => {
+    setTemplate(t);
+    setSheet(t.sheet ?? DEFAULT_SHEET);
+    setSequence(t.sequence ?? DEFAULT_SEQUENCE);
     setCurrentId(null);
     setCurrentPage(0);
     setSelectedIds([]);
     setBatchRows(null);
     setBatchIndex(0);
     resetHistory();
+  };
+
+  const doNew = () => loadFreshTemplate(blankTemplate());
+
+  const doStartFrom = (starterId: string) => {
+    const s = STARTER_TEMPLATES.find((x) => x.id === starterId);
+    if (!s) return;
+    loadFreshTemplate(s.make());
+    addToast(`Started from “${s.label}”.`, 'info');
   };
 
   const onImportFile = async (file: File) => {
@@ -845,6 +856,20 @@ export function DocumentDesigner() {
         <Button variant="outline" size="sm" className="gap-1" onClick={doNew}>
           <IconFileText className="h-3.5 w-3.5" /> New
         </Button>
+        <select
+          className={SELECT_CLASS}
+          aria-label="Start from a template"
+          data-testid="doc-start-from"
+          value=""
+          onChange={(e) => e.target.value && doStartFrom(e.target.value)}
+        >
+          <option value="">Start from…</option>
+          {STARTER_TEMPLATES.filter((s) => s.id !== 'blank').map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+            </option>
+          ))}
+        </select>
         <Button size="sm" className="gap-1" data-testid="doc-save" onClick={doSave}>
           <IconDeviceFloppy className="h-3.5 w-3.5" /> Save
         </Button>

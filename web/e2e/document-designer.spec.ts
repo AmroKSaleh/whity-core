@@ -500,6 +500,18 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-ruler-x').getByText('10', { exact: true })).toBeVisible();
   });
 
+  test('starter templates: "Start from" populates a ready document (no white sheet)', async ({ page }) => {
+    await page.goto('/admin/documents');
+    const el = page.locator('[data-testid^="doc-el-"]');
+    await expect(el).toHaveCount(0);
+
+    // Pick the Invoice starter → the canvas fills with a ready layout.
+    await page.getByTestId('doc-start-from').selectOption('invoice');
+    await expect(page.getByTestId('doc-name')).toHaveValue('Invoice');
+    expect(await el.count()).toBeGreaterThan(5);
+    await expect(page.getByTestId('doc-page').getByText('INVOICE').first()).toBeVisible();
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
