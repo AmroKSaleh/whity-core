@@ -32,6 +32,10 @@ export interface TextStyle {
    * (e.g. a Latin serial inside Arabic). Applies in edit, Preview and print.
    */
   direction?: 'auto' | 'ltr' | 'rtl';
+  /** Line height as a unitless multiple of the font size (undefined = 1.2). */
+  lineHeight?: number;
+  /** Extra spacing between characters, in points (undefined = 0). */
+  letterSpacing?: number;
 }
 
 interface ElementCommon {

@@ -415,6 +415,17 @@ test.describe('Document & Label Designer', () => {
     await expect(page.locator('[data-testid^="doc-block-scope-"]').first()).toHaveValue('tenant');
   });
 
+  test('text typography: line height is configurable and applied to the text box', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+
+    const textbox = page.getByTestId('doc-page').getByTestId('doc-textbox').first();
+    await expect(textbox).toHaveAttribute('style', /line-height:\s*1\.2\b/);
+
+    await page.getByTestId('doc-line-height').fill('2');
+    await expect(textbox).toHaveAttribute('style', /line-height:\s*2\b/);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
