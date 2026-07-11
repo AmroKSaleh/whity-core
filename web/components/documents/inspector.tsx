@@ -5,6 +5,7 @@ import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '
 import { BARCODE_SYMBOLOGIES } from '@/lib/documents/types';
 import { generateSequence, type SequenceConfig } from '@/lib/documents/batch';
 import { parseDelimited, parseJsonRows } from '@/lib/documents/csv';
+import { SHEET_PRESETS, cellsPerSheet, sheetCount, type SheetSpec } from '@/lib/documents/sheet';
 import { PAGE_PRESETS } from '@/lib/documents/presets';
 import { Input } from '@amroksaleh/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
@@ -14,7 +15,7 @@ import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight } from '@tabler/
 const SELECT_CLASS =
   'h-7 w-full min-w-0 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30';
 
-type Tab = 'element' | 'page' | 'data' | 'batch';
+type Tab = 'element' | 'page' | 'data' | 'batch' | 'sheet';
 
 export interface BatchState {
   active: boolean;
@@ -26,6 +27,7 @@ export function Inspector({
   template,
   selected,
   batch,
+  sheet,
   onChangeSelected,
   onChangePage,
   onChangePlaceholders,
@@ -33,10 +35,12 @@ export function Inspector({
   onLoadBatchRecords,
   onClearBatch,
   onBatchIndex,
+  onChangeSheet,
 }: {
   template: DocTemplate;
   selected: DocElement | null;
   batch: BatchState;
+  sheet: SheetSpec;
   onChangeSelected: (patch: Partial<DocElement>) => void;
   onChangePage: (patch: Partial<PageSpec>) => void;
   onChangePlaceholders: (list: Placeholder[]) => void;
@@ -44,19 +48,21 @@ export function Inspector({
   onLoadBatchRecords: (records: Record<string, string>[]) => void;
   onClearBatch: () => void;
   onBatchIndex: (i: number) => void;
+  onChangeSheet: (patch: Partial<SheetSpec>) => void;
 }) {
   const [tab, setTab] = useState<Tab>('element');
+  const unitsTotal = (batch.active ? batch.total : 1) * template.pages.length;
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-3 flex gap-1 rounded-md bg-muted/40 p-0.5 text-xs">
-        {(['element', 'page', 'data', 'batch'] as Tab[]).map((t) => (
+      <div className="mb-3 flex gap-0.5 rounded-md bg-muted/40 p-0.5 text-[11px]">
+        {(['element', 'page', 'data', 'batch', 'sheet'] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
             data-testid={`doc-tab-${t}`}
             onClick={() => setTab(t)}
-            className={`flex-1 rounded px-2 py-1 capitalize ${tab === t ? 'bg-card font-medium text-foreground shadow-sm' : 'text-muted-foreground'}`}
+            className={`flex-1 rounded px-1.5 py-1 capitalize ${tab === t ? 'bg-card font-medium text-foreground shadow-sm' : 'text-muted-foreground'}`}
           >
             {t}
           </button>
@@ -77,8 +83,76 @@ export function Inspector({
             onIndex={onBatchIndex}
           />
         )}
+        {tab === 'sheet' && <SheetTab sheet={sheet} unitsTotal={unitsTotal} onChange={onChangeSheet} />}
       </div>
     </div>
+  );
+}
+
+function SheetTab({
+  sheet,
+  unitsTotal,
+  onChange,
+}: {
+  sheet: SheetSpec;
+  unitsTotal: number;
+  onChange: (patch: Partial<SheetSpec>) => void;
+}) {
+  const per = cellsPerSheet(sheet);
+  const sheets = sheetCount(unitsTotal, sheet);
+  return (
+    <>
+      <p className="text-xs text-muted-foreground">
+        Tile many labels onto one physical sheet (e.g. an A4 sheet of address labels). The label size is the page
+        size; batch rows flow into cells across sheets.
+      </p>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Print as label sheet</span>
+        <Switch data-testid="doc-sheet-enable" checked={sheet.enabled} onCheckedChange={(v) => onChange({ enabled: v })} />
+      </div>
+      {sheet.enabled && (
+        <>
+          <Field label="Preset">
+            <select
+              className={SELECT_CLASS}
+              data-testid="doc-sheet-preset"
+              value=""
+              onChange={(e) => {
+                const p = SHEET_PRESETS.find((x) => x.id === e.target.value);
+                if (p) onChange(p.spec);
+              }}
+            >
+              <option value="">Choose a preset…</option>
+              {SHEET_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Columns" value={sheet.cols} onChange={(v) => onChange({ cols: Math.max(1, Math.round(v)) })} testId="doc-sheet-cols" />
+            <Num label="Rows" value={sheet.rows} onChange={(v) => onChange({ rows: Math.max(1, Math.round(v)) })} testId="doc-sheet-rows" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Sheet width (mm)" value={sheet.sheetWidthMm} onChange={(v) => onChange({ sheetWidthMm: v })} />
+            <Num label="Sheet height (mm)" value={sheet.sheetHeightMm} onChange={(v) => onChange({ sheetHeightMm: v })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Margin X (mm)" value={sheet.marginXMm} step={0.5} onChange={(v) => onChange({ marginXMm: v })} />
+            <Num label="Margin Y (mm)" value={sheet.marginYMm} step={0.5} onChange={(v) => onChange({ marginYMm: v })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Gutter X (mm)" value={sheet.gutterXMm} step={0.5} onChange={(v) => onChange({ gutterXMm: v })} />
+            <Num label="Gutter Y (mm)" value={sheet.gutterYMm} step={0.5} onChange={(v) => onChange({ gutterYMm: v })} />
+          </div>
+          <p className="text-[10px] text-muted-foreground" data-testid="doc-sheet-summary">
+            {per} labels per sheet · {sheets} sheet{sheets === 1 ? '' : 's'} for {unitsTotal} label
+            {unitsTotal === 1 ? '' : 's'}
+          </p>
+        </>
+      )}
+    </>
   );
 }
 

@@ -250,6 +250,27 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-page').getByText('ABC-1')).toBeVisible();
   });
 
+  test('label sheet: tiles batch rows N-up onto one sheet page', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-dynamicText').click();
+    await page.getByTestId('doc-text-value').fill('{{sku}}');
+
+    // A 4-row batch → 4 individual pages before tiling.
+    await page.getByTestId('doc-tab-batch').click();
+    await page.getByTestId('doc-batch-mode-paste').click();
+    await page.getByTestId('doc-batch-paste').fill('sku\nA\nB\nC\nD');
+    await page.getByTestId('doc-batch-load-paste').click();
+    await expect(page.getByTestId('doc-print-page')).toHaveCount(4);
+
+    // Enable a 2×2 label sheet → 4 cells fit on a single sheet page.
+    await page.getByTestId('doc-tab-sheet').click();
+    await page.getByTestId('doc-sheet-enable').click();
+    await page.getByTestId('doc-sheet-cols').fill('2');
+    await page.getByTestId('doc-sheet-rows').fill('2');
+    await expect(page.getByTestId('doc-print-page')).toHaveCount(1);
+    await expect(page.getByTestId('doc-sheet-cell')).toHaveCount(4);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
