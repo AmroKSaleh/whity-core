@@ -48,6 +48,7 @@ export function Canvas({
   selectedId,
   zoom,
   gridMm,
+  showGrid,
   preview,
   onSelect,
   onChange,
@@ -58,6 +59,7 @@ export function Canvas({
   selectedId: string | null;
   zoom: number;
   gridMm: number;
+  showGrid: boolean;
   preview: boolean;
   onSelect: (id: string | null) => void;
   onChange: (id: string, patch: Partial<DocElement>) => void;
@@ -158,6 +160,20 @@ export function Canvas({
           overflow: 'hidden',
         }}
       >
+        {showGrid && !preview && (
+          <div
+            data-testid="doc-grid"
+            aria-hidden
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              zIndex: 0,
+              backgroundImage:
+                'repeating-linear-gradient(to right, var(--color-border), var(--color-border) 0.1mm, transparent 0.1mm, transparent 5mm), repeating-linear-gradient(to bottom, var(--color-border), var(--color-border) 0.1mm, transparent 0.1mm, transparent 5mm)',
+            }}
+          />
+        )}
         <MarginGuide page={page} preview={preview} />
         {drag &&
           guides.v.map((x) => (
@@ -219,6 +235,29 @@ export function Canvas({
               }}
             >
               <ElementContent el={el} data={data} preview={preview} />
+              {selected && (
+                <span
+                  data-testid="doc-readout"
+                  aria-hidden
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    bottom: 0,
+                    transform: 'translateY(115%)',
+                    fontSize: '2.4mm',
+                    lineHeight: 1,
+                    padding: '0.4mm 0.8mm',
+                    borderRadius: '0.6mm',
+                    background: 'var(--color-primary)',
+                    color: '#fff',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                    zIndex: 9999,
+                  }}
+                >
+                  {Math.round(el.w)} × {Math.round(el.h)} mm
+                </span>
+              )}
               {selected &&
                 !el.locked &&
                 HANDLES.map((hd) => (
