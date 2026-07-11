@@ -220,11 +220,11 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
               return (
                 <li
                   key={index}
-                  className={`rounded-md border-l-4 bg-muted/40 px-3 py-2 text-sm ${
+                  className={`rounded-md border-s-4 bg-muted/40 px-3 py-2 text-sm ${
                     isError ? 'border-destructive' : 'border-warning'
                   }`}
                 >
-                  <span className="mr-2 text-xs font-semibold uppercase tracking-wide">
+                  <span className="me-2 text-xs font-semibold uppercase tracking-wide">
                     {isError ? 'error' : 'warning'}
                   </span>
                   {where.length > 0 && (
