@@ -69,6 +69,10 @@ export function ElementContent({
       );
     case 'line':
       return <div className="h-full w-full" style={{ background: el.stroke }} />;
+    case 'blockInstance':
+      // Block instances are resolved to their sub-elements by the canvas/print
+      // renderer, not here; nothing to draw as a leaf.
+      return null;
     default: {
       const _exhaustive: never = el;
       return <>{String(_exhaustive)}</>;

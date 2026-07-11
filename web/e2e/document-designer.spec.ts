@@ -348,6 +348,29 @@ test.describe('Document & Label Designer', () => {
     await expect(el).toHaveCount(0);
   });
 
+  test('reusable blocks: save a selection as a block and insert it into a fresh document', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-add-rect').click();
+
+    // Select both elements and save them as a reusable block.
+    const layers = page.locator('[data-testid^="doc-layer-select-"]');
+    await layers.nth(0).click();
+    await layers.nth(1).click({ modifiers: ['Shift'] });
+    await page.getByTestId('doc-save-block').click();
+
+    // Start a fresh document — the block persists in the library (stored once).
+    await page.getByRole('button', { name: 'New' }).click();
+    await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(0);
+
+    // Insert the saved block → a single block instance carrying its content.
+    const insertBtn = page.locator('[data-testid^="doc-block-insert-"]').first();
+    await expect(insertBtn).toBeVisible();
+    await insertBtn.click();
+    await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(1);
+    await expect(page.getByTestId('doc-page').getByText('Text')).toBeVisible();
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

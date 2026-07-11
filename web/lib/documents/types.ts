@@ -103,6 +103,17 @@ export interface LineElement extends ElementCommon {
   strokeWidth: number;
 }
 
+/**
+ * A reference (pointer) to a reusable block. The document stores only the
+ * blockId + placement; the block's actual elements live once in the block store
+ * and are resolved at render time, so editing the block updates every instance.
+ * Not an "add" element type — inserted from the Blocks panel, never via newElement.
+ */
+export interface BlockInstanceElement extends ElementCommon {
+  type: 'blockInstance';
+  blockId: string;
+}
+
 export type DocElement =
   | TextElement
   | DynamicTextElement
@@ -110,7 +121,8 @@ export type DocElement =
   | BarcodeElement
   | QrElement
   | RectElement
-  | LineElement;
+  | LineElement
+  | BlockInstanceElement;
 
 export interface Placeholder {
   key: string;
