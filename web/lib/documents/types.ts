@@ -26,6 +26,12 @@ export interface TextStyle {
   align: 'left' | 'center' | 'right';
   vAlign: 'top' | 'middle' | 'bottom';
   color: string;
+  /**
+   * Text direction. 'auto' (default) lets the renderer infer per-paragraph from
+   * the first strong character — correct for Arabic and mixed Arabic/Latin
+   * (e.g. a Latin serial inside Arabic). Applies in edit, Preview and print.
+   */
+  direction?: 'auto' | 'ltr' | 'rtl';
 }
 
 interface ElementCommon {
