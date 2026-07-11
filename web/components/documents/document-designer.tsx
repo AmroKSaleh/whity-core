@@ -32,6 +32,7 @@ import {
   makeBlockFromElements,
   resolveInstance,
   saveBlock,
+  type BlockScope,
   type DocBlock,
 } from '@/lib/documents/blocks';
 import { useToast } from '@/lib/toast-context';
@@ -540,6 +541,15 @@ export function DocumentDesigner() {
     addToast('Block deleted from your library.', 'info');
   };
 
+  // Change a block's visibility tier. Tenant/global publishing will be RBAC-gated
+  // once the backend store exists; for now it updates the local library.
+  const setBlockScope = (id: string, scope: BlockScope) => {
+    const b = blocksMap[id];
+    if (!b) return;
+    saveBlock({ ...b, scope });
+    setBlocks(listBlocks());
+  };
+
   // Enter block edit mode: stash the current editor state and load the block's
   // elements into a synthetic single-page document sized to the block.
   const enterBlockEdit = (blockId: string) => {
@@ -961,6 +971,7 @@ export function DocumentDesigner() {
             onDelete={deleteElement}
             onInsertBlock={insertBlock}
             onDeleteBlock={deleteBlockDef}
+            onSetBlockScope={setBlockScope}
           />
         </aside>
 
