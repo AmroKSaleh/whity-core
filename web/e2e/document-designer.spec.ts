@@ -364,7 +364,9 @@ test.describe('Document & Label Designer', () => {
     await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(0);
 
     // Insert the saved block → a single block instance carrying its content.
-    const insertBtn = page.locator('[data-testid^="doc-block-insert-"]').first();
+    const insertBtn = page
+      .locator('[data-testid^="doc-block-insert-"]:not([data-testid^="doc-block-insert-sys-"])')
+      .first();
     await expect(insertBtn).toBeVisible();
     await insertBtn.click();
     await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(1);
@@ -382,7 +384,9 @@ test.describe('Document & Label Designer', () => {
 
     // Fresh doc, insert the block twice → two instances, both showing "LOGO".
     await page.getByRole('button', { name: 'New' }).click();
-    const insert = page.locator('[data-testid^="doc-block-insert-"]').first();
+    const insert = page
+      .locator('[data-testid^="doc-block-insert-"]:not([data-testid^="doc-block-insert-sys-"])')
+      .first();
     await insert.click();
     await insert.click();
     await expect(canvas.getByText('LOGO')).toHaveCount(2);
@@ -407,12 +411,13 @@ test.describe('Document & Label Designer', () => {
     await page.getByTestId('doc-add-text').click();
     await page.getByTestId('doc-save-block').click();
 
-    const scope = page.locator('[data-testid^="doc-block-scope-"]').first();
+    const userScope = '[data-testid^="doc-block-scope-"]:not([data-testid^="doc-block-scope-sys-"])';
+    const scope = page.locator(userScope).first();
     await expect(scope).toHaveValue('personal');
 
     // Publish it tenant-wide; the choice sticks (it moves under the Tenant group).
     await scope.selectOption('tenant');
-    await expect(page.locator('[data-testid^="doc-block-scope-"]').first()).toHaveValue('tenant');
+    await expect(page.locator(userScope).first()).toHaveValue('tenant');
   });
 
   test('text typography: line height is configurable and applied to the text box', async ({ page }) => {
