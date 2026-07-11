@@ -1592,8 +1592,10 @@ class PluginLoader
 
         if (is_dir($path)) {
             $sentinel = rtrim($path, '/\\') . '/' . self::DIR_DISABLED_SENTINEL;
-            if (!file_exists($sentinel)) {
-                @file_put_contents($sentinel, '');
+            if (!file_exists($sentinel) && @file_put_contents($sentinel, '') === false) {
+                throw new \Whity\Core\Exception\PluginPersistenceException(
+                    "Could not persist the disable for plugin '{$pluginName}': writing the sentinel failed."
+                );
             }
             return;
         }
@@ -1605,8 +1607,10 @@ class PluginLoader
 
         if (str_ends_with($path, '.php')) {
             $disabledPath = $path . '.disabled';
-            if (!file_exists($disabledPath)) {
-                @rename($path, $disabledPath);
+            if (!file_exists($disabledPath) && !@rename($path, $disabledPath)) {
+                throw new \Whity\Core\Exception\PluginPersistenceException(
+                    "Could not persist the disable for plugin '{$pluginName}': renaming the file failed."
+                );
             }
         }
     }
@@ -1631,8 +1635,10 @@ class PluginLoader
 
         if (is_dir($path)) {
             $sentinel = rtrim($path, '/\\') . '/' . self::DIR_DISABLED_SENTINEL;
-            if (file_exists($sentinel)) {
-                @unlink($sentinel);
+            if (file_exists($sentinel) && !@unlink($sentinel)) {
+                throw new \Whity\Core\Exception\PluginPersistenceException(
+                    "Could not persist the re-enable for plugin '{$pluginName}': removing the sentinel failed."
+                );
             }
             return;
         }
@@ -1640,8 +1646,10 @@ class PluginLoader
         // Single-file plugin: rename the `.php.disabled` file back to `.php`.
         if (str_ends_with($path, '.php.disabled')) {
             $enabledPath = substr($path, 0, -strlen('.disabled'));
-            if (!file_exists($enabledPath)) {
-                @rename($path, $enabledPath);
+            if (!file_exists($enabledPath) && !@rename($path, $enabledPath)) {
+                throw new \Whity\Core\Exception\PluginPersistenceException(
+                    "Could not persist the re-enable for plugin '{$pluginName}': renaming the file failed."
+                );
             }
         }
     }

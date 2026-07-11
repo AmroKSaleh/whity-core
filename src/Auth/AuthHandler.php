@@ -451,9 +451,12 @@ class AuthHandler
         }
         $tenantId = (int) $body['tenant_id'];
 
-        // Re-validate: the caller MUST still hold an active membership in this
-        // REAL tenant (hasActiveMembershipInTenant excludes tenant 0). This is the
-        // authorization gate — never trust the submitted tenant_id alone.
+        // Re-validate: the caller MUST still hold an ACTIVE membership in the
+        // selected tenant. This is the authorization gate — never trust the
+        // submitted tenant_id alone. It applies uniformly to tenant 0: system
+        // authority is grantable here ONLY to a profile that genuinely holds a
+        // tenant-0 membership, so a non-system user selecting 0 is rejected (no
+        // such membership) — the tenant-0 escalation guard.
         if (!$this->hasActiveMembershipInTenant($profileId, $tenantId)) {
             return Response::error('Invalid tenant selection', 401);
         }
