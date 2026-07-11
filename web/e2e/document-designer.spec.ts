@@ -138,6 +138,37 @@ test.describe('Document & Label Designer', () => {
     await expect.poll(leftMm).toBeCloseTo(x0 + 1, 1);
   });
 
+  test('dragging near the page origin shows an alignment guide and snaps to it', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    const el = page.locator('[data-testid^="doc-el-"]').first();
+    await expect(el).toBeVisible();
+
+    const box = await el.boundingBox();
+    if (!box) throw new Error('element has no bounding box');
+
+    // Grab near the top-left and drag toward the page origin — the left/top
+    // edges come to rest ~1mm off 0, inside the snap tolerance, so they snap
+    // exactly onto the page-origin alignment target.
+    await page.mouse.move(box.x + 6, box.y + 6);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 20, box.y - 20, { steps: 10 });
+
+    // A vertical alignment guide is drawn while dragging (integration of the
+    // snap engine → guide overlay).
+    await expect(page.getByTestId('doc-guide-v').first()).toBeAttached();
+    await page.mouse.up();
+
+    // The left/top edges are pulled onto the page-origin guide — the exact
+    // snap arithmetic is covered by the geometry unit tests; here we just prove
+    // the drag reaches the origin alignment zone (well past its 8mm start).
+    const style = (await el.getAttribute('style')) ?? '';
+    const left = parseFloat(/left:\s*([\d.]+)mm/.exec(style)?.[1] ?? 'NaN');
+    const top = parseFloat(/top:\s*([\d.]+)mm/.exec(style)?.[1] ?? 'NaN');
+    expect(left).toBeLessThanOrEqual(1);
+    expect(top).toBeLessThanOrEqual(1);
+  });
+
   test('hiding an element removes it from Preview', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-dynamicText').click();

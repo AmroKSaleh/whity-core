@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DocElement, DocTemplate, PageSpec } from '@/lib/documents/types';
 import { PX_PER_MM } from '@/lib/documents/types';
+import { snapMove } from '@/lib/documents/geometry';
 import { ElementContent } from './element-content';
 
 interface HandleDef {
@@ -28,6 +29,8 @@ const HANDLES: HandleDef[] = [
 ];
 
 const MIN_MM = 1;
+/** Alignment-guide snap tolerance, in millimetres (edge/centre to target). */
+const SNAP_MM = 1.5;
 
 interface Interaction {
   kind: 'move' | 'resize';
@@ -59,6 +62,18 @@ export function Canvas({
 }) {
   const { page } = template;
   const [drag, setDrag] = useState<Interaction | null>(null);
+  // Alignment guide lines to draw while dragging (x/y positions in mm).
+  const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
+
+  // Live scene + change callback read by the drag listener via refs, so the
+  // listener subscribes ONCE per drag instead of re-subscribing on every render
+  // (which would drop fast pointer events in the unsubscribe gap).
+  const sceneRef = useRef({ elements: template.elements, page });
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    sceneRef.current = { elements: template.elements, page };
+    onChangeRef.current = onChange;
+  });
 
   useEffect(() => {
     if (!drag) return;
@@ -70,7 +85,21 @@ export function Canvas({
       const dy = (e.clientY - drag.startY) * mmPerPx;
       const o = drag.orig;
       if (drag.kind === 'move') {
-        onChange(drag.id, { x: Math.max(0, snap(o.x + dx)), y: Math.max(0, snap(o.y + dy)) });
+        let nx = o.x + dx;
+        let ny = o.y + dy;
+        // Alignment snapping (tied to the Snap toggle): align edges/centre to
+        // the page and other elements; grid-snap any axis that doesn't align.
+        if (gridMm > 0) {
+          const { elements, page: pg } = sceneRef.current;
+          const others = elements
+            .filter((el) => el.id !== drag.id && !el.hidden)
+            .map((el) => ({ x: el.x, y: el.y, w: el.w, h: el.h }));
+          const r = snapMove({ x: nx, y: ny, w: o.w, h: o.h }, others, pg, SNAP_MM);
+          nx = r.vGuides.length ? r.x : snap(nx);
+          ny = r.hGuides.length ? r.y : snap(ny);
+          setGuides({ v: r.vGuides, h: r.hGuides });
+        }
+        onChangeRef.current(drag.id, { x: Math.max(0, nx), y: Math.max(0, ny) });
         return;
       }
       const hd = drag.handle!;
@@ -83,16 +112,19 @@ export function Canvas({
       h = Math.max(MIN_MM, snap(h));
       if (hd.l) x = Math.max(0, o.x + o.w - w);
       if (hd.t) y = Math.max(0, o.y + o.h - h);
-      onChange(drag.id, { x, y, w, h });
+      onChangeRef.current(drag.id, { x, y, w, h });
     };
-    const onUp = () => setDrag(null);
+    const onUp = () => {
+      setDrag(null);
+      setGuides({ v: [], h: [] });
+    };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     return () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [drag, zoom, gridMm, onChange]);
+  }, [drag, zoom, gridMm]);
 
   const start = (e: React.PointerEvent, kind: 'move' | 'resize', el: DocElement, handle?: HandleDef) => {
     if (preview) return;
@@ -127,6 +159,42 @@ export function Canvas({
         }}
       >
         <MarginGuide page={page} preview={preview} />
+        {drag &&
+          guides.v.map((x) => (
+            <div
+              key={`v-${x}`}
+              data-testid="doc-guide-v"
+              aria-hidden
+              style={{
+                position: 'absolute',
+                left: `${x}mm`,
+                top: 0,
+                bottom: 0,
+                width: 0,
+                borderLeft: '0.25mm solid var(--color-primary)',
+                pointerEvents: 'none',
+                zIndex: 9998,
+              }}
+            />
+          ))}
+        {drag &&
+          guides.h.map((y) => (
+            <div
+              key={`h-${y}`}
+              data-testid="doc-guide-h"
+              aria-hidden
+              style={{
+                position: 'absolute',
+                top: `${y}mm`,
+                left: 0,
+                right: 0,
+                height: 0,
+                borderTop: '0.25mm solid var(--color-primary)',
+                pointerEvents: 'none',
+                zIndex: 9998,
+              }}
+            />
+          ))}
         {ordered.map((el) => {
           // Hidden elements are omitted from Preview/print, shown dimmed while editing.
           if (preview && el.hidden) return null;
