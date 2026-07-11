@@ -545,23 +545,10 @@ $kernel->use(new CsrfGuard());
 $kernel->use($tenantIsolationMiddleware);
 // Post-auth limiter runs AFTER tenant/principal are resolved, before route dispatch.
 $kernel->use($postAuthRateLimiter);
-// Payment wall (WC-billing): after tenant is resolved, block a LAPSED tenant's
-// requests per its effective enforcement mode. NEVER walls the system tenant,
-// public routes, or the billing/subscription-management routes (so an admin can
-// always pay/upgrade — payment can happen externally). Dormant until a tenant has
-// a lapsed subscription AND an enforcing mode; env BILLING_WALL_ENABLED is the
-// master off switch, BILLING_URL sets the 402 Link target.
-$paymentWall = new \Whity\Http\Middleware\PaymentWall(
-    new \Whity\Core\Subscription\SubscriptionService(
-        new \Whity\Core\Subscription\SubscriptionRepository($db->getPdo()),
-        $settingsService
-    ),
-    enabled: (($_ENV['BILLING_WALL_ENABLED'] ?? '1') !== '0'),
-    exemptPrefixes: ['/api/v1/subscription'],
-    billingUrl: ($_ENV['BILLING_URL'] ?? getenv('BILLING_URL')) ?: null,
-    logger: $logger,
-);
-$kernel->use($paymentWall);
+// NOTE: the payment wall is the LAST middleware but is registered further below,
+// right after $settingsService is constructed (it depends on it). $kernel->use()
+// order == execution order, so registering it after the block above still runs it
+// after tenant isolation + the post-auth limiter, immediately before dispatch.
 
 // 9. Initialize plugin loader and load plugins
 // Wire the permission registry, hook manager, and logger (WC-9/WC-13) so plugin
@@ -618,6 +605,26 @@ $settingsService = new \Whity\Core\Settings\SettingsService(
     new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
 );
 $secretStore = \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV);
+
+// Payment wall (WC-billing) — registered here (not up with the other middleware)
+// because it depends on $settingsService just constructed above. It is still the
+// LAST $kernel->use(), so it runs AFTER tenant isolation + the post-auth limiter,
+// immediately before route dispatch. After tenant resolution it blocks a LAPSED
+// tenant's requests per its effective enforcement mode; NEVER walls the system
+// tenant, public routes, or the billing/subscription-management routes (so an
+// admin can always pay/upgrade — payment can happen externally). Dormant until a
+// tenant is lapsed AND has an enforcing mode; env BILLING_WALL_ENABLED is the
+// master off switch, BILLING_URL sets the 402 Link target.
+$kernel->use(new \Whity\Http\Middleware\PaymentWall(
+    new \Whity\Core\Subscription\SubscriptionService(
+        new \Whity\Core\Subscription\SubscriptionRepository($db->getPdo()),
+        $settingsService
+    ),
+    enabled: (($_ENV['BILLING_WALL_ENABLED'] ?? '1') !== '0'),
+    exemptPrefixes: ['/api/v1/subscription'],
+    billingUrl: ($_ENV['BILLING_URL'] ?? getenv('BILLING_URL')) ?: null,
+    logger: $logger,
+));
 
 // WC-email: the Mailer is built from the GLOBAL instance mail.* settings
 // (transport none/log/smtp; SMTP password decrypted from the encrypted-secret
