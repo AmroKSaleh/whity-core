@@ -17,6 +17,7 @@ use Whity\Core\Exception\PluginIncompatible;
 use Whity\Core\Exception\PluginInstallException;
 use Whity\Core\Exception\PluginNameUnsafe;
 use Whity\Core\Exception\PluginPackageInvalid;
+use Whity\Core\Exception\PluginPersistenceException;
 
 /**
  * Plugins API Handler
@@ -143,6 +144,22 @@ class PluginsApiHandler
     private function installError(PluginInstallException $e, int $status): Response
     {
         return Response::error($e->clientMessage(), $status, $e->clientDetails());
+    }
+
+    /**
+     * Response for a plugin lifecycle change that applied to THIS worker but could
+     * not be persisted for other workers (WC-210 convergence). The raw filesystem
+     * reason is logged server-side; the client gets a safe, actionable message.
+     */
+    private function persistenceFailed(string $verb, PluginPersistenceException $e): Response
+    {
+        error_log('[PluginsApiHandler] plugin ' . $verb . ' could not be persisted: ' . $e->getMessage());
+
+        return Response::error(
+            "The plugin was {$verb} on this node, but the change could not be persisted for other workers "
+            . '(check the plugins directory is writable), so it may not take effect fleet-wide. Please retry.',
+            500
+        );
     }
 
     /**
@@ -279,7 +296,11 @@ class PluginsApiHandler
                     return $this->installError($e, 422);
                 }
 
-                $loader->reEnablePlugin($key);
+                try {
+                    $loader->reEnablePlugin($key);
+                } catch (PluginPersistenceException $e) {
+                    return $this->persistenceFailed('enabled', $e);
+                }
                 $lifecycle = $loader->getLifecycle($key);
 
                 $this->auditLogger?->record('plugin.enable', [
@@ -370,8 +391,12 @@ class PluginsApiHandler
         if ($this->pluginLoader !== null) {
             $key = $this->resolvePluginKey($identifier);
             if ($key !== null) {
-                if (!$this->pluginLoader->disablePlugin($key)) {
-                    return Response::error('Plugin not found', 404);
+                try {
+                    if (!$this->pluginLoader->disablePlugin($key)) {
+                        return Response::error('Plugin not found', 404);
+                    }
+                } catch (PluginPersistenceException $e) {
+                    return $this->persistenceFailed('disabled', $e);
                 }
 
                 $lifecycle = $this->pluginLoader->getLifecycle($key);
@@ -416,8 +441,12 @@ class PluginsApiHandler
             return Response::error('Plugin lifecycle management is unavailable', 503);
         }
 
-        if (!$this->pluginLoader->reEnablePlugin($id)) {
-            return Response::error('Plugin not found', 404);
+        try {
+            if (!$this->pluginLoader->reEnablePlugin($id)) {
+                return Response::error('Plugin not found', 404);
+            }
+        } catch (PluginPersistenceException $e) {
+            return $this->persistenceFailed('re-enabled', $e);
         }
 
         $lifecycle = $this->pluginLoader->getLifecycle($id);

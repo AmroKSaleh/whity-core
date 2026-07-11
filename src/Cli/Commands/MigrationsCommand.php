@@ -639,8 +639,11 @@ class MigrationsCommand
                 ');
                 $stmt->execute([$name, (int)((microtime(true) - $start) * 1000)]);
             } catch (\PDOException $e) {
-                // If the migrations table doesn't exist yet, silently skip recording
-                if (strpos($e->getMessage(), 'core_schema_migrations') === false) {
+                // Only the "tracking table doesn't exist yet" bootstrap case is
+                // benign to skip. A real error (permission denied, deadlock,
+                // serialization failure) — even one whose message mentions the
+                // table — MUST surface, or the DDL ran unrecorded and re-runs.
+                if (!self::isMissingMigrationsTable($e)) {
                     throw $e;
                 }
             }
@@ -652,11 +655,30 @@ class MigrationsCommand
                 $stmt = $this->db->getPdo()->prepare('DELETE FROM core_schema_migrations WHERE migration_name = ?');
                 $stmt->execute([$name]);
             } catch (\PDOException $e) {
-                if (strpos($e->getMessage(), 'core_schema_migrations') === false) {
+                if (!self::isMissingMigrationsTable($e)) {
                     throw $e;
                 }
             }
         }
+    }
+
+    /**
+     * Whether a PDOException specifically means the `core_schema_migrations`
+     * tracking table does not exist yet (the bootstrap case that is safe to skip).
+     * Distinguished by SQLSTATE 42P01 (PostgreSQL undefined_table) or SQLite's
+     * "no such table" — NOT by a loose message substring, so a permission/lock/
+     * serialization failure that merely names the table is never swallowed.
+     */
+    public static function isMissingMigrationsTable(\PDOException $e): bool
+    {
+        if ((string) $e->getCode() === '42P01') {
+            return true;
+        }
+
+        $message = $e->getMessage();
+
+        return stripos($message, 'no such table') !== false
+            && stripos($message, 'core_schema_migrations') !== false;
     }
 
     /**
