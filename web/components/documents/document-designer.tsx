@@ -653,7 +653,7 @@ export function DocumentDesigner() {
           </span>
         )}
 
-        <span className="ml-auto flex items-center gap-2">
+        <span className="ms-auto flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             Snap <Switch checked={snap} onCheckedChange={setSnap} />
           </label>
@@ -674,7 +674,7 @@ export function DocumentDesigner() {
 
       {/* Page navigator */}
       <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1.5" data-testid="doc-page-nav">
-        <span className="mr-1 text-xs font-medium text-muted-foreground">Pages</span>
+        <span className="me-1 text-xs font-medium text-muted-foreground">Pages</span>
         {template.pages.map((pg, i) => (
           <button
             key={pg.id}
@@ -724,7 +724,7 @@ export function DocumentDesigner() {
         >
           <IconTrash className="h-4 w-4 text-destructive/80" />
         </Button>
-        <span className="ml-auto text-xs text-muted-foreground">
+        <span className="ms-auto text-xs text-muted-foreground">
           Page {pageIndex + 1} of {template.pages.length}
         </span>
       </div>

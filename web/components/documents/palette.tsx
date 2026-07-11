@@ -109,7 +109,7 @@ export function Palette({
             >
               <button
                 type="button"
-                className={`min-w-0 flex-1 truncate text-left ${el.hidden ? 'text-muted-foreground line-through' : ''}`}
+                className={`min-w-0 flex-1 truncate text-start ${el.hidden ? 'text-muted-foreground line-through' : ''}`}
                 onClick={() => onSelect(el.id)}
                 title={elementLabel(el)}
               >
