@@ -273,7 +273,8 @@ test.describe('Roles CRUD (admin)', () => {
     await dialog.getByTestId('perm-group-toggle-users').check();
     await expect(dialog.getByTestId('perm-summary')).not.toHaveText(/^0 of/);
 
-    // Cancel — nothing persisted.
+    // Close the dropdown so its panel no longer overlays the footer, then cancel.
+    await permsToggle.click();
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
     createdRoleName = null;
