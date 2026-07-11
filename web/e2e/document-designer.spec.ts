@@ -73,6 +73,21 @@ test.describe('Document & Label Designer', () => {
     await page.keyboard.press('Delete');
     await expect(el).toHaveCount(0);
   });
+
+  test('undo reverses an add and redo re-applies it', async ({ page }) => {
+    await page.goto('/admin/documents');
+    const el = page.locator('[data-testid^="doc-el-"]');
+    await expect(page.getByTestId('doc-undo')).toBeDisabled();
+
+    await page.getByTestId('doc-add-text').click();
+    await expect(el).toHaveCount(1);
+
+    await page.getByTestId('doc-undo').click();
+    await expect(el).toHaveCount(0);
+
+    await page.getByTestId('doc-redo').click();
+    await expect(el).toHaveCount(1);
+  });
 });
 
 test.describe('Document designer — requires auth', () => {
