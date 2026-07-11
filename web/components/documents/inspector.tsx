@@ -3,36 +3,51 @@
 import { useState } from 'react';
 import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '@/lib/documents/types';
 import { BARCODE_SYMBOLOGIES } from '@/lib/documents/types';
+import { generateSequence, type SequenceConfig } from '@/lib/documents/batch';
 import { PAGE_PRESETS } from '@/lib/documents/presets';
 import { Input } from '@amroksaleh/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
 import { Button } from '@amroksaleh/ui/button';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 
 const SELECT_CLASS =
   'h-7 w-full min-w-0 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30';
 
-type Tab = 'element' | 'page' | 'data';
+type Tab = 'element' | 'page' | 'data' | 'batch';
+
+export interface BatchState {
+  active: boolean;
+  index: number;
+  total: number;
+}
 
 export function Inspector({
   template,
   selected,
+  batch,
   onChangeSelected,
   onChangePage,
   onChangePlaceholders,
+  onGenerateBatch,
+  onClearBatch,
+  onBatchIndex,
 }: {
   template: DocTemplate;
   selected: DocElement | null;
+  batch: BatchState;
   onChangeSelected: (patch: Partial<DocElement>) => void;
   onChangePage: (patch: Partial<PageSpec>) => void;
   onChangePlaceholders: (list: Placeholder[]) => void;
+  onGenerateBatch: (cfg: SequenceConfig) => void;
+  onClearBatch: () => void;
+  onBatchIndex: (i: number) => void;
 }) {
   const [tab, setTab] = useState<Tab>('element');
 
   return (
     <div className="flex h-full flex-col">
       <div className="mb-3 flex gap-1 rounded-md bg-muted/40 p-0.5 text-xs">
-        {(['element', 'page', 'data'] as Tab[]).map((t) => (
+        {(['element', 'page', 'data', 'batch'] as Tab[]).map((t) => (
           <button
             key={t}
             type="button"
@@ -49,6 +64,15 @@ export function Inspector({
         {tab === 'element' && <ElementTab selected={selected} placeholders={template.placeholders} onChange={onChangeSelected} />}
         {tab === 'page' && <PageTab page={template.page} onChange={onChangePage} />}
         {tab === 'data' && <DataTab placeholders={template.placeholders} onChange={onChangePlaceholders} />}
+        {tab === 'batch' && (
+          <BatchTab
+            placeholders={template.placeholders}
+            batch={batch}
+            onGenerate={onGenerateBatch}
+            onClear={onClearBatch}
+            onIndex={onBatchIndex}
+          />
+        )}
       </div>
     </div>
   );
@@ -324,6 +348,128 @@ function DataTab({ placeholders, onChange }: { placeholders: Placeholder[]; onCh
         <IconPlus className="h-3.5 w-3.5" />
         Add placeholder
       </Button>
+    </>
+  );
+}
+
+function BatchTab({
+  placeholders,
+  batch,
+  onGenerate,
+  onClear,
+  onIndex,
+}: {
+  placeholders: Placeholder[];
+  batch: BatchState;
+  onGenerate: (cfg: SequenceConfig) => void;
+  onClear: () => void;
+  onIndex: (i: number) => void;
+}) {
+  const [key, setKey] = useState(placeholders[0]?.key ?? '');
+  const [prefix, setPrefix] = useState('SN-');
+  const [start, setStart] = useState(1);
+  const [count, setCount] = useState(10);
+  const [step, setStep] = useState(1);
+  const [padding, setPadding] = useState(4);
+  const [suffix, setSuffix] = useState('');
+
+  const cfg: SequenceConfig = { key, prefix, start, count, step, padding, suffix };
+  const canGenerate = key !== '' && count > 0;
+  const sample = canGenerate ? generateSequence({ ...cfg, count: Math.min(count, 3) }) : [];
+
+  return (
+    <>
+      <p className="text-xs text-muted-foreground">
+        Generate a run of serial numbers (or any sequence) into a placeholder — one label per value.
+        <span className="block">Preview pages through the rows; Print outputs one copy per row.</span>
+      </p>
+      <Field label="Fill placeholder">
+        <select
+          className={SELECT_CLASS}
+          data-testid="doc-batch-key"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+        >
+          {placeholders.length === 0 && <option value="">(add a placeholder in the Data tab)</option>}
+          {placeholders.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label} ({`{{${p.key}}}`})
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Prefix">
+          <Input data-testid="doc-batch-prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
+        </Field>
+        <Field label="Suffix">
+          <Input data-testid="doc-batch-suffix" value={suffix} onChange={(e) => setSuffix(e.target.value)} />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Num label="Start" value={start} onChange={setStart} testId="doc-batch-start" />
+        <Num label="Count" value={count} onChange={setCount} testId="doc-batch-count" />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Num label="Step" value={step} onChange={setStep} />
+        <Num label="Zero-pad" value={padding} onChange={setPadding} />
+      </div>
+      {sample.length > 0 && (
+        <p className="text-[10px] text-muted-foreground">
+          Example: <span className="font-medium">{sample.join(', ')}{count > 3 ? ', …' : ''}</span>
+        </p>
+      )}
+      <Button
+        size="sm"
+        className="w-full"
+        data-testid="doc-batch-generate"
+        disabled={!canGenerate}
+        onClick={() => onGenerate(cfg)}
+      >
+        Generate rows
+      </Button>
+
+      {batch.active && (
+        <div className="space-y-1.5 rounded-md border border-primary/40 bg-primary/5 p-2" data-testid="doc-batch-active">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-primary">Batch active · {batch.total} rows</span>
+            <button
+              type="button"
+              data-testid="doc-batch-clear"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={onClear}
+            >
+              Clear
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Previous row"
+              data-testid="doc-batch-prev"
+              disabled={batch.index <= 0}
+              onClick={() => onIndex(batch.index - 1)}
+            >
+              <IconChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-xs tabular-nums" data-testid="doc-batch-rowcount">
+              Row {batch.index + 1} / {batch.total}
+            </span>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Next row"
+              data-testid="doc-batch-next"
+              disabled={batch.index >= batch.total - 1}
+              onClick={() => onIndex(batch.index + 1)}
+            >
+              <IconChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">Switch to Preview to see each row.</p>
+        </div>
+      )}
     </>
   );
 }
