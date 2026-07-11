@@ -87,6 +87,7 @@ function safeImageSrc(raw: string): string {
 }
 
 function TextBox({ style, children }: { style: TextStyle; children: React.ReactNode }) {
+  const dir = style.direction ?? 'auto';
   const css: CSSProperties = {
     fontSize: `${style.fontSize}pt`,
     fontWeight: style.fontWeight,
@@ -102,6 +103,13 @@ function TextBox({ style, children }: { style: TextStyle; children: React.ReactN
     wordBreak: 'break-word',
     height: '100%',
     width: '100%',
+    // 'auto' relies on the dir attribute for per-paragraph inference (Arabic /
+    // mixed content); explicit ltr/rtl set the base direction.
+    ...(dir === 'auto' ? {} : { direction: dir }),
   };
-  return <div style={css}>{children}</div>;
+  return (
+    <div dir={dir} style={css}>
+      {children}
+    </div>
+  );
 }

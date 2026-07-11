@@ -314,6 +314,22 @@ test.describe('Document & Label Designer', () => {
     await expect(readout).toContainText('mm');
   });
 
+  test('text elements support direction (auto/RTL) for Arabic content', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-text-value').fill('مرحبا SN-001');
+
+    const canvas = page.getByTestId('doc-page');
+    await expect(canvas.getByText('مرحبا SN-001')).toBeVisible();
+
+    // Defaults to dir="auto" (per-paragraph inference for mixed Arabic/Latin).
+    await expect(canvas.locator('div[dir="auto"]').first()).toBeVisible();
+
+    // Switching to RTL sets the base direction on the rendered text box.
+    await page.getByTestId('doc-text-direction').selectOption('rtl');
+    await expect(canvas.locator('div[dir="rtl"]').first()).toBeVisible();
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

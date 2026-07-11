@@ -349,6 +349,18 @@ function TextStyleFields({ style, onChange }: { style: TextStyle; onChange: (pat
           </select>
         </Field>
       </div>
+      <Field label="Text direction">
+        <select
+          className={SELECT_CLASS}
+          data-testid="doc-text-direction"
+          value={style.direction ?? 'auto'}
+          onChange={(e) => onChange({ direction: e.target.value as TextStyle['direction'] })}
+        >
+          <option value="auto">Auto (Arabic / mixed)</option>
+          <option value="ltr">Left-to-right</option>
+          <option value="rtl">Right-to-left</option>
+        </select>
+      </Field>
     </>
   );
 }

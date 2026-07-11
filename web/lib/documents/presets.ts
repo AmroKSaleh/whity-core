@@ -19,6 +19,7 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   align: 'left',
   vAlign: 'top',
   color: '#111111',
+  direction: 'auto',
 };
 
 /** A blank template — a single small shipping-label sized page by default. */
