@@ -230,6 +230,26 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-print-page')).toHaveCount(1);
   });
 
+  test('batch from pasted rows: load CSV rows and print one label each', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-dynamicText').click();
+    await page.getByTestId('doc-text-value').fill('{{sku}}');
+
+    // Batch tab → Paste mode → paste a 2-row CSV and load it.
+    await page.getByTestId('doc-tab-batch').click();
+    await page.getByTestId('doc-batch-mode-paste').click();
+    await page.getByTestId('doc-batch-paste').fill('sku,model\nABC-1,Widget\nABC-2,Gadget');
+    await page.getByTestId('doc-batch-load-paste').click();
+
+    // Two rows → ×2 badge and 2 print pages.
+    await expect(page.getByTestId('doc-batch-badge')).toHaveText('×2');
+    await expect(page.getByTestId('doc-print-page')).toHaveCount(2);
+
+    // Preview shows the first row's sku.
+    await page.getByTestId('doc-preview-toggle').click();
+    await expect(page.getByTestId('doc-page').getByText('ABC-1')).toBeVisible();
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

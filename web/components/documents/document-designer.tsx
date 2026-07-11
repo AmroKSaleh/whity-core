@@ -17,7 +17,7 @@ import {
   saveTemplate,
   type SavedTemplate,
 } from '@/lib/documents/storage';
-import { generateSequence, rowsFromValues, type SequenceConfig } from '@/lib/documents/batch';
+import { generateSequence, rowsFromRecords, rowsFromValues, type SequenceConfig } from '@/lib/documents/batch';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
@@ -319,6 +319,13 @@ export function DocumentDesigner() {
     setBatchRows(built.length ? built : null);
     setBatchIndex(0);
     addToast(built.length ? `Generated ${built.length} rows.` : 'No rows generated.', built.length ? 'success' : 'info');
+  };
+
+  const loadBatchRecords = (records: Record<string, string>[]) => {
+    const built = rowsFromRecords(records, data);
+    setBatchRows(built.length ? built : null);
+    setBatchIndex(0);
+    addToast(built.length ? `Loaded ${built.length} rows.` : 'No rows found.', built.length ? 'success' : 'info');
   };
 
   const clearBatch = () => {
@@ -782,6 +789,7 @@ export function DocumentDesigner() {
               setTemplate((t) => ({ ...t, placeholders: list }));
             }}
             onGenerateBatch={generateBatch}
+            onLoadBatchRecords={loadBatchRecords}
             onClearBatch={clearBatch}
             onBatchIndex={setBatchIndex}
           />
