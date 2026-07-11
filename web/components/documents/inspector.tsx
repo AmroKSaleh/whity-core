@@ -73,7 +73,7 @@ export function Inspector({
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pe-1">
         {tab === 'element' && <ElementTab selected={selected} placeholders={template.placeholders} onChange={onChangeSelected} />}
         {tab === 'page' && <PageTab page={template.page} onChange={onChangePage} />}
         {tab === 'data' && <DataTab placeholders={template.placeholders} onChange={onChangePlaceholders} />}
@@ -582,7 +582,7 @@ function BatchTab({
             type="file"
             accept=".csv,.tsv,text/csv,text/tab-separated-values,text/plain"
             data-testid="doc-batch-csv-file"
-            className="block w-full text-xs file:mr-2 file:rounded-md file:border file:border-input file:bg-input/20 file:px-2 file:py-1 file:text-xs"
+            className="block w-full text-xs file:me-2 file:rounded-md file:border file:border-input file:bg-input/20 file:px-2 file:py-1 file:text-xs"
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void loadCsvFile(f);
