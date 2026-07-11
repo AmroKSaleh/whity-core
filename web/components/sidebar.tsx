@@ -169,7 +169,7 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors w-full text-left"
+          className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors w-full text-start"
           aria-label={`Switch tenant, current: ${displayName}`}
           disabled={isSwitching}
         >
@@ -195,7 +195,7 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
             disabled={isSwitching}
           >
             {m.tenant_id === activeTenantId && (
-              <IconCheck size={14} className="mr-1 shrink-0" />
+              <IconCheck size={14} className="me-1 shrink-0" />
             )}
             <span className="truncate">{m.tenant_name}</span>
           </DropdownMenuItem>

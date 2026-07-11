@@ -164,7 +164,7 @@ export function SessionsSettings() {
                   <p className="text-sm font-medium text-foreground truncate">
                     {session.user_agent || 'Unknown device'}
                     {session.current && (
-                      <Badge className="ml-2 align-middle" data-testid="session-current-badge">
+                      <Badge className="ms-2 align-middle" data-testid="session-current-badge">
                         This device
                       </Badge>
                     )}

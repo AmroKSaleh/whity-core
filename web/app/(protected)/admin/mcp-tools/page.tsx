@@ -78,7 +78,7 @@ export default function McpToolsPage() {
                   {['Tool', 'Description', 'Access'].map((heading) => (
                     <th
                       key={heading}
-                      className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-foreground"
+                      className="px-6 py-3 text-start text-xs font-medium uppercase tracking-wider text-foreground"
                     >
                       {heading}
                     </th>

@@ -43,7 +43,7 @@ export function PermissionCheckbox({
         type="button"
         variant="outline"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full justify-between text-left font-normal"
+        className="w-full justify-between text-start font-normal"
       >
         <span className="truncate">
           {selectedCount === 0
@@ -63,7 +63,7 @@ export function PermissionCheckbox({
               <button
                 type="button"
                 onClick={handleSelectAll}
-                className="w-full text-left px-2 py-2 text-sm font-medium text-foreground hover:bg-muted rounded"
+                className="w-full text-start px-2 py-2 text-sm font-medium text-foreground hover:bg-muted rounded"
               >
                 {selectedCount === totalCount ? 'Deselect All' : 'Select All'}
               </button>

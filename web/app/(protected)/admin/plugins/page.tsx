@@ -562,7 +562,7 @@ export default function PluginsPage() {
                 aria-label="Plugin package"
                 onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                 disabled={uploading}
-                className="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-semibold file:text-primary-foreground hover:file:bg-primary/80 file:cursor-pointer cursor-pointer"
+                className="block w-full text-xs text-muted-foreground file:me-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-xs file:font-semibold file:text-primary-foreground hover:file:bg-primary/80 file:cursor-pointer cursor-pointer"
               />
             </label>
             {uploadFile && (
