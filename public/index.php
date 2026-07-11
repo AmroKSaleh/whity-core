@@ -511,6 +511,14 @@ $rateLimitExemptPaths = ['/api/health', '/api/version', '/api/openapi.json'];
 $preAuthRateLimiter = new RateLimitMiddleware(
     $rateLimitStore,
     [
+        // Platform-wide ceiling: a single shared counter over ALL requests — a
+        // safety valve for the whole deployment (esp. a sovereign single-customer
+        // box). Generous by default so it never throttles normal load; operators
+        // tighten RATE_LIMIT_PLATFORM_* per deployment.
+        RateLimitRule::platform(
+            (int) ($_ENV['RATE_LIMIT_PLATFORM_LIMIT']  ?? 100000),
+            (int) ($_ENV['RATE_LIMIT_PLATFORM_WINDOW'] ?? 60),
+        ),
         RateLimitRule::ip(
             (int) ($_ENV['RATE_LIMIT_IP_LIMIT']  ?? 2000),
             (int) ($_ENV['RATE_LIMIT_IP_WINDOW'] ?? 60),
@@ -524,7 +532,15 @@ $preAuthRateLimiter = new RateLimitMiddleware(
 $postAuthRateLimiter = new RateLimitMiddleware(
     $rateLimitStore,
     [
-        RateLimitRule::tenant(
+        // Per-tenant budget is PLAN-DRIVEN: the tenant's ratelimit.rpm entitlement
+        // (a plan raises/lowers it), falling back to the RATE_LIMIT_TENANT_*
+        // baseline when the plan sets none (entitlement default -1). A fresh
+        // EntitlementService here is stateless — $db is available this early,
+        // avoiding the boot-order trap of the later shared $entitlementService.
+        RateLimitRule::tenantEntitled(
+            new \Whity\Core\Entitlement\EntitlementService(
+                new \Whity\Core\Entitlement\TenantEntitlementRepository($db->getPdo())
+            ),
             (int) ($_ENV['RATE_LIMIT_TENANT_LIMIT']  ?? 10000),
             (int) ($_ENV['RATE_LIMIT_TENANT_WINDOW'] ?? 60),
         ),

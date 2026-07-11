@@ -49,6 +49,14 @@ final class EntitlementRegistry
     /** Max active members the tenant may hold (-1 = unlimited). */
     public const MEMBERS_MAX = 'members.max';
 
+    // ── Rate limiting ──────────────────────────────────────────────────────────
+    /**
+     * The tenant's per-minute request budget (the per-tenant rate limit). A plan
+     * raises/lowers it to make throughput scale with the tier. -1 (the default)
+     * means "no plan-specific cap — use the platform baseline (RATE_LIMIT_TENANT_*)".
+     */
+    public const RATELIMIT_RPM = 'ratelimit.rpm';
+
     /**
      * The default (baseline / free-tier) grant for every known entitlement,
      * as its TEXT representation. This is what a tenant gets when the operator
@@ -61,6 +69,7 @@ final class EntitlementRegistry
         self::STORAGE_QUOTA_BYTES    => '-1',
         self::SSO_TENANT_IDP         => 'false',
         self::MEMBERS_MAX            => '-1',
+        self::RATELIMIT_RPM          => '-1',
     ];
 
     /**
@@ -74,6 +83,7 @@ final class EntitlementRegistry
         self::STORAGE_QUOTA_BYTES    => 'int',
         self::SSO_TENANT_IDP         => 'bool',
         self::MEMBERS_MAX            => 'int',
+        self::RATELIMIT_RPM          => 'int',
     ];
 
     /**
@@ -86,6 +96,7 @@ final class EntitlementRegistry
         self::STORAGE_QUOTA_BYTES    => 'Maximum total bytes the tenant may store (-1 for unlimited).',
         self::SSO_TENANT_IDP         => 'Allow the tenant to configure its own bring-your-own SSO/OIDC identity provider.',
         self::MEMBERS_MAX            => 'Maximum number of active members the tenant may have (-1 for unlimited).',
+        self::RATELIMIT_RPM          => 'Per-minute API request budget for the tenant (-1 uses the platform baseline).',
     ];
 
     /**

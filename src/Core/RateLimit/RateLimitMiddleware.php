@@ -73,7 +73,7 @@ final class RateLimitMiddleware
                 continue; // dimension absent for this request — skip it
             }
 
-            $decision = $this->store->hit("rl:{$rule->name}:{$value}", $rule->limit, $rule->window);
+            $decision = $this->store->hit("rl:{$rule->name}:{$value}", $rule->limitFor($request), $rule->window);
             if (!$decision->allowed) {
                 $this->logBlock($rule, $request, $decision);
 
