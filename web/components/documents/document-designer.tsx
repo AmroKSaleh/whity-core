@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DocElement, DocTemplate, ElementType, PageSpec, Placeholder } from '@/lib/documents/types';
 import {
   blankTemplate,
@@ -30,6 +30,8 @@ import {
   IconCopy,
   IconZoomIn,
   IconZoomOut,
+  IconArrowBackUp,
+  IconArrowForwardUp,
   IconLayoutAlignLeft,
   IconLayoutAlignCenter,
   IconLayoutAlignRight,
@@ -55,6 +57,12 @@ export function DocumentDesigner() {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Undo/redo: full-template snapshots. Consecutive same-kind edits (a drag, a
+  // burst of typing) coalesce into one step via `commit` (see below).
+  const [past, setPast] = useState<DocTemplate[]>([]);
+  const [future, setFuture] = useState<DocTemplate[]>([]);
+  const historyRef = useRef({ lastLabel: '', lastTime: 0 });
+
   // Read the saved-template list from localStorage after mount (client-only).
   // Deferred off the synchronous effect tick to stay clear of the
   // set-state-in-effect rule while still populating on first render.
@@ -63,17 +71,60 @@ export function DocumentDesigner() {
     void p;
   }, []);
 
-  // Keyboard shortcuts on the canvas: Delete/Backspace removes, arrows nudge
-  // (Shift = 5mm), Escape deselects. A once-attached listener reads the latest
-  // state through a ref that a per-render effect keeps fresh (lint-safe).
-  const kbRef = useRef({ selectedId, preview, template });
+  // Live state for the once-attached keyboard listener + history snapshots,
+  // kept fresh by a per-render effect (so the stable listener/callbacks read
+  // current values without re-subscribing — lint-safe).
+  const kbRef = useRef({ selectedId, preview, template, past, future });
   useEffect(() => {
-    kbRef.current = { selectedId, preview, template };
+    kbRef.current = { selectedId, preview, template, past, future };
   });
+
+  // Snapshot the pre-mutation template onto the undo stack. Call BEFORE applying
+  // a mutation. Consecutive calls with the same label within 600ms coalesce, so
+  // one drag / typing burst becomes a single undo step.
+  const commit = useCallback((label: string) => {
+    const now = Date.now();
+    const h = historyRef.current;
+    const coalesce = label === h.lastLabel && now - h.lastTime < 600;
+    h.lastLabel = label;
+    h.lastTime = now;
+    if (!coalesce) {
+      setPast((p) => [...p.slice(-49), kbRef.current.template]);
+      setFuture([]);
+    }
+  }, []);
+
+  const resetHistory = useCallback(() => {
+    setPast([]);
+    setFuture([]);
+    historyRef.current = { lastLabel: '', lastTime: 0 };
+  }, []);
+
+  const undo = useCallback(() => {
+    const { past: p, future: f, template: cur } = kbRef.current;
+    if (p.length === 0) return;
+    setPast(p.slice(0, -1));
+    setFuture([cur, ...f]);
+    setTemplate(p[p.length - 1]);
+    setSelectedId(null);
+    historyRef.current.lastLabel = '';
+  }, []);
+
+  const redo = useCallback(() => {
+    const { past: p, future: f, template: cur } = kbRef.current;
+    if (f.length === 0) return;
+    setFuture(f.slice(1));
+    setPast([...p, cur]);
+    setTemplate(f[0]);
+    setSelectedId(null);
+    historyRef.current.lastLabel = '';
+  }, []);
+
+  // Keyboard: Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo (work without a
+  // selection); Delete removes, arrows nudge (Shift = 5mm), Escape deselects.
+  // Ignored while typing in a form field (native undo there).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { selectedId: sid, preview: pv, template: tpl } = kbRef.current;
-      if (pv || !sid) return;
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -81,9 +132,22 @@ export function DocumentDesigner() {
       ) {
         return;
       }
-      if (!tpl.elements.some((x) => x.id === sid)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (mod && ((e.shiftKey && (e.key === 'z' || e.key === 'Z')) || e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      const { selectedId: sid, preview: pv, template: tpl } = kbRef.current;
+      if (pv || !sid || !tpl.elements.some((x) => x.id === sid)) return;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
+        commit('delete');
         setTemplate((t) => ({ ...t, elements: t.elements.filter((x) => x.id !== sid) }));
         setSelectedId(null);
         return;
@@ -102,6 +166,7 @@ export function DocumentDesigner() {
       const d = delta[e.key];
       if (d) {
         e.preventDefault();
+        commit('nudge');
         setTemplate((t) => ({
           ...t,
           elements: t.elements.map((x) => (x.id === sid ? { ...x, x: Math.max(0, x.x + d[0]), y: Math.max(0, x.y + d[1]) } : x)),
@@ -110,29 +175,37 @@ export function DocumentDesigner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [undo, redo, commit]);
 
   const data = useMemo(() => sampleDataOf(template), [template]);
   const selected = template.elements.find((e) => e.id === selectedId) ?? null;
 
-  const patchElement = (id: string, patch: Partial<DocElement>) =>
+  const patchElement = (id: string, patch: Partial<DocElement>) => {
+    // Label by field set so a continuous drag / same-field typing coalesces.
+    commit(`patch:${Object.keys(patch).sort().join(',')}`);
     setTemplate((t) => ({
       ...t,
       elements: t.elements.map((e) => (e.id === id ? ({ ...e, ...patch } as DocElement) : e)),
     }));
+  };
 
-  const addElement = (type: ElementType) =>
+  const addElement = (type: ElementType) => {
+    commit('add');
     setTemplate((t) => {
       const el = newElement(type, t.elements);
       setSelectedId(el.id);
       return { ...t, elements: [...t.elements, el] };
     });
+  };
 
-  const deleteElement = (id: string) =>
+  const deleteElement = (id: string) => {
+    commit('delete');
     setTemplate((t) => ({ ...t, elements: t.elements.filter((e) => e.id !== id) }));
+  };
 
   const duplicateSelected = () => {
     if (!selected) return;
+    commit('duplicate');
     setTemplate((t) => {
       const maxZ = t.elements.reduce((m, e) => Math.max(m, e.z), 0);
       const clone = { ...selected, id: `${selected.id}-copy-${Date.now()}`, x: selected.x + 3, y: selected.y + 3, z: maxZ + 1 } as DocElement;
@@ -159,12 +232,14 @@ export function DocumentDesigner() {
     patchElement(selected.id, patch);
   };
 
-  const reorder = (id: string, dir: 'up' | 'down') =>
+  const reorder = (id: string, dir: 'up' | 'down') => {
+    commit('reorder');
     setTemplate((t) => {
       const zs = t.elements.map((e) => e.z);
       const target = dir === 'up' ? Math.max(...zs) + 1 : Math.min(...zs) - 1;
       return { ...t, elements: t.elements.map((e) => (e.id === id ? { ...e, z: target } : e)) };
     });
+  };
 
   const doSave = () => {
     const id = saveTemplate(template, currentId ?? undefined);
@@ -179,6 +254,7 @@ export function DocumentDesigner() {
     setTemplate(entry.data);
     setCurrentId(entry.id);
     setSelectedId(null);
+    resetHistory();
     addToast(`Loaded “${entry.name}”.`, 'info');
   };
 
@@ -186,6 +262,7 @@ export function DocumentDesigner() {
     setTemplate(blankTemplate());
     setCurrentId(null);
     setSelectedId(null);
+    resetHistory();
   };
 
   const onImportFile = async (file: File) => {
@@ -198,6 +275,7 @@ export function DocumentDesigner() {
       setTemplate(parsed);
       setCurrentId(null);
       setSelectedId(null);
+      resetHistory();
       addToast('Template imported.', 'success');
     } catch {
       addToast('Could not read that file.', 'error');
@@ -218,9 +296,33 @@ export function DocumentDesigner() {
           aria-label="Template name"
           data-testid="doc-name"
           value={template.name}
-          onChange={(e) => setTemplate((t) => ({ ...t, name: e.target.value }))}
+          onChange={(e) => {
+            commit('name');
+            setTemplate((t) => ({ ...t, name: e.target.value }));
+          }}
           className="max-w-[16rem]"
         />
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Undo"
+          data-testid="doc-undo"
+          disabled={past.length === 0}
+          onClick={undo}
+        >
+          <IconArrowBackUp className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Redo"
+          data-testid="doc-redo"
+          disabled={future.length === 0}
+          onClick={redo}
+        >
+          <IconArrowForwardUp className="h-4 w-4" />
+        </Button>
+        <span className="mx-1 h-5 w-px bg-border" />
         <Button variant="outline" size="sm" className="gap-1" onClick={doNew}>
           <IconFileText className="h-3.5 w-3.5" /> New
         </Button>
@@ -362,8 +464,14 @@ export function DocumentDesigner() {
             template={template}
             selected={selected}
             onChangeSelected={(patch) => selectedId && patchElement(selectedId, patch)}
-            onChangePage={(patch: Partial<PageSpec>) => setTemplate((t) => ({ ...t, page: { ...t.page, ...patch } }))}
-            onChangePlaceholders={(list: Placeholder[]) => setTemplate((t) => ({ ...t, placeholders: list }))}
+            onChangePage={(patch: Partial<PageSpec>) => {
+              commit('page');
+              setTemplate((t) => ({ ...t, page: { ...t.page, ...patch } }));
+            }}
+            onChangePlaceholders={(list: Placeholder[]) => {
+              commit('data');
+              setTemplate((t) => ({ ...t, placeholders: list }));
+            }}
           />
         </aside>
       </div>
