@@ -52,6 +52,30 @@ describe('snapMove', () => {
     expect(res.hGuides).toEqual([]);
   });
 
+  it('snaps a left edge to the content margin line', () => {
+    const page = { widthMm: 100, heightMm: 100, marginMm: 5 };
+    const moving: Box = { x: 5.7, y: 50, w: 20, h: 10 };
+    const res = snapMove(moving, [], page, THRESHOLD);
+    expect(res.x).toBeCloseTo(5, 5);
+    expect(res.vGuides).toContain(5);
+  });
+
+  it('snaps a right edge to the far margin line', () => {
+    // Far margin at width - margin = 95; right edge there means x = 95 - 20 = 75.
+    const page = { widthMm: 100, heightMm: 100, marginMm: 5 };
+    const moving: Box = { x: 74.3, y: 50, w: 20, h: 10 };
+    const res = snapMove(moving, [], page, THRESHOLD);
+    expect(res.x).toBeCloseTo(75, 5);
+    expect(res.vGuides).toContain(95);
+  });
+
+  it('ignores margin targets when the page has no margin', () => {
+    const moving: Box = { x: 5.7, y: 50, w: 20, h: 10 };
+    const res = snapMove(moving, [], { ...PAGE, marginMm: 0 }, THRESHOLD);
+    expect(res.x).toBe(5.7);
+    expect(res.vGuides).toEqual([]);
+  });
+
   it('chooses the nearest target when several are in range', () => {
     // Left edge (x=0.4 → target 0, delta -0.4) beats centre (target 50, far).
     const moving: Box = { x: 0.4, y: 10, w: 4, h: 4 };

@@ -36,13 +36,18 @@ function anchors(pos: number, size: number): [number, number, number] {
 export function snapMove(
   moving: Box,
   others: Box[],
-  page: { widthMm: number; heightMm: number },
+  page: { widthMm: number; heightMm: number; marginMm?: number },
   threshold: number
 ): SnapResult {
-  // Candidate target lines on each axis: page near/centre/far + every other
-  // element's near/centre/far.
+  // Candidate target lines on each axis: page near/centre/far, the content
+  // margin lines (if any), + every other element's near/centre/far.
   const xTargets = [0, page.widthMm / 2, page.widthMm];
   const yTargets = [0, page.heightMm / 2, page.heightMm];
+  const m = page.marginMm ?? 0;
+  if (m > 0) {
+    xTargets.push(m, page.widthMm - m);
+    yTargets.push(m, page.heightMm - m);
+  }
   for (const o of others) {
     xTargets.push(...anchors(o.x, o.w));
     yTargets.push(...anchors(o.y, o.h));
