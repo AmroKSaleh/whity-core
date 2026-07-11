@@ -116,15 +116,17 @@ class BackupCodesServiceTest extends TestCase
         $userId = 123;
         $version = 1;
 
-        // Create mock statement for SELECT query
+        // Create mock statement for SELECT query — validateCode fetches ALL
+        // unused rows and password_verify()s the submitted code against each.
         $mockSelectStatement = $this->createMock(PDOStatement::class);
-        $mockSelectStatement->method('fetch')->willReturn([
-            'id' => 1,
-            'code' => $hash
+        $mockSelectStatement->method('fetchAll')->willReturn([
+            ['id' => 1, 'code' => $hash],
         ]);
 
-        // Create mock statement for UPDATE query
+        // Create mock statement for the atomic single-use burn: the
+        // `WHERE id AND used = false` UPDATE flips exactly one row.
         $mockUpdateStatement = $this->createMock(PDOStatement::class);
+        $mockUpdateStatement->method('rowCount')->willReturn(1);
 
         // Setup mock database to return different statements based on call count
         $this->mockDb->expects($this->exactly(2))
@@ -200,11 +202,11 @@ class BackupCodesServiceTest extends TestCase
         $userId = 123;
         $version = 1;
 
-        // Create mock statement that returns a code (but with wrong hash)
+        // Return the row so the loop actually runs; password_verify() must
+        // reject the wrong code against the (correct) stored hash.
         $mockSelectStatement = $this->createMock(PDOStatement::class);
-        $mockSelectStatement->method('fetch')->willReturn([
-            'id' => 1,
-            'code' => $hash // This is the correct hash, but we're checking with wrong code
+        $mockSelectStatement->method('fetchAll')->willReturn([
+            ['id' => 1, 'code' => $hash],
         ]);
 
         $this->mockDb->method('query')
