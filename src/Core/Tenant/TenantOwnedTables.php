@@ -98,6 +98,11 @@ final class TenantOwnedTables
         // The operator API writes cross-tenant (system gated) but still binds the
         // target tenant_id on every statement, so the predicate guard polices it.
         'tenant_entitlements' => '051_create_tenant_entitlements.php',
+
+        // WC-storage — per-tenant storage backend config (migration 053): an
+        // S3-compatible bucket a tenant owns, used only when it also holds the
+        // storage.custom_backend entitlement. Every query binds tenant_id.
+        'tenant_storage_config' => '053_create_tenant_storage_config.php',
     ];
 
     /**

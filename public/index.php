@@ -942,7 +942,20 @@ $router->register('POST', '/api/settings/mail/test',         [$mailSettingsHandl
 // when the operator sets storage.driver='s3' + the storage.s3.* config, secret
 // from STORAGE_S3_SECRET_KEY env). Built once and shared by the branding paths.
 $storageRoot = getenv('STORAGE_ROOT') ?: (__DIR__ . '/../storage');
-$storageDriver = \Whity\Storage\StorageDriverFactory::fromSettings($settingsService, $_ENV, $storageRoot);
+$defaultStorageDriver = \Whity\Storage\StorageDriverFactory::fromSettings($settingsService, $_ENV, $storageRoot);
+// Per-tenant storage routing (WC-storage): a tenant that BOTH holds the
+// storage.custom_backend entitlement AND has a tenant_storage_config row uses its
+// own object-storage backend; every other tenant transparently uses the platform
+// default built above. Routing keys off the tenant segment in the storage key
+// (tenants/{id}/...), so it also works on the PUBLIC, context-less asset path.
+// Behaviour-preserving until a tenant is both entitled and configured.
+$storageResolver = new \Whity\Storage\TenantStorageResolver(
+    $defaultStorageDriver,
+    new \Whity\Storage\TenantStorageConfigRepository($db->getPdo()),
+    $entitlementService,
+    $secretStore
+);
+$storageDriver = new \Whity\Storage\TenantRoutingStorageDriver($defaultStorageDriver, $storageResolver);
 $brandingService = new \Whity\Core\Branding\BrandingService(
     $settingsService,
     $storageDriver,
