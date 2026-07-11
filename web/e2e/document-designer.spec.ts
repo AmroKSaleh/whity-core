@@ -199,6 +199,37 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-print-page')).toHaveCount(1);
   });
 
+  test('serial batch: generate a sequence, preview rows, and print one copy per row', async ({ page }) => {
+    await page.goto('/admin/documents');
+
+    // A dynamic-text element bound to {{sku}} so the generated serial shows.
+    await page.getByTestId('doc-add-dynamicText').click();
+    await page.getByTestId('doc-text-value').fill('{{sku}}');
+
+    // Configure and generate a 3-row serial sequence into `sku`.
+    await page.getByTestId('doc-tab-batch').click();
+    await page.getByTestId('doc-batch-key').selectOption('sku');
+    await page.getByTestId('doc-batch-prefix').fill('SN-');
+    await page.getByTestId('doc-batch-start').fill('1');
+    await page.getByTestId('doc-batch-count').fill('3');
+    await page.getByTestId('doc-batch-generate').click();
+
+    // Batch badge reflects ×3 and the print doc has 3 pages (1 page × 3 rows).
+    await expect(page.getByTestId('doc-batch-badge')).toHaveText('×3');
+    await expect(page.getByTestId('doc-print-page')).toHaveCount(3);
+
+    // Preview shows the first serial; Next advances to the second row.
+    await page.getByTestId('doc-preview-toggle').click();
+    const canvas = page.getByTestId('doc-page');
+    await expect(canvas.getByText('SN-0001')).toBeVisible();
+    await page.getByTestId('doc-batch-next').click();
+    await expect(canvas.getByText('SN-0002')).toBeVisible();
+
+    // Clearing the batch returns to a single print page.
+    await page.getByTestId('doc-batch-clear').click();
+    await expect(page.getByTestId('doc-print-page')).toHaveCount(1);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

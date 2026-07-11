@@ -17,6 +17,7 @@ import {
   saveTemplate,
   type SavedTemplate,
 } from '@/lib/documents/storage';
+import { generateSequence, rowsFromValues, type SequenceConfig } from '@/lib/documents/batch';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
@@ -91,6 +92,12 @@ export function DocumentDesigner() {
   const clipboardRef = useRef<DocElement | null>(null);
   const pasteSeq = useRef(0);
   const [hasClipboard, setHasClipboard] = useState(false);
+
+  // Variable-data batch: when set, Preview and Print iterate these data rows
+  // (e.g. a run of serial numbers) instead of the single sample row. Batch data
+  // is runtime-only — it is NOT part of the template and NOT on the undo stack.
+  const [batchRows, setBatchRows] = useState<Record<string, string>[] | null>(null);
+  const [batchIndex, setBatchIndex] = useState(0);
 
   // Current page + its elements. `currentPage` may briefly exceed the page count
   // after an undo/delete, so read through a clamped `pageIndex`. ALL element
@@ -298,6 +305,27 @@ export function DocumentDesigner() {
 
   const data = useMemo(() => sampleDataOf(template), [template]);
 
+  // Effective data for Preview/Print: the current batch row when batching, else
+  // the single sample row. Print emits one physical run per dataset entry.
+  const rows = batchRows ?? [];
+  const batchActive = rows.length > 0;
+  const batchClampIndex = batchActive ? Math.min(batchIndex, rows.length - 1) : 0;
+  const activeData = batchActive ? rows[batchClampIndex] : data;
+  const printDatasets = batchActive ? rows : [data];
+
+  const generateBatch = (cfg: SequenceConfig) => {
+    const serials = generateSequence(cfg);
+    const built = rowsFromValues(serials, cfg.key, data);
+    setBatchRows(built.length ? built : null);
+    setBatchIndex(0);
+    addToast(built.length ? `Generated ${built.length} rows.` : 'No rows generated.', built.length ? 'success' : 'info');
+  };
+
+  const clearBatch = () => {
+    setBatchRows(null);
+    setBatchIndex(0);
+  };
+
   const patchElement = (id: string, patch: Partial<DocElement>) => {
     // Label by field set so a continuous drag / same-field typing coalesces.
     commit(`patch:${Object.keys(patch).sort().join(',')}`);
@@ -438,6 +466,8 @@ export function DocumentDesigner() {
     setCurrentId(entry.id);
     setCurrentPage(0);
     setSelectedId(null);
+    setBatchRows(null);
+    setBatchIndex(0);
     resetHistory();
     addToast(`Loaded “${entry.name}”.`, 'info');
   };
@@ -447,6 +477,8 @@ export function DocumentDesigner() {
     setCurrentId(null);
     setCurrentPage(0);
     setSelectedId(null);
+    setBatchRows(null);
+    setBatchIndex(0);
     resetHistory();
   };
 
@@ -461,6 +493,8 @@ export function DocumentDesigner() {
       setCurrentId(null);
       setCurrentPage(0);
       setSelectedId(null);
+      setBatchRows(null);
+      setBatchIndex(0);
       resetHistory();
       addToast('Template imported.', 'success');
     } catch {
@@ -578,6 +612,15 @@ export function DocumentDesigner() {
         <Button variant="outline" size="sm" className="gap-1" data-testid="doc-print" onClick={doPrint}>
           <IconPrinter className="h-3.5 w-3.5" /> Print
         </Button>
+        {batchActive && (
+          <span
+            className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
+            data-testid="doc-batch-badge"
+            title="Print will render one copy per batch row"
+          >
+            ×{rows.length}
+          </span>
+        )}
 
         <span className="ml-auto flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -674,7 +717,7 @@ export function DocumentDesigner() {
           <Canvas
             elements={elements}
             page={template.page}
-            data={data}
+            data={activeData}
             selectedId={selectedId}
             zoom={zoom}
             gridMm={snap ? 1 : 0}
@@ -728,6 +771,7 @@ export function DocumentDesigner() {
           <Inspector
             template={template}
             selected={selected}
+            batch={{ active: batchActive, index: batchClampIndex, total: rows.length }}
             onChangeSelected={(patch) => selectedId && patchElement(selectedId, patch)}
             onChangePage={(patch: Partial<PageSpec>) => {
               commit('page');
@@ -737,12 +781,15 @@ export function DocumentDesigner() {
               commit('data');
               setTemplate((t) => ({ ...t, placeholders: list }));
             }}
+            onGenerateBatch={generateBatch}
+            onClearBatch={clearBatch}
+            onBatchIndex={setBatchIndex}
           />
         </aside>
       </div>
 
-      {/* Off-screen, all-pages render used only for printing. */}
-      <PrintDocument template={template} data={data} />
+      {/* Off-screen, all-pages render used only for printing (per data row). */}
+      <PrintDocument template={template} datasets={printDatasets} />
 
       {/* Print stylesheet: hide the app chrome and emit each page at the physical
           @page size with a break between pages. Rendered as a text child (not
