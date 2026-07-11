@@ -368,17 +368,15 @@ export function DocumentDesigner() {
         </aside>
       </div>
 
-      {/* Print stylesheet: isolate the page and set the physical @page size. */}
-      <style
-        dangerouslySetInnerHTML={{
-          __html: `@media print {
-            body * { visibility: hidden !important; }
-            #doc-print-root, #doc-print-root * { visibility: visible !important; }
-            #doc-print-root { position: fixed !important; left: 0; top: 0; transform: none !important; box-shadow: none !important; }
-            @page { size: ${template.page.widthMm}mm ${template.page.heightMm}mm; margin: 0; }
-          }`,
-        }}
-      />
+      {/* Print stylesheet: isolate the page and set the physical @page size.
+          Rendered as a text child (not innerHTML); the interpolated dims are
+          plain numbers from state. */}
+      <style>{`@media print {
+        body * { visibility: hidden !important; }
+        #doc-print-root, #doc-print-root * { visibility: visible !important; }
+        #doc-print-root { position: fixed !important; left: 0; top: 0; transform: none !important; box-shadow: none !important; }
+        @page { size: ${template.page.widthMm}mm ${template.page.heightMm}mm; margin: 0; }
+      }`}</style>
     </div>
   );
 }

@@ -44,11 +44,13 @@ export function BarcodeSvg({
     );
   }
 
+  // Render the generated SVG via a data-URI <img> rather than injecting it as
+  // HTML: an <img>-loaded SVG is inert (no script/external fetch), which avoids
+  // an innerHTML sink entirely while staying crisp (vector) and scalable.
+  const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   return (
-    <div
-      className="h-full w-full [&>svg]:h-full [&>svg]:w-full"
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    // eslint-disable-next-line @next/next/no-img-element -- inline generated SVG barcode; next/image is inappropriate here.
+    <img src={dataUri} alt="" className="h-full w-full" style={{ objectFit: 'contain' }} draggable={false} />
   );
 }
 

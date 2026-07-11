@@ -16,13 +16,15 @@ test.describe('Document & Label Designer', () => {
     const pageCanvas = page.getByTestId('doc-page');
     await expect(pageCanvas).toBeVisible();
 
-    // Barcode: default value {{sku}} resolves to the sample "WID-001" and renders SVG.
+    // Barcode: default value {{sku}} resolves to the sample "WID-001" and renders
+    // as an inert data-URI SVG image.
+    const codes = pageCanvas.locator('img[src^="data:image/svg+xml"]');
     await page.getByTestId('doc-add-barcode').click();
-    await expect(pageCanvas.locator('svg')).toHaveCount(1);
+    await expect(codes).toHaveCount(1);
 
-    // QR adds a second matrix SVG.
+    // QR adds a second matrix code.
     await page.getByTestId('doc-add-qr').click();
-    await expect(pageCanvas.locator('svg')).toHaveCount(2);
+    await expect(codes).toHaveCount(2);
   });
 
   test('dynamic text shows the raw token while editing and interpolates in Preview', async ({ page }) => {

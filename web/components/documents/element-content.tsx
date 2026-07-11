@@ -27,7 +27,9 @@ export function ElementContent({
     case 'dynamicText':
       return <TextBox style={el.style}>{preview ? interpolate(el.template, data) : el.template}</TextBox>;
     case 'image': {
-      const src = resolveBound(el.binding, el.src, data);
+      const resolved = resolveBound(el.binding, el.src, data);
+      // Only render http(s) or image data-URIs — never javascript:/other schemes.
+      const src = /^(https?:\/\/|data:image\/)/i.test(resolved) ? resolved : '';
       if (src === '') {
         return (
           <div className="flex h-full w-full items-center justify-center rounded-sm border border-dashed border-border bg-muted/30 text-[8px] text-muted-foreground">
