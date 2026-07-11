@@ -39,43 +39,50 @@ interface Interaction {
   startX: number;
   startY: number;
   orig: { x: number; y: number; w: number; h: number };
+  /** For a group move: the original x/y of every dragged element. */
+  group?: Array<{ id: string; x: number; y: number }>;
 }
 
 export function Canvas({
   elements,
   page,
   data,
-  selectedId,
+  selectedIds,
   zoom,
   gridMm,
   showGrid,
   preview,
   onSelect,
   onChange,
+  onChangeMany,
 }: {
   elements: DocElement[];
   page: PageSpec;
   data: Record<string, string>;
-  selectedId: string | null;
+  selectedIds: string[];
   zoom: number;
   gridMm: number;
   showGrid: boolean;
   preview: boolean;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive?: boolean) => void;
   onChange: (id: string, patch: Partial<DocElement>) => void;
+  onChangeMany: (updates: Array<{ id: string; patch: Partial<DocElement> }>) => void;
 }) {
   const [drag, setDrag] = useState<Interaction | null>(null);
   // Alignment guide lines to draw while dragging (x/y positions in mm).
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
+  const selectedSet = new Set(selectedIds);
 
-  // Live scene + change callback read by the drag listener via refs, so the
+  // Live scene + change callbacks read by the drag listener via refs, so the
   // listener subscribes ONCE per drag instead of re-subscribing on every render
   // (which would drop fast pointer events in the unsubscribe gap).
   const sceneRef = useRef({ elements, page });
   const onChangeRef = useRef(onChange);
+  const onChangeManyRef = useRef(onChangeMany);
   useEffect(() => {
     sceneRef.current = { elements, page };
     onChangeRef.current = onChange;
+    onChangeManyRef.current = onChangeMany;
   });
 
   useEffect(() => {
@@ -88,6 +95,16 @@ export function Canvas({
       const dy = (e.clientY - drag.startY) * mmPerPx;
       const o = drag.orig;
       if (drag.kind === 'move') {
+        // Group move: shift every dragged element by the same delta (grid-snap
+        // the delta; no alignment guides for groups to keep it predictable).
+        if (drag.group && drag.group.length > 1) {
+          const sdx = snap(dx);
+          const sdy = snap(dy);
+          onChangeManyRef.current(
+            drag.group.map((g) => ({ id: g.id, patch: { x: Math.max(0, g.x + sdx), y: Math.max(0, g.y + sdy) } }))
+          );
+          return;
+        }
         let nx = o.x + dx;
         let ny = o.y + dy;
         // Alignment snapping (tied to the Snap toggle): align edges/centre to
@@ -132,11 +149,39 @@ export function Canvas({
   const start = (e: React.PointerEvent, kind: 'move' | 'resize', el: DocElement, handle?: HandleDef) => {
     if (preview) return;
     e.stopPropagation();
-    onSelect(el.id);
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+
+    // Additive click just toggles membership — no drag.
+    if (kind === 'move' && additive) {
+      onSelect(el.id, true);
+      return;
+    }
+
+    // Dragging an element already in a multi-selection keeps the whole set and
+    // moves it as a group; otherwise this element becomes the sole selection.
+    const inSelection = selectedSet.has(el.id);
+    const groupIds = kind === 'move' && inSelection && selectedSet.size > 1 ? selectedIds : [el.id];
+    if (!inSelection || selectedSet.size <= 1) {
+      onSelect(el.id, false);
+    }
+
     // Locked: selectable (to inspect/unlock) but not draggable/resizable.
     if (el.locked) return;
     e.preventDefault();
-    setDrag({ kind, handle, id: el.id, startX: e.clientX, startY: e.clientY, orig: { x: el.x, y: el.y, w: el.w, h: el.h } });
+    const byId = new Map(elements.map((x) => [x.id, x]));
+    const group = groupIds
+      .map((id) => byId.get(id))
+      .filter((x): x is DocElement => !!x && !x.locked)
+      .map((x) => ({ id: x.id, x: x.x, y: x.y }));
+    setDrag({
+      kind,
+      handle,
+      id: el.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      orig: { x: el.x, y: el.y, w: el.w, h: el.h },
+      group,
+    });
   };
 
   const ordered = [...elements].sort((a, b) => a.z - b.z);
@@ -214,7 +259,9 @@ export function Canvas({
         {ordered.map((el) => {
           // Hidden elements are omitted from Preview/print, shown dimmed while editing.
           if (preview && el.hidden) return null;
-          const selected = el.id === selectedId && !preview;
+          const selected = selectedSet.has(el.id) && !preview;
+          // Resize handles + size readout only make sense for a single element.
+          const solo = selected && selectedSet.size === 1;
           return (
             <div
               key={el.id}
@@ -235,7 +282,7 @@ export function Canvas({
               }}
             >
               <ElementContent el={el} data={data} preview={preview} />
-              {selected && (
+              {solo && (
                 <span
                   data-testid="doc-readout"
                   aria-hidden
@@ -258,7 +305,7 @@ export function Canvas({
                   {Math.round(el.w)} × {Math.round(el.h)} mm
                 </span>
               )}
-              {selected &&
+              {solo &&
                 !el.locked &&
                 HANDLES.map((hd) => (
                   <span

@@ -330,6 +330,24 @@ test.describe('Document & Label Designer', () => {
     await expect(canvas.locator('div[dir="rtl"]').first()).toBeVisible();
   });
 
+  test('multi-select: shift-click selects several elements, then group delete removes them', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-add-rect').click();
+    const el = page.locator('[data-testid^="doc-el-"]');
+    await expect(el).toHaveCount(2);
+
+    // Select the first layer, then shift-click the second → both selected.
+    const layers = page.locator('[data-testid^="doc-layer-select-"]');
+    await layers.nth(0).click();
+    await layers.nth(1).click({ modifiers: ['Shift'] });
+    await expect(page.getByTestId('doc-selection-count')).toHaveText('2 elements selected');
+
+    // Delete acts on the whole selection.
+    await page.keyboard.press('Delete');
+    await expect(el).toHaveCount(0);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

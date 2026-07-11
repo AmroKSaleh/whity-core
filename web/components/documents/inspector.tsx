@@ -26,6 +26,7 @@ export interface BatchState {
 export function Inspector({
   template,
   selected,
+  selectedCount,
   batch,
   sheet,
   sequence,
@@ -41,6 +42,7 @@ export function Inspector({
 }: {
   template: DocTemplate;
   selected: DocElement | null;
+  selectedCount: number;
   batch: BatchState;
   sheet: SheetSpec;
   sequence: SequenceConfig;
@@ -74,7 +76,15 @@ export function Inspector({
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pe-1">
-        {tab === 'element' && <ElementTab selected={selected} placeholders={template.placeholders} onChange={onChangeSelected} />}
+        {tab === 'element' &&
+          (selectedCount > 1 ? (
+            <p className="text-xs text-muted-foreground">
+              {selectedCount} elements selected. Use the actions above (align, copy, duplicate, delete), or select a
+              single element to edit its properties.
+            </p>
+          ) : (
+            <ElementTab selected={selected} placeholders={template.placeholders} onChange={onChangeSelected} />
+          ))}
         {tab === 'page' && <PageTab page={template.page} onChange={onChangePage} />}
         {tab === 'data' && <DataTab placeholders={template.placeholders} onChange={onChangePlaceholders} />}
         {tab === 'batch' && (
