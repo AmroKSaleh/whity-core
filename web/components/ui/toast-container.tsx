@@ -51,7 +51,7 @@ export function ToastContainer() {
     <div
       role="region"
       aria-label="Notifications"
-      className="fixed bottom-0 right-0 z-[9999] flex flex-col gap-3 p-4 pointer-events-none"
+      className="fixed bottom-0 inset-e-0 z-[9999] flex flex-col gap-3 p-4 pointer-events-none"
     >
       {toasts.map((toast) => (
         <div
@@ -60,7 +60,7 @@ export function ToastContainer() {
           aria-live={toastPoliteness[toast.type]}
           aria-atomic="true"
           className={cn(
-            'pointer-events-auto flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium shadow-lg animate-in slide-in-from-right-full duration-200',
+            'pointer-events-auto flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium shadow-lg animate-in duration-200 ltr:slide-in-from-right-full rtl:slide-in-from-left-full',
             toastStyles[toast.type]
           )}
         >

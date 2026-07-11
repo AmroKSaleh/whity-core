@@ -143,9 +143,9 @@ export function DataTable<T extends { id: string | number }>({
     }
 
     return sortDirection === 'asc' ? (
-      <IconChevronUp className="inline ml-1 size-4" />
+      <IconChevronUp className="inline ms-1 size-4" />
     ) : (
-      <IconChevronDown className="inline ml-1 size-4" />
+      <IconChevronDown className="inline ms-1 size-4" />
     );
   };
 
@@ -165,13 +165,13 @@ export function DataTable<T extends { id: string | number }>({
                 {columns.map((column) => (
                   <th
                     key={String(column.key)}
-                    className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider"
+                    className="px-6 py-3 text-start text-xs font-medium text-muted-foreground uppercase tracking-wider"
                   >
                     {column.label}
                   </th>
                 ))}
                 {rowActions && (
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  <th className="px-6 py-3 text-start text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     Actions
                   </th>
                 )}
@@ -232,7 +232,7 @@ export function DataTable<T extends { id: string | number }>({
                   key={String(column.key)}
                   onClick={() => handleSort(column)}
                   className={cn(
-                    'px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider',
+                    'px-6 py-3 text-start text-xs font-medium text-muted-foreground uppercase tracking-wider',
                     column.sortable && 'cursor-pointer hover:bg-muted/60 transition-colors'
                   )}
                 >
@@ -243,7 +243,7 @@ export function DataTable<T extends { id: string | number }>({
                 </th>
               ))}
               {rowActions && (
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                <th className="px-6 py-3 text-start text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   Actions
                 </th>
               )}
