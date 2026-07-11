@@ -123,6 +123,13 @@ final class CorePermissions
     // may only configure a custom backend when its plan includes it.
     public const STORAGE_MANAGE = 'storage:manage';
 
+    // Operator subscription-plan management (WC-plans, ADR 0010). Gates the
+    // catalog CRUD of plans + their entitlement bundles, and applying a plan to a
+    // target tenant. A PLATFORM capability: necessary but not sufficient — the
+    // handler additionally requires the caller to be acting in the system tenant
+    // (id 0). Mirrors ENTITLEMENTS_MANAGE.
+    public const PLANS_MANAGE = 'plans:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -164,6 +171,7 @@ final class CorePermissions
             self::AUTH_PROVIDERS_MANAGE,
             self::ENTITLEMENTS_MANAGE,
             self::STORAGE_MANAGE,
+            self::PLANS_MANAGE,
         ];
     }
 }
