@@ -106,8 +106,12 @@ final class SubscriptionApiHandler
             if ($changes !== []) {
                 $this->subscriptions->setSubscription($targetTenant, $changes);
             }
-        } catch (PlanValidationException | SubscriptionException $e) {
-            return Response::error('Validation failed', 422, ['reason' => $e->getMessage()]);
+        } catch (PlanValidationException $e) {
+            // WC-186: surface the exception's curated, client-safe reason — never
+            // $e->getMessage() inside a Response::error.
+            return Response::error('Validation failed', 422, [$e->field() => $e->reason()]);
+        } catch (SubscriptionException $e) {
+            return Response::error('Validation failed', 422, ['subscription' => $e->reason()]);
         }
 
         return Response::json(['data' => $this->viewFor($targetTenant, operator: true)]);
