@@ -88,6 +88,24 @@ test.describe('Document & Label Designer', () => {
     await page.getByTestId('doc-redo').click();
     await expect(el).toHaveCount(1);
   });
+
+  test('copy + paste clones the selected element, and cut removes it', async ({ page }) => {
+    await page.goto('/admin/documents');
+    const el = page.locator('[data-testid^="doc-el-"]');
+    await page.getByTestId('doc-add-text').click();
+    await expect(el).toHaveCount(1);
+    await el.first().click(); // ensure selected + move focus off the Add button
+
+    // Copy then paste → a second element; the Paste button appears once there's
+    // something on the clipboard.
+    await page.getByTestId('doc-copy').click();
+    await page.getByTestId('doc-paste').click();
+    await expect(el).toHaveCount(2);
+
+    // The pasted clone is now selected; cut removes it, leaving one.
+    await page.getByTestId('doc-cut').click();
+    await expect(el).toHaveCount(1);
+  });
 });
 
 test.describe('Document designer — requires auth', () => {
