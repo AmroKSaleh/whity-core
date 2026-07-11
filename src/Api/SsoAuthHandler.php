@@ -243,12 +243,14 @@ final class SsoAuthHandler
         }
         // last_login_at is stamped inside the linker on the resolved link.
         //
-        // NOTE: domain-claim JIT membership (auto-join a tenant whose email domain
-        // a person's verified address matches) is deliberately NOT wired here.
-        // Auto-provisioning from a self-asserted, unverified `tenant_email_domains`
-        // claim is a cross-tenant harvesting risk; it is deferred until domain-
-        // OWNERSHIP verification exists (WC-628738f5). Tenant-trust onboarding still
-        // works via explicit invites, JIT-accepted in FederatedIdentityLinker.
+        // NOTE: domain-claim JIT membership (auto-join a tenant whose verified
+        // email domain a person's address matches) IS handled inside the linker's
+        // tenant-trust path — but ONLY when the tenant's `tenant_email_domains`
+        // claim is DNS-ownership-VERIFIED (WC-628738f5) and has auto_provision on.
+        // A self-asserted, unverified claim never onboards (the cross-tenant
+        // harvesting guard). Tenant-trust also onboarding via explicit invites,
+        // JIT-accepted in FederatedIdentityLinker. The JIT-assigned role is
+        // validated to belong to the tenant (or be global) before it is granted.
 
         $email = $this->loginEmailFor($profileId, $identity->normalizedEmail());
 

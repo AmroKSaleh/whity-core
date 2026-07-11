@@ -262,6 +262,48 @@ final class FederatedIdentityLinkerRealEngineTest extends TestCase
         self::assertNull($this->identities->findGlobalByIssuerSubject(self::ISS, 'sub-jit'), 'never the global namespace');
     }
 
+    public function testTenantJitFallsBackToUserRoleWhenClaimRoleIsForeign(): void
+    {
+        // Hardening (WC-500215fd): a verified claim whose default_role_id points at
+        // ANOTHER tenant's private role must NOT grant that foreign role. JIT
+        // provisions with the safe global 'user' role instead (least privilege).
+        $acme  = $this->seedTenant('Acme');
+        $other = $this->seedTenant('Other');
+        $this->pdo->exec("INSERT INTO roles (name, tenant_id, created_at) VALUES ('other-admin', {$other}, NOW())");
+        $foreignRoleId = (int) $this->col("SELECT id FROM roles WHERE name = 'other-admin' AND tenant_id = {$other}");
+
+        // Acme's verified claim references the FOREIGN role.
+        $claimId = $this->domains->insert($acme, 'acme.com', $foreignRoleId, true);
+        $this->domains->markVerified($claimId, $acme);
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-foreign', 'x@acme.com', true), $this->tenantCtx($acme));
+        self::assertSame('provisioned', $r['status']);
+        $pid = $r['profile_id'] ?? 0;
+
+        $assigned = (int) $this->col("SELECT role_id FROM memberships WHERE profile_id = {$pid} AND tenant_id = {$acme}");
+        $userRole = (int) $this->col("SELECT id FROM roles WHERE name = 'user' AND tenant_id IS NULL");
+        self::assertSame($userRole, $assigned, 'a foreign claim role must fall back to the global user role');
+        self::assertNotSame($foreignRoleId, $assigned);
+    }
+
+    public function testTenantJitAcceptsOwnTenantPrivateRoleFromClaim(): void
+    {
+        // The mirror case: a claim role that legitimately BELONGS to the configuring
+        // tenant is honoured (not clobbered by the fallback).
+        $acme = $this->seedTenant('Acme');
+        $this->pdo->exec("INSERT INTO roles (name, tenant_id, created_at) VALUES ('acme-editor', {$acme}, NOW())");
+        $ownRoleId = (int) $this->col("SELECT id FROM roles WHERE name = 'acme-editor' AND tenant_id = {$acme}");
+
+        $claimId = $this->domains->insert($acme, 'acme.com', $ownRoleId, true);
+        $this->domains->markVerified($claimId, $acme);
+
+        $r = $this->linker->resolveForLogin($this->identity('sub-own', 'y@acme.com', true), $this->tenantCtx($acme));
+        self::assertSame('provisioned', $r['status']);
+        $pid = $r['profile_id'] ?? 0;
+        $assigned = (int) $this->col("SELECT role_id FROM memberships WHERE profile_id = {$pid} AND tenant_id = {$acme}");
+        self::assertSame($ownRoleId, $assigned, "the tenant's own role is honoured");
+    }
+
     public function testTenantJitAddsExistingNonMemberForVerifiedOwnedDomain(): void
     {
         // An existing profile (member of ANOTHER tenant) whose verified email domain
