@@ -65,21 +65,13 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'GET /api/email-domains',
         'POST /api/email-domains',
         'POST /api/email-domains/{id}/verify', // WC-628738f5: DNS-TXT ownership verification; OpenAPI to follow
-        // WC-e6287: per-tenant identity-provider (SSO/OIDC) admin endpoints —
-        // OpenAPI schema to follow in a dedicated documentation task.
-        'GET /api/identity-providers',
-        'POST /api/identity-providers',
-        'PATCH /api/identity-providers/{id}',
-        'DELETE /api/identity-providers/{id}',
-        // WC-ae16: public federated sign-in (OIDC) — browser redirect + callback;
-        // OpenAPI schema not applicable (302 redirect flow, not a JSON API).
-        'GET /api/auth/sso/providers', // WC-28fb2e19: public enabled-providers list for the login screen
+        // WC-e6287 / WC-f3b17bd2: identity-provider admin CRUD, the public
+        // enabled-providers list, and connected-accounts management are now
+        // declared in CoreApiSchemas::identityRoutes().
+        // WC-ae16: the OIDC sign-in redirect flow itself stays undocumented —
+        // start/callback are 302 browser redirects, not JSON APIs.
         'GET /api/auth/sso/{provider}/start',
         'GET /api/auth/sso/{provider}/callback',
-        // WC-f3b17bd2: authenticated connected-accounts management — OpenAPI schema
-        // to follow in a dedicated documentation task.
-        'GET /api/me/identities',
-        'DELETE /api/me/identities/{id}',
         // WC-d279a9b3: MCP Streamable-HTTP endpoints — OpenAPI schema not
         // applicable (MCP uses its own JSON-RPC discovery surface, not OpenAPI).
         'GET /mcp',

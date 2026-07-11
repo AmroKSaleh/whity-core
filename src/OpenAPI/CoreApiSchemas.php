@@ -91,7 +91,8 @@ final class CoreApiSchemas
             self::platformOpsRoutes(),
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
-            self::brandingRoutes()
+            self::brandingRoutes(),
+            self::identityRoutes()
         );
     }
 
@@ -1475,6 +1476,73 @@ final class CoreApiSchemas
                 'backup_codes_available' => self::int(),
             ], ['enabled', 'backup_codes_available']),
 
+            // ── SSO / federated identity (WC-e6287, WC-f3b17bd2; ADR 0009) ────
+            // A tenant's configured OIDC provider. `client_secret` is WRITE-ONLY:
+            // the repository never returns it — `has_secret` reflects whether one
+            // is set. `discovery_url`/`domain` are nullable (optional config).
+            'IdentityProvider' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'provider_key' => self::str(),
+                'display_name' => self::str(),
+                'client_id' => self::str(),
+                'has_secret' => self::bool(),
+                'issuer' => self::str(),
+                'discovery_url' => self::str(true),
+                'scopes' => self::str(),
+                'domain' => self::str(true),
+                'enabled' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'provider_key', 'display_name', 'client_id',
+                'has_secret', 'issuer', 'scopes', 'enabled', 'created_at', 'updated_at',
+            ]),
+            'IdentityProviderListResponse' => self::listEnvelope('IdentityProvider'),
+            'IdentityProviderResponse' => self::dataEnvelope(SchemaBuilder::ref('IdentityProvider')),
+            // provider_key is constrained to the currently-configurable set; issuer
+            // and discovery_url must be https URLs; client_secret is write-only.
+            'IdentityProviderCreateRequest' => self::object([
+                'provider_key' => ['type' => 'string', 'enum' => ['google', 'microsoft', 'oidc']],
+                'display_name' => self::str(),
+                'client_id' => self::str(),
+                'issuer' => ['type' => 'string', 'format' => 'uri'],
+                'client_secret' => self::str(),
+                'discovery_url' => ['type' => 'string', 'format' => 'uri', 'nullable' => true],
+                'scopes' => self::str(),
+                'domain' => self::str(true),
+                'enabled' => self::bool(),
+            ], ['provider_key', 'display_name', 'client_id', 'issuer']),
+            // All fields optional — a partial patch. Sending `client_secret`
+            // re-encrypts and replaces it; omitting it leaves the stored one.
+            'IdentityProviderUpdateRequest' => self::object([
+                'provider_key' => ['type' => 'string', 'enum' => ['google', 'microsoft', 'oidc']],
+                'display_name' => self::str(),
+                'client_id' => self::str(),
+                'issuer' => ['type' => 'string', 'format' => 'uri'],
+                'client_secret' => self::str(),
+                'discovery_url' => ['type' => 'string', 'format' => 'uri', 'nullable' => true],
+                'scopes' => self::str(),
+                'domain' => self::str(true),
+                'enabled' => self::bool(),
+            ], []),
+            // Public login-screen shape — only the safe display fields.
+            'SsoProvider' => self::object([
+                'provider_key' => self::str(),
+                'display_name' => self::str(),
+            ], ['provider_key', 'display_name']),
+            'SsoProviderListResponse' => self::listEnvelope('SsoProvider'),
+            // A caller's linked external identity (connected account). `email` and
+            // `last_login_at` may be null (asserted-at-link email; never-since-linked).
+            'MeIdentity' => self::object([
+                'id' => self::int(),
+                'provider_key' => self::str(),
+                'email' => self::str(true),
+                'linked_at' => self::str(),
+                'last_login_at' => self::str(true),
+            ], ['id', 'provider_key', 'linked_at']),
+            'MeIdentityListResponse' => self::listEnvelope('MeIdentity'),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -1932,6 +2000,122 @@ final class CoreApiSchemas
             'BrandingHostRequest' => self::object(['host' => self::str(true)], []),
             // PUT /api/tenants/{id}/branding-host response body.
             'BrandingHostResponse' => self::dataEnvelope(self::object(['branding_host' => self::str(true)], ['branding_host'])),
+        ];
+    }
+
+    /**
+     * SSO / federated-identity route declarations (WC-e6287, WC-f3b17bd2):
+     *   - per-tenant identity-provider admin CRUD (gated `auth_providers:manage`),
+     *   - the public enabled-providers list for the login screen,
+     *   - the authenticated connected-accounts (linked identities) surface.
+     *
+     * The OIDC redirect flow itself — `GET /api/auth/sso/{provider}/start` and
+     * `/callback` — is a 302 browser redirect, not a JSON API, and is deliberately
+     * left undocumented (see RouteCatalogueCompletenessTest::KNOWN_UNDOCUMENTED).
+     *
+     * The client secret is WRITE-ONLY end-to-end: accepted as plaintext on
+     * create/update, encrypted at rest, and NEVER returned — reads expose only
+     * `has_secret` (see ADR 0009 and IdentityProviderRepository).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function identityRoutes(): array
+    {
+        // Public: the login screen's enabled-provider buttons (empty when the
+        // SSO kill-switch is off). No auth gate.
+        $ssoProviders = [
+            'method' => 'GET',
+            'path' => '/api/auth/sso/providers',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'List enabled SSO providers for the login screen',
+                'tags' => ['sso'],
+                'responses' => [
+                    200 => self::jsonResponse('Enabled providers (empty when SSO is disabled)', 'SsoProviderListResponse'),
+                ],
+            ],
+        ];
+
+        // Authenticated self-service: the caller's linked external identities.
+        // Cookie-authenticated by the handler — no requiredRole/requiredPermission.
+        $meIdentitiesList = [
+            'method' => 'GET',
+            'path' => '/api/me/identities',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'List the caller\'s linked SSO identities',
+                'tags' => ['sso'],
+                'responses' => [
+                    200 => self::jsonResponse('The caller\'s connected external identities', 'MeIdentityListResponse'),
+                    401 => self::errorResponse('Authentication required'),
+                ],
+            ],
+        ];
+
+        $meIdentitiesUnlink = [
+            'method' => 'DELETE',
+            'path' => '/api/me/identities/{id:\d+}',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'Unlink one of the caller\'s SSO identities',
+                'tags' => ['sso'],
+                'responses' => [
+                    204 => ['description' => 'Identity unlinked'],
+                    400 => self::errorResponse('Invalid id'),
+                    401 => self::errorResponse('Authentication required'),
+                    404 => self::errorResponse('Identity not found'),
+                    409 => self::errorResponse('Cannot remove the only sign-in method of a passwordless account'),
+                ],
+            ],
+        ];
+
+        return [
+            self::permissionRoute('GET', '/api/identity-providers', 'auth_providers:manage', [
+                'summary' => 'List the tenant\'s configured identity providers',
+                'tags' => ['sso'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s identity providers (client secret never returned)', 'IdentityProviderListResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/identity-providers', 'auth_providers:manage', [
+                'summary' => 'Configure a new identity provider for the tenant',
+                'tags' => ['sso'],
+                'request' => 'IdentityProviderCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created identity provider', 'IdentityProviderResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    409 => self::errorResponse('This provider is already configured for the tenant'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/identity-providers/{id:\d+}', 'auth_providers:manage', [
+                'summary' => 'Update a tenant identity provider',
+                'tags' => ['sso'],
+                'request' => 'IdentityProviderUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated identity provider', 'IdentityProviderResponse'),
+                    400 => self::errorResponse('Invalid id or missing tenant context'),
+                    404 => self::errorResponse('Identity provider not found'),
+                    409 => self::errorResponse('This provider is already configured for the tenant'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/identity-providers/{id:\d+}', 'auth_providers:manage', [
+                'summary' => 'Delete a tenant identity provider',
+                'tags' => ['sso'],
+                'responses' => [
+                    204 => ['description' => 'Identity provider deleted'],
+                    400 => self::errorResponse('Invalid id or missing tenant context'),
+                    404 => self::errorResponse('Identity provider not found'),
+                ] + self::authErrors(),
+            ]),
+            $ssoProviders,
+            $meIdentitiesList,
+            $meIdentitiesUnlink,
         ];
     }
 
