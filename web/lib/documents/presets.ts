@@ -20,6 +20,8 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   vAlign: 'top',
   color: '#111111',
   direction: 'auto',
+  lineHeight: 1.2,
+  letterSpacing: 0,
 };
 
 /** A blank template — a single small shipping-label sized page by default. */

@@ -101,7 +101,8 @@ function TextBox({ style, children }: { style: TextStyle; children: React.ReactN
     display: 'flex',
     flexDirection: 'column',
     justifyContent: style.vAlign === 'top' ? 'flex-start' : style.vAlign === 'middle' ? 'center' : 'flex-end',
-    lineHeight: 1.2,
+    lineHeight: style.lineHeight ?? 1.2,
+    letterSpacing: style.letterSpacing ? `${style.letterSpacing}pt` : undefined,
     whiteSpace: 'pre-wrap',
     overflow: 'hidden',
     wordBreak: 'break-word',
@@ -112,7 +113,7 @@ function TextBox({ style, children }: { style: TextStyle; children: React.ReactN
     ...(dir === 'auto' ? {} : { direction: dir }),
   };
   return (
-    <div dir={dir} style={css}>
+    <div dir={dir} data-testid="doc-textbox" style={css}>
       {children}
     </div>
   );

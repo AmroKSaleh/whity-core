@@ -330,6 +330,21 @@ function TextStyleFields({ style, onChange }: { style: TextStyle; onChange: (pat
         <Color label="Color" value={style.color} onChange={(v) => onChange({ color: v })} />
       </div>
       <div className="grid grid-cols-2 gap-2">
+        <Num
+          label="Line height"
+          testId="doc-line-height"
+          value={style.lineHeight ?? 1.2}
+          step={0.1}
+          onChange={(v) => onChange({ lineHeight: Math.max(0.5, v) })}
+        />
+        <Num
+          label="Letter spacing (pt)"
+          value={style.letterSpacing ?? 0}
+          step={0.1}
+          onChange={(v) => onChange({ letterSpacing: v })}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
         <Field label="Weight">
           <select className={SELECT_CLASS} value={style.fontWeight} onChange={(e) => onChange({ fontWeight: e.target.value as 'normal' | 'bold' })}>
             <option value="normal">Normal</option>
