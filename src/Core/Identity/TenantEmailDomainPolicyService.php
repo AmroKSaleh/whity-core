@@ -89,8 +89,35 @@ final class TenantEmailDomainPolicyService
             // unverified claim silently does nothing here; the tenant must pass the
             // DNS TXT challenge (DomainOwnershipVerifier) first.
             if ($autoProvision && $isVerified) {
-                $this->memberships->insert($profileId, $tenantId, $defaultRoleId);
+                try {
+                    $this->memberships->insert($profileId, $tenantId, $defaultRoleId);
+                } catch (\PDOException $e) {
+                    // Check-then-insert race: two verifications of the same email
+                    // (or a verification concurrent with a JIT/federated provision)
+                    // can both pass the findByProfile() null-check above and both
+                    // INSERT. The second loses on UNIQUE(profile_id, tenant_id).
+                    // That collision is benign — the member row now exists, which
+                    // is exactly the desired end state — so swallow ONLY a unique
+                    // violation. Any other DB error (bad role FK, connection, etc.)
+                    // must surface, not be silently lost. Mirrors
+                    // FederatedIdentityLinker::addTenantMember (WC-628738f5).
+                    if (!self::isUniqueViolation($e)) {
+                        throw $e;
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * Whether a PDOException is a UNIQUE / integrity-constraint violation (a benign
+     * "row already exists"), as opposed to any other database failure. Portable
+     * across PostgreSQL (SQLSTATE 23505) and SQLite (23000).
+     */
+    private static function isUniqueViolation(\PDOException $e): bool
+    {
+        $sqlState = (string) $e->getCode();
+
+        return $sqlState === '23505' || $sqlState === '23000';
     }
 }
