@@ -248,6 +248,41 @@ test.describe('Roles CRUD (admin)', () => {
     createdRoleName = null;
   });
 
+  // The picker groups permissions by resource, filters on a live search, and
+  // offers a per-group select-all — the granular-RBAC ergonomics (WC-roles-ux).
+  test('permission picker groups by resource with search and per-group select-all', async ({
+    adminPage,
+    page,
+  }) => {
+    createdRoleName = `e2e-role-group-${uniqueSuffix()}`;
+
+    await adminPage.shell.clickNav('Roles');
+    await page.waitForURL('**/admin/roles');
+
+    await page.getByRole('button', { name: 'Create Role' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Role Name').fill(createdRoleName);
+    await dialog.getByLabel('Description').fill('Grouping probe');
+
+    const permsToggle = dialog.getByRole('button').filter({ hasText: /permission/i });
+    await permsToggle.click();
+
+    // Live search narrows the list to the users:* group.
+    await dialog.getByTestId('perm-search').fill('users:');
+    await expect(dialog.locator('label', { hasText: 'users:read' })).toBeVisible();
+    await expect(dialog.locator('label', { hasText: 'roles:read' })).toHaveCount(0);
+
+    // Per-group select-all checks the whole users group; the summary updates.
+    await expect(dialog.getByTestId('perm-summary')).toHaveText(/^0 of/);
+    await dialog.getByTestId('perm-group-toggle-users').check();
+    await expect(dialog.getByTestId('perm-summary')).not.toHaveText(/^0 of/);
+
+    // Cancel — nothing persisted.
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toBeHidden();
+    createdRoleName = null;
+  });
+
   // Validation: the Create Role form requires a name and description (zod). With
   // both blank, submitting keeps the dialog open and surfaces field errors; no
   // success toast appears.
