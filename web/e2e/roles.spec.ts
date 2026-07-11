@@ -36,6 +36,19 @@ test.describe('Roles CRUD (admin)', () => {
     await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
   });
 
+  test('the roles list filters by search', async ({ adminPage, page }) => {
+    await adminPage.shell.clickNav('Roles');
+    await page.waitForURL('**/admin/roles');
+    const table = page.getByRole('table');
+    await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
+    await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
+
+    // Filtering by "admin" keeps the admin role and hides the user role.
+    await page.getByTestId('roles-search').fill('admin');
+    await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
+    await expect(table.getByRole('cell', { name: 'user', exact: true })).toHaveCount(0);
+  });
+
   test('create a role, see it listed, then delete it', async ({ adminPage, page }) => {
     createdRoleName = `e2e-role-${uniqueSuffix()}`;
 

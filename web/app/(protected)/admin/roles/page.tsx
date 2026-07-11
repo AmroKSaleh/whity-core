@@ -9,13 +9,14 @@ import { ROLES_WRITE, ROLES_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@amroksaleh/ui/button';
+import { Input } from '@amroksaleh/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
-import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { IconMenu2, IconPlus, IconSearch } from '@tabler/icons-react';
 import { CreateRoleModal } from './create-modal';
 import { EditRoleModal } from './edit-modal';
 import { DeleteRoleModal } from './delete-modal';
@@ -35,6 +36,7 @@ export default function RolesPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isPermissionsPanelOpen, setIsPermissionsPanelOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [query, setQuery] = useState('');
 
   const { data, loading: isLoading, error, refetch: fetchRoles } = useFetch(async () => {
     const response = await apiClient('/api/v1/roles');
@@ -45,7 +47,13 @@ export default function RolesPage() {
     return (data.data ?? []) as Role[];
   }, [apiClient]);
 
-  const roles = data ?? [];
+  const allRoles = data ?? [];
+  const q = query.trim().toLowerCase();
+  const roles = q
+    ? allRoles.filter(
+        (r) => r.name.toLowerCase().includes(q) || (r.description ?? '').toLowerCase().includes(q)
+      )
+    : allRoles;
 
   useEffect(() => {
     if (error) {
@@ -148,6 +156,20 @@ export default function RolesPage() {
           ) : undefined
         }
       />
+
+      <div className="relative max-w-sm">
+        <IconSearch
+          size={16}
+          className="pointer-events-none absolute inset-s-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
+          data-testid="roles-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter roles…"
+          className="ps-8"
+        />
+      </div>
 
       <DataTable
         columns={columns}

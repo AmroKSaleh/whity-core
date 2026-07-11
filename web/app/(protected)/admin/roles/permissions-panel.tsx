@@ -13,6 +13,19 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import type { Permission, Role } from './types';
 
+/** Group permissions by resource (segment before ':'), sorted, stable within. */
+function groupPermissions(permissions: Permission[]): [string, Permission[]][] {
+  const map = new Map<string, Permission[]>();
+  for (const p of permissions) {
+    const i = (p.name ?? '').indexOf(':');
+    const g = i > 0 ? p.name.slice(0, i) : 'general';
+    const list = map.get(g);
+    if (list) list.push(p);
+    else map.set(g, [p]);
+  }
+  return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
 interface PermissionsPanelProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -77,17 +90,24 @@ export function PermissionsPanel({
               No permissions assigned to this role.
             </div>
           ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {permissions.map(permission => (
-                <div
-                  key={permission.id}
-                  className="rounded-lg border border-border p-3"
-                >
-                  <div className="text-sm font-medium text-foreground">
-                    {permission.name}
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {groupPermissions(permissions).map(([group, perms]) => (
+                <div key={group}>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {group.charAt(0).toUpperCase() + group.slice(1)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{perms.length}</span>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {permission.description}
+                  <div className="space-y-1">
+                    {perms.map(permission => (
+                      <div key={permission.id} className="rounded-md border border-border p-2">
+                        <div className="font-mono text-sm text-foreground">{permission.name}</div>
+                        {permission.description && (
+                          <div className="mt-0.5 text-xs text-muted-foreground">{permission.description}</div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
