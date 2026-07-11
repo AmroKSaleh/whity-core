@@ -92,6 +92,12 @@ final class TenantOwnedTables
         // (migration 048). Each tenant configures its own providers; every query
         // binds tenant_id so a tenant can only see/manage its own configs.
         'identity_providers' => '048_create_identity_providers.php',
+
+        // WC-ent — operator-granted per-tenant entitlements (migration 051):
+        // capabilities/limits the platform owner sets per tenant to sell tiers.
+        // The operator API writes cross-tenant (system gated) but still binds the
+        // target tenant_id on every statement, so the predicate guard polices it.
+        'tenant_entitlements' => '051_create_tenant_entitlements.php',
     ];
 
     /**
