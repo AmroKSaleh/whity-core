@@ -1,4 +1,5 @@
 import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from './types';
+import type { DocBlock } from './blocks';
 import { DEFAULT_TEXT_STYLE, blankTemplate, newPageId } from './presets';
 
 /**
@@ -161,6 +162,33 @@ export interface StarterTemplate {
   label: string;
   make: () => DocTemplate;
 }
+
+/**
+ * Built-in starter blocks — so the Blocks panel is never empty. A company
+ * header + footer (with the company name) are the must-haves; users insert and
+ * customise them like any block. Stable ids so a user's edit (saved under the
+ * same id) overrides the built-in. Scope 'system'. When the backend lands,
+ * these get seeded per-tenant pre-filled with real company info.
+ */
+function block(id: string, name: string, w: number, h: number, els: DocElement[]): DocBlock {
+  return { id, name, scope: 'system', w, h, elements: els.map((e, i) => ({ ...e, z: i + 1 })) };
+}
+
+export const STARTER_BLOCKS: ReadonlyArray<DocBlock> = [
+  block('sys-header', 'Company header', 180, 21, [
+    D(0, 0, 120, 10, '{{company_name}}', { fontSize: 18, fontWeight: 'bold' }),
+    T(0, 11, 180, 5, 'Address line · City · Country', { fontSize: 8, color: '#666666' }),
+    L(0, 20, 180),
+  ]),
+  block('sys-footer', 'Company footer', 180, 8, [
+    L(0, 0, 180),
+    D(0, 2, 180, 6, '{{company_name}} · contact@example.com · +1 555 0100', {
+      fontSize: 8,
+      align: 'center',
+      color: '#666666',
+    }),
+  ]),
+];
 
 /** Ordered starter set shown in the "Start from…" picker (Blank first). */
 export const STARTER_TEMPLATES: ReadonlyArray<StarterTemplate> = [
