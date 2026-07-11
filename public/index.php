@@ -915,6 +915,20 @@ $tenantEntitlementsHandler = new \Whity\Api\TenantEntitlementsApiHandler(
 $router->register('GET',   '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'get'],   null, null, CorePermissions::ENTITLEMENTS_MANAGE);
 $router->register('PATCH', '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'patch'], null, null, CorePermissions::ENTITLEMENTS_MANAGE);
 
+// 13a-ter. Per-tenant storage backend self-service (WC-storage): a tenant admin
+// configures its OWN object-storage backend. Tenant-scoped via TenantContext and
+// gated on storage:manage (RbacMiddleware); a WRITE additionally requires the
+// storage.custom_backend entitlement (enforced in the handler), so the plan gate
+// applies. The secret is encrypted at rest and never returned.
+$tenantStorageConfigHandler = new \Whity\Api\TenantStorageConfigApiHandler(
+    $db->getPdo(),
+    $secretStore,
+    $entitlementService
+);
+$router->register('GET',    '/api/storage-config', [$tenantStorageConfigHandler, 'get'],    null, null, CorePermissions::STORAGE_MANAGE);
+$router->register('PUT',    '/api/storage-config', [$tenantStorageConfigHandler, 'put'],    null, null, CorePermissions::STORAGE_MANAGE);
+$router->register('DELETE', '/api/storage-config', [$tenantStorageConfigHandler, 'delete'], null, null, CorePermissions::STORAGE_MANAGE);
+
 // 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
 // plaintext mail.* config is edited via /api/settings/global above; these add the
 // write-only SMTP password (encrypted at rest, never returned) and a live "send

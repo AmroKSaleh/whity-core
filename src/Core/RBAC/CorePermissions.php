@@ -116,6 +116,13 @@ final class CorePermissions
     // entitlements. Mirrors REGISTRATIONS_APPROVE.
     public const ENTITLEMENTS_MANAGE = 'entitlements:manage';
 
+    // Per-tenant storage backend management (WC-storage). Gates a tenant's
+    // self-service CRUD of its own object-storage backend config. Tenant-scoped
+    // (a tenant manages only its own). Necessary but not sufficient — the handler
+    // additionally requires the storage.custom_backend ENTITLEMENT, so a tenant
+    // may only configure a custom backend when its plan includes it.
+    public const STORAGE_MANAGE = 'storage:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -156,6 +163,7 @@ final class CorePermissions
             self::REGISTRATIONS_APPROVE,
             self::AUTH_PROVIDERS_MANAGE,
             self::ENTITLEMENTS_MANAGE,
+            self::STORAGE_MANAGE,
         ];
     }
 }
