@@ -18,6 +18,7 @@ import {
   type SavedTemplate,
 } from '@/lib/documents/storage';
 import { generateSequence, rowsFromRecords, rowsFromValues, type SequenceConfig } from '@/lib/documents/batch';
+import type { SheetSpec } from '@/lib/documents/sheet';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
@@ -98,6 +99,20 @@ export function DocumentDesigner() {
   // is runtime-only — it is NOT part of the template and NOT on the undo stack.
   const [batchRows, setBatchRows] = useState<Record<string, string>[] | null>(null);
   const [batchIndex, setBatchIndex] = useState(0);
+
+  // N-up label-sheet layout (print-time). Disabled by default = one label per
+  // physical page. Runtime-only, like the batch.
+  const [sheet, setSheet] = useState<SheetSpec>({
+    enabled: false,
+    cols: 3,
+    rows: 8,
+    sheetWidthMm: 210,
+    sheetHeightMm: 297,
+    marginXMm: 7,
+    marginYMm: 13,
+    gutterXMm: 2.5,
+    gutterYMm: 0,
+  });
 
   // Current page + its elements. `currentPage` may briefly exceed the page count
   // after an undo/delete, so read through a clamped `pageIndex`. ALL element
@@ -788,16 +803,18 @@ export function DocumentDesigner() {
               commit('data');
               setTemplate((t) => ({ ...t, placeholders: list }));
             }}
+            sheet={sheet}
             onGenerateBatch={generateBatch}
             onLoadBatchRecords={loadBatchRecords}
             onClearBatch={clearBatch}
             onBatchIndex={setBatchIndex}
+            onChangeSheet={(patch) => setSheet((s) => ({ ...s, ...patch }))}
           />
         </aside>
       </div>
 
       {/* Off-screen, all-pages render used only for printing (per data row). */}
-      <PrintDocument template={template} datasets={printDatasets} />
+      <PrintDocument template={template} datasets={printDatasets} sheet={sheet} />
 
       {/* Print stylesheet: hide the app chrome and emit each page at the physical
           @page size with a break between pages. Rendered as a text child (not
@@ -809,7 +826,7 @@ export function DocumentDesigner() {
         .doc-print-doc { display: block !important; position: absolute; left: 0; top: 0; }
         .doc-print-page { break-after: page; box-shadow: none !important; }
         .doc-print-page:last-child { break-after: auto; }
-        @page { size: ${template.page.widthMm}mm ${template.page.heightMm}mm; margin: 0; }
+        @page { size: ${sheet.enabled ? sheet.sheetWidthMm : template.page.widthMm}mm ${sheet.enabled ? sheet.sheetHeightMm : template.page.heightMm}mm; margin: 0; }
       }`}</style>
     </div>
   );

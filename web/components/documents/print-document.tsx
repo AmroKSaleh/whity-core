@@ -1,33 +1,81 @@
 'use client';
 
-import type { DocTemplate } from '@/lib/documents/types';
+import type { DocElement, DocTemplate } from '@/lib/documents/types';
+import { chunkIntoSheets, cellPositions, type SheetSpec } from '@/lib/documents/sheet';
 import { ElementContent } from './element-content';
 
+/** One render unit: a single template page paired with one data row. */
+interface Unit {
+  key: string;
+  elements: DocElement[];
+  data: Record<string, string>;
+}
+
+/** The visible content of one label/page: its resolved, non-hidden elements. */
+function LabelBody({ elements, data }: { elements: DocElement[]; data: Record<string, string> }) {
+  return (
+    <>
+      {[...elements]
+        .sort((a, b) => a.z - b.z)
+        .filter((el) => !el.hidden)
+        .map((el) => (
+          <div
+            key={el.id}
+            style={{
+              position: 'absolute',
+              left: `${el.x}mm`,
+              top: `${el.y}mm`,
+              width: `${el.w}mm`,
+              height: `${el.h}mm`,
+              transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+              opacity: el.opacity ?? undefined,
+              zIndex: el.z,
+            }}
+          >
+            <ElementContent el={el} data={data} preview />
+          </div>
+        ))}
+    </>
+  );
+}
+
 /**
- * Off-screen render of EVERY page of the template, for each data row, used only
- * for printing. Hidden on screen (`.doc-print-doc { display: none }` in the
- * designer's print stylesheet) and revealed in print, one physical page per
- * `.doc-print-page` with a page break between them. Elements are rendered
- * resolved (preview), hidden elements omitted — matching the on-canvas Preview.
+ * Off-screen render used only for printing. Hidden on screen and revealed in
+ * print (see the designer's print stylesheet), one physical page per
+ * `.doc-print-page` with a page break between them.
  *
- * `datasets` is the list of data rows: a single-element list for a normal print,
- * or one entry per row for a variable-data / serial batch run (template pages ×
- * rows physical pages).
+ * `datasets` is the list of data rows (one entry for a normal print, one per row
+ * for a variable-data batch). Physical output is `datasets × template.pages`
+ * render units. When `sheet` is enabled those units are tiled N-up onto
+ * sheet-sized pages; otherwise each unit is its own physical page.
  */
 export function PrintDocument({
   template,
   datasets,
+  sheet,
 }: {
   template: DocTemplate;
   datasets: Record<string, string>[];
+  sheet?: SheetSpec;
 }) {
   const { page } = template;
+
+  // Flatten to render units in print order (row-major: row 0 all pages, …).
+  const units: Unit[] = [];
+  datasets.forEach((data, ri) => {
+    template.pages.forEach((pg) => {
+      units.push({ key: `${ri}-${pg.id}`, elements: pg.elements, data });
+    });
+  });
+
+  const tiled = sheet?.enabled ?? false;
+
   return (
     <div id="doc-print-root" className="doc-print-doc" aria-hidden data-testid="doc-print-doc">
-      {datasets.map((data, rowIdx) =>
-        template.pages.map((pg) => (
+      {!tiled &&
+        units.map((u) => (
           <div
-            key={`${rowIdx}-${pg.id}`}
+            key={u.key}
             className="doc-print-page"
             data-testid="doc-print-page"
             style={{
@@ -38,29 +86,51 @@ export function PrintDocument({
               overflow: 'hidden',
             }}
           >
-            {[...pg.elements]
-              .sort((a, b) => a.z - b.z)
-              .filter((el) => !el.hidden)
-              .map((el) => (
-                <div
-                  key={el.id}
-                  style={{
-                    position: 'absolute',
-                    left: `${el.x}mm`,
-                    top: `${el.y}mm`,
-                    width: `${el.w}mm`,
-                    height: `${el.h}mm`,
-                    transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
-                    opacity: el.opacity ?? undefined,
-                    zIndex: el.z,
-                  }}
-                >
-                  <ElementContent el={el} data={data} preview />
-                </div>
-              ))}
+            <LabelBody elements={u.elements} data={u.data} />
           </div>
-        ))
-      )}
+        ))}
+
+      {tiled &&
+        sheet &&
+        chunkIntoSheets(units, sheet).map((cellUnits, si) => {
+          const positions = cellPositions(sheet, page.widthMm, page.heightMm);
+          return (
+            <div
+              key={`sheet-${si}`}
+              className="doc-print-page"
+              data-testid="doc-print-page"
+              style={{
+                position: 'relative',
+                width: `${sheet.sheetWidthMm}mm`,
+                height: `${sheet.sheetHeightMm}mm`,
+                background: '#ffffff',
+                overflow: 'hidden',
+              }}
+            >
+              {cellUnits.map((u, ci) => {
+                const pos = positions[ci];
+                if (!pos) return null;
+                return (
+                  <div
+                    key={u.key}
+                    data-testid="doc-sheet-cell"
+                    style={{
+                      position: 'absolute',
+                      left: `${pos.x}mm`,
+                      top: `${pos.y}mm`,
+                      width: `${page.widthMm}mm`,
+                      height: `${page.heightMm}mm`,
+                      background: page.background,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <LabelBody elements={u.elements} data={u.data} />
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
     </div>
   );
 }
