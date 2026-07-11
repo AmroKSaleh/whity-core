@@ -445,11 +445,23 @@ export function DocumentDesigner() {
     );
   };
 
-  // Align every selected element (skipping locked) to a page edge/centre.
+  // Align selected elements (skipping locked) to an edge/centre of a reference
+  // frame: the page for a single element, else the selection's bounding box —
+  // the standard design-tool behaviour.
   const alignSelected = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vmiddle' | 'bottom') => {
     const ids = new Set(selectedIds);
-    if (!elements.some((e) => ids.has(e.id) && !e.locked)) return;
+    const sel = elements.filter((e) => ids.has(e.id) && !e.locked);
+    if (sel.length === 0) return;
     const { widthMm: W, heightMm: H } = template.page;
+    const frame =
+      sel.length <= 1
+        ? { left: 0, top: 0, right: W, bottom: H }
+        : {
+            left: Math.min(...sel.map((e) => e.x)),
+            top: Math.min(...sel.map((e) => e.y)),
+            right: Math.max(...sel.map((e) => e.x + e.w)),
+            bottom: Math.max(...sel.map((e) => e.y + e.h)),
+          };
     commit('align');
     setTemplate((t) =>
       withPageElements(t, pageIndex, (els) =>
@@ -457,16 +469,16 @@ export function DocumentDesigner() {
           if (!ids.has(e.id) || e.locked) return e;
           const patch: Partial<DocElement> =
             kind === 'left'
-              ? { x: 0 }
+              ? { x: Math.max(0, frame.left) }
               : kind === 'hcenter'
-                ? { x: Math.max(0, (W - e.w) / 2) }
+                ? { x: Math.max(0, frame.left + (frame.right - frame.left - e.w) / 2) }
                 : kind === 'right'
-                  ? { x: Math.max(0, W - e.w) }
+                  ? { x: Math.max(0, frame.right - e.w) }
                   : kind === 'top'
-                    ? { y: 0 }
+                    ? { y: Math.max(0, frame.top) }
                     : kind === 'vmiddle'
-                      ? { y: Math.max(0, (H - e.h) / 2) }
-                      : { y: Math.max(0, H - e.h) };
+                      ? { y: Math.max(0, frame.top + (frame.bottom - frame.top - e.h) / 2) }
+                      : { y: Math.max(0, frame.bottom - e.h) };
           return { ...e, ...patch } as DocElement;
         })
       )

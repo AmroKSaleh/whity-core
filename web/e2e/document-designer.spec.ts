@@ -470,6 +470,24 @@ test.describe('Document & Label Designer', () => {
     await expect(canvas.locator('[data-testid^="doc-el-"][style*="left: 100mm"]')).toHaveCount(1);
   });
 
+  test('align uses the selection bounding box when multiple are selected', async ({ page }) => {
+    await page.goto('/admin/documents');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-field-x').fill('10');
+    await page.getByTestId('doc-add-text').click();
+    await page.getByTestId('doc-field-x').fill('60');
+
+    // Select both and align left → both go to the selection's left edge (10mm),
+    // NOT the page edge (0mm).
+    const layers = page.locator('[data-testid^="doc-layer-select-"]');
+    await layers.nth(0).click();
+    await layers.nth(1).click({ modifiers: ['Shift'] });
+    await page.getByRole('button', { name: 'Align left' }).click();
+
+    const canvas = page.getByTestId('doc-page');
+    await expect(canvas.locator('[data-testid^="doc-el-"][style*="left: 10mm"]')).toHaveCount(2);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
