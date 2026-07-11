@@ -16,9 +16,10 @@ import type { BlockInstanceElement, DocElement } from './types';
  * is meaningful in the localStorage MVP; tenant/global become real once the
  * tenant-scoped backend store + RBAC (who may publish) land (Tasker ca1d8c03).
  */
-export type BlockScope = 'personal' | 'tenant' | 'global';
+export type BlockScope = 'system' | 'personal' | 'tenant' | 'global';
 
 export const BLOCK_SCOPES: ReadonlyArray<{ id: BlockScope; label: string }> = [
+  { id: 'system', label: 'System' },
   { id: 'personal', label: 'Personal' },
   { id: 'tenant', label: 'Tenant-wide' },
   { id: 'global', label: 'Global' },

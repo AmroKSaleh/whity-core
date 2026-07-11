@@ -512,6 +512,19 @@ test.describe('Document & Label Designer', () => {
     await expect(page.getByTestId('doc-page').getByText('INVOICE').first()).toBeVisible();
   });
 
+  test('starter blocks: company header/footer are available out of the box', async ({ page }) => {
+    await page.goto('/admin/documents');
+
+    // The Blocks panel is populated on a fresh document (System starters).
+    await expect(page.getByTestId('doc-block-insert-sys-header')).toBeVisible();
+    await expect(page.getByTestId('doc-block-insert-sys-footer')).toBeVisible();
+
+    // Insert the header → an instance carrying the company name renders.
+    await page.getByTestId('doc-block-insert-sys-header').click();
+    await expect(page.locator('[data-testid^="doc-el-"]')).toHaveCount(1);
+    await expect(page.getByTestId('doc-page').getByText('Acme Corp').first()).toBeVisible();
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

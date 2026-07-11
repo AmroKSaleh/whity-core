@@ -25,7 +25,7 @@ import {
   type SequenceConfig,
 } from '@/lib/documents/batch';
 import { DEFAULT_SHEET, type SheetSpec } from '@/lib/documents/sheet';
-import { STARTER_TEMPLATES } from '@/lib/documents/starters';
+import { STARTER_BLOCKS, STARTER_TEMPLATES } from '@/lib/documents/starters';
 import {
   blocksById,
   deleteBlock,
@@ -132,10 +132,17 @@ export function DocumentDesigner() {
   // block by id via a `blockInstance` element; the block store holds the shared
   // definition, so editing a block updates every instance.
   const [blocks, setBlocks] = useState<DocBlock[]>([]);
-  useEffect(() => {
-    const p = Promise.resolve().then(() => setBlocks(listBlocks()));
-    void p;
+  // Effective library = the user's saved blocks + any built-in starter blocks
+  // not already overridden (by id) — so the Blocks panel is never empty.
+  const refreshBlocks = useCallback(() => {
+    const saved = listBlocks();
+    const extras = STARTER_BLOCKS.filter((b) => !saved.some((s) => s.id === b.id));
+    setBlocks([...saved, ...extras]);
   }, []);
+  useEffect(() => {
+    const p = Promise.resolve().then(refreshBlocks);
+    void p;
+  }, [refreshBlocks]);
   const blocksMap = useMemo(() => blocksById(blocks), [blocks]);
 
   // Block edit mode: the whole designer is temporarily repurposed to edit ONE
@@ -552,7 +559,7 @@ export function DocumentDesigner() {
       return;
     }
     saveBlock(block);
-    setBlocks(listBlocks());
+    refreshBlocks();
     addToast(`Saved block “${block.name}”.`, 'success');
   };
 
@@ -580,7 +587,7 @@ export function DocumentDesigner() {
 
   const deleteBlockDef = (id: string) => {
     deleteBlock(id);
-    setBlocks(listBlocks());
+    refreshBlocks();
     addToast('Block deleted from your library.', 'info');
   };
 
@@ -590,7 +597,7 @@ export function DocumentDesigner() {
     const b = blocksMap[id];
     if (!b) return;
     saveBlock({ ...b, scope });
-    setBlocks(listBlocks());
+    refreshBlocks();
   };
 
   // Enter block edit mode: stash the current editor state and load the block's
@@ -634,7 +641,7 @@ export function DocumentDesigner() {
       const rebuilt = makeBlockFromElements(editing.name, els);
       if (rebuilt) {
         saveBlock({ ...rebuilt, id: editing.id });
-        setBlocks(listBlocks());
+        refreshBlocks();
         addToast(`Block “${editing.name}” updated.`, 'success');
       } else {
         addToast('A block needs at least one element; discarded.', 'info');
