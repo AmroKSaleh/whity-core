@@ -93,7 +93,8 @@ final class CoreApiSchemas
             self::settingsRoutes(),
             self::brandingRoutes(),
             self::identityRoutes(),
-            self::tenantEntitlementRoutes()
+            self::tenantEntitlementRoutes(),
+            self::tenantStorageRoutes()
         );
     }
 
@@ -1578,6 +1579,47 @@ final class CoreApiSchemas
                 'entitlements' => ['type' => 'object', 'additionalProperties' => true],
             ], ['entitlements']),
 
+            // ── Per-tenant storage backend (WC-storage) ───────────────────────
+            // The tenant's object-storage config. The secret is WRITE-ONLY — never
+            // returned; `has_secret` reflects whether one is stored.
+            'StorageConfig' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'driver' => self::str(),
+                'endpoint' => self::str(),
+                'region' => self::str(),
+                'bucket' => self::str(),
+                'access_key' => self::str(),
+                'has_secret' => self::bool(),
+                'path_style' => self::bool(),
+                'public_base_url' => self::str(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'driver', 'endpoint', 'region', 'bucket',
+                'access_key', 'has_secret', 'path_style', 'created_at', 'updated_at',
+            ]),
+            // GET response: config is null when the tenant uses the platform
+            // default; `entitled` is whether the plan includes a custom backend.
+            'StorageConfigResponse' => self::dataEnvelope(self::object([
+                'config' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('StorageConfig')]],
+                'entitled' => self::bool(),
+                'drivers' => ['type' => 'array', 'items' => self::str()],
+            ], ['config', 'entitled', 'drivers'])),
+            'StorageConfigDataResponse' => self::dataEnvelope(SchemaBuilder::ref('StorageConfig')),
+            // endpoint/public_base_url must be https; secret is write-only and may
+            // be omitted on update to keep the stored one.
+            'StorageConfigPutRequest' => self::object([
+                'driver' => ['type' => 'string', 'enum' => ['s3']],
+                'endpoint' => ['type' => 'string', 'format' => 'uri'],
+                'region' => self::str(),
+                'bucket' => self::str(),
+                'access_key' => self::str(),
+                'secret' => self::str(),
+                'path_style' => self::bool(),
+                'public_base_url' => ['type' => 'string', 'format' => 'uri', 'nullable' => true],
+            ], ['endpoint', 'region', 'bucket', 'access_key']),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -2183,6 +2225,48 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Tenant not found'),
                     409 => self::errorResponse('The system tenant is implicitly unlimited and has no overrides'),
                     422 => self::errorResponse('Validation failed (unknown key or invalid value)'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Per-tenant storage backend self-service routes (WC-storage). A tenant admin
+     * configures its OWN object-storage backend; tenant-scoped, gated on
+     * `storage:manage`, and a write additionally requires the
+     * storage.custom_backend entitlement (403 otherwise). The secret is write-only.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tenantStorageRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/storage-config', 'storage:manage', [
+                'summary' => 'Get this tenant\'s storage backend configuration',
+                'tags' => ['storage'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s storage config (secret never returned) + entitlement', 'StorageConfigResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/storage-config', 'storage:manage', [
+                'summary' => 'Set or replace this tenant\'s storage backend',
+                'tags' => ['storage'],
+                'request' => 'StorageConfigPutRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The saved storage config (secret never returned)', 'StorageConfigDataResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    403 => self::errorResponse('A custom storage backend is not included in your plan'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/storage-config', 'storage:manage', [
+                'summary' => 'Remove this tenant\'s storage backend (revert to platform default)',
+                'tags' => ['storage'],
+                'responses' => [
+                    204 => ['description' => 'Storage configuration removed'],
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('No storage configuration to remove'),
                 ] + self::authErrors(),
             ]),
         ];
