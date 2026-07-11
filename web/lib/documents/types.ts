@@ -91,6 +91,8 @@ export interface QrElement extends ElementCommon {
   type: 'qr';
   value: string;
   binding?: string;
+  /** QR error-correction level (undefined = 'M'). Higher = more damage-tolerant, denser. */
+  eclevel?: 'L' | 'M' | 'Q' | 'H';
 }
 
 export interface RectElement extends ElementCommon {
@@ -163,11 +165,18 @@ export interface DocTemplate {
 /** The barcode symbologies offered in the properties panel (bwip-js ids). */
 export const BARCODE_SYMBOLOGIES: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'code128', label: 'Code 128' },
+  { id: 'gs1-128', label: 'GS1-128' },
   { id: 'code39', label: 'Code 39' },
+  { id: 'code93', label: 'Code 93' },
   { id: 'ean13', label: 'EAN-13' },
   { id: 'ean8', label: 'EAN-8' },
   { id: 'upca', label: 'UPC-A' },
+  { id: 'upce', label: 'UPC-E' },
+  { id: 'interleaved2of5', label: 'Interleaved 2 of 5' },
+  { id: 'itf14', label: 'ITF-14' },
+  { id: 'msi', label: 'MSI Plessey' },
+  { id: 'rationalizedCodabar', label: 'Codabar' },
   { id: 'datamatrix', label: 'Data Matrix' },
   { id: 'pdf417', label: 'PDF417' },
-  { id: 'itf14', label: 'ITF-14' },
+  { id: 'azteccode', label: 'Aztec' },
 ];

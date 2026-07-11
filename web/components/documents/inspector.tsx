@@ -300,6 +300,19 @@ function ElementTab({
               {bindingOptions}
             </select>
           </Field>
+          <Field label="Error correction">
+            <select
+              className={SELECT_CLASS}
+              data-testid="doc-qr-eclevel"
+              value={el.eclevel ?? 'M'}
+              onChange={(e) => onChange({ eclevel: e.target.value as 'L' | 'M' | 'Q' | 'H' })}
+            >
+              <option value="L">L — Low (7%)</option>
+              <option value="M">M — Medium (15%)</option>
+              <option value="Q">Q — Quartile (25%)</option>
+              <option value="H">H — High (30%)</option>
+            </select>
+          </Field>
         </>
       )}
 

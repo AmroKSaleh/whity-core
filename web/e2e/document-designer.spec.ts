@@ -426,6 +426,24 @@ test.describe('Document & Label Designer', () => {
     await expect(textbox).toHaveAttribute('style', /line-height:\s*2\b/);
   });
 
+  test('barcodes: an extended symbology and a QR error-correction level render', async ({ page }) => {
+    await page.goto('/admin/documents');
+    const codes = page.getByTestId('doc-page').locator('img[src^="data:image/svg+xml"]');
+
+    // Barcode → switch to an extended symbology (Code 93) — still renders.
+    await page.getByTestId('doc-add-barcode').click();
+    await expect(codes).toHaveCount(1);
+    await page.getByTestId('doc-tab-element').click();
+    await page.getByLabel('Symbology').selectOption('code93');
+    await expect(codes).toHaveCount(1);
+
+    // QR → set error-correction to High — still renders.
+    await page.getByTestId('doc-add-qr').click();
+    await expect(codes).toHaveCount(2);
+    await page.getByTestId('doc-qr-eclevel').selectOption('H');
+    await expect(codes).toHaveCount(2);
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();

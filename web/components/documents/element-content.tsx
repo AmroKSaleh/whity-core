@@ -54,6 +54,7 @@ export function ElementContent({
         <BarcodeSvg
           symbology="qrcode"
           value={el.binding ? resolveBound(el.binding, el.value, data) : interpolate(el.value, data)}
+          eclevel={el.eclevel}
         />
       );
     case 'rect':
