@@ -488,6 +488,18 @@ test.describe('Document & Label Designer', () => {
     await expect(canvas.locator('[data-testid^="doc-el-"][style*="left: 10mm"]')).toHaveCount(2);
   });
 
+  test('rulers toggle on and show mm ticks around the page', async ({ page }) => {
+    await page.goto('/admin/documents');
+
+    // Off by default; the toggle reveals the top + left rulers.
+    await expect(page.getByTestId('doc-ruler-x')).toHaveCount(0);
+    await page.getByTestId('doc-rulers-toggle').click();
+    await expect(page.getByTestId('doc-ruler-x')).toBeVisible();
+    await expect(page.getByTestId('doc-ruler-y')).toBeVisible();
+    // Ticks are labelled in millimetres (0 and a 10mm mark present).
+    await expect(page.getByTestId('doc-ruler-x').getByText('10', { exact: true })).toBeVisible();
+  });
+
   test('setting element opacity applies it on the canvas', async ({ page }) => {
     await page.goto('/admin/documents');
     await page.getByTestId('doc-add-rect').click();
