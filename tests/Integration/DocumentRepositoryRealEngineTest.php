@@ -71,7 +71,11 @@ final class DocumentRepositoryRealEngineTest extends TestCase
 
         $row = $this->templates->findById($id, self::TENANT_A);
         self::assertNotNull($row);
-        self::assertSame($this->sampleTemplate(), $row['data'], 'the DocTemplate JSON must round-trip faithfully');
+        // assertEquals, not assertSame: Postgres jsonb round-trips by VALUE but
+        // reorders object keys (SQLite preserves order — the classic mask). The
+        // client re-parses JSON, so value-equality is the contract; jsonb is kept
+        // for its containment queries (future block reference-integrity guard).
+        self::assertEquals($this->sampleTemplate(), $row['data'], 'the DocTemplate JSON must round-trip by value');
         self::assertSame('tenant', $row['scope']);
         self::assertSame('documents:use:finance', $row['required_permission']);
         self::assertTrue($row['is_system']);
@@ -133,7 +137,7 @@ final class DocumentRepositoryRealEngineTest extends TestCase
 
         $row = $this->blocks->findById($id, self::TENANT_A);
         self::assertNotNull($row);
-        self::assertSame($elements, $row['data']);
+        self::assertEquals($elements, $row['data']); // value equality — jsonb reorders keys on PG
         self::assertSame('tenant', $row['scope']);
 
         // Isolation.
