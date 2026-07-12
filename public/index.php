@@ -1008,6 +1008,22 @@ $router->register('GET', '/api/tenants/{id:\d+}/subscription', [$subscriptionHan
 $router->register('PUT', '/api/tenants/{id:\d+}/subscription', [$subscriptionHandler, 'setForTenant'], null, null, CorePermissions::SUBSCRIPTIONS_MANAGE);
 $router->register('GET', '/api/subscription',                  [$subscriptionHandler, 'getSelf'],      null, null, CorePermissions::SETTINGS_READ);
 
+// 13a-sexies. Document/label designer templates API (WC-docdesigner). Tenant-
+// scoped, RBAC-gated CRUD. The route permission (documents:read on GET,
+// documents:write on writes) is the baseline; the handler ADDITIONALLY row-
+// filters list/get by scope + required_permission (server-side, so a caller only
+// receives templates it may see) and gates publishing on documents:publish.
+$documentTemplatesHandler = new \Whity\Api\DocumentTemplatesApiHandler(
+    new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo()),
+    new \Whity\Core\Document\DocumentAccessPolicy(),
+    $roleChecker
+);
+$router->register('GET',    '/api/document-templates',          [$documentTemplatesHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-templates',          [$documentTemplatesHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('GET',    '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PATCH',  '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('DELETE', '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
+
 // 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
 // plaintext mail.* config is edited via /api/settings/global above; these add the
 // write-only SMTP password (encrypted at rest, never returned) and a live "send

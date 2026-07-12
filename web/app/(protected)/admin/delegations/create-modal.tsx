@@ -72,7 +72,11 @@ export function CreateDelegationModal({
   const loadOptions = useCallback(async () => {
     try {
       const [permsRes, rolesRes, usersRes, ousRes] = await Promise.all([
-        api.GET('/api/v1/permissions'),
+        // per_page=100 (the max) fetches the WHOLE permission catalogue in one
+        // page — the picker must show every delegatable permission. Without it the
+        // default page size (25) silently drops permissions past the first page as
+        // the catalogue grows (mirrors the roles editor's per_page=100).
+        api.GET('/api/v1/permissions', { params: { query: { per_page: 100 } } }),
         api.GET('/api/v1/roles'),
         api.GET('/api/v1/users'),
         api.GET('/api/v1/ous'),

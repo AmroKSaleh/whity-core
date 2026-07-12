@@ -139,6 +139,17 @@ final class CorePermissions
     // settings:read (and is exempt from the payment wall so it stays reachable).
     public const SUBSCRIPTIONS_MANAGE = 'subscriptions:manage';
 
+    // Document/label designer (WC-docdesigner). Tenant-scoped. read = view/list
+    // templates & blocks (list/get are ADDITIONALLY row-filtered server-side by
+    // scope + a row's required_permission, so a technician never receives a gated
+    // contracts template); write = create/update/delete own; publish = set a
+    // template/block tenant-wide/global or attach a required_permission tag;
+    // render = produce server-side PDF/PNG (Track 2).
+    public const DOCUMENTS_READ = 'documents:read';
+    public const DOCUMENTS_WRITE = 'documents:write';
+    public const DOCUMENTS_PUBLISH = 'documents:publish';
+    public const DOCUMENTS_RENDER = 'documents:render';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -182,6 +193,10 @@ final class CorePermissions
             self::STORAGE_MANAGE,
             self::PLANS_MANAGE,
             self::SUBSCRIPTIONS_MANAGE,
+            self::DOCUMENTS_READ,
+            self::DOCUMENTS_WRITE,
+            self::DOCUMENTS_PUBLISH,
+            self::DOCUMENTS_RENDER,
         ];
     }
 }
