@@ -38,10 +38,10 @@ class CreateDocumentDesignerTables
 {
     public static function up(Database $db): void
     {
-        // NOTE: literal CREATE TABLE per table (not a loop over interpolated
-        // names) — TenantOwnedTablesTest derives the tenant-owned set by scanning
-        // this source for `CREATE TABLE <name> (... tenant_id ...)`, so the names
-        // must appear literally.
+        // NOTE: one literal create-table statement for each table (not a loop over
+        // an interpolated name) — TenantOwnedTablesTest derives the tenant-owned
+        // set by scanning this source for the table DDL, and the idempotency test
+        // scans for the create keyword, so the names must appear literally.
         $db->exec("
             CREATE TABLE IF NOT EXISTS document_templates (
                 id                  BIGSERIAL     NOT NULL PRIMARY KEY,
