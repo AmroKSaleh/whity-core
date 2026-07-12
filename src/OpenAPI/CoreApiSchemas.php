@@ -96,7 +96,8 @@ final class CoreApiSchemas
             self::tenantEntitlementRoutes(),
             self::tenantStorageRoutes(),
             self::planRoutes(),
-            self::subscriptionRoutes()
+            self::subscriptionRoutes(),
+            self::documentTemplateRoutes()
         );
     }
 
@@ -1722,6 +1723,37 @@ final class CoreApiSchemas
                 'external_ref' => self::str(true),
             ], []),
 
+            // ── Document/label designer templates (WC-docdesigner) ────────────
+            // `data` is the verbatim client DocTemplate JSON (freeform object).
+            'DocumentTemplate' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'name' => self::str(),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+                'is_system' => self::bool(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
+            'DocumentTemplateListResponse' => self::listEnvelope('DocumentTemplate'),
+            'DocumentTemplateResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentTemplate')),
+            // scope/required_permission are optional; setting a shared scope or a
+            // permission tag requires documents:publish (403 otherwise).
+            'DocumentTemplateCreateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], ['name', 'data']),
+            'DocumentTemplateUpdateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], []),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -2503,6 +2535,63 @@ final class CoreApiSchemas
                 ] + self::authErrors(),
             ]),
             $selfRoute,
+        ];
+    }
+
+    /**
+     * Document/label designer template routes (WC-docdesigner). Tenant-scoped,
+     * RBAC-gated CRUD; list/get are additionally row-filtered server-side by
+     * scope + required_permission, and publishing needs documents:publish.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentTemplateRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/document-templates', 'documents:read', [
+                'summary' => 'List document/label templates visible to the caller',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The templates the caller may see (RBAC-filtered)', 'DocumentTemplateListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-templates', 'documents:write', [
+                'summary' => 'Create a document/label template',
+                'tags' => ['documents'],
+                'request' => 'DocumentTemplateCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created template', 'DocumentTemplateResponse'),
+                    403 => self::errorResponse('Publishing a shared template requires documents:publish'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-templates/{id:\d+}', 'documents:read', [
+                'summary' => 'Get a document/label template',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The template', 'DocumentTemplateResponse'),
+                    404 => self::errorResponse('Template not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-templates/{id:\d+}', 'documents:write', [
+                'summary' => 'Update a document/label template',
+                'tags' => ['documents'],
+                'request' => 'DocumentTemplateUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated template', 'DocumentTemplateResponse'),
+                    403 => self::errorResponse('Publishing a shared template requires documents:publish'),
+                    404 => self::errorResponse('Template not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-templates/{id:\d+}', 'documents:write', [
+                'summary' => 'Delete a document/label template',
+                'tags' => ['documents'],
+                'responses' => [
+                    204 => ['description' => 'Template deleted'],
+                    404 => self::errorResponse('Template not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
