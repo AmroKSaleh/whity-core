@@ -6662,7 +6662,12 @@ export interface operations {
     };
     get_api_v1_permissions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100). Pickers pass per_page=100 to fetch the whole catalogue. */
+                per_page?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;

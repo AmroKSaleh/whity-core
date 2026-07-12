@@ -502,6 +502,10 @@ final class CoreApiSchemas
             self::adminRoute('GET', '/api/permissions', [
                 'summary' => 'List the permission catalogue',
                 'tags' => ['roles'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). Pickers pass per_page=100 to fetch the whole catalogue.'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('All known permissions', 'PermissionCatalogueResponse'),
                 ] + self::authErrors(),
