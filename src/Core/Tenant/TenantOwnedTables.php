@@ -110,6 +110,13 @@ final class TenantOwnedTables
         // (plans / plan_entitlements are global catalogs with no tenant_id,
         // unregistered like `permissions`.)
         'tenant_plan' => '055_create_plans.php',
+
+        // WC-docdesigner — document/label designer persistence (migration 059).
+        // Saved templates and reusable blocks; the client object is stored as JSON
+        // in `data`. Tenant-scoped + RBAC-gated visibility; every query binds
+        // tenant_id (list/get additionally RBAC-filter server-side).
+        'document_templates' => '059_create_document_designer_tables.php',
+        'document_blocks'    => '059_create_document_designer_tables.php',
     ];
 
     /**
