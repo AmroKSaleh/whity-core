@@ -43,12 +43,32 @@ setup('authenticate as regular user', async ({ page }) => {
   expect(page.url()).toContain('/dashboard');
 });
 
-setup('authenticate as system admin', async ({ page }) => {
+setup('authenticate as system admin', async ({ page, baseURL }) => {
+  if (!baseURL) {
+    throw new Error('baseURL is required to configure the instance for system-admin setup');
+  }
   // The system-tenant (id 0) admin. It is the only identity that may manage the
   // GLOBAL platform defaults / branding after WC-235, so the branding-display
   // specs drive their global writes through this session. Clear any residual
   // 2FA first, matching the admin setup's self-heal.
   await resetTwoFactorViaDb(SYSTEM_ADMIN.email);
+
+  // First-run funnel (WC-instance-first-run): the protected layout routes an
+  // UNCONFIGURED instance's operator (system tenant + settings:manage) into the
+  // onboarding wizard. Functional specs exercise the already-onboarded steady
+  // state, so mark the instance configured through the real endpoint BEFORE the
+  // operator's UI login — otherwise every [admin] spec (settings/branding/email)
+  // would be redirected to /onboarding. Idempotent; a real fresh install still
+  // shows the wizard. (The onboarding flow itself is covered by the backend
+  // InstanceApiHandler unit test.)
+  const api = await createAuthedApi(baseURL, SYSTEM_ADMIN);
+  try {
+    const res = await api.post('/api/v1/instance/complete-setup');
+    expect(res.ok(), 'complete-setup must succeed for the system operator').toBeTruthy();
+  } finally {
+    await api.dispose();
+  }
+
   const login = new LoginPage(page);
   await login.loginExpectingSuccess(SYSTEM_ADMIN);
   await page.context().storageState({ path: systemStatePath });
