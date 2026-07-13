@@ -57,25 +57,6 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Whether the instance has already completed first-run setup
- * (WC-instance-first-run). Reads GET /api/v1/instance/status. Returns `null`
- * while unknown (loading, or a transient/unauthenticated error) so the wizard
- * renders rather than faking either state; an already-configured instance is
- * redirected out of the wizard by the caller once this resolves `true`.
- */
-function useInstanceConfigured(): boolean | null {
-  const { data } = useFetch(async () => {
-    const { data: body, error } = await api.GET('/api/v1/instance/status');
-    if (body === undefined) {
-      throw new Error(errorMessage(error, 'Failed to read instance status'));
-    }
-    return body.configured;
-  }, []);
-
-  return data ?? null;
-}
-
-/**
  * Mark first-run setup complete (WC-instance-first-run): POST
  * /api/v1/instance/complete-setup. Idempotent server-side. Throws on failure so
  * the caller can surface it — the saved global settings are the durable result;
@@ -107,7 +88,6 @@ export default function OnboardingPage() {
   const router = useRouter();
   const { isLoading: authLoading, user } = useAuth();
   const { hasPermission, loading: capsLoading } = useCapabilities();
-  const configured = useInstanceConfigured();
 
   const canManage = hasPermission(SETTINGS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -120,13 +100,10 @@ export default function OnboardingPage() {
     }
   }, [authLoading, user, router]);
 
-  // TODO(first-run flag): once `useInstanceConfigured` reads the real flag, an
-  // already-configured instance should be redirected out of the wizard here.
-  useEffect(() => {
-    if (configured === true) {
-      router.replace('/admin/settings/global');
-    }
-  }, [configured, router]);
+  // The wizard is directly accessible even after setup completes (re-runnable),
+  // so there is no "already configured → redirect away" here. The first-run
+  // FUNNEL — auto-routing an operator INTO the wizard until the instance is
+  // configured — lives in the protected layout (WC-instance-first-run).
 
   if (authLoading || capsLoading) {
     return (
