@@ -57,25 +57,35 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Whether the instance has already completed first-run setup.
- * TODO(WC-2b9d4f6a / backend): resolve from the real first-run flag, e.g.
- *   GET /api/v1/instance/status -> { configured: boolean }
- * and redirect a configured instance away from /onboarding. Returns `null`
- * (unknown) for now so the wizard always renders and never fakes completion.
+ * Whether the instance has already completed first-run setup
+ * (WC-instance-first-run). Reads GET /api/v1/instance/status. Returns `null`
+ * while unknown (loading, or a transient/unauthenticated error) so the wizard
+ * renders rather than faking either state; an already-configured instance is
+ * redirected out of the wizard by the caller once this resolves `true`.
  */
 function useInstanceConfigured(): boolean | null {
-  return null;
+  const { data } = useFetch(async () => {
+    const { data: body, error } = await api.GET('/api/v1/instance/status');
+    if (body === undefined) {
+      throw new Error(errorMessage(error, 'Failed to read instance status'));
+    }
+    return body.configured;
+  }, []);
+
+  return data ?? null;
 }
 
 /**
- * Mark first-run setup complete.
- * TODO(WC-2b9d4f6a / backend): persist the first-run flag, e.g.
- *   POST /api/v1/instance/complete-setup
- * so the wizard is not shown again. No-op until the endpoint exists — the saved
- * global settings are the durable result; this only flips the "seen" flag.
+ * Mark first-run setup complete (WC-instance-first-run): POST
+ * /api/v1/instance/complete-setup. Idempotent server-side. Throws on failure so
+ * the caller can surface it — the saved global settings are the durable result;
+ * this flips the operator-visible "seen" flag so the wizard is not shown again.
  */
 async function markInstanceConfigured(): Promise<void> {
-  // Intentionally empty until the backend flag lands (see TODO above).
+  const { error } = await api.POST('/api/v1/instance/complete-setup', {});
+  if (error) {
+    throw new Error(errorMessage(error, 'Could not finalize first-run setup'));
+  }
 }
 
 interface WizardStep {
@@ -224,9 +234,16 @@ function OnboardingWizard() {
 
     // No changes: still complete setup (the operator accepted the defaults).
     if (changedKeys.length === 0) {
-      await markInstanceConfigured();
-      addToast('Setup complete. You can fine-tune everything in Global Settings.', 'success');
-      router.push('/admin/settings/global');
+      setSaving(true);
+      try {
+        await markInstanceConfigured();
+        addToast('Setup complete. You can fine-tune everything in Global Settings.', 'success');
+        router.push('/admin/settings/global');
+      } catch (err) {
+        addToast(err instanceof Error ? err.message : 'Could not finalize setup', 'error');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
 

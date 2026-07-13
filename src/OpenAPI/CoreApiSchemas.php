@@ -97,8 +97,48 @@ final class CoreApiSchemas
             self::tenantStorageRoutes(),
             self::planRoutes(),
             self::subscriptionRoutes(),
-            self::documentTemplateRoutes()
+            self::documentTemplateRoutes(),
+            self::instanceRoutes()
         );
+    }
+
+    /**
+     * First-run instance lifecycle surface (WC-instance-first-run).
+     *
+     * GET /api/instance/status is authenticated but unpermissioned (any signed-in
+     * caller reads it to drive onboarding routing); POST /api/instance/complete-setup
+     * is settings:manage (and system-tenant-only, enforced in the handler).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function instanceRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/instance/status',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'First-run + version probe (drives onboarding routing)',
+                    'tags' => ['instance'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Whether guided first-run setup is complete, plus the running core version',
+                            'InstanceStatusResponse'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+            self::permissionRoute('POST', '/api/instance/complete-setup', 'settings:manage', [
+                'summary' => 'Mark guided first-run setup complete (system tenant only)',
+                'tags' => ['instance'],
+                'responses' => [
+                    200 => self::jsonResponse('First-run setup marked complete', 'InstanceCompleteSetupResponse'),
+                    422 => self::errorResponse('Not the system tenant — first-run setup is an operator/global action'),
+                ] + self::authErrors(),
+            ]),
+        ];
     }
 
 
@@ -1977,6 +2017,17 @@ final class CoreApiSchemas
                 'db_connected' => self::bool(),
                 'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
             ], ['status', 'version', 'worker_count', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+
+            // GET /api/instance/status (WC-instance-first-run)
+            'InstanceStatusResponse' => self::object([
+                'configured' => self::bool(),
+                'version' => self::str(),
+            ], ['configured', 'version']),
+
+            // POST /api/instance/complete-setup (WC-instance-first-run)
+            'InstanceCompleteSetupResponse' => self::object([
+                'configured' => self::bool(),
+            ], ['configured']),
 
             // GET /api/navigation
             'NavigationItem' => self::object([

@@ -939,6 +939,18 @@ $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'], 
 $router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlobal'], null, null, CorePermissions::SETTINGS_MANAGE);
 
+// First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
+// the already-constructed $globalSettingsRepository (the flag lives in a reserved
+// app_settings key, NOT a registry setting). GET /instance/status is authenticated
+// but unpermissioned (any signed-in caller reads it to drive onboarding routing);
+// POST /instance/complete-setup is settings:manage AND system-tenant-only (enforced
+// in the handler), mirroring the global-settings write surface.
+$instanceHandler = new \Whity\Api\InstanceApiHandler(
+    new \Whity\Core\Instance\InstanceService($globalSettingsRepository)
+);
+$router->register('GET',  '/api/instance/status',         [$instanceHandler, 'status'],        null, null, null);
+$router->register('POST', '/api/instance/complete-setup', [$instanceHandler, 'completeSetup'], null, null, CorePermissions::SETTINGS_MANAGE);
+
 // 13a-bis. Operator per-tenant entitlements API (WC-ent): the platform owner
 // grants/limits a TARGET tenant's capabilities per subscription tier. Gated on
 // entitlements:manage (RbacMiddleware) AND — enforced in the handler — the system

@@ -3591,6 +3591,163 @@
                 ]
             }
         },
+        "/api/v1/instance/complete-setup": {
+            "post": {
+                "operationId": "post_api_v1_instance_complete_setup",
+                "summary": "Mark guided first-run setup complete (system tenant only)",
+                "tags": [
+                    "instance"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "First-run setup marked complete",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InstanceCompleteSetupResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Not the system tenant \u2014 first-run setup is an operator/global action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/instance/status": {
+            "get": {
+                "operationId": "get_api_v1_instance_status",
+                "summary": "First-run + version probe (drives onboarding routing)",
+                "tags": [
+                    "instance"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Whether guided first-run setup is complete, plus the running core version",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InstanceStatusResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/login": {
             "post": {
                 "operationId": "post_api_v1_login",
@@ -11548,6 +11705,32 @@
                         "type": "boolean"
                     }
                 }
+            },
+            "InstanceCompleteSetupResponse": {
+                "type": "object",
+                "properties": {
+                    "configured": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "configured"
+                ]
+            },
+            "InstanceStatusResponse": {
+                "type": "object",
+                "properties": {
+                    "configured": {
+                        "type": "boolean"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "configured",
+                    "version"
+                ]
             },
             "Login2faRequiredResponse": {
                 "type": "object",
