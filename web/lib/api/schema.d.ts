@@ -994,6 +994,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plugins/install-from-store": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch a package from a trusted plugin store and stage it (lands disabled) */
+        post: operations["post_api_v1_plugins_install_from_store"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plugins/reload": {
         parameters: {
             query?: never;
@@ -1758,6 +1775,19 @@ export interface components {
             scopes?: string;
             domain?: string | null;
             enabled?: boolean;
+        };
+        InstallFromStoreRequest: {
+            /**
+             * @description Bare https origin of a trusted plugin store — scheme + allowlisted host only (no path, query, credentials, or non-443 port).
+             * @example https://store.example.com
+             */
+            store_url: string;
+            /** @description Plugin slug to install. */
+            slug: string;
+            /** @description Exact package version to install. */
+            version: string;
+            /** @description Optional store access token (opaque bearer credential). */
+            token?: string | null;
         };
         InstanceCompleteSetupResponse: {
             configured: boolean;
@@ -7877,6 +7907,111 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_plugins_install_from_store: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InstallFromStoreRequest"];
+            };
+        };
+        responses: {
+            /** @description Plugin staged (disabled) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginUploadResponse"];
+                };
+            };
+            /** @description Invalid package, unsafe name, or unsafe archive */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Feature disabled or store host not in the allowlist */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A plugin with this name is already installed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing/invalid fields, or plugin incompatible with this host */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The store package could not be fetched */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
