@@ -82,6 +82,9 @@ services:
       FRANKENPHP_WORKERS: ${FRANKENPHP_WORKERS:-8}
       FRANKENPHP_TIMEOUT: ${FRANKENPHP_TIMEOUT:-60s}
       MAX_REQUESTS: ${MAX_REQUESTS:-500}
+      # Master switch for the /mcp JSON-RPC transport (per-tenant mcp.enabled
+      # opt-in still applies on top). Off unless explicitly enabled.
+      MCP_ENABLED: ${MCP_ENABLED:-false}
     volumes:
       # Serve the committed tree (mirrors the dev compose bind mount). The app
       # writes a plugin-manifest cache + sqlite scratch file under /app at runtime,

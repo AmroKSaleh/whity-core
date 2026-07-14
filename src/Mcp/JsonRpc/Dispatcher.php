@@ -92,11 +92,27 @@ final class Dispatcher implements McpRequestHandlerInterface
                 return $this->encode($this->makeError(null, ErrorCode::INVALID_REQUEST, 'Invalid Request'));
             }
 
-            $response = $this->dispatch((array) $decoded, $bearerToken);
+            $response = $this->dispatch($this->toArrayDeep($decoded), $bearerToken);
             return $response !== null ? $this->encode($response) : '';
         } finally {
             TenantContext::reset();
         }
+    }
+
+    /**
+     * Recursively convert a decoded JSON-RPC request object (stdClass, produced
+     * by the non-associative json_decode used for batch-vs-single detection) into
+     * a deep associative array. A shallow `(array)` cast leaves nested objects —
+     * notably `params.arguments` — as stdClass, which downstream handlers reject
+     * via `is_array()` checks, silently dropping object-valued tool arguments.
+     *
+     * @return array<string, mixed>
+     */
+    private function toArrayDeep(\stdClass $object): array
+    {
+        /** @var array<string, mixed> $array */
+        $array = (array) json_decode((string) json_encode($object), true);
+        return $array;
     }
 
     // ── Batch ─────────────────────────────────────────────────────────────────
@@ -114,7 +130,7 @@ final class Dispatcher implements McpRequestHandlerInterface
                 $responses[] = $this->makeError(null, ErrorCode::INVALID_REQUEST, 'Invalid Request');
                 continue;
             }
-            $response = $this->dispatch((array) $item, $bearerToken);
+            $response = $this->dispatch($this->toArrayDeep($item), $bearerToken);
             if ($response !== null) {
                 $responses[] = $response;
             }

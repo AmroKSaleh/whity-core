@@ -14,7 +14,7 @@ use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\ErrorCode;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
-use Whity\Sdk\Http\Request;
+use Whity\Core\Request;
 
 /**
  * MCP tools/call handler (WC-2e6944d5, WC-b570dccd).
@@ -315,12 +315,19 @@ final class ToolsCallHandler implements MethodHandler
         $request = new Request($method, $path, $headers, $body);
 
         // Stash JWT claims — mirrors EnforceTenantIsolation for the HTTP path.
+        // Post-identity-cutover handlers read the caller off the CANONICAL
+        // {profile_id, active_tenant_id} claims, so stamp those (the legacy
+        // {user_id, tenant_id} aliases are retained for any consumer still on
+        // them). Without profile_id, a handler that reads $request->user->profile_id
+        // gets null.
         $claims = [
-            'user_id'        => $principal->userId,
-            'tenant_id'      => $principal->tenantId,
-            'type'           => 'mcp',
-            'principal_kind' => $principal->principalKind,
-            'scope'          => $principal->scope,
+            'profile_id'       => $principal->userId,
+            'active_tenant_id' => $principal->tenantId,
+            'user_id'          => $principal->userId,
+            'tenant_id'        => $principal->tenantId,
+            'type'             => 'mcp',
+            'principal_kind'   => $principal->principalKind,
+            'scope'            => $principal->scope,
         ];
         $request->setAttribute(Request::ATTR_JWT_CLAIMS, $claims);
         $request->user = (object) $claims;
