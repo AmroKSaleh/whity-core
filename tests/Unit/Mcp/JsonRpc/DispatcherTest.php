@@ -138,6 +138,41 @@ final class DispatcherTest extends TestCase
         self::assertSame(1, $log->count);
     }
 
+    public function testHandlerReceivesNestedObjectParamsAsArrays(): void
+    {
+        // Regression (WC-mcp-toolcall): the request body is decoded
+        // NON-associatively (to distinguish a batch array from a single object),
+        // then converted to a DEEP associative array before dispatch. A prior
+        // shallow `(array)` cast left nested params — notably tools/call
+        // `arguments` — as stdClass, which handlers that read them via is_array()
+        // / array access silently dropped (every write tool failed with
+        // "missing required argument"). Every level of params must arrive as an
+        // array, not stdClass.
+        $handler = new class implements MethodHandler {
+            /** @var array<string, mixed>|null */
+            public ?array $captured = null;
+
+            public function __invoke(?array $params, ?string $bearerToken): mixed
+            {
+                $this->captured = $params;
+                return ['ok' => true];
+            }
+        };
+
+        $dispatcher = new Dispatcher(['probe' => $handler]);
+        $dispatcher->handle(
+            '{"jsonrpc":"2.0","id":1,"method":"probe","params":{"name":"t","arguments":{"settings":{"site_name":"X"}}}}',
+            null,
+        );
+
+        $params = $handler->captured;
+        self::assertIsArray($params);
+        $arguments = $params['arguments'] ?? null;
+        self::assertIsArray($arguments, 'nested object params must be arrays, not stdClass');
+        self::assertIsArray($arguments['settings'] ?? null);
+        self::assertSame('X', $arguments['settings']['site_name'] ?? null);
+    }
+
     // ── Token + params propagation ────────────────────────────────────────────
 
     public function testHandlePassesBearerTokenAndParamsToHandler(): void

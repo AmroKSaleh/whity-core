@@ -17,7 +17,10 @@ use Whity\Mcp\JsonRpc\ErrorCode;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\Tools\ToolDeriver;
 use Whity\Mcp\Tools\ToolsCallHandler;
-use Whity\Sdk\Http\Request;
+// Core route handlers type-hint the narrower Whity\Core\Request (not the SDK
+// base), so the test doubles do too — a synthesized SDK request would TypeError
+// on every real handler (WC-mcp-toolcall regression guard).
+use Whity\Core\Request;
 use Whity\Sdk\Http\Response;
 
 /**
@@ -269,8 +272,15 @@ final class ToolsCallHandlerTest extends TestCase
         ], self::BEARER);
 
         self::assertNotNull($this->lastRequest);
+        // The synthesized request must be the core subclass every handler expects,
+        // not the SDK base (WC-mcp-toolcall).
+        self::assertInstanceOf(Request::class, $this->lastRequest);
         $claims = $this->lastRequest->getAttribute(Request::ATTR_JWT_CLAIMS);
         self::assertIsArray($claims);
+        // Canonical, post-identity-cutover claims handlers read the caller from.
+        self::assertSame(self::USER_ID, $claims['profile_id']);
+        self::assertSame(self::TENANT_ID, $claims['active_tenant_id']);
+        // Legacy aliases retained for back-compat.
         self::assertSame(self::USER_ID, $claims['user_id']);
         self::assertSame(self::TENANT_ID, $claims['tenant_id']);
     }
@@ -287,6 +297,9 @@ final class ToolsCallHandlerTest extends TestCase
         self::assertNotNull($this->lastRequest);
         self::assertNotNull($this->lastRequest->user);
         $userVars = get_object_vars($this->lastRequest->user);
+        // Handlers read the caller off the canonical profile_id (post-cutover);
+        // the legacy user_id alias is retained.
+        self::assertSame(self::USER_ID, $userVars['profile_id']);
         self::assertSame(self::USER_ID, $userVars['user_id']);
     }
 
