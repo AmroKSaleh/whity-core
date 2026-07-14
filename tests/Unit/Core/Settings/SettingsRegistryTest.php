@@ -32,7 +32,8 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.invitation_enabled', 'mail.events.verification_enabled',
              'mail.events.deletion_enabled',
              'mail.brand_color', 'mail.footer_text',
-             'billing.enforcement_default', 'billing.grace_days'],
+             'billing.enforcement_default', 'billing.grace_days',
+             'plugins.store_allowed_hosts'],
             SettingsRegistry::keys()
         );
     }
@@ -176,7 +177,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(34, $describe);
+        self::assertCount(35, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

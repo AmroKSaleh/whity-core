@@ -132,16 +132,64 @@ final class PluginInstaller
         // 1. Accept & cap — before touching the filesystem.
         $kind = $this->validateUpload($package);
 
-        // 2. Stage to a private, unique temp working dir.
+        return $this->processPackage(
+            $kind,
+            function (string $staged) use ($package): void {
+                $this->copyUpload($package, $staged);
+            },
+            $package->getSize(),
+        );
+    }
+
+    /**
+     * Install a plugin package from RAW BYTES already in memory (e.g. a package
+     * fetched from a plugin store). The bytes get the SAME size cap, content-kind
+     * detection, and staged validation pipeline as an upload — they are written to
+     * a private temp file and never trusted.
+     *
+     * @param string $bytes The raw package bytes (zip or single PHP file).
+     * @return array{id: string, name: string, enabled: bool, file: string, version: string|null, status: string, routes_count: int|null, permissions_count: int|null}
+     * @throws PluginInstallException On any validation failure (filesystem clean).
+     */
+    public function installFromBytes(string $bytes): array
+    {
+        $kind = $this->validateBytes($bytes);
+
+        return $this->processPackage(
+            $kind,
+            function (string $staged) use ($bytes): void {
+                $this->writeStaged($staged, $bytes);
+            },
+            strlen($bytes),
+        );
+    }
+
+    /**
+     * Stage, validate, and commit a package (landing DISABLED).
+     *
+     * `$stage` writes the raw artifact to the given path — either copied from an
+     * upload or written from fetched bytes. Everything after staging is identical,
+     * so both ingest paths share ONE hardened pipeline (extract guards, isolated
+     * introspection, name allowlist, version gate, collision reject, commit).
+     *
+     * @param 'zip'|'php'            $kind  Detected package kind.
+     * @param callable(string): void $stage Writes the artifact to the given path.
+     * @param int                    $size  Raw package size (for the audit trail).
+     * @return array{id: string, name: string, enabled: bool, file: string, version: string|null, status: string, routes_count: int|null, permissions_count: int|null}
+     * @throws PluginInstallException On any validation failure (filesystem clean).
+     */
+    private function processPackage(string $kind, callable $stage, int $size): array
+    {
+        // Stage to a private, unique temp working dir.
         $workDir = $this->makeWorkDir();
         $committedPath = null;
         $auditName = null;
-        $auditSize = $package->getSize();
+        $auditSize = $size;
         $auditSha = null;
 
         try {
             $stagedArtifact = $workDir . '/' . ($kind === 'zip' ? 'package.zip' : 'package.php');
-            $this->copyUpload($package, $stagedArtifact);
+            $stage($stagedArtifact);
             $auditSha = hash_file('sha256', $stagedArtifact) ?: null;
 
             // 3. Extract (zip) with hard guards, or treat as a single-file plugin.
@@ -285,6 +333,57 @@ final class PluginInstaller
     {
         if (!@copy($package->getStreamPath(), $target)) {
             throw new PluginPackageInvalid('The uploaded package could not be staged.');
+        }
+    }
+
+    /**
+     * Validate a raw in-memory package and detect its kind by CONTENT — the
+     * bytes-based analogue of {@see validateUpload()} (same cap + magic-byte
+     * detection, no upload envelope).
+     *
+     * @param string $bytes Raw package bytes.
+     * @return 'zip'|'php' The detected package kind.
+     * @throws PluginPackageInvalid On an empty/oversized package or content that
+     *                              is neither zip nor PHP.
+     */
+    private function validateBytes(string $bytes): string
+    {
+        $size = strlen($bytes);
+        if ($size <= 0) {
+            throw new PluginPackageInvalid('The package is empty.');
+        }
+        if ($size > self::MAX_UPLOAD_BYTES) {
+            throw new PluginPackageInvalid(
+                'The package exceeds the maximum allowed size.',
+                ['max_bytes' => self::MAX_UPLOAD_BYTES]
+            );
+        }
+
+        $head = substr($bytes, 0, 64);
+        if (str_starts_with($head, "PK\x03\x04")) {
+            return 'zip';
+        }
+
+        $trimmed = ltrim($head, "\xEF\xBB\xBF \t\r\n");
+        if (str_starts_with($trimmed, '<?php') || str_starts_with($trimmed, '<?=')) {
+            return 'php';
+        }
+
+        throw new PluginPackageInvalid('Only .zip or .php plugin packages are accepted.');
+    }
+
+    /**
+     * Write raw package bytes into the private working dir (the bytes-based
+     * analogue of {@see copyUpload()}).
+     *
+     * @param string $target Absolute destination path inside the work dir.
+     * @param string $bytes  Raw package bytes.
+     * @throws PluginPackageInvalid When the write fails or is short.
+     */
+    private function writeStaged(string $target, string $bytes): void
+    {
+        if (@file_put_contents($target, $bytes) !== strlen($bytes)) {
+            throw new PluginPackageInvalid('The package could not be staged.');
         }
     }
 

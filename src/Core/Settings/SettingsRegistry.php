@@ -106,6 +106,12 @@ final class SettingsRegistry
     public const BILLING_ENFORCEMENT_DEFAULT = 'billing.enforcement_default';
     public const BILLING_GRACE_DAYS = 'billing.grace_days';
 
+    // Plugin marketplace (WC plugin-store): comma-separated allowlist of trusted
+    // store HOSTS the install-from-store endpoint may fetch packages from. EMPTY
+    // (default) = the feature is OFF — no store is trusted. This is the PRIMARY
+    // SSRF control for server-side package fetches.
+    public const PLUGINS_STORE_ALLOWED_HOSTS = 'plugins.store_allowed_hosts';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -156,6 +162,7 @@ final class SettingsRegistry
         self::MAIL_FOOTER_TEXT,
         self::BILLING_ENFORCEMENT_DEFAULT,
         self::BILLING_GRACE_DAYS,
+        self::PLUGINS_STORE_ALLOWED_HOSTS,
     ];
 
     /**
@@ -247,6 +254,8 @@ final class SettingsRegistry
         // per-tenant. A past_due tenant keeps access for grace_days days.
         self::BILLING_ENFORCEMENT_DEFAULT => 'warn',
         self::BILLING_GRACE_DAYS => '7',
+        // Empty = install-from-store OFF (no trusted store); operator opts in.
+        self::PLUGINS_STORE_ALLOWED_HOSTS => '',
     ];
 
     /**
@@ -488,7 +497,8 @@ final class SettingsRegistry
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
             self::MAIL_FROM_NAME,
-            self::MAIL_FOOTER_TEXT => null, // free-form strings
+            self::MAIL_FOOTER_TEXT,
+            self::PLUGINS_STORE_ALLOWED_HOSTS => null, // free-form strings
             default => "Unknown setting key: {$key}",
         };
     }
