@@ -46,6 +46,81 @@ final class HttpFetcher implements HttpClient
     }
 
     /**
+     * GET a BINARY payload (e.g. a plugin package) under the SAME SSRF guard,
+     * redirect-block, TLS verification and size/time bounds as the JSON path,
+     * plus caller-supplied request headers (e.g. an `Authorization` bearer).
+     *
+     * Returns the raw bytes on a 2xx response, or null on any transport failure
+     * or non-2xx status (so an error body — e.g. a 401 JSON — is never mistaken
+     * for a package). Throws when the guard refuses the URL (a config/security
+     * problem, distinct from a transient failure).
+     *
+     * @param array<string, string> $headers Extra request headers (name => value).
+     * @throws \RuntimeException When the URL is non-public or non-https.
+     */
+    public function getBinary(string $url, array $headers = []): ?string
+    {
+        if (!self::isPubliclyRoutableUrl($url)) {
+            throw new \RuntimeException('HttpFetcher: refused non-public or non-https URL');
+        }
+
+        $headerLines = "Accept: application/octet-stream, application/zip\r\n";
+        foreach ($headers as $name => $value) {
+            // Strip CR/LF so a crafted header name/value cannot inject additional
+            // request headers (header-splitting).
+            $name = str_replace(["\r", "\n"], '', $name);
+            $value = str_replace(["\r", "\n"], '', $value);
+            if ($name !== '') {
+                $headerLines .= $name . ': ' . $value . "\r\n";
+            }
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method'          => 'GET',
+                'header'          => $headerLines,
+                'timeout'         => $this->timeoutSeconds,
+                'ignore_errors'   => true,   // read the body so we can check status
+                'max_redirects'   => 0,      // never follow a redirect to a new host
+                'follow_location' => 0,
+            ],
+            'ssl' => [
+                'verify_peer'      => true,
+                'verify_peer_name' => true,
+            ],
+        ]);
+
+        $raw = @file_get_contents($url, false, $context, 0, max(0, $this->maxBytes));
+        if ($raw === false) {
+            return null;
+        }
+        // $http_response_header is populated by the stream wrapper on any completed
+        // response (we only reach here after a non-false read).
+        $status = self::statusFromHeaders($http_response_header);
+        if ($status < 200 || $status >= 300) {
+            return null;
+        }
+
+        return $raw;
+    }
+
+    /**
+     * Parse the numeric status from a stream-wrapper response-header list.
+     *
+     * @param list<string> $responseHeaders
+     */
+    private static function statusFromHeaders(array $responseHeaders): int
+    {
+        $status = 0;
+        foreach ($responseHeaders as $line) {
+            if (preg_match('#^HTTP/\d(?:\.\d)?\s+(\d{3})#', $line, $m) === 1) {
+                $status = (int) $m[1]; // keep the LAST status line (after any redirects)
+            }
+        }
+        return $status;
+    }
+
+    /**
      * Whether $url is https AND its host resolves only to publicly-routable IPs.
      * Pure/deterministic for IP-literal hosts; performs DNS for hostnames.
      */

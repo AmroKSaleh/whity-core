@@ -110,6 +110,58 @@ final class PluginInstallerTest extends TestCase
         self::assertFileDoesNotExist($this->pluginDir . '/AcmeSingle.php');
     }
 
+    /**
+     * PR-3: install-from-store fetches raw bytes rather than an uploaded file, so
+     * {@see PluginInstaller::installFromBytes()} must reach the SAME hardened
+     * staging outcome as the upload path — parity, not a second pipeline.
+     */
+    public function testInstallFromBytesStagesValidZipIdenticallyToUpload(): void
+    {
+        $zip = PluginPackageFixtures::validDirectoryZip($this->workDir, 'BytesUploaded');
+        $bytes = (string) file_get_contents($zip);
+
+        $entry = $this->installer()->installFromBytes($bytes);
+
+        self::assertSame('BytesUploaded', $entry['name']);
+        self::assertSame('disabled', $entry['status']);
+        self::assertFalse($entry['enabled']);
+        self::assertDirectoryExists($this->pluginDir . '/BytesUploaded');
+        self::assertFileExists(
+            $this->pluginDir . '/BytesUploaded/' . PluginLoader::DIR_DISABLED_SENTINEL
+        );
+        self::assertSame(0, $this->tempWorkDirCount(), 'temp work dir must be cleaned up');
+    }
+
+    public function testInstallFromBytesStagesValidSinglePhp(): void
+    {
+        $php = PluginPackageFixtures::validSinglePhp($this->workDir, 'BytesSingle');
+        $bytes = (string) file_get_contents($php);
+
+        $entry = $this->installer()->installFromBytes($bytes);
+
+        self::assertSame('BytesSingle', $entry['name']);
+        self::assertSame('disabled', $entry['status']);
+        self::assertFileExists($this->pluginDir . '/BytesSingle.php.disabled');
+    }
+
+    public function testInstallFromBytesRejectsEmptyPayload(): void
+    {
+        $this->expectException(PluginPackageInvalid::class);
+        $this->installer()->installFromBytes('');
+    }
+
+    public function testInstallFromBytesRejectsNonPackageBytesAndWritesNothing(): void
+    {
+        try {
+            $this->installer()->installFromBytes('this is not a zip or a php file');
+            self::fail('Expected PluginPackageInvalid for non-package bytes');
+        } catch (PluginPackageInvalid) {
+            // Rejected pre-staging: nothing written, no temp dir leaked.
+            self::assertSame([], glob($this->pluginDir . '/*') ?: []);
+            self::assertSame(0, $this->tempWorkDirCount());
+        }
+    }
+
     public function testZipSlipIsRejectedAndNothingIsWrittenOutsideTarget(): void
     {
         $marker = $this->workDir . '/evil_zipslip_marker.php';

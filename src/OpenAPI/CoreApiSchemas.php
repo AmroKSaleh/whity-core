@@ -1012,6 +1012,23 @@ final class CoreApiSchemas
                     500 => self::errorResponse('Internal error'),
                 ],
             ]),
+            self::permissionRoute('POST', '/api/plugins/install-from-store', 'plugins:upload', [
+                'summary' => 'Fetch a package from a trusted plugin store and stage it (lands disabled)',
+                'description' => 'Downloads a plugin package from a store host that MUST be on the '
+                    . 'operator `plugins.store_allowed_hosts` allowlist (SSRF control; empty ⇒ disabled), '
+                    . 'then validates and stages it through the same hardened installer as an upload.',
+                'tags' => ['platform-ops'],
+                'request' => 'InstallFromStoreRequest',
+                'responses' => [
+                    201 => self::jsonResponse('Plugin staged (disabled)', 'PluginUploadResponse'),
+                    400 => self::errorResponse('Invalid package, unsafe name, or unsafe archive'),
+                    403 => self::errorResponse('Feature disabled or store host not in the allowlist'),
+                    409 => self::errorResponse('A plugin with this name is already installed'),
+                    422 => self::errorResponse('Missing/invalid fields, or plugin incompatible with this host'),
+                    500 => self::errorResponse('Internal error'),
+                    502 => self::errorResponse('The store package could not be fetched'),
+                ],
+            ]),
         ];
     }
 
@@ -1415,6 +1432,26 @@ final class CoreApiSchemas
                 'email' => self::str(),
                 'password' => self::str(),
             ], ['email', 'password']),
+
+            // POST /api/plugins/install-from-store — request body. store_url host
+            // must be on the plugins.store_allowed_hosts allowlist; token is an
+            // opaque store credential sent as a bearer to the store (never logged).
+            'InstallFromStoreRequest' => self::object([
+                'store_url' => array_merge(self::str(), [
+                    'description' => 'Bare https origin of a trusted plugin store — scheme + allowlisted '
+                        . 'host only (no path, query, credentials, or non-443 port).',
+                    'example' => 'https://store.example.com',
+                ]),
+                'slug' => array_merge(self::str(), [
+                    'description' => 'Plugin slug to install.',
+                ]),
+                'version' => array_merge(self::str(), [
+                    'description' => 'Exact package version to install.',
+                ]),
+                'token' => array_merge(self::str(true), [
+                    'description' => 'Optional store access token (opaque bearer credential).',
+                ]),
+            ], ['store_url', 'slug', 'version']),
 
             // POST /api/login — 200 success (single membership → session issued,
             // OR multi-membership → requires_tenant_selection prompt).

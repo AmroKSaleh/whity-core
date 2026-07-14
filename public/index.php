@@ -888,6 +888,17 @@ $router->register('POST', '/api/plugins/{name}/disable', [$pluginsHandler, 'disa
 $router->register('POST', '/api/plugins/{id}/re-enable', [$pluginsHandler, 'reEnable'], null, null, CorePermissions::PLUGINS_ENABLE);
 $router->register('POST', '/api/plugins/{id}/uninstall', [$pluginsHandler, 'uninstall'], null, null, CorePermissions::PLUGINS_UNINSTALL);
 $router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], null, null, CorePermissions::PLUGINS_RELOAD);
+// WC-install-from-store: fetch a package from a TRUSTED plugin store (host must
+// be on the operator `plugins.store_allowed_hosts` allowlist; empty ⇒ disabled)
+// and stage it through the SAME hardened installer as an upload (lands DISABLED).
+// Same permission as upload — it is the same install action, remotely sourced.
+$installFromStoreHandler = new \Whity\Api\InstallFromStoreApiHandler(
+    __DIR__ . '/../plugins',
+    $settingsService,
+    $pluginLoader,
+    $auditLogger
+);
+$router->register('POST', '/api/plugins/install-from-store', [$installFromStoreHandler, 'install'], null, null, CorePermissions::PLUGINS_UPLOAD);
 
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
 // Only allow read-only access to migration status via API

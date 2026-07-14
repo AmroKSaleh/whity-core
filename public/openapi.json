@@ -6581,6 +6581,132 @@
                 ]
             }
         },
+        "/api/v1/plugins/install-from-store": {
+            "post": {
+                "operationId": "post_api_v1_plugins_install_from_store",
+                "summary": "Fetch a package from a trusted plugin store and stage it (lands disabled)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InstallFromStoreRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Plugin staged (disabled)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PluginUploadResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid package, unsafe name, or unsafe archive",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Feature disabled or store host not in the allowlist",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A plugin with this name is already installed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Missing/invalid fields, or plugin incompatible with this host",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The store package could not be fetched",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plugins/reload": {
             "post": {
                 "operationId": "post_api_v1_plugins_reload",
@@ -11705,6 +11831,34 @@
                         "type": "boolean"
                     }
                 }
+            },
+            "InstallFromStoreRequest": {
+                "type": "object",
+                "properties": {
+                    "store_url": {
+                        "type": "string",
+                        "description": "Bare https origin of a trusted plugin store \u2014 scheme + allowlisted host only (no path, query, credentials, or non-443 port).",
+                        "example": "https://store.example.com"
+                    },
+                    "slug": {
+                        "type": "string",
+                        "description": "Plugin slug to install."
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "Exact package version to install."
+                    },
+                    "token": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Optional store access token (opaque bearer credential)."
+                    }
+                },
+                "required": [
+                    "store_url",
+                    "slug",
+                    "version"
+                ]
             },
             "InstanceCompleteSetupResponse": {
                 "type": "object",
