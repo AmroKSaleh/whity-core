@@ -70,6 +70,10 @@ services:
       SERVER_NAME: ":80"
       SERVER_ROOT: "public/"
       FRANKENPHP_CONFIG: ${FRANKENPHP_CONFIG:-worker /app/public/index.php 8}
+      # Public base URL of the deployment. REQUIRED for absolute URLs the backend
+      # cannot derive behind the TLS-terminating proxy — notably the SSO/OIDC
+      # redirect_uri (unset ⇒ relative callback ⇒ provider invalid_request).
+      APP_URL: ${APP_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

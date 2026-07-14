@@ -85,6 +85,12 @@ services:
       # Master switch for the /mcp JSON-RPC transport (per-tenant mcp.enabled
       # opt-in still applies on top). Off unless explicitly enabled.
       MCP_ENABLED: ${MCP_ENABLED:-false}
+      # Public base URL of the deployment. REQUIRED for absolute URLs the backend
+      # cannot derive behind a reverse proxy — notably the SSO/OIDC redirect_uri:
+      # unset, the callback is emitted relative and providers reject the flow with
+      # invalid_request. Set to the externally-reachable origin (e.g. the tunnel/
+      # proxy host), not the in-container bind.
+      APP_URL: ${APP_URL:-}
     volumes:
       # Serve the committed tree (mirrors the dev compose bind mount). The app
       # writes a plugin-manifest cache + sqlite scratch file under /app at runtime,
