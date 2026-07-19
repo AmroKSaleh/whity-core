@@ -25,6 +25,8 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: whity_staging_postgres
+    # Survive host reboots: come back automatically unless explicitly stopped.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-whity}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
@@ -48,6 +50,8 @@ services:
       # The `release` stage (code baked in) is for the GHCR image only.
       target: base
     container_name: whity_staging_frankenphp
+    # Survive host reboots: come back automatically unless explicitly stopped.
+    restart: unless-stopped
     ports:
       # Non-default host port so it never collides with the dev demo on 8000.
       - "${APP_PORT_HOST:-8100}:80"
