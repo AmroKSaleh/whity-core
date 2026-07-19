@@ -12,10 +12,10 @@ use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 
 /**
- * UiKitShowcasePlugin (WC-228 / WC-232 / WC-236 / WC-240)
+ * UiKitShowcasePlugin (WC-228 / WC-232 / WC-236 / WC-240 / WC-241)
  *
  * The capstone example plugin for the SP1 + SP2 + SP3 + SP4 server-driven
- * plugin-UI block system (SDK 1.10, WC-225–WC-240). It is a SANCTIONED
+ * plugin-UI block system (SDK 1.11, WC-225–WC-241). It is a SANCTIONED
  * example plugin — named for the SDK feature it documents — that proves AND
  * documents the entire pipeline:
  *
@@ -42,6 +42,11 @@ use Whity\Sdk\PluginRequirementsInterface;
  * to `GET /api/uikit/demo/chart-rows` (gated on `uikit:view`, DB-free), whose
  * two series each pick one of the five semantic `--chart-1..5` design tokens —
  * never a raw hex/rgb value.
+ *
+ * As of WC-241, the `dataTable` and `dataList` demos also show inline
+ * client-side sort/filter/pagination: sortable/filterable column flags and a
+ * `pageSize`, all applied entirely to the rows already fetched from the same
+ * `GET /api/uikit/demo/rows` endpoint — no additional route is ever touched.
  *
  * The plugin contributes ONE `screen: 'blocks'` feature whose declarative tree
  * renders a LIVE instance of every one of the 34 block types (21 SP1+SP2 + 12
@@ -743,22 +748,27 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     ],
                     $this->dataBoundDemo(
                         'dataTable',
-                        'A table whose rows are fetched from a plugin endpoint at render time.',
+                        'A table whose rows are fetched from a plugin endpoint at render time. '
+                            . 'The Name column is sortable + filterable, and pageSize turns on '
+                            . 'inline client-side pagination (WC-241) — all three operate over the '
+                            . 'rows already fetched from this one endpoint, no second request.',
                         [
                             'type' => 'dataTable',
                             'source' => '/api/uikit/demo/rows',
                             'columns' => [
-                                ['key' => 'name', 'label' => 'Name'],
-                                ['key' => 'role', 'label' => 'Role'],
+                                ['key' => 'name', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
+                                ['key' => 'role', 'label' => 'Role', 'sortable' => true],
                             ],
+                            'pageSize' => 2,
                         ],
                         <<<'PHP'
                             ['type' => 'dataTable',
                              'source' => '/api/uikit/demo/rows',
                              'columns' => [
-                                 ['key' => 'name', 'label' => 'Name'],
-                                 ['key' => 'role', 'label' => 'Role'],
-                             ]]
+                                 ['key' => 'name', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
+                                 ['key' => 'role', 'label' => 'Role', 'sortable' => true],
+                             ],
+                             'pageSize' => 2]
                             PHP,
                         <<<'PHP'
                             // GET /api/uikit/demo/rows — returns:
@@ -804,16 +814,24 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     ),
                     $this->dataBoundDemo(
                         'dataList',
-                        'An unordered list whose items are fetched from a plugin endpoint.',
+                        'An unordered list whose items are fetched from a plugin endpoint. '
+                            . 'sortable/filterable/pageSize (WC-241) add an alphabetical sort '
+                            . 'toggle, a search box, and inline pagination over the same fetch.',
                         [
                             'type' => 'dataList',
                             'source' => '/api/uikit/demo/rows',
                             'itemField' => 'name',
+                            'sortable' => true,
+                            'filterable' => true,
+                            'pageSize' => 2,
                         ],
                         <<<'PHP'
                             ['type' => 'dataList',
                              'source' => '/api/uikit/demo/rows',
-                             'itemField' => 'name']
+                             'itemField' => 'name',
+                             'sortable' => true,
+                             'filterable' => true,
+                             'pageSize' => 2]
                             PHP,
                         <<<'PHP'
                             // Same GET /api/uikit/demo/rows endpoint — `itemField`

@@ -218,7 +218,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -247,7 +247,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -314,6 +314,11 @@ final class BlockValidator
 
             case 'columnList':
                 self::validateColumnList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'dataColumnList':
+                self::validateDataColumnList($value, $type, $prop, $path, $errors);
 
                 break;
 
@@ -429,6 +434,42 @@ final class BlockValidator
                 || !isset($item['label']) || !\is_string($item['label'])
             ) {
                 $errors[] = "{$path}[{$i}]: each '{$type}.{$prop}' entry must be a {key: string, label: string} object";
+            }
+        }
+    }
+
+    /**
+     * `dataTable.columns` (WC-241): a list of `{key, label}` objects, each
+     * optionally carrying `sortable`/`filterable` booleans that turn on the
+     * web renderer's inline client-side sort/filter for that column. These
+     * are semantic on/off flags only — never an expression, class, or style.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateDataColumnList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a list of {key, label} objects";
+
+            return;
+        }
+
+        foreach ($value as $i => $item) {
+            if (
+                !\is_array($item)
+                || !isset($item['key']) || !\is_string($item['key'])
+                || !isset($item['label']) || !\is_string($item['label'])
+                || (isset($item['sortable']) && !\is_bool($item['sortable']))
+                || (isset($item['filterable']) && !\is_bool($item['filterable']))
+            ) {
+                $errors[] = "{$path}[{$i}]: each '{$type}.{$prop}' entry must be a "
+                    . '{key: string, label: string, sortable?: bool, filterable?: bool} object';
             }
         }
     }

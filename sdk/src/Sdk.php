@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.10).
+ * SDK identity (v1.11).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -41,13 +41,18 @@ namespace Whity\Sdk;
  * 1.10 (`chart` data-bound block type — bar/line/area/pie backed by the same
  * `apiPath`-owned `source` trust boundary as `dataTable`/`dataStat`/`dataList`,
  * plus the new `chartSeriesList` prop-rule kind for its semantic
- * `{key, label, color: 1..5}` series set, WC-240).
+ * `{key, label, color: 1..5}` series set, WC-240) →
+ * 1.11 (`dataTable`/`dataList` inline client-side sort/filter/pagination:
+ * `dataTable.columns` upgraded to the new `dataColumnList` prop-rule kind
+ * (adds optional per-column `sortable`/`filterable` booleans), plus a shared
+ * optional `pageSize` on both leaves — purely additive, applies only to rows
+ * already fetched from the block's single verified `source`, WC-241).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.10.0';
+    public const VERSION = '1.11.0';
 
     /**
      * Static identity only — never instantiated.

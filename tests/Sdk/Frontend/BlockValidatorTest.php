@@ -553,6 +553,149 @@ final class BlockValidatorTest extends TestCase
         $this->assertFalse(BlockContract::isContainer('dataList'));
     }
 
+    // ==================== WC-241: dataTable/dataList inline sort/filter/pagination ====================
+
+    public function testDataTableWithSortableFilterableColumnsAndPageSizeIsValid(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [
+                    ['key' => 'name', 'label' => 'Name', 'sortable' => true, 'filterable' => true],
+                    ['key' => 'role', 'label' => 'Role', 'sortable' => false],
+                ],
+                'pageSize' => 10,
+            ],
+        ]);
+
+        $this->assertSame(['ok' => true, 'errors' => []], $result);
+    }
+
+    public function testDataTableColumnWithNonBoolSortableIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [
+                    ['key' => 'name', 'label' => 'Name', 'sortable' => 'yes'],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('columns', $joined);
+    }
+
+    public function testDataTableColumnWithNonBoolFilterableIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [
+                    ['key' => 'name', 'label' => 'Name', 'filterable' => 1],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('columns', $joined);
+    }
+
+    public function testDataTablePageSizeMustBeAnInteger(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [['key' => 'name', 'label' => 'Name']],
+                'pageSize' => '10',
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('pageSize', $joined);
+    }
+
+    public function testDataListWithSortableFilterableAndPageSizeIsValid(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataList',
+                'source' => '/api/uikit/demo/rows',
+                'itemField' => 'name',
+                'sortable' => true,
+                'filterable' => true,
+                'pageSize' => 5,
+            ],
+        ]);
+
+        $this->assertSame(['ok' => true, 'errors' => []], $result);
+    }
+
+    public function testDataListSortableMustBeABool(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataList',
+                'source' => '/api/uikit/demo/rows',
+                'itemField' => 'name',
+                'sortable' => 'true',
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('sortable', $joined);
+    }
+
+    public function testDataListFilterableMustBeABool(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataList',
+                'source' => '/api/uikit/demo/rows',
+                'itemField' => 'name',
+                'filterable' => 'true',
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('filterable', $joined);
+    }
+
+    /**
+     * A dataTable/dataList declared exactly as before WC-241 (no sortable,
+     * filterable, or pageSize props) must still validate — this is a purely
+     * additive, backward-compatible upgrade.
+     */
+    public function testPreExistingDataTableAndDataListShapesStillValidate(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'dataTable',
+                'source' => '/api/uikit/demo/rows',
+                'columns' => [
+                    ['key' => 'name', 'label' => 'Name'],
+                    ['key' => 'role', 'label' => 'Role'],
+                ],
+            ],
+            [
+                'type' => 'dataList',
+                'source' => '/api/uikit/demo/rows',
+                'itemField' => 'name',
+            ],
+        ]);
+
+        $this->assertSame(['ok' => true, 'errors' => []], $result);
+    }
+
     // ==================== SP4 chart block type (WC-240) ====================
 
     public function testChartWithAllFourTypesIsValid(): void

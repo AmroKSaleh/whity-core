@@ -155,11 +155,18 @@ export interface CodeBlock {
 /**
  * Leaf: a table whose rows are fetched at runtime from `source`.
  * `source` is the versioned API path served by the host (e.g. `/api/v1/x/rows`).
+ *
+ * WC-241: a column may set `sortable`/`filterable` to turn on inline
+ * client-side sort/a per-column text filter for it; `pageSize` turns on
+ * client-side pagination. All three apply ONLY to the rows already fetched
+ * from `source` — none of them trigger a second request or touch any other
+ * route.
  */
 export interface DataTableBlock {
   type: 'dataTable';
   source: string;
-  columns: { key: string; label: string }[];
+  columns: { key: string; label: string; sortable?: boolean; filterable?: boolean }[];
+  pageSize?: number;
   emptyText?: string;
 }
 
@@ -178,12 +185,19 @@ export interface DataStatBlock {
 
 /**
  * Leaf: an ordered or unordered list whose items are fetched at runtime from `source`.
+ *
+ * WC-241: `sortable` turns on an alphabetical asc/desc toggle; `filterable`
+ * turns on a search box over `itemField`; `pageSize` turns on client-side
+ * pagination. All three apply to the rows already fetched from `source`.
  */
 export interface DataListBlock {
   type: 'dataList';
   source: string;
   itemField: string;
   ordered?: boolean;
+  sortable?: boolean;
+  filterable?: boolean;
+  pageSize?: number;
   emptyText?: string;
 }
 

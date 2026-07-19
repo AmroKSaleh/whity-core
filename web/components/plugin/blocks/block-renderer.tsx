@@ -7,9 +7,12 @@ import type { Icon } from '@tabler/icons-react';
 import {
   IconArrowDownRight,
   IconArrowUpRight,
+  IconChevronDown,
+  IconChevronUp,
   IconMinus,
   IconPointFilled,
   IconRefresh,
+  IconSearch,
 } from '@tabler/icons-react';
 import type {
   ActionButtonBlock,
@@ -49,6 +52,7 @@ import type {
 } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
 import { Input } from '@amroksaleh/ui/input';
+import { Pagination } from '@amroksaleh/ui/pagination';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import {
   Select,
@@ -173,6 +177,24 @@ function isColumnList(
         typeof (item as { key?: unknown }).key === 'string' &&
         typeof (item as { label?: unknown }).label === 'string'
     )
+  );
+}
+
+function isDataColumnList(
+  value: unknown
+): value is { key: string; label: string; sortable?: boolean; filterable?: boolean }[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => {
+      if (typeof item !== 'object' || item === null) return false;
+      const v = item as { key?: unknown; label?: unknown; sortable?: unknown; filterable?: unknown };
+      return (
+        typeof v.key === 'string' &&
+        typeof v.label === 'string' &&
+        (v.sortable === undefined || typeof v.sortable === 'boolean') &&
+        (v.filterable === undefined || typeof v.filterable === 'boolean')
+      );
+    })
   );
 }
 
@@ -565,6 +587,150 @@ function CodeRenderer({ block }: { block: CodeBlock }) {
 // ---- SP2 data-bound renderers (WC-231) ----
 
 /**
+ * InteractiveDataTable (WC-241) — renders the rows already fetched by
+ * `DataTableRenderer` with inline client-side sort/filter/pagination. All
+ * three operate ENTIRELY on the in-memory `rows` array: there is no second
+ * fetch, no route other than the block's original (already ownership
+ * verified) `source` is ever touched. Sortable/filterable are per-column
+ * booleans; a column with neither behaves exactly like a static `table`.
+ */
+function InteractiveDataTable({
+  columns,
+  rows,
+  pageSize,
+}: {
+  columns: { key: string; label: string; sortable?: boolean; filterable?: boolean }[];
+  rows: Record<string, string>[];
+  pageSize?: number;
+}) {
+  const [filters, setFilters] = React.useState<Record<string, string>>({});
+  const [sortKey, setSortKey] = React.useState<string | null>(null);
+  const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc');
+  const [page, setPage] = React.useState(1);
+
+  const filterableColumns = columns.filter((c) => c.filterable === true);
+
+  const filtered = React.useMemo(() => {
+    const active = Object.entries(filters).filter(([, v]) => v.trim() !== '');
+    if (active.length === 0) return rows;
+    return rows.filter((row) =>
+      active.every(([key, needle]) =>
+        (row[key] ?? '').toLowerCase().includes(needle.trim().toLowerCase())
+      )
+    );
+  }, [rows, filters]);
+
+  const sorted = React.useMemo(() => {
+    if (sortKey === null) return filtered;
+    const copy = [...filtered];
+    copy.sort((a, b) => {
+      const cmp = (a[sortKey] ?? '').localeCompare(b[sortKey] ?? '');
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }, [filtered, sortKey, sortDir]);
+
+  const paginate = pageSize !== undefined && pageSize > 0;
+  const effectivePageSize = paginate ? pageSize : Math.max(sorted.length, 1);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / effectivePageSize));
+  const clampedPage = Math.min(page, totalPages);
+  const paged = paginate
+    ? sorted.slice((clampedPage - 1) * effectivePageSize, clampedPage * effectivePageSize)
+    : sorted;
+
+  const handleSort = (col: { key: string; sortable?: boolean }) => {
+    if (col.sortable !== true) return;
+    if (sortKey === col.key) {
+      if (sortDir === 'asc') {
+        setSortDir('desc');
+      } else {
+        setSortKey(null);
+        setSortDir('asc');
+      }
+    } else {
+      setSortKey(col.key);
+      setSortDir('asc');
+    }
+    setPage(1);
+  };
+
+  return (
+    <div className="space-y-2">
+      {filterableColumns.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {filterableColumns.map((col) => (
+            <div key={col.key} className="relative">
+              <IconSearch
+                className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                value={filters[col.key] ?? ''}
+                onChange={(e) => {
+                  setFilters((f) => ({ ...f, [col.key]: e.target.value }));
+                  setPage(1);
+                }}
+                placeholder={`Filter ${col.label}`}
+                aria-label={`Filter ${col.label}`}
+                className="h-8 ps-7 text-xs"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
+        <table className="w-full border-collapse text-xs/relaxed">
+          <thead>
+            <tr className="border-b border-border bg-muted/40">
+              {columns.map((col) => (
+                <th
+                  key={col.key}
+                  onClick={() => handleSort(col)}
+                  className={cn(
+                    'px-3 py-2 text-start font-medium text-muted-foreground',
+                    col.sortable === true && 'cursor-pointer select-none hover:bg-muted/60'
+                  )}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col.label}
+                    {col.sortable === true && sortKey === col.key && (
+                      sortDir === 'asc' ? (
+                        <IconChevronUp className="size-3.5" aria-hidden />
+                      ) : (
+                        <IconChevronDown className="size-3.5" aria-hidden />
+                      )
+                    )}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-b border-border last:border-0">
+                {columns.map((col) => (
+                  <td key={col.key} className="px-3 py-2 text-foreground">
+                    {row[col.key] ?? ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {paginate && (
+        <Pagination
+          page={clampedPage}
+          perPage={effectivePageSize}
+          total={sorted.length}
+          onPageChange={setPage}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
  * DataTableRenderer — fetches rows from `block.source` and reuses
  * `TableRenderer` for the ready state.
  */
@@ -644,7 +810,7 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
           <IconRefresh className="size-3.5" aria-hidden />
         </Button>
       </div>
-      <TableRenderer block={{ type: 'table', columns: block.columns, rows }} />
+      <InteractiveDataTable columns={block.columns} rows={rows} pageSize={block.pageSize} />
     </div>
   );
 }
@@ -743,6 +909,101 @@ function DataStatRenderer({ block }: { block: DataStatBlock }) {
 }
 
 /**
+ * InteractiveList (WC-241) — renders the items already fetched by
+ * `DataListRenderer` with an optional inline search box, an alphabetical
+ * asc/desc sort toggle, and client-side pagination. All three operate
+ * entirely on the in-memory `items` array — no second fetch.
+ */
+function InteractiveList({
+  items,
+  ordered,
+  sortable,
+  filterable,
+  pageSize,
+}: {
+  items: string[];
+  ordered?: boolean;
+  sortable?: boolean;
+  filterable?: boolean;
+  pageSize?: number;
+}) {
+  const [filterText, setFilterText] = React.useState('');
+  const [sortDir, setSortDir] = React.useState<'asc' | 'desc' | null>(null);
+  const [page, setPage] = React.useState(1);
+
+  const filtered = React.useMemo(() => {
+    if (filterable !== true || filterText.trim() === '') return items;
+    const needle = filterText.trim().toLowerCase();
+    return items.filter((item) => item.toLowerCase().includes(needle));
+  }, [items, filterable, filterText]);
+
+  const sorted = React.useMemo(() => {
+    if (sortDir === null) return filtered;
+    const copy = [...filtered].sort((a, b) => a.localeCompare(b));
+    return sortDir === 'asc' ? copy : copy.reverse();
+  }, [filtered, sortDir]);
+
+  const paginate = pageSize !== undefined && pageSize > 0;
+  const effectivePageSize = paginate ? pageSize : Math.max(sorted.length, 1);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / effectivePageSize));
+  const clampedPage = Math.min(page, totalPages);
+  const paged = paginate
+    ? sorted.slice((clampedPage - 1) * effectivePageSize, clampedPage * effectivePageSize)
+    : sorted;
+
+  const toggleSort = () => {
+    setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    setPage(1);
+  };
+
+  return (
+    <div className="space-y-2">
+      {(filterable === true || sortable === true) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {filterable === true && (
+            <div className="relative">
+              <IconSearch
+                className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                value={filterText}
+                onChange={(e) => {
+                  setFilterText(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Filter items"
+                aria-label="Filter items"
+                className="h-8 ps-7 text-xs"
+              />
+            </div>
+          )}
+          {sortable === true && (
+            <Button type="button" variant="outline" size="sm" onClick={toggleSort}>
+              {sortDir === 'desc' ? (
+                <IconChevronDown className="size-3.5" aria-hidden />
+              ) : (
+                <IconChevronUp className="size-3.5" aria-hidden />
+              )}
+              Sort
+            </Button>
+          )}
+        </div>
+      )}
+      <ListRenderer block={{ type: 'list', ordered, items: paged }} />
+      {paginate && (
+        <Pagination
+          page={clampedPage}
+          perPage={effectivePageSize}
+          total={sorted.length}
+          onPageChange={setPage}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
  * DataListRenderer — fetches rows from `block.source` and reuses
  * `ListRenderer` for the ready state.
  */
@@ -818,7 +1079,13 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
           <IconRefresh className="size-3.5" aria-hidden />
         </Button>
       </div>
-      <ListRenderer block={{ type: 'list', ordered: block.ordered, items }} />
+      <InteractiveList
+        items={items}
+        ordered={block.ordered}
+        sortable={block.sortable}
+        filterable={block.filterable}
+        pageSize={block.pageSize}
+      />
     </div>
   );
 }
@@ -1307,7 +1574,7 @@ function BlockNode({ block }: { block: Block }): React.ReactElement {
         <UnsupportedBlock type="code" />
       );
     case 'dataTable':
-      return isNonEmptyString(block.source) && isColumnList(block.columns) ? (
+      return isNonEmptyString(block.source) && isDataColumnList(block.columns) ? (
         <DataTableRenderer block={block} />
       ) : (
         <UnsupportedBlock type="dataTable" />
