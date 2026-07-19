@@ -51,7 +51,7 @@ function catalogResponse(plugins = CATALOG) {
   return { data: { data: plugins, store_url: 'https://store.example.com', count: plugins.length }, error: undefined };
 }
 
-function routeGet(allowed = allowedResponse(), catalog = catalogResponse()) {
+function routeGet(allowed: unknown = allowedResponse(), catalog: unknown = catalogResponse()) {
   mockApiGet.mockImplementation((path: string) => {
     if (path === '/api/v1/plugins/store/allowed') return Promise.resolve(allowed);
     if (path === '/api/v1/plugins/store/catalog') return Promise.resolve(catalog);
@@ -124,4 +124,83 @@ test('Install posts install-from-store with the store_url, slug and version', as
       }),
     ),
   );
+});
+
+/**
+ * Regression: a failed install (e.g. no/invalid store token, already
+ * installed, allowlist rejection) used to show the SAME generic
+ * "Failed to install X" toast for every reason, leaving the actual cause
+ * (most commonly: no download token was supplied) invisible to the operator.
+ * The backend's real `error` message must now surface verbatim.
+ */
+test('Install surfaces the real backend error message on failure', async () => {
+  routeGet();
+  mockApiPost.mockResolvedValue({
+    data: undefined,
+    error: { error: 'A valid store download token is required.' },
+  });
+  render(<PluginStorePage />);
+  await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('https://store.example.com'));
+  fireEvent.click(screen.getByRole('button', { name: /Browse/i }));
+  await screen.findByText('Quote of the Day');
+  fireEvent.click(screen.getAllByRole('button', { name: /Install/i })[0]);
+  await waitFor(() => expect(addToast).toHaveBeenCalledWith('A valid store download token is required.', 'error'));
+});
+
+test('Browse surfaces the real backend error message on failure', async () => {
+  routeGet(allowedResponse(), { data: undefined, error: { error: 'The store host is not in the trusted allowlist.' } });
+  render(<PluginStorePage />);
+  await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('https://store.example.com'));
+  fireEvent.click(screen.getByRole('button', { name: /Browse/i }));
+  await waitFor(() =>
+    expect(addToast).toHaveBeenCalledWith('The store host is not in the trusted allowlist.', 'error'),
+  );
+});
+
+describe('mint token', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('mints a token from the selected store and fills the field', async () => {
+    routeGet();
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: { token: 'wps_abc123', label: 'admin-store-page' } }),
+    });
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    render(<PluginStorePage />);
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('https://store.example.com'));
+
+    const mintButton = screen.getByTitle(/Mint a download token/i);
+    fireEvent.click(mintButton);
+
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://store.example.com/api/v1/plugin-store/tokens',
+        expect.objectContaining({ method: 'POST', credentials: 'include' }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByPlaceholderText(/required to install/i)).toHaveValue('wps_abc123'));
+    expect(addToast).toHaveBeenCalledWith('Store token minted and filled in below.', 'success');
+  });
+
+  test('surfaces the real error when minting fails (e.g. not an admin on that store)', async () => {
+    routeGet();
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({ error: 'Forbidden' }),
+    });
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    render(<PluginStorePage />);
+    await waitFor(() => expect(screen.getByRole('combobox')).toHaveValue('https://store.example.com'));
+    fireEvent.click(screen.getByTitle(/Mint a download token/i));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('Forbidden', 'error'));
+    expect(screen.getByPlaceholderText(/required to install/i)).toHaveValue('');
+  });
 });
