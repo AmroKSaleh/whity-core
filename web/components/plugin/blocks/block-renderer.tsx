@@ -392,19 +392,16 @@ function TextRenderer({ block }: { block: TextBlock }) {
   );
 }
 
-const ALERT_TONE_CLASS: Record<AlertBlock['variant'], string> = {
-  info: 'border-info/40 text-info',
-  success: 'border-success/40 text-success',
-  warning: 'border-warning/40 text-warning',
-  danger: 'border-destructive/40 text-destructive',
+const ALERT_VARIANT: Record<AlertBlock['variant'], React.ComponentProps<typeof Alert>['variant']> = {
+  info: 'info',
+  success: 'success',
+  warning: 'warning',
+  danger: 'destructive',
 };
 
 function AlertRenderer({ block }: { block: AlertBlock }) {
   return (
-    <Alert
-      variant={block.variant === 'danger' ? 'destructive' : 'default'}
-      className={ALERT_TONE_CLASS[block.variant]}
-    >
+    <Alert variant={ALERT_VARIANT[block.variant]}>
       {isNonEmptyString(block.title) && <AlertTitle>{block.title}</AlertTitle>}
       <AlertDescription>{block.body}</AlertDescription>
     </Alert>

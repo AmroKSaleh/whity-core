@@ -212,7 +212,7 @@ export default function AdminStats() {
                   <StatsChart
                     data={stats?.growth.users ?? []}
                     label="new users"
-                    color="hsl(var(--primary))"
+                    color="var(--primary)"
                   />
                 )}
               </TabsContent>
@@ -223,7 +223,7 @@ export default function AdminStats() {
                   <StatsChart
                     data={stats?.growth.tenants ?? []}
                     label="new tenants"
-                    color="hsl(var(--chart-2, 25 95% 53%))"
+                    color="var(--chart-2)"
                   />
                 )}
               </TabsContent>

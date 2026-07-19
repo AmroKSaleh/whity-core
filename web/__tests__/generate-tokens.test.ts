@@ -30,9 +30,11 @@ interface GeneratorModule {
   loadBase: () => Record<string, unknown>;
   oklchToLinearSrgb: (L: number, C: number, H: number) => [number, number, number];
   oklchToArgbHex: (value: string) => string;
+  oklchToCssHex: (value: string) => string;
   toCamelCase: (value: string) => string;
   remToPx: (value: string) => number;
   generateTokensJson: (base: unknown) => string;
+  generateThemeJson: (base: unknown) => string;
   generateDart: (base: unknown) => string;
   generateCssRegion: (base: unknown) => string;
   syncGlobalsCss: (existing: string, base: unknown) => string;
@@ -90,6 +92,15 @@ describe('oklch conversion', () => {
   it('maps pure white and black correctly', () => {
     expect(gen.oklchToArgbHex('oklch(1 0 0)')).toBe('0xFFFFFFFF');
     expect(gen.oklchToArgbHex('oklch(0 0 0)')).toBe('0xFF000000');
+  });
+
+  it('converts the light brand blue to its expected CSS hex', () => {
+    expect(gen.oklchToCssHex('oklch(0.5 0.16 255)')).toBe('#0961bb');
+  });
+
+  it('appends an alpha byte only for translucent colors', () => {
+    expect(gen.oklchToCssHex('oklch(1 0 0)')).toBe('#ffffff');
+    expect(gen.oklchToCssHex('oklch(1 0 0 / 10%)')).toBe('#ffffff1a');
   });
 });
 
@@ -177,6 +188,28 @@ describe('generated outputs', () => {
     expect(json.light.brand).toBe('oklch(0.5 0.16 255)');
     expect(json.dark.brand).toBeDefined();
     expect(Object.keys(json.typography.fontSize).length).toBeGreaterThan(0);
+  });
+
+  it('emits a colors-only master theme.json with light/dark oklch + resolved hex', () => {
+    const theme = JSON.parse(gen.generateThemeJson(base)) as {
+      version: string;
+      colors: Record<string, { light: string; dark: string; lightHex: string; darkHex: string }>;
+    };
+    expect(typeof theme.version).toBe('string');
+    expect(theme.colors.brand).toEqual({
+      light: 'oklch(0.5 0.16 255)',
+      dark: 'oklch(0.7 0.15 255)',
+      lightHex: '#0961bb',
+      darkHex: expect.stringMatching(/^#[0-9a-f]{6}$/),
+    });
+    // Colors-only: no typography/spacing/radius leak into this file.
+    expect(theme).not.toHaveProperty('typography');
+    expect(theme).not.toHaveProperty('spacing');
+    // Every color in base.json's light palette appears, alphabetically.
+    const expectedNames = Object.keys(
+      (base as { colors: { light: Record<string, string> } }).colors.light
+    ).sort();
+    expect(Object.keys(theme.colors)).toEqual(expectedNames);
   });
 
   it('is idempotent: the generated CSS region round-trips through syncGlobalsCss', () => {

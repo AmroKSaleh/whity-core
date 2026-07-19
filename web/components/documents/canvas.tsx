@@ -351,7 +351,7 @@ export function Canvas({
                     padding: '0.4mm 0.8mm',
                     borderRadius: '0.6mm',
                     background: 'var(--color-primary)',
-                    color: '#fff',
+                    color: 'var(--color-primary-foreground)',
                     whiteSpace: 'nowrap',
                     pointerEvents: 'none',
                     zIndex: 9999,
@@ -375,7 +375,7 @@ export function Canvas({
                       height: '2mm',
                       transform: 'translate(-50%, -50%)',
                       background: 'var(--color-primary)',
-                      border: '0.3mm solid #fff',
+                      border: '0.3mm solid var(--color-primary-foreground)',
                       cursor: hd.cursor,
                       zIndex: 9999,
                     }}
