@@ -1,0 +1,46 @@
+version: 2
+updates:
+  # Root Composer package (whity-core backend).
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      composer-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Plugin SDK — published standalone; keep its own update cadence since a
+  # backward-compat contract applies here that doesn't apply to the app.
+  - package-ecosystem: "composer"
+    directory: "/sdk"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      composer-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # npm workspace root (covers web/, packages/ui, packages/api-client).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions workflow dependencies (would have surfaced #198).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  # Dockerfile base images.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10

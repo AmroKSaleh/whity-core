@@ -1,14 +1,39 @@
 # Security Policy
 
+## Supported Versions
+
+Whity Core is pre-1.0 and has no legacy-compatibility stance: there is one
+supported line — the latest tagged release plus `main`. Security fixes land
+on `main` and are included in the next tag; there is no backport policy to
+older tags while the project is pre-1.0.
+
+| Version       | Supported          |
+| ------------- | ------------------ |
+| `main` (HEAD) | :white_check_mark: |
+| Latest tag    | :white_check_mark: |
+| Older tags    | :x:                |
+
 ## Reporting Vulnerabilities
 
-**Do not open public issues for security vulnerabilities.**
+**Do not open public issues for security vulnerabilities.** This keeps
+exploit details out of the public tracker until a fix ships.
 
 Email: **amroksaleh@gmail.com**
 
 Include: description, affected versions, reproduction steps, potential impact.
 
 Response time: 48 hours. Patch: within 7 days.
+
+### Coordinated Disclosure
+
+- We ask reporters to give us a reasonable window (target: 7 days for a
+  patch, longer only by mutual agreement) before any public disclosure.
+- We will acknowledge the report, confirm reproduction, and keep the reporter
+  updated on remediation progress.
+- Once a fix is released, we credit the reporter (unless they prefer to stay
+  anonymous) in the release notes / `CHANGELOG.md`.
+- No bug-bounty program exists today; reports are handled on a best-effort,
+  goodwill basis.
 
 ## Critical Security Principles
 
