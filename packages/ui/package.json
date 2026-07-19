@@ -16,6 +16,7 @@
     "./card": "./src/card.tsx",
     "./dialog": "./src/dialog.tsx",
     "./dropdown-menu": "./src/dropdown-menu.tsx",
+    "./empty-state": "./src/empty-state.tsx",
     "./form": "./src/form.tsx",
     "./input": "./src/input.tsx",
     "./math-text": "./src/math-text.tsx",
