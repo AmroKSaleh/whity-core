@@ -255,6 +255,138 @@ final class InstallFromStoreApiHandlerTest extends TestCase
         self::assertArrayNotHasKey('Authorization', $calls[0]['headers']);
     }
 
+    // ── Browse / allowed-stores (admin UI surface) ───────────────────────────
+
+    /**
+     * Build a handler with a stub JSON catalogue fetcher (for browse tests).
+     *
+     * @param array<string, mixed>|null $jsonReturns catalogue payload the store "returns"
+     * @param array{0: list<string>}     $urls        by-ref sink of fetched URLs (index 0)
+     */
+    private function browseHandler(string $allowlist, ?array $jsonReturns, array &$urls): InstallFromStoreApiHandler
+    {
+        $pdo = SchemaFromMigrations::make(true);
+        $settings = new SettingsService(
+            new GlobalSettingsRepository($pdo),
+            new TenantSettingsRepository($pdo)
+        );
+        $settings->setGlobal(SettingsRegistry::PLUGINS_STORE_ALLOWED_HOSTS, $allowlist);
+
+        $urls = [];
+        $fetchJson = function (string $url) use (&$urls, $jsonReturns): ?array {
+            $urls[] = $url;
+            return $jsonReturns;
+        };
+
+        // fetchPackage unused here; pass a null-returning stub in slot 5.
+        $fetchPackage = static fn (string $u, array $h): ?string => null;
+
+        return new InstallFromStoreApiHandler($this->pluginDir, $settings, null, null, $fetchPackage, $fetchJson);
+    }
+
+    private function catalogRequest(string $qs): Request
+    {
+        return new Request('GET', '/api/plugins/store/catalog?' . $qs, [], '');
+    }
+
+    /** @return array<string, mixed> */
+    private function sampleCatalog(): array
+    {
+        return ['data' => [
+            ['slug' => 'quote-of-day', 'name' => 'Quote of the Day', 'description' => 'A rotating quote.', 'tags' => ['demo', 'fun']],
+            ['slug' => 'system-ping', 'name' => 'System Ping', 'description' => 'Health pong.', 'tags' => ['demo', 'ops']],
+        ]];
+    }
+
+    public function testAllowedStoresReportsDisabledWhenEmpty(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('', null, $urls);
+        $res = $handler->allowedStores(new Request('GET', '/api/plugins/store/allowed'));
+        self::assertSame(200, $res->getStatusCode());
+        $body = json_decode($res->getBody(), true);
+        self::assertFalse($body['data']['enabled']);
+        self::assertSame([], $body['data']['hosts']);
+    }
+
+    public function testAllowedStoresListsConfiguredHosts(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com, Other.Example.COM', null, $urls);
+        $res = $handler->allowedStores(new Request('GET', '/api/plugins/store/allowed'));
+        $body = json_decode($res->getBody(), true);
+        self::assertTrue($body['data']['enabled']);
+        self::assertSame(['store.example.com', 'other.example.com'], $body['data']['hosts']);
+    }
+
+    public function testBrowseRequiresStoreUrl(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com', $this->sampleCatalog(), $urls);
+        $res = $handler->browseCatalog($this->catalogRequest('q=quote'));
+        self::assertSame(422, $res->getStatusCode());
+        self::assertSame([], $urls);
+    }
+
+    public function testBrowseDisabledWhenAllowlistEmpty(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('', $this->sampleCatalog(), $urls);
+        $res = $handler->browseCatalog($this->catalogRequest('store_url=https://store.example.com'));
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame([], $urls, 'no outbound request when disabled');
+    }
+
+    public function testBrowseRejectsHostNotOnAllowlist(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com', $this->sampleCatalog(), $urls);
+        $res = $handler->browseCatalog($this->catalogRequest('store_url=https://169.254.169.254'));
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame([], $urls, 'the allowlist must block before any fetch');
+    }
+
+    public function testBrowseReturnsCatalogueAndFetchesCorrectUrl(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com', $this->sampleCatalog(), $urls);
+        $res = $handler->browseCatalog($this->catalogRequest('store_url=https://store.example.com'));
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame(['https://store.example.com/api/v1/plugin-store/plugins'], $urls);
+        $body = json_decode($res->getBody(), true);
+        self::assertCount(2, $body['data']);
+        self::assertSame('https://store.example.com', $body['store_url']);
+        self::assertSame(2, $body['count']);
+    }
+
+    public function testBrowseSearchFiltersCatalogue(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com', $this->sampleCatalog(), $urls);
+        // 'ops' matches only system-ping (via its tag).
+        $res = $handler->browseCatalog($this->catalogRequest('store_url=https://store.example.com&q=ops'));
+        $body = json_decode($res->getBody(), true);
+        self::assertCount(1, $body['data']);
+        self::assertSame('system-ping', $body['data'][0]['slug']);
+    }
+
+    public function testBrowseFetchFailureReturns502(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com', null, $urls); // fetchJson returns null
+        $res = $handler->browseCatalog($this->catalogRequest('store_url=https://store.example.com'));
+        self::assertSame(502, $res->getStatusCode());
+        self::assertCount(1, $urls);
+    }
+
+    public function testBrowseMalformedCatalogueReturns502(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com', ['unexpected' => true], $urls);
+        $res = $handler->browseCatalog($this->catalogRequest('store_url=https://store.example.com'));
+        self::assertSame(502, $res->getStatusCode());
+    }
+
     private function removeRecursive(string $path): void
     {
         if (!is_dir($path)) {

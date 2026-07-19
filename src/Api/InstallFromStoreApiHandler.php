@@ -42,10 +42,17 @@ final class InstallFromStoreApiHandler
     /** @var \Closure(string, array<string, string>): ?string */
     private \Closure $fetchPackage;
 
+    /** @var \Closure(string): ?array<string, mixed> */
+    private \Closure $fetchJson;
+
     /**
      * @param \Closure(string, array<string, string>): ?string|null $fetchPackage
      *   Injectable package fetcher (url, headers) => raw bytes|null. Defaults to a
      *   size-capped, SSRF-guarded HttpFetcher; stubbed in tests.
+     * @param \Closure(string): ?array<string, mixed>|null $fetchJson
+     *   Injectable JSON fetcher (url) => decoded array|null, used to read a store's
+     *   public catalogue. Defaults to the same SSRF-guarded HttpFetcher; stubbed
+     *   in tests.
      */
     public function __construct(
         private readonly string $pluginDir,
@@ -53,10 +60,13 @@ final class InstallFromStoreApiHandler
         private readonly ?PluginLoader $pluginLoader = null,
         private readonly ?AuditLogger $auditLogger = null,
         ?\Closure $fetchPackage = null,
+        ?\Closure $fetchJson = null,
     ) {
         $this->fetchPackage = $fetchPackage ?? static fn (string $url, array $headers): ?string
             => (new HttpFetcher(timeoutSeconds: 15, maxBytes: PluginInstaller::MAX_UPLOAD_BYTES))
                 ->getBinary($url, $headers);
+        $this->fetchJson = $fetchJson ?? static fn (string $url): ?array
+            => (new HttpFetcher(timeoutSeconds: 15))->getJson($url);
     }
 
     /**
@@ -86,38 +96,13 @@ final class InstallFromStoreApiHandler
         }
 
         // ── SSRF allowlist (primary control) ─────────────────────────────────
-        $allowed = $this->allowedHosts();
-        if ($allowed === []) {
-            return Response::error(
-                'Installing from a store is disabled (no trusted store hosts are configured).',
-                403
-            );
-        }
-        // store_url must be a BARE https origin — scheme + allowlisted host + (only)
-        // the default 443 port. Rejecting any path/query/fragment/userinfo and any
-        // non-443 port keeps the fetch on the vetted host AND blocks aiming the
-        // server at other TCP ports of that host (e.g. a co-located Redis).
-        $parts = parse_url($storeUrl);
-        if (!is_array($parts)) {
-            return Response::error('The store URL is malformed.', 422);
-        }
-        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
-        $host = strtolower((string) ($parts['host'] ?? ''));
-        $port = $parts['port'] ?? null;
-        $path = (string) ($parts['path'] ?? '');
-        if ($scheme !== 'https' || $host === '' || !in_array($host, $allowed, true)) {
-            return Response::error('The store host is not in the trusted allowlist.', 403);
-        }
-        if (($port !== null && $port !== 443)
-            || isset($parts['user']) || isset($parts['pass'])
-            || isset($parts['query']) || isset($parts['fragment'])
-            || ($path !== '' && $path !== '/')
-        ) {
-            return Response::error('The store URL must be a bare https origin (no path, query, port or credentials).', 422);
+        [$origin, $originError] = $this->resolveStoreOrigin($storeUrl);
+        if ($originError !== null) {
+            return $originError;
         }
 
         // ── Fetch (SSRF-guarded, token-authenticated) ────────────────────────
-        $downloadUrl = rtrim($storeUrl, '/')
+        $downloadUrl = $origin
             . '/api/v1/plugin-store/plugins/' . rawurlencode($slug)
             . '/versions/' . rawurlencode($version) . '/download';
 
@@ -153,6 +138,152 @@ final class InstallFromStoreApiHandler
         }
 
         return Response::json(['data' => $entry], 201);
+    }
+
+    /**
+     * GET /api/plugins/store/allowed — the trusted store hosts the operator has
+     * configured, so the admin UI can offer a store picker and know whether the
+     * feature is on. Read-only, no outbound request.
+     *
+     * @param array<string, string> $params
+     */
+    public function allowedStores(Request $request, array $params = []): Response
+    {
+        $hosts = $this->allowedHosts();
+
+        return Response::json([
+            'data' => [
+                'enabled' => $hosts !== [],
+                'hosts' => $hosts,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/plugins/store/catalog?store_url=…&q=… — browse (and search) a
+     * trusted store's PUBLIC catalogue on the caller's behalf. The host must be
+     * on the allowlist (same SSRF control as install); the browser never talks to
+     * the store directly. `q` filters by slug/name/description/tags (substring,
+     * case-insensitive). Never leaks internal errors.
+     *
+     * @param array<string, string> $params
+     */
+    public function browseCatalog(Request $request, array $params = []): Response
+    {
+        $query = [];
+        $qs = parse_url($request->getPath(), PHP_URL_QUERY);
+        if (is_string($qs) && $qs !== '') {
+            parse_str($qs, $query);
+        }
+        // parse_str can yield arrays (e.g. `?q[]=x`); accept only scalar strings.
+        $storeUrlRaw = $query['store_url'] ?? '';
+        $searchRaw = $query['q'] ?? '';
+        $storeUrl = is_string($storeUrlRaw) ? trim($storeUrlRaw) : '';
+        $search = is_string($searchRaw) ? strtolower(trim($searchRaw)) : '';
+
+        if ($storeUrl === '') {
+            return Response::error('store_url is required.', 422);
+        }
+
+        [$origin, $originError] = $this->resolveStoreOrigin($storeUrl);
+        if ($originError !== null) {
+            return $originError;
+        }
+
+        try {
+            $payload = ($this->fetchJson)($origin . '/api/v1/plugin-store/plugins');
+        } catch (\Throwable $e) {
+            error_log('[StoreBrowse] catalogue fetch refused/failed: ' . $e->getMessage());
+            return Response::error('The store catalogue could not be fetched.', 502);
+        }
+        if (!is_array($payload) || !isset($payload['data']) || !is_array($payload['data'])) {
+            return Response::error('The store returned an unexpected catalogue response.', 502);
+        }
+
+        /** @var list<array<string, mixed>> $plugins */
+        $plugins = array_values(array_filter($payload['data'], 'is_array'));
+
+        if ($search !== '') {
+            $plugins = array_values(array_filter(
+                $plugins,
+                static fn (array $p): bool => self::matchesSearch($p, $search)
+            ));
+        }
+
+        return Response::json([
+            'data' => $plugins,
+            'store_url' => $origin,
+            'count' => count($plugins),
+        ]);
+    }
+
+    /**
+     * Whether a catalogue entry matches a lower-cased search term across its
+     * slug, name, description and tags.
+     *
+     * @param array<string, mixed> $plugin
+     */
+    private static function matchesSearch(array $plugin, string $needle): bool
+    {
+        $haystacks = [
+            (string) ($plugin['slug'] ?? ''),
+            (string) ($plugin['name'] ?? ''),
+            (string) ($plugin['description'] ?? ''),
+            (string) ($plugin['author'] ?? ''),
+        ];
+        if (isset($plugin['tags']) && is_array($plugin['tags'])) {
+            foreach ($plugin['tags'] as $tag) {
+                $haystacks[] = (string) $tag;
+            }
+        }
+        foreach ($haystacks as $h) {
+            if ($h !== '' && str_contains(strtolower($h), $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Validate that $storeUrl is a BARE https origin whose host is on the operator
+     * allowlist — the single SSRF gate shared by install + browse. Rejecting any
+     * path/query/fragment/userinfo and any non-443 port keeps the fetch on the
+     * vetted host AND blocks aiming the server at other TCP ports of that host
+     * (e.g. a co-located Redis).
+     *
+     * @return array{0: ?string, 1: ?Response} [normalized `https://host` origin, error-to-return]
+     */
+    private function resolveStoreOrigin(string $storeUrl): array
+    {
+        $allowed = $this->allowedHosts();
+        if ($allowed === []) {
+            return [null, Response::error(
+                'Installing from a store is disabled (no trusted store hosts are configured).',
+                403
+            )];
+        }
+
+        $parts = parse_url($storeUrl);
+        if (!is_array($parts)) {
+            return [null, Response::error('The store URL is malformed.', 422)];
+        }
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $port = $parts['port'] ?? null;
+        $path = (string) ($parts['path'] ?? '');
+        if ($scheme !== 'https' || $host === '' || !in_array($host, $allowed, true)) {
+            return [null, Response::error('The store host is not in the trusted allowlist.', 403)];
+        }
+        if (($port !== null && $port !== 443)
+            || isset($parts['user']) || isset($parts['pass'])
+            || isset($parts['query']) || isset($parts['fragment'])
+            || ($path !== '' && $path !== '/')
+        ) {
+            return [null, Response::error('The store URL must be a bare https origin (no path, query, port or credentials).', 422)];
+        }
+
+        return ['https://' . $host, null];
     }
 
     /**
