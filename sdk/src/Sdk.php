@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.9).
+ * SDK identity (v1.10).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -37,13 +37,17 @@ namespace Whity\Sdk;
  * `fileInput`, `colorInput` — plus `submitButton` and `actionButton`; new
  * `inputName`/`selectOptions`/`submitSpec` prop-rule kinds; form-ancestor
  * enforcement and per-form duplicate-name detection in the validator, WC-233) →
- * 1.9 (MCP prompt contribution point: {@see PluginMcpInterface}, WC-7abb732f).
+ * 1.9 (MCP prompt contribution point: {@see PluginMcpInterface}, WC-7abb732f) →
+ * 1.10 (`chart` data-bound block type — bar/line/area/pie backed by the same
+ * `apiPath`-owned `source` trust boundary as `dataTable`/`dataStat`/`dataList`,
+ * plus the new `chartSeriesList` prop-rule kind for its semantic
+ * `{key, label, color: 1..5}` series set, WC-240).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.9.0';
+    public const VERSION = '1.10.0';
 
     /**
      * Static identity only — never instantiated.

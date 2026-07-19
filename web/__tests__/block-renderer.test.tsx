@@ -804,3 +804,142 @@ describe('BlockRenderer — data-bound blocks (WC-231)', () => {
     expect(container.querySelector('img')).toBeNull();
   });
 });
+
+// ---- WC-240: chart (SP4) ----
+
+/**
+ * recharts' ResponsiveContainer never renders in jsdom (no layout engine) —
+ * stub it to a fixed size so the underlying chart actually mounts.
+ */
+jest.mock('recharts', () => {
+  const actual = jest.requireActual('recharts');
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactNode }) => (
+      <div style={{ width: 400, height: 300 }}>{children}</div>
+    ),
+  };
+});
+
+describe('BlockRenderer — chart (WC-240)', () => {
+  const series = [{ key: 'count', label: 'Count', color: 1 as const }];
+
+  it('shows loading skeleton before apiClient resolves', () => {
+    mockApiClient.mockReturnValue(new Promise(() => undefined));
+
+    const { container } = render(
+      <BlockRenderer
+        blocks={[
+          { type: 'chart', source: '/api/v1/x/rows', chartType: 'bar', xField: 'role', series },
+        ]}
+      />
+    );
+
+    expect(container.querySelector('[data-slot="block-data-loading"]')).not.toBeNull();
+  });
+
+  it('ready: renders an img-role chart labelled with the series name', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [{ role: 'Admin', count: 3 }] })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          { type: 'chart', source: '/api/v1/x/rows', chartType: 'bar', xField: 'role', series },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Count' })).toBeInTheDocument());
+  });
+
+  it('error: renders error state with Retry button', async () => {
+    mockApiClient.mockResolvedValue(stubResponse(false, 500, { error: 'fail' }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          { type: 'chart', source: '/api/v1/x/rows', chartType: 'bar', xField: 'role', series },
+        ]}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    );
+    expect(screen.getByText(/Failed to load data/i)).toBeInTheDocument();
+  });
+
+  it('empty: renders emptyText', async () => {
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: [] }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'chart',
+            source: '/api/v1/x/rows',
+            chartType: 'bar',
+            xField: 'role',
+            series,
+            emptyText: 'No series yet.',
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('No series yet.')).toBeInTheDocument());
+  });
+
+  it('malformed row values coerce to 0 rather than throwing', async () => {
+    mockApiClient.mockResolvedValue(
+      stubResponse(true, 200, { data: [{ role: 'Admin', count: 'not-a-number' }] })
+    );
+
+    render(
+      <BlockRenderer
+        blocks={[
+          { type: 'chart', source: '/api/v1/x/rows', chartType: 'bar', xField: 'role', series },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole('img')).toBeInTheDocument());
+  });
+
+  it('missing required props (chartType, series) renders UnsupportedBlock', () => {
+    const blocks = [
+      { type: 'chart', source: '/api/v1/x/rows' },
+    ] as unknown as Block[];
+
+    render(<BlockRenderer blocks={blocks} />);
+
+    expect(screen.getByText(/Unsupported block/i)).toBeInTheDocument();
+  });
+
+  it('an out-of-range series color is rejected and renders UnsupportedBlock', () => {
+    const blocks = [
+      {
+        type: 'chart',
+        source: '/api/v1/x/rows',
+        chartType: 'bar',
+        series: [{ key: 'count', label: 'Count', color: 6 }],
+      },
+    ] as unknown as Block[];
+
+    render(<BlockRenderer blocks={blocks} />);
+
+    expect(screen.getByText(/Unsupported block/i)).toBeInTheDocument();
+  });
+
+  it('injection guard: an unknown chartType from a malformed payload never reaches recharts', () => {
+    const blocks = [
+      { type: 'chart', source: '/api/v1/x/rows', chartType: 'scatter', series },
+    ] as unknown as Block[];
+
+    render(<BlockRenderer blocks={blocks} />);
+
+    expect(screen.getByText(/Unsupported block/i)).toBeInTheDocument();
+  });
+});

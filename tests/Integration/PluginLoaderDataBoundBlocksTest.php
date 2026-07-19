@@ -72,6 +72,23 @@ final class PluginLoaderDataBoundBlocksTest extends TestCase
                     ],
                 ]],
             ],
+            // WC-240: a `chart` block is data-bound the SAME way (a `source`
+            // prop of kind `apiPath`) — it must go through the identical
+            // ownership + versioning walk as dataTable/dataStat/dataList,
+            // with zero PluginLoader changes required.
+            [
+                'id' => 'x-chart',
+                'label' => 'X Chart',
+                'screen' => 'blocks',
+                'requiredPermission' => 'x:view',
+                'blocks' => [[
+                    'type' => 'chart',
+                    'source' => '/api/x/rows',
+                    'chartType' => 'bar',
+                    'xField' => 'name',
+                    'series' => [['key' => 'id', 'label' => 'ID', 'color' => 1]],
+                ]],
+            ],
             // Sibling static feature: must be unaffected by data-bound logic.
             [
                 'id' => 'x-static',
@@ -111,6 +128,19 @@ PHP);
                     'type' => 'dataTable',
                     'source' => '/api/other/thing',
                     'columns' => [['key' => 'id', 'label' => 'ID']],
+                ]],
+            ],
+            // WC-240: same ownership check, but for a `chart` block.
+            [
+                'id' => 'y-foreign-chart',
+                'label' => 'Y Foreign Chart',
+                'screen' => 'blocks',
+                'requiredPermission' => 'y:view',
+                'blocks' => [[
+                    'type' => 'chart',
+                    'source' => '/api/other/thing',
+                    'chartType' => 'bar',
+                    'series' => [['key' => 'id', 'label' => 'ID', 'color' => 1]],
                 ]],
             ],
             // VALID sibling: must survive even though the above is dropped.
@@ -185,6 +215,25 @@ PHP);
         $this->assertSame('custom', $byId['x-static']['screen']);
     }
 
+    /**
+     * WC-240: a `chart` block's `source` is verified and versioned through the
+     * SAME generic walk as `dataTable` — no chart-specific code exists in
+     * PluginLoader, so this proves the reuse rather than a parallel path.
+     */
+    public function testChartOwnedSourceIsServedAndVersioned(): void
+    {
+        [$loader] = $this->loadDir(self::$ownedSourceDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('x-chart', $byId);
+
+        $node = $byId['x-chart']['blocks'][0];
+        $this->assertSame('chart', $node['type']);
+        $this->assertSame('/api/v1/x/rows', $node['source']);
+        $this->assertSame('bar', $node['chartType']);
+        $this->assertSame([['key' => 'id', 'label' => 'ID', 'color' => 1]], $node['series']);
+    }
+
     // ── TEST 2: foreign source → dropped fail-closed ──────────────────────
 
     /**
@@ -205,6 +254,18 @@ PHP);
             $ids,
             'A data-bound feature with a foreign source must be DROPPED (fail-closed)'
         );
+    }
+
+    /**
+     * WC-240: a `chart` feature whose `source` is a foreign (non-owned) route
+     * is dropped fail-closed exactly like the `dataTable` case above.
+     */
+    public function testForeignChartSourceDropsTheFeatureFailClosed(): void
+    {
+        [$loader] = $this->loadDir(self::$foreignSourceDir, new Router('/v1'));
+
+        $ids = array_column($loader->getFrontendFeatures(), 'id');
+        $this->assertNotContains('y-foreign-chart', $ids);
     }
 
     /**

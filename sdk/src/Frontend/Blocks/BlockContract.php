@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -225,6 +225,15 @@ final class BlockContract
                 'itemField' => ['type' => 'string',     'required' => true],
                 'ordered'   => ['type' => 'bool',       'required' => false],
                 'emptyText' => ['type' => 'string',     'required' => false],
+            ]],
+            // ---- SP4 chart block (WC-240) ----
+            'chart' => ['container' => false, 'props' => [
+                'source'    => ['type' => 'apiPath',         'required' => true],
+                'chartType' => ['type' => 'enum',            'required' => true,
+                    'values' => ['bar', 'line', 'area', 'pie']],
+                'series'    => ['type' => 'chartSeriesList', 'required' => true],
+                'xField'    => ['type' => 'string',          'required' => false],
+                'emptyText' => ['type' => 'string',          'required' => false],
             ]],
 
             // ---- interactive blocks (SP3, WC-233) ----

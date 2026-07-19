@@ -298,9 +298,10 @@ final class BlockValidatorTest extends TestCase
         $types = BlockContract::types();
         sort($types);
 
-        // SP1 display types + SP2 data-bound types + SP3 interactive types (WC-233)
+        // SP1 display types + SP2 data-bound types + SP3 interactive types
+        // (WC-233) + SP4 chart type (WC-240)
         $expected = [
-            'actionButton', 'alert', 'badge', 'button', 'card', 'checkbox', 'code',
+            'actionButton', 'alert', 'badge', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
             'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list',
             'numberInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
@@ -550,6 +551,184 @@ final class BlockValidatorTest extends TestCase
         $this->assertFalse(BlockContract::isContainer('dataTable'));
         $this->assertFalse(BlockContract::isContainer('dataStat'));
         $this->assertFalse(BlockContract::isContainer('dataList'));
+    }
+
+    // ==================== SP4 chart block type (WC-240) ====================
+
+    public function testChartWithAllFourTypesIsValid(): void
+    {
+        foreach (['bar', 'line', 'area', 'pie'] as $chartType) {
+            $result = BlockValidator::validate([
+                [
+                    'type' => 'chart',
+                    'source' => '/api/uikit/demo/rows',
+                    'chartType' => $chartType,
+                    'xField' => 'label',
+                    'series' => [
+                        ['key' => 'revenue', 'label' => 'Revenue', 'color' => 1],
+                        ['key' => 'cost', 'label' => 'Cost', 'color' => 2],
+                    ],
+                ],
+            ]);
+
+            $this->assertSame(['ok' => true, 'errors' => []], $result, "chartType={$chartType}");
+        }
+    }
+
+    public function testChartMissingSourceIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'chartType' => 'bar',
+                'series' => [['key' => 'revenue', 'label' => 'Revenue', 'color' => 1]],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('blocks[0]', $joined);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testChartSourceOwnershipUsesTheSameApiPathRule(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => 'http://evil/api/x',
+                'chartType' => 'bar',
+                'series' => [['key' => 'revenue', 'label' => 'Revenue', 'color' => 1]],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('source', $joined);
+    }
+
+    public function testChartUnknownChartTypeIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => '/api/uikit/demo/rows',
+                'chartType' => 'scatter',
+                'series' => [['key' => 'revenue', 'label' => 'Revenue', 'color' => 1]],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('chartType', $joined);
+    }
+
+    public function testChartMissingSeriesIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => '/api/uikit/demo/rows',
+                'chartType' => 'bar',
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('series', $joined);
+    }
+
+    public function testChartEmptySeriesListIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => '/api/uikit/demo/rows',
+                'chartType' => 'bar',
+                'series' => [],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('series', $joined);
+    }
+
+    public function testChartSeriesEntryMissingKeyIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => '/api/uikit/demo/rows',
+                'chartType' => 'bar',
+                'series' => [['label' => 'Revenue', 'color' => 1]],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('series', $joined);
+    }
+
+    /**
+     * `color` selects one of the five semantic `--chart-1..5` tokens; it is an
+     * int enum, never a raw hex/rgb string a plugin could smuggle CSS through.
+     */
+    public function testChartSeriesEntryWithOutOfRangeColorIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => '/api/uikit/demo/rows',
+                'chartType' => 'bar',
+                'series' => [['key' => 'revenue', 'label' => 'Revenue', 'color' => 6]],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('series', $joined);
+    }
+
+    public function testChartSeriesEntryWithHexColorStringIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => '/api/uikit/demo/rows',
+                'chartType' => 'bar',
+                'series' => [['key' => 'revenue', 'label' => 'Revenue', 'color' => '#ff0000']],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('series', $joined);
+    }
+
+    public function testChartWithChildrenIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            [
+                'type' => 'chart',
+                'source' => '/api/uikit/demo/rows',
+                'chartType' => 'bar',
+                'series' => [['key' => 'revenue', 'label' => 'Revenue', 'color' => 1]],
+                'children' => [
+                    ['type' => 'text', 'value' => 'nope'],
+                ],
+            ],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString('children', $joined);
+    }
+
+    public function testChartIsInTheWhitelistAndIsALeaf(): void
+    {
+        $this->assertContains('chart', BlockContract::types());
+        $this->assertFalse(BlockContract::isContainer('chart'));
     }
 
     // ==================== SP3 interactive block types (WC-233) ====================

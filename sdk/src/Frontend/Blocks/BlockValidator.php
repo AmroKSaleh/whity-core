@@ -218,7 +218,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -247,7 +247,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -319,6 +319,11 @@ final class BlockValidator
 
             case 'rowList':
                 self::validateRowList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'chartSeriesList':
+                self::validateChartSeriesList($value, $type, $prop, $path, $errors);
 
                 break;
 
@@ -460,6 +465,40 @@ final class BlockValidator
 
                     break;
                 }
+            }
+        }
+    }
+
+    /**
+     * `chart.series`: a list of `{key: string, label: string, color: 1|2|3|4|5}`.
+     * `color` selects one of the five semantic `--chart-1..5` design tokens —
+     * never a raw hex/rgb value, so a plugin cannot smuggle CSS via this prop.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateChartSeriesList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty list of {key, label, color} objects";
+
+            return;
+        }
+
+        foreach ($value as $i => $item) {
+            if (
+                !\is_array($item)
+                || !isset($item['key']) || !\is_string($item['key']) || $item['key'] === ''
+                || !isset($item['label']) || !\is_string($item['label'])
+                || !isset($item['color']) || !\is_int($item['color']) || !\in_array($item['color'], [1, 2, 3, 4, 5], true)
+            ) {
+                $errors[] = "{$path}[{$i}]: each '{$type}.{$prop}' entry must be a "
+                    . "{key: non-empty string, label: string, color: one of 1..5} object";
             }
         }
     }
