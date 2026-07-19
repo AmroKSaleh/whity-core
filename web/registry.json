@@ -20,6 +20,14 @@
       "files": [{ "path": "../packages/ui/src/badge.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "breadcrumb",
+      "type": "registry:ui",
+      "title": "Breadcrumb",
+      "description": "Controlled, presentational breadcrumb trail (items array).",
+      "dependencies": ["@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/breadcrumb.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "button",
       "type": "registry:ui",
       "title": "Button",
