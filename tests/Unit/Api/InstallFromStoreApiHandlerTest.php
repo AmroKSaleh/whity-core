@@ -387,6 +387,31 @@ final class InstallFromStoreApiHandlerTest extends TestCase
         self::assertSame(502, $res->getStatusCode());
     }
 
+    /**
+     * At runtime Request::fromGlobals() strips the query from getPath() (path
+     * only), so the handler must read the query from PHP's native $_GET. Simulate
+     * that: a path WITHOUT a query string + a populated $_GET.
+     */
+    public function testBrowseReadsQueryFromSuperglobalWhenPathHasNone(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandler('store.example.com', $this->sampleCatalog(), $urls);
+
+        $previous = $_GET;
+        $_GET = ['store_url' => 'https://store.example.com', 'q' => 'ops'];
+        try {
+            $res = $handler->browseCatalog(new Request('GET', '/api/plugins/store/catalog'));
+        } finally {
+            $_GET = $previous;
+        }
+
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame(['https://store.example.com/api/v1/plugin-store/plugins'], $urls);
+        $body = json_decode($res->getBody(), true);
+        self::assertCount(1, $body['data']);
+        self::assertSame('system-ping', $body['data'][0]['slug']);
+    }
+
     private function removeRecursive(string $path): void
     {
         if (!is_dir($path)) {
