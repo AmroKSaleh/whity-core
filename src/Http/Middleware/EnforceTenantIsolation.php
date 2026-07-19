@@ -161,6 +161,21 @@ class EnforceTenantIsolation
         '/api/v1/auth/sso/',
     ];
 
+    /**
+     * Anchored path patterns for the whity-plugin-store READ surface reachable
+     * without a host session (GET only — see {@see self::isPublicPluginStoreRead()}).
+     * Exact SHAPES (single {slug}/{version} segments), not an open prefix, so the
+     * exemption cannot silently grow if the store plugin adds deeper GET routes.
+     *
+     * @var list<string>
+     */
+    private const PLUGIN_STORE_PUBLIC_GET_PATTERNS = [
+        '#^/api/v1/plugin-store/plugins$#',                               // catalogue list
+        '#^/api/v1/plugin-store/index\.json$#',                          // registry index
+        '#^/api/v1/plugin-store/plugins/[^/]+$#',                        // show {slug}
+        '#^/api/v1/plugin-store/plugins/[^/]+/versions/[^/]+/download$#', // token-gated download
+    ];
+
     private JwtParser $jwtParser;
 
     /**
@@ -211,7 +226,7 @@ class EnforceTenantIsolation
         $path = $this->pathWithoutQuery($request->getPath());
 
         // Public endpoints carry no tenant context; let them through untouched.
-        if ($this->isPublicRoute($path)) {
+        if ($this->isPublicRoute($path) || $this->isPublicPluginStoreRead($request->getMethod(), $path)) {
             return $next($request);
         }
 
@@ -544,6 +559,43 @@ class EnforceTenantIsolation
                 return true;
             }
         }
+        return false;
+    }
+
+    /**
+     * The whity-plugin-store READ surface is reachable without a host session:
+     * the catalogue browse (`GET /plugins`, `/plugins/{slug}`) and registry index
+     * (`GET /index.json`) are PUBLIC (operator-global marketplace metadata, never
+     * tenant data), and the package download
+     * (`GET /plugins/{slug}/versions/{version}/download`) is SELF-AUTHENTICATING —
+     * it validates its own opaque store token inside the handler, exactly like
+     * `/mcp` and `/api/v1/devices/token` already listed above. A CONSUMING
+     * whity-core host holds no session on the store, so these must bypass tenant
+     * resolution or they are unreachable (the whole point of a marketplace).
+     *
+     * Scope is deliberately tight — ONLY GET, and only the `/plugin-store/plugins`
+     * and `/index.json` paths. The operator PUBLISH route (`POST …/versions`) and
+     * the token-management routes (`…/plugin-store/tokens`) are a DIFFERENT method
+     * or path, so they are never matched here and keep full session + RBAC
+     * enforcement (a `POST …/versions` or `GET …/tokens` without a valid session
+     * still 401s, exactly as before).
+     */
+    private function isPublicPluginStoreRead(string $method, string $path): bool
+    {
+        if (strtoupper($method) !== 'GET') {
+            return false;
+        }
+
+        // Anchored EXACT shapes of only the store's public/self-auth read routes
+        // — NOT an open `/plugins/` prefix. If a future store version adds a
+        // deeper GET path (e.g. `…/plugins/{slug}/stats`) it is NOT auto-public;
+        // exposing it would require a deliberate addition here.
+        foreach (self::PLUGIN_STORE_PUBLIC_GET_PATTERNS as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
+                return true;
+            }
+        }
+
         return false;
     }
 
