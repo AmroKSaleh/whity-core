@@ -627,4 +627,131 @@ class EnforceTenantIsolationTest extends TestCase
             'trailing junk' => ['2; DROP'],
         ];
     }
+
+    /**
+     * The whity-plugin-store READ surface (catalogue browse + registry index +
+     * self-authenticating package download) must pass through WITHOUT a host
+     * session — a consuming host has no session on the store. All are GET.
+     *
+     * @dataProvider pluginStorePublicReadProvider
+     */
+    public function testPluginStorePublicReadBypassesTenantIsolation(string $path): void
+    {
+        // No Authorization header at all — a public/consumer request.
+        $request = new Request('GET', $path);
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertTrue($reached, "GET {$path} must reach the handler without a session");
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * @return array<string, array{0:string}>
+     */
+    public static function pluginStorePublicReadProvider(): array
+    {
+        return [
+            'list'            => ['/api/v1/plugin-store/plugins'],
+            'show'            => ['/api/v1/plugin-store/plugins/quote-of-day'],
+            'download'        => ['/api/v1/plugin-store/plugins/quote-of-day/versions/1.0.0/download'],
+            'registry index'  => ['/api/v1/plugin-store/index.json'],
+        ];
+    }
+
+    /**
+     * The exemption is READ-ONLY (GET). Operator writes on the SAME base path —
+     * publishing a version — must still require a session (401 without one), so a
+     * cross-site or anonymous caller can never publish.
+     */
+    public function testPluginStorePublishStillRequiresSession(): void
+    {
+        $request = new Request('POST', '/api/v1/plugin-store/plugins/quote-of-day/versions');
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertFalse($reached, 'POST publish must NOT bypass tenant isolation');
+        $this->assertSame(401, $response->getStatusCode());
+    }
+
+    /**
+     * The token-management routes are a different PATH (never matched by the
+     * read exemption) and must stay session-gated — even the GET list, which
+     * shares the method but not the path.
+     *
+     * @dataProvider pluginStoreTokenRouteProvider
+     */
+    public function testPluginStoreTokenRoutesStillRequireSession(string $method, string $path): void
+    {
+        $request = new Request($method, $path);
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertFalse($reached, "{$method} {$path} must NOT bypass tenant isolation");
+        $this->assertSame(401, $response->getStatusCode());
+    }
+
+    /**
+     * @return array<string, array{0:string,1:string}>
+     */
+    public static function pluginStoreTokenRouteProvider(): array
+    {
+        return [
+            'list tokens (GET, different path)' => ['GET', '/api/v1/plugin-store/tokens'],
+            'mint token'                        => ['POST', '/api/v1/plugin-store/tokens'],
+            'revoke token'                      => ['DELETE', '/api/v1/plugin-store/tokens/1'],
+        ];
+    }
+
+    /**
+     * The exemption is anchored to EXACT route shapes, not an open `/plugins/`
+     * prefix. A GET to a DEEPER or unknown path under the store namespace must
+     * NOT be auto-exempted — it stays session-gated (401), so a future store
+     * route can never become unauthenticated without an explicit change here.
+     *
+     * @dataProvider pluginStoreNonExemptGetProvider
+     */
+    public function testDeeperOrUnknownStoreGetPathsAreNotExempt(string $path): void
+    {
+        $request = new Request('GET', $path);
+        $reached = false;
+        $next = function (Request $req) use (&$reached): Response {
+            $reached = true;
+            return new Response(200, 'ok');
+        };
+
+        $response = $this->middleware->handle($request, $next);
+
+        $this->assertFalse($reached, "GET {$path} must NOT be treated as a public store route");
+        $this->assertSame(401, $response->getStatusCode());
+    }
+
+    /**
+     * @return array<string, array{0:string}>
+     */
+    public static function pluginStoreNonExemptGetProvider(): array
+    {
+        return [
+            'deeper under slug'          => ['/api/v1/plugin-store/plugins/quote-of-day/stats'],
+            'versions listing (no dl)'   => ['/api/v1/plugin-store/plugins/quote-of-day/versions/1.0.0'],
+            'trailing segment past dl'   => ['/api/v1/plugin-store/plugins/x/versions/1.0.0/download/extra'],
+            'traversal to tokens'        => ['/api/v1/plugin-store/plugins/../tokens'],
+            'index prefix but not exact' => ['/api/v1/plugin-store/index.jsonx'],
+        ];
+    }
 }
