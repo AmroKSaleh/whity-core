@@ -166,11 +166,13 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.9.0',
+            '1.10.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.9 adds the MCP prompt contribution point (PluginMcpInterface, WC-7abb732f); '
-            . '1.8 added interactive block types (form, inputs, submitButton, actionButton) '
-            . 'and the inputName/selectOptions/submitSpec prop-rule kinds (WC-233)'
+            'SDK 1.10 adds the chart data-bound block type and the chartSeriesList '
+            . 'prop-rule kind (WC-240); 1.9 adds the MCP prompt contribution point '
+            . '(PluginMcpInterface, WC-7abb732f); 1.8 added interactive block types '
+            . '(form, inputs, submitButton, actionButton) and the '
+            . 'inputName/selectOptions/submitSpec prop-rule kinds (WC-233)'
         );
     }
 

@@ -12,12 +12,12 @@ use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 
 /**
- * UiKitShowcasePlugin (WC-228 / WC-232 / WC-236)
+ * UiKitShowcasePlugin (WC-228 / WC-232 / WC-236 / WC-240)
  *
- * The capstone example plugin for the SP1 + SP2 + SP3 server-driven plugin-UI
- * block system (SDK 1.8, WC-225–WC-236). It is a SANCTIONED example plugin —
- * named for the SDK feature it documents — that proves AND documents the entire
- * pipeline:
+ * The capstone example plugin for the SP1 + SP2 + SP3 + SP4 server-driven
+ * plugin-UI block system (SDK 1.10, WC-225–WC-240). It is a SANCTIONED
+ * example plugin — named for the SDK feature it documents — that proves AND
+ * documents the entire pipeline:
  *
  *   SDK BlockContract whitelist (WC-225)
  *     -> host BlockValidator validation of `screen: 'blocks'` features (WC-226)
@@ -38,9 +38,14 @@ use Whity\Sdk\PluginRequirementsInterface;
  * an SP3 `form` (all 9 input leaf types + a `submitButton`) and a standalone
  * `actionButton`, both targeting this endpoint and gated on `uikit:view`.
  *
+ * As of WC-240, the plugin also demos the SP4 `chart` block: a bar chart bound
+ * to `GET /api/uikit/demo/chart-rows` (gated on `uikit:view`, DB-free), whose
+ * two series each pick one of the five semantic `--chart-1..5` design tokens —
+ * never a raw hex/rgb value.
+ *
  * The plugin contributes ONE `screen: 'blocks'` feature whose declarative tree
- * renders a LIVE instance of every one of the 33 block types (21 SP1+SP2 + 12
- * SP3 interactive) beside the exact PHP snippet that declares it.
+ * renders a LIVE instance of every one of the 34 block types (21 SP1+SP2 + 12
+ * SP3 interactive + 1 SP4 chart) beside the exact PHP snippet that declares it.
  *
  * Props are SEMANTIC throughout (never CSS/hex/pixels), exactly as the
  * contract requires.
@@ -100,12 +105,13 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * Three demo endpoints (WC-232 + WC-236). All are gated on `uikit:view`
+     * Four demo endpoints (WC-232 + WC-236 + WC-240). All are gated on `uikit:view`
      * (the single existing permission — no new permission or migration).
      *
-     * GET /api/uikit/demo/rows   — static fixture collection (SP2 data-bound demos)
-     * GET /api/uikit/demo/metric — static fixture metric (SP2 data-bound stat demo)
-     * POST /api/uikit/demo/echo  — interactive echo for SP3 form + actionButton demos
+     * GET /api/uikit/demo/rows        — static fixture collection (SP2 data-bound demos)
+     * GET /api/uikit/demo/metric      — static fixture metric (SP2 data-bound stat demo)
+     * GET /api/uikit/demo/chart-rows  — static fixture series (SP4 chart demo)
+     * POST /api/uikit/demo/echo       — interactive echo for SP3 form + actionButton demos
      *
      * @inheritDoc
      */
@@ -139,6 +145,23 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     'tags' => ['uikit-showcase'],
                     'responses' => [
                         200 => 'UiKitDemoMetricResponse',
+                        403 => ['description' => 'Missing uikit:view permission'],
+                    ],
+                    'components' => self::demoComponents(),
+                ],
+            ],
+            // WC-240: fixture endpoint for the SP4 chart block demo.
+            [
+                'method' => 'GET',
+                'path' => '/api/uikit/demo/chart-rows',
+                'handler' => [$this, 'demoChartRows'],
+                'requiredRole' => null,
+                'requiredPermission' => 'uikit:view',
+                'schema' => [
+                    'summary' => 'Demo series for the chart block example',
+                    'tags' => ['uikit-showcase'],
+                    'responses' => [
+                        200 => 'UiKitDemoChartRowsResponse',
                         403 => ['description' => 'Missing uikit:view permission'],
                     ],
                     'components' => self::demoComponents(),
@@ -205,6 +228,27 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                 'value' => '1,284',
                 'trend' => 'up',
                 'hint' => '+12% this week',
+            ],
+        ]);
+    }
+
+    /**
+     * Handle GET /api/uikit/demo/chart-rows (requires uikit:view).
+     *
+     * Returns a static fixture series used by the chart block demo. No PDO,
+     * no side effects.
+     *
+     * @param Request               $request The incoming HTTP request.
+     * @param array<string, string> $params  Captured path parameters.
+     * @return Response Static demo chart series.
+     */
+    public function demoChartRows(Request $request, array $params = []): Response
+    {
+        return Response::json([
+            'data' => [
+                ['role' => 'Administrator', 'count' => 3, 'lastMonth' => 2],
+                ['role' => 'Editor', 'count' => 7, 'lastMonth' => 5],
+                ['role' => 'Viewer', 'count' => 12, 'lastMonth' => 9],
             ],
         ]);
     }
@@ -594,8 +638,9 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
     }
 
     /**
-     * The "Data" tab: stat, keyValue, list, table (SP1 static) plus the SP2
-     * data-bound demos in a "Live data" section: dataTable, dataStat, dataList.
+     * The "Data" tab: stat, keyValue, list, table (SP1 static) plus the
+     * data-bound demos in a "Live data" section: dataTable, dataStat, dataList
+     * (SP2) and chart (SP4).
      *
      * @return list<array<string, mixed>>
      */
@@ -773,6 +818,42 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                         <<<'PHP'
                             // Same GET /api/uikit/demo/rows endpoint — `itemField`
                             // picks the column to render as list items.
+                            PHP,
+                    ),
+                    $this->dataBoundDemo(
+                        'chart',
+                        'A bar/line/area/pie chart whose rows are fetched from a plugin endpoint; '
+                            . 'each series picks a --chart-1..5 design token, never a raw color.',
+                        [
+                            'type' => 'chart',
+                            'source' => '/api/uikit/demo/chart-rows',
+                            'chartType' => 'bar',
+                            'xField' => 'role',
+                            'series' => [
+                                ['key' => 'count', 'label' => 'This month', 'color' => 1],
+                                ['key' => 'lastMonth', 'label' => 'Last month', 'color' => 2],
+                            ],
+                        ],
+                        <<<'PHP'
+                            ['type' => 'chart',
+                             'source' => '/api/uikit/demo/chart-rows',
+                             'chartType' => 'bar',
+                             'xField' => 'role',
+                             'series' => [
+                                 ['key' => 'count', 'label' => 'This month', 'color' => 1],
+                                 ['key' => 'lastMonth', 'label' => 'Last month', 'color' => 2],
+                             ]]
+                            PHP,
+                        <<<'PHP'
+                            // GET /api/uikit/demo/chart-rows — returns:
+                            // { "data": [{"role":"Administrator","count":3,"lastMonth":2},] }
+                            public function demoChartRows(Request $r, array $p = []): Response {
+                                return Response::json(['data' => [
+                                    ['role' => 'Administrator', 'count' => 3, 'lastMonth' => 2],
+                                    ['role' => 'Editor',        'count' => 7, 'lastMonth' => 5],
+                                    ['role' => 'Viewer',        'count' => 12, 'lastMonth' => 9],
+                                ]]);
+                            }
                             PHP,
                     ),
                 ],
@@ -1104,6 +1185,25 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                             'trend' => ['type' => 'string'],
                             'hint' => ['type' => 'string'],
                         ],
+                    ],
+                ],
+            ],
+            'UiKitDemoChartRow' => [
+                'type' => 'object',
+                'required' => ['role', 'count', 'lastMonth'],
+                'properties' => [
+                    'role' => ['type' => 'string'],
+                    'count' => ['type' => 'integer'],
+                    'lastMonth' => ['type' => 'integer'],
+                ],
+            ],
+            'UiKitDemoChartRowsResponse' => [
+                'type' => 'object',
+                'required' => ['data'],
+                'properties' => [
+                    'data' => [
+                        'type' => 'array',
+                        'items' => ['$ref' => '#/components/schemas/UiKitDemoChartRow'],
                     ],
                 ],
             ],

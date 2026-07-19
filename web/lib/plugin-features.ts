@@ -311,8 +311,26 @@ export interface ActionButtonBlock {
   variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
 }
 
+// ---- SP4 chart block (WC-240) ----
+
 /**
- * The discriminated union of every SP1 + SP2 + SP3 block, keyed on `type`. The host has
+ * Leaf: a bar/line/area/pie chart whose rows are fetched at runtime from
+ * `source`. Each series picks one of the five semantic `--chart-1..5` design
+ * tokens by number — never a raw hex/rgb value, so a plugin cannot smuggle
+ * CSS through this prop. `xField` names the category/label field in each row
+ * (the x-axis for bar/line/area, the slice label for pie).
+ */
+export interface ChartBlock {
+  type: 'chart';
+  source: string;
+  chartType: 'bar' | 'line' | 'area' | 'pie';
+  series: { key: string; label: string; color: 1 | 2 | 3 | 4 | 5 }[];
+  xField?: string;
+  emptyText?: string;
+}
+
+/**
+ * The discriminated union of every SP1 + SP2 + SP3 + SP4 block, keyed on `type`. The host has
  * already validated the tree, but the web renderer revalidates defensively so a
  * malformed node degrades to a placeholder rather than crashing.
  */
@@ -349,7 +367,8 @@ export type Block =
   | FileInputBlock
   | ColorInputBlock
   | SubmitButtonBlock
-  | ActionButtonBlock;
+  | ActionButtonBlock
+  | ChartBlock;
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {

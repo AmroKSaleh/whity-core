@@ -366,9 +366,10 @@ final class UiKitShowcasePluginTest extends TestCase
     }
 
     /**
-     * WC-236: interactive demos are now in the tree, so the coverage assertion
-     * is restored to ALL BlockContract::types() (SP1 + SP2 + SP3 interactive).
-     * Total: 33 types (21 SP1+SP2 + 12 SP3 interactive).
+     * WC-236 / WC-240: interactive and chart demos are now in the tree, so the
+     * coverage assertion is restored to ALL BlockContract::types()
+     * (SP1 + SP2 + SP3 interactive + SP4 chart).
+     * Total: 34 types (21 SP1+SP2 + 12 SP3 interactive + 1 SP4 chart).
      */
     public function testTheBlocksTreeCoversEveryBlockType(): void
     {
@@ -415,8 +416,8 @@ final class UiKitShowcasePluginTest extends TestCase
 
         // Walk the tree; for each data-bound node, assert its source is a
         // registered GET path (the ownership invariant that WC-230 enforces).
-        $dataBoundTypes = ['dataTable', 'dataStat', 'dataList'];
-        $foundBound = ['dataTable' => false, 'dataStat' => false, 'dataList' => false];
+        $dataBoundTypes = ['dataTable', 'dataStat', 'dataList', 'chart'];
+        $foundBound = ['dataTable' => false, 'dataStat' => false, 'dataList' => false, 'chart' => false];
 
         $this->walkDataBound($blocks, $dataBoundTypes, $registeredGetPaths, $foundBound);
 

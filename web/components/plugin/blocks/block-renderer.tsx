@@ -18,6 +18,7 @@ import type {
   Block,
   ButtonBlock,
   CardBlock,
+  ChartBlock,
   CheckboxBlock,
   CodeBlock,
   ColorInputBlock,
@@ -46,6 +47,7 @@ import type {
   TextBlock,
   TextInputBlock,
 } from '@/lib/plugin-features';
+import { Chart } from '@amroksaleh/ui/chart';
 import { Input } from '@amroksaleh/ui/input';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import {
@@ -184,6 +186,24 @@ function isRowList(value: unknown): value is Record<string, string>[] {
         Object.values(item as Record<string, unknown>).every(
           (cell) => typeof cell === 'string'
         )
+    )
+  );
+}
+
+function isChartSeriesList(
+  value: unknown
+): value is { key: string; label: string; color: 1 | 2 | 3 | 4 | 5 }[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (item) =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as { key?: unknown }).key === 'string' &&
+        (item as { key: string }).key !== '' &&
+        typeof (item as { label?: unknown }).label === 'string' &&
+        isOneOfNumber((item as { color?: unknown }).color, [1, 2, 3, 4, 5] as const)
     )
   );
 }
@@ -804,6 +824,97 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
 }
 
 
+// ---- SP4 chart renderer (WC-240) ----
+
+/**
+ * ChartRenderer — fetches rows from `block.source` (the SAME verified-route
+ * trust boundary as `dataTable`/`dataStat`/`dataList`, enforced generically
+ * in `PluginLoader` by the block's `source: apiPath` prop rule) and hands
+ * them to the shared `Chart` primitive. Series values are coerced to numbers
+ * and the `xField` category to a string; malformed rows degrade the row's
+ * value to `0` rather than throwing.
+ */
+function ChartRenderer({ block }: { block: ChartBlock }) {
+  type Rows = Record<string, unknown>[];
+  const state = usePluginData<Rows>(block.source, (body) => {
+    if (!Array.isArray(body) || body.length === 0) return null;
+    return body as Rows;
+  });
+
+  if (state.status === 'loading') {
+    return (
+      <div className="space-y-2" data-slot="block-data-loading">
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-error"
+      >
+        <span>Failed to load data.</span>
+        <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (state.status === 'empty') {
+    return (
+      <div
+        className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-card p-3 text-xs text-muted-foreground"
+        data-slot="block-data-empty"
+      >
+        <span>{block.emptyText ?? 'No data available.'}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+    );
+  }
+
+  // ready
+  const data = state.data.map((row) => {
+    const mapped: Record<string, string | number> = {};
+    if (block.xField !== undefined) {
+      mapped[block.xField] = String(row[block.xField] ?? '');
+    }
+    for (const s of block.series) {
+      const raw = row[s.key];
+      const num = typeof raw === 'number' ? raw : Number(raw);
+      mapped[s.key] = Number.isFinite(num) ? num : 0;
+    }
+    return mapped;
+  });
+
+  return (
+    <div className="space-y-1" data-slot="block-data-refresh">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Refresh"
+          onClick={state.refresh}
+        >
+          <IconRefresh className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      <Chart type={block.chartType} data={data} series={block.series} xKey={block.xField} />
+    </div>
+  );
+}
+
 // ---- SP3 interactive renderers (WC-235) ----
 
 function InputLabel({ inputId, label, required, error }: { inputId: string; label: string; required?: boolean; error?: string }) {
@@ -1214,6 +1325,14 @@ function BlockNode({ block }: { block: Block }): React.ReactElement {
         <DataListRenderer block={block} />
       ) : (
         <UnsupportedBlock type="dataList" />
+      );
+    case 'chart':
+      return isNonEmptyString(block.source) &&
+        isOneOf(block.chartType, ['bar', 'line', 'area', 'pie']) &&
+        isChartSeriesList(block.series) ? (
+        <ChartRenderer block={block} />
+      ) : (
+        <UnsupportedBlock type="chart" />
       );
 
     case 'form':

@@ -43,6 +43,14 @@
       "files": [{ "path": "../packages/ui/src/card.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "chart",
+      "type": "registry:ui",
+      "title": "Chart",
+      "description": "Bar/line/area/pie chart wired to the --chart-1..5 design tokens.",
+      "dependencies": ["recharts"],
+      "files": [{ "path": "../packages/ui/src/chart.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "checkbox",
       "type": "registry:ui",
       "title": "Checkbox",
