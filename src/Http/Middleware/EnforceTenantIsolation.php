@@ -454,8 +454,15 @@ class EnforceTenantIsolation
             return (int) $matches[1];
         }
 
-        // tenant_id query parameter (parsed from the raw path when present).
-        $queryTenant = $this->tenantIdFromQuery($request->getPath());
+        // tenant_id query parameter. At runtime FrankenPHP strips the query
+        // string from getPath() (Request::fromGlobals() keeps the path only), so
+        // $_GET is the live source; the path-query form is how the test suite
+        // builds a Request. $_GET wins when both are present (mirrors
+        // DelegationsApiHandler::queryParams() / AuditLogApiHandler::parseQuery()
+        // — WC-167 review: path-only parsing silently dropped this signal at
+        // runtime, meaning a `?tenant_id=` cross-tenant probe never reached the
+        // audit-and-refuse gate below in production).
+        $queryTenant = $this->tenantIdFromQuery($request->getPath()) ?? $this->tenantIdFromSuperglobal();
         if ($queryTenant !== null) {
             return $queryTenant;
         }
@@ -486,13 +493,31 @@ class EnforceTenantIsolation
         }
 
         parse_str($query, $params);
-        $value = $params['tenant_id'] ?? null;
 
-        if (is_string($value) && ctype_digit($value)) {
-            return (int) $value;
-        }
+        return self::numericTenantId($params['tenant_id'] ?? null);
+    }
 
-        return null;
+    /**
+     * Extract a numeric `tenant_id` value from PHP's native `$_GET` superglobal
+     * — the live runtime source (see {@see self::resolveResourceTenantId()}).
+     *
+     * @return int|null The parsed tenant id, or null when absent/non-numeric.
+     */
+    private function tenantIdFromSuperglobal(): ?int
+    {
+        return self::numericTenantId($_GET['tenant_id'] ?? null);
+    }
+
+    /**
+     * A `tenant_id` value is trusted ONLY when it is a plain non-negative
+     * decimal integer string (ctype_digit) — anything else (signed, decimal,
+     * hex, whitespace, an array from `?tenant_id[]=`) resolves to "no declared
+     * target" rather than being coerced, matching the fail-closed parsing this
+     * gate relies on throughout.
+     */
+    private static function numericTenantId(mixed $value): ?int
+    {
+        return is_string($value) && ctype_digit($value) ? (int) $value : null;
     }
 
     /**
