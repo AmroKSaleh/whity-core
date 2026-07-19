@@ -1130,6 +1130,14 @@ $router->register('POST',   '/api/branding/global/assets/{key}',    [$brandingHa
 $router->register('DELETE', '/api/branding/global/assets/{key}',    [$brandingHandler, 'clearGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHandler, 'setBrandingHost'], null, null, CorePermissions::SETTINGS_MANAGE);
 
+// 12b. Theme Override API (WC-242) — public GET, unauthenticated by design
+// (like branding, called on every page load before login is even possible).
+// The handler enforces whatever permission the contributing plugin's OWN
+// route declares internally and always degrades to {"data": {}} rather than
+// erroring, so this route itself is unprotected at the router level.
+$themeHandler = new \Whity\Api\ThemeApiHandler($pluginLoader, $roleChecker);
+$router->register('GET', '/api/theme', [$themeHandler, 'get'], null, null, null);
+
 // 13c-bis. Register the pending-registration review API (WC-235). Gated on
 // registrations:approve (6th positional arg) AND — inside the handler — on the
 // SYSTEM tenant (id 0): approving a registration activates another tenant's

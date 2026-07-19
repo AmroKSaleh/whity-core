@@ -11,6 +11,7 @@ import { ToastContainer } from "@/components/ui/toast-container";
 import "@/lib/plugin-screens";
 import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
+import { getThemeOverrides } from "@/lib/theme";
 
 // Design-token font families (see src/design/tokens/base.json): Noto Sans
 // (latin) + Noto Sans Arabic together drive --font-sans / --font-heading (see
@@ -44,6 +45,15 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const branding = await getBranding();
+  // WC-242: color overrides an installed plugin may contribute (see
+  // web/lib/theme.ts). Both the server (ThemeApiHandler) and the client
+  // (getThemeOverrides) already restrict keys to known design-token names
+  // and values to strict '#rrggbb' hex, so building this CSS string by plain
+  // concatenation is safe — neither component can contain quotes or braces.
+  const themeOverrides = await getThemeOverrides();
+  const overrideCss = Object.entries(themeOverrides)
+    .map(([key, value]) => `--${key}:${value};`)
+    .join("");
   return (
     <html
       lang="en"
@@ -65,6 +75,8 @@ export default async function RootLayout({
         own markup below <body>.
       */}
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        {/* React 19 hoists <style> into <head> regardless of nesting position. */}
+        {overrideCss !== "" && <style>{`:root{${overrideCss}}`}</style>}
         <BrandingProvider initial={branding}>
           <DirectionProvider>
             <AuthProvider>

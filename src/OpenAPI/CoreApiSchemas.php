@@ -92,6 +92,7 @@ final class CoreApiSchemas
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
             self::brandingRoutes(),
+            self::themeRoutes(),
             self::identityRoutes(),
             self::tenantEntitlementRoutes(),
             self::tenantStorageRoutes(),
@@ -1322,6 +1323,34 @@ final class CoreApiSchemas
     }
 
     /**
+     * Theme Override route declaration (WC-242): a single public GET that
+     * proxies to AT MOST ONE installed plugin's own theme-override route (see
+     * {@see \Whity\Core\PluginLoader::getThemeOverrideRoute()}). Public and
+     * unauthenticated by design, exactly like {@see brandingRoutes()} — called
+     * on every page load, including pre-login.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function themeRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/theme',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Get the effective theme color overrides for the resolved tenant (public)',
+                    'tags' => ['theme'],
+                    'responses' => [
+                        200 => self::jsonResponse('The effective theme overrides (possibly empty)', 'ThemeOverridesResponse'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * The component schemas the admin resources publish.
      *
      * @return array<string, array<string, mixed>>
@@ -2355,6 +2384,13 @@ final class CoreApiSchemas
             'BrandingHostRequest' => self::object(['host' => self::str(true)], []),
             // PUT /api/tenants/{id}/branding-host response body.
             'BrandingHostResponse' => self::dataEnvelope(self::object(['branding_host' => self::str(true)], ['branding_host'])),
+            // GET /api/theme response body (WC-242): a free-form map of known
+            // design-token names to '#rrggbb' hex strings, contributed by at
+            // most one installed plugin. Possibly empty.
+            'ThemeOverridesResponse' => self::dataEnvelope([
+                'type' => 'object',
+                'additionalProperties' => ['type' => 'string'],
+            ]),
         ];
     }
 
