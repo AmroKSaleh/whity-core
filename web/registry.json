@@ -107,6 +107,14 @@
       "files": [{ "path": "../packages/ui/src/skeleton.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "spinner",
+      "type": "registry:ui",
+      "title": "Spinner",
+      "description": "Loading indicator announced to assistive tech.",
+      "dependencies": ["class-variance-authority", "@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/spinner.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "tabs",
       "type": "registry:ui",
       "title": "Tabs",
