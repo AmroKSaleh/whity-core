@@ -170,12 +170,18 @@ final class InstallFromStoreApiHandler
      */
     public function browseCatalog(Request $request, array $params = []): Response
     {
+        // Query params: at runtime Request::fromGlobals() strips the query from
+        // getPath() (path only), so the reliable source is PHP's native $_GET.
+        // In unit tests the query is carried in the path, so parse that first and
+        // fall back to $_GET for the live request.
         $query = [];
         $qs = parse_url($request->getPath(), PHP_URL_QUERY);
         if (is_string($qs) && $qs !== '') {
             parse_str($qs, $query);
+        } else {
+            $query = $_GET;
         }
-        // parse_str can yield arrays (e.g. `?q[]=x`); accept only scalar strings.
+        // parse_str/$_GET can yield arrays (e.g. `?q[]=x`); accept only scalar strings.
         $storeUrlRaw = $query['store_url'] ?? '';
         $searchRaw = $query['q'] ?? '';
         $storeUrl = is_string($storeUrlRaw) ? trim($storeUrlRaw) : '';
