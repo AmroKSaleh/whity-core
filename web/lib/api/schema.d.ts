@@ -1449,6 +1449,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/uikit/demo/chart-rows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Demo series for the chart block example */
+        get: operations["get_api_v1_uikit_demo_chart_rows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uikit/demo/echo": {
         parameters: {
             query?: never;
@@ -2442,6 +2459,14 @@ export interface components {
         TwoFaStatusResponse: {
             enabled: boolean;
             backup_codes_available: number;
+        };
+        UiKitDemoChartRow: {
+            role: string;
+            count: number;
+            lastMonth: number;
+        };
+        UiKitDemoChartRowsResponse: {
+            data: components["schemas"]["UiKitDemoChartRow"][];
         };
         UiKitDemoEchoIssues: {
             issues: {
@@ -11053,6 +11078,69 @@ export interface operations {
             };
             /** @description Validation failed (bad status/mode/plan) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_uikit_demo_chart_rows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UiKitDemoChartRowsResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiKitDemoChartRowsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing uikit:view permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
