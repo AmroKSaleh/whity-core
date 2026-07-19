@@ -47,7 +47,7 @@ function SheetOverlay({
   )
 }
 
-type SheetSide = "right" | "left"
+type SheetSide = "top" | "right" | "bottom" | "left"
 
 function SheetContent({
   className,
@@ -65,11 +65,15 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "fixed inset-y-0 z-50 flex h-full w-full max-w-md flex-col gap-4 overflow-y-auto bg-popover p-5 text-xs/relaxed text-popover-foreground ring-1 ring-foreground/10 duration-150 outline-none data-open:animate-in data-closed:animate-out",
+          "fixed z-50 flex flex-col gap-4 overflow-y-auto bg-popover p-5 text-xs/relaxed text-popover-foreground ring-1 ring-foreground/10 duration-150 outline-none data-open:animate-in data-closed:animate-out",
           side === "right" &&
-            "end-0 border-s border-border data-open:slide-in-from-right data-closed:slide-out-to-right",
+            "inset-y-0 end-0 h-full w-full max-w-md border-s border-border data-open:slide-in-from-right data-closed:slide-out-to-right",
           side === "left" &&
-            "start-0 border-e border-border data-open:slide-in-from-left data-closed:slide-out-to-left",
+            "inset-y-0 start-0 h-full w-full max-w-md border-e border-border data-open:slide-in-from-left data-closed:slide-out-to-left",
+          side === "top" &&
+            "inset-x-0 top-0 h-auto max-h-[80%] w-full border-b border-border data-open:slide-in-from-top data-closed:slide-out-to-top",
+          side === "bottom" &&
+            "inset-x-0 bottom-0 h-auto max-h-[80%] w-full border-t border-border data-open:slide-in-from-bottom data-closed:slide-out-to-bottom",
           className
         )}
         {...props}
