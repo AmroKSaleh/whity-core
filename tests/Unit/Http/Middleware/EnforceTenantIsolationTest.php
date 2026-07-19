@@ -244,6 +244,68 @@ class EnforceTenantIsolationTest extends TestCase
     }
 
     /**
+     * WC-537 (audit follow-up to WC-167): at runtime FrankenPHP strips the query
+     * string from the path (Request::fromGlobals() keeps the path only), so a
+     * `?tenant_id=` declared target read via parse_url($request->getPath(), …)
+     * alone never reaches this gate in production — only $_GET carries the real
+     * query there. Simulate that shape: a query-free path + a populated $_GET.
+     */
+    public function testCrossTenantQueryResourceReadFromGetSuperglobalIsBlocked(): void
+    {
+        $payload = ['user_id' => 5, 'tenant_id' => 1, 'email' => 'a@t1'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $previousGet = $_GET;
+        $_GET = ['tenant_id' => '2'];
+        try {
+            // No query string in the PATH — only $_GET carries it, as at runtime.
+            $request = new Request('GET', '/api/resource', ['Authorization' => 'Bearer t1.token']);
+
+            $reached = false;
+            $next = function (Request $req) use (&$reached): Response {
+                $reached = true;
+                return new Response(200, 'ok');
+            };
+
+            $response = $this->middleware->handle($request, $next);
+        } finally {
+            $_GET = $previousGet;
+        }
+
+        $this->assertFalse($reached, 'Cross-tenant $_GET-borne declared target must be blocked before the handler runs');
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    /**
+     * Companion positive case: a same-tenant declared target read from $_GET
+     * (no query string in the path) must still pass through.
+     */
+    public function testSameTenantQueryResourceReadFromGetSuperglobalPasses(): void
+    {
+        $payload = ['user_id' => 5, 'tenant_id' => 1, 'email' => 'a@t1'];
+        $this->mockJwtParser->method('parse')->willReturn($payload);
+
+        $previousGet = $_GET;
+        $_GET = ['tenant_id' => '1'];
+        try {
+            $request = new Request('GET', '/api/resource', ['Authorization' => 'Bearer t1.token']);
+
+            $reached = false;
+            $next = function (Request $req) use (&$reached): Response {
+                $reached = true;
+                return new Response(200, 'ok');
+            };
+
+            $response = $this->middleware->handle($request, $next);
+        } finally {
+            $_GET = $previousGet;
+        }
+
+        $this->assertTrue($reached, 'Same-tenant $_GET-borne declared target must reach the handler');
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    /**
      * AC1: cross-tenant access is blocked when the resource tenant is encoded in
      * the path (/api/tenants/{id}).
      */

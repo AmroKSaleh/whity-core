@@ -374,19 +374,33 @@ class PersonsApiHandler
     }
 
     /**
-     * Read a single query parameter from the request path.
+     * Read a single query parameter from BOTH runtime sources.
+     *
+     * At runtime FrankenPHP strips the query string from the path, so $_GET is
+     * the live source; the path-query form is how the test suite builds a
+     * {@see Request}. Path values win when both are present — mirroring
+     * {@see DelegationsApiHandler::queryParams()} / {@see AuditLogApiHandler::parseQuery()}
+     * (WC-167 review: path-only parsing made every documented filter dead in
+     * production — this handler was missed by that pass).
      */
     private function queryParam(Request $request, string $name): ?string
     {
-        $query = parse_url($request->getPath(), PHP_URL_QUERY);
-        if (!is_string($query) || $query === '') {
-            return null;
+        $value = null;
+
+        if (isset($_GET[$name]) && is_string($_GET[$name])) {
+            $value = $_GET[$name];
         }
 
-        $params = [];
-        parse_str($query, $params);
+        $query = parse_url($request->getPath(), PHP_URL_QUERY);
+        if (is_string($query) && $query !== '') {
+            $params = [];
+            parse_str($query, $params);
+            if (isset($params[$name]) && is_string($params[$name])) {
+                $value = $params[$name];
+            }
+        }
 
-        return isset($params[$name]) && is_string($params[$name]) ? $params[$name] : null;
+        return $value;
     }
 
     /**
