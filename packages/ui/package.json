@@ -26,6 +26,7 @@
     "./switch": "./src/switch.tsx",
     "./tabs": "./src/tabs.tsx",
     "./textarea": "./src/textarea.tsx",
+    "./tooltip": "./src/tooltip.tsx",
     "./utils": "./src/utils.ts",
     "./globals.css": "./src/globals.css"
   },

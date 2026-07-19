@@ -1,6 +1,19 @@
 // jest.setup.js
 import '@testing-library/jest-dom';
 
+// Polyfill ResizeObserver — jsdom has no layout engine so it never implements
+// this, but Radix's popover-family primitives (Tooltip/Popover/.../Arrow) use
+// it internally for size measurement via @radix-ui/react-use-size. A no-op
+// stub is sufficient: tests assert on ARIA wiring and DOM presence, never on
+// measured pixel sizes.
+if (typeof global.ResizeObserver === 'undefined') {
+  global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // Polyfill Response for node environment
 if (typeof global.Response === 'undefined') {
   global.Response = class Response {

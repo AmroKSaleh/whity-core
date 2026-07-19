@@ -125,6 +125,14 @@
       ]
     },
     {
+      "name": "tooltip",
+      "type": "registry:ui",
+      "title": "Tooltip",
+      "description": "Accessible hover/focus tooltip (Provider/Root/Trigger/Content).",
+      "dependencies": ["radix-ui"],
+      "files": [{ "path": "../packages/ui/src/tooltip.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "admin-header",
       "type": "registry:component",
       "title": "Admin Header",
