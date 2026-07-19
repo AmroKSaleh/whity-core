@@ -23,6 +23,7 @@ use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
+use Whity\Sdk\PluginThemeInterface;
 use Whity\Sdk\Sdk;
 
 /**
@@ -108,7 +109,7 @@ class PluginLoader
      * disabled via the admin API. The plugin instance is retained so a disabled
      * plugin can be re-registered (re-enabled) without re-reading it from disk.
      *
-     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>}>
+     * @var array<string, array{plugin: PluginInterface, namespacePrefix: string, hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}>
      */
     private array $registeredPlugins = [];
 
@@ -1120,6 +1121,7 @@ class PluginLoader
             'namespacePrefix' => $candidate['namespacePrefix'],
             'hooks' => [],
             'frontendFeatures' => [],
+            'themeOverrideRoute' => null,
         ];
         // Mark administratively disabled so reEnablePlugin() re-registers its
         // capabilities from this retained instance.
@@ -1279,6 +1281,7 @@ class PluginLoader
             );
             $this->registeredPlugins[$pluginKey]['hooks'] = $registered['hooks'];
             $this->registeredPlugins[$pluginKey]['frontendFeatures'] = $registered['frontendFeatures'];
+            $this->registeredPlugins[$pluginKey]['themeOverrideRoute'] = $registered['themeOverrideRoute'];
             unset($this->administrativelyDisabled[$pluginKey]);
         }
 
@@ -2203,6 +2206,7 @@ class PluginLoader
             'namespacePrefix' => $namespacePrefix,
             'hooks' => $registered['hooks'],
             'frontendFeatures' => $registered['frontendFeatures'],
+            'themeOverrideRoute' => $registered['themeOverrideRoute'],
         ];
 
         // The plugin is now fully registered and ready to serve.
@@ -2222,7 +2226,7 @@ class PluginLoader
      * @param PluginInterface $plugin The plugin instance to register.
      * @param string $namespacePrefix The plugin namespace prefix.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
-     * @return array{hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>}
+     * @return array{hooks: array<array{event: string, callback: callable}>, frontendFeatures: list<array<string, mixed>>, themeOverrideRoute: array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null}
      */
     private function registerCapabilities(
         PluginInterface $plugin,
@@ -2242,6 +2246,11 @@ class PluginLoader
         // requiredPermission — the ownership basis for an 'action' frontend
         // screen, exactly as $registeredGetRoutes backs a 'crud' screen.
         $registeredActionRoutes = [];
+        // GET path => the SAME wrapped handler passed to Router::register(),
+        // so a theme-override route (WC-242) can be invoked in-process
+        // without a second HTTP round-trip; keyed identically to
+        // $registeredGetRoutes so ownership and dispatch always agree.
+        $registeredGetHandlers = [];
 
         // 1. Register routes with the router, each wrapped in an error boundary
         //    so a throwing handler cannot crash the host or other plugins.
@@ -2273,10 +2282,11 @@ class PluginLoader
                 // OpenAPI declaration through to the router/generator.
                 $schema = isset($route['schema']) && is_array($route['schema']) ? $route['schema'] : null;
 
+                $wrappedHandler = $this->wrapHandler($pluginKey, $handler);
                 $accepted = $this->router->register(
                     $method,
                     $path,
-                    $this->wrapHandler($pluginKey, $handler),
+                    $wrappedHandler,
                     $requiredRole,
                     $namespacePrefix,
                     $requiredPermission,
@@ -2299,6 +2309,7 @@ class PluginLoader
                 $upperMethod = strtoupper((string) $method);
                 if ($upperMethod === 'GET') {
                     $registeredGetRoutes[$path] = $requiredPermission;
+                    $registeredGetHandlers[$path] = $wrappedHandler;
                 } elseif ($upperMethod === 'POST' || $upperMethod === 'PUT') {
                     $registeredActionRoutes["{$upperMethod} {$path}"] = $requiredPermission;
                 }
@@ -2360,7 +2371,77 @@ class PluginLoader
             $registeredActionRoutes
         );
 
-        return ['hooks' => $registeredHooks, 'frontendFeatures' => $frontendFeatures];
+        // 5. Collect the plugin's optional theme-override route (WC-242),
+        //    same error-boundary + ownership-verification philosophy as (4).
+        $themeOverrideRoute = $this->collectThemeOverrideRoute(
+            $plugin,
+            $pluginKey,
+            $registeredGetRoutes,
+            $registeredGetHandlers
+        );
+
+        return [
+            'hooks' => $registeredHooks,
+            'frontendFeatures' => $frontendFeatures,
+            'themeOverrideRoute' => $themeOverrideRoute,
+        ];
+    }
+
+    /**
+     * Collect and validate a plugin's optional theme-override route (WC-242).
+     *
+     * Mirrors {@see collectFrontendFeatures()}'s error-boundary and ownership
+     * philosophy: a throwing declaration, a non-string return, or a path the
+     * plugin did NOT itself register as a GET route is dropped with a logged
+     * warning — the plugin itself keeps loading either way, this is metadata
+     * only. Returns null when the plugin doesn't implement
+     * {@see PluginThemeInterface} or its declaration was rejected.
+     *
+     * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
+     * @param array<string, callable> $registeredGetHandlers GET path => the SAME wrapped handler passed to Router::register(), for in-process invocation.
+     * @return array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null
+     */
+    private function collectThemeOverrideRoute(
+        PluginInterface $plugin,
+        string $pluginKey,
+        array $registeredGetRoutes,
+        array $registeredGetHandlers
+    ): ?array {
+        if (!$plugin instanceof PluginThemeInterface) {
+            return null;
+        }
+
+        try {
+            $path = $plugin->getThemeOverrideRoute();
+        } catch (Throwable $e) {
+            $this->handlePluginThrowable($pluginKey, $e, 'theme-override route declaration');
+            return null;
+        }
+
+        if (!is_string($path) || $path === '') {
+            $this->logWarning(
+                "Plugin {$pluginKey} declares a theme-override route that is not a non-empty string; ignored."
+            );
+            return null;
+        }
+
+        // Ownership (same invariant as data-bound block sources, WC-230): the
+        // path must be a GET route THIS plugin actually registered.
+        if (!array_key_exists($path, $registeredGetRoutes)) {
+            $this->logWarning(
+                "Plugin {$pluginKey} declares theme-override route '{$path}' which is not a GET route "
+                . 'it registered; ignored (fail-closed).'
+            );
+
+            return null;
+        }
+
+        return [
+            'plugin' => $plugin->getName(),
+            'path' => $path,
+            'requiredPermission' => $registeredGetRoutes[$path],
+            'handler' => $registeredGetHandlers[$path],
+        ];
     }
 
     /**
@@ -2926,6 +3007,37 @@ class PluginLoader
         }
 
         return $features;
+    }
+
+    /**
+     * Get the active theme-override route descriptor, if any plugin
+     * contributes one (WC-242).
+     *
+     * First-registration-wins across plugins (same convention as frontend
+     * feature ids / MCP prompt names): only ONE plugin's route is ever
+     * returned. A plugin that is administratively disabled, auto-failed, or
+     * otherwise not in the active lifecycle state contributes nothing.
+     *
+     * @return array{plugin: string, path: string, requiredPermission: ?string, handler: callable}|null
+     */
+    public function getThemeOverrideRoute(): ?array
+    {
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            if ($info['themeOverrideRoute'] !== null) {
+                return $info['themeOverrideRoute'];
+            }
+        }
+
+        return null;
     }
 
     /**

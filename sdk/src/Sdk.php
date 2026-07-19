@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.11).
+ * SDK identity (v1.12).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -46,13 +46,19 @@ namespace Whity\Sdk;
  * `dataTable.columns` upgraded to the new `dataColumnList` prop-rule kind
  * (adds optional per-column `sortable`/`filterable` booleans), plus a shared
  * optional `pageSize` on both leaves — purely additive, applies only to rows
- * already fetched from the block's single verified `source`, WC-241).
+ * already fetched from the block's single verified `source`, WC-241) →
+ * 1.12 (optional theme-override contribution point:
+ * {@see PluginThemeInterface}, letting a plugin contribute design-token CSS
+ * variable overrides the host applies at render time. Same ownership model
+ * as data-bound block sources — the declared route must be one this plugin
+ * actually registered — and the host independently revalidates every
+ * returned key/value before it ever reaches a `<style>` tag, WC-242).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.11.0';
+    public const VERSION = '1.12.0';
 
     /**
      * Static identity only — never instantiated.

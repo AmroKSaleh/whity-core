@@ -574,11 +574,11 @@
         },
         {
             "name": "whity/plugin-sdk",
-            "version": "1.11.0",
+            "version": "1.12.0",
             "dist": {
                 "type": "path",
                 "url": "sdk",
-                "reference": "8a83aaf70828b6c0a6e2ba7b5da37469e7c564e3"
+                "reference": "29dbd7a2248190d42a933d7dea64568520016846"
             },
             "require": {
                 "php": ">=8.4"
