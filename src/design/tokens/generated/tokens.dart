@@ -96,9 +96,9 @@ class AppTokens {
   };
 
   // Font families
-  static const String fontSans = 'Inter';
+  static const String fontSans = 'Noto Sans';
   static const String fontMono = 'Geist Mono';
-  static const String fontHeading = 'Inter';
+  static const String fontHeading = 'Noto Sans';
 
   // Font sizes (logical pixels)
   static const fontSize = <String, double>{

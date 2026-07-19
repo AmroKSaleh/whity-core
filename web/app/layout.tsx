@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Geist_Mono } from "next/font/google";
+import { Noto_Sans, Noto_Sans_Arabic, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/lib/auth-context";
@@ -12,9 +12,17 @@ import "@/lib/plugin-screens";
 import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 
-// Design-token font families (see src/design/tokens/base.json):
-// Inter drives --font-sans / --font-heading, Geist Mono drives --font-mono.
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+// Design-token font families (see src/design/tokens/base.json): Noto Sans
+// (latin) + Noto Sans Arabic together drive --font-sans / --font-heading (see
+// the composed stack in globals.css), Geist Mono drives --font-mono. Loading
+// both scripts unconditionally — rather than swapping fonts on `dir` — lets
+// the browser fall through per-glyph, which is correct for bidi/mixed-script
+// content (e.g. an Arabic name inside an English sentence).
+const notoSans = Noto_Sans({ subsets: ["latin"], variable: "--font-noto-sans" });
+const notoSansArabic = Noto_Sans_Arabic({
+  subsets: ["arabic"],
+  variable: "--font-noto-sans-arabic",
+});
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -39,7 +47,14 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={cn("h-full", "antialiased", inter.variable, geistMono.variable, "font-sans")}
+      className={cn(
+        "h-full",
+        "antialiased",
+        notoSans.variable,
+        notoSansArabic.variable,
+        geistMono.variable,
+        "font-sans"
+      )}
     >
       {/*
         suppressHydrationWarning (one level deep, body attributes only): browser

@@ -109,14 +109,14 @@
   },
   "typography": {
     "fontFamily": {
-      "sans": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "sans": "'Noto Sans', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       "mono": "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-      "heading": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+      "heading": "'Noto Sans', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     },
     "fontFamilyDart": {
-      "sans": "Inter",
+      "sans": "Noto Sans",
       "mono": "Geist Mono",
-      "heading": "Inter"
+      "heading": "Noto Sans"
     },
     "scaleRationale": "Modular type scale anchored at 1rem (16px) base, stepping on an approximate minor-third (~1.2) ratio. Sizes expressed in rem for web (respects user zoom / root font-size) and resolved to px for Dart/Flutter (logical pixels).",
     "fontSize": {

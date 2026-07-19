@@ -7,6 +7,10 @@
  *
  * Generates platform token files deterministically:
  *   - generated/tokens.json   (flat JSON for programmatic / white-label tooling)
+ *   - generated/theme.json    (colors-ONLY master reference: every semantic
+ *                              color name, its light/dark oklch value, and a
+ *                              resolved hex preview of each — the one file to
+ *                              open to see the whole palette at a glance)
  *   - generated/tokens.dart   (Flutter Material 3 constants)
  *   - ../../../web/app/globals.css  (CSS custom properties, synced between sentinel markers)
  *
@@ -14,11 +18,12 @@
  * regenerating without source changes produces byte-identical files.
  *
  * Usage:
- *   node generate-tokens.js [all|json|dart|web|check]
+ *   node generate-tokens.js [all|json|dart|web|theme|check]
  *     all   - regenerate every target (default)
  *     json  - regenerate generated/tokens.json
  *     dart  - regenerate generated/tokens.dart
  *     web   - sync web/app/globals.css
+ *     theme - regenerate generated/theme.json
  *     check - regenerate in-memory and fail (exit 1) if any target is stale
  */
 
@@ -219,6 +224,19 @@ function oklchToArgbHex(value) {
   return `0x${a}${toHexByte(r)}${toHexByte(g)}${toHexByte(b)}`.toUpperCase().replace('0X', '0x');
 }
 
+/**
+ * Convert an OKLCH string to a standard CSS hex color: `#rrggbb`, or
+ * `#rrggbbaa` when the color carries alpha < 1. Used only for the
+ * human-readable preview in theme.json — the CSS/Dart outputs above keep the
+ * original oklch/ARGB representations they've always used.
+ */
+function oklchToCssHex(value) {
+  const { L, C, H, alpha } = parseOklch(value, 'oklchToCssHex');
+  const [r, g, b] = oklchToLinearSrgb(L, C, H).map(linearToSrgb);
+  const rgb = `#${toHexByte(r)}${toHexByte(g)}${toHexByte(b)}`;
+  return alpha < 1 ? `${rgb}${toHexByte(alpha)}` : rgb;
+}
+
 // ---------------------------------------------------------------------------
 // Naming utilities
 // ---------------------------------------------------------------------------
@@ -251,6 +269,34 @@ function generateTokensJson(base) {
     },
     spacing: base.spacing,
     borderRadius: base.borderRadius,
+  };
+  return JSON.stringify(output, null, 2) + '\n';
+}
+
+/**
+ * The master color theme: every semantic color name, once, with its light
+ * and dark oklch values plus a resolved hex preview of each — colors ONLY
+ * (no typography/spacing/radius; see tokens.json for the full bundle).
+ * Keys are sorted alphabetically so the file is easy to scan/diff by hand.
+ */
+function generateThemeJson(base) {
+  const names = Object.keys(base.colors.light).sort();
+  const colors = {};
+  for (const name of names) {
+    colors[name] = {
+      light: base.colors.light[name],
+      dark: base.colors.dark[name],
+      lightHex: oklchToCssHex(base.colors.light[name]),
+      darkHex: oklchToCssHex(base.colors.dark[name]),
+    };
+  }
+  const output = {
+    version: base.version,
+    description:
+      'Master color theme — every semantic color token used across the design system, ' +
+      'light + dark, oklch (source of truth) plus a resolved hex preview. ' +
+      'Generated from base.json; do not edit by hand — run `npm run tokens:generate`.',
+    colors,
   };
   return JSON.stringify(output, null, 2) + '\n';
 }
@@ -431,10 +477,13 @@ function loadBase() {
 /**
  * Build the full set of target outputs as { path, content } records.
  */
-function buildTargets(base, { json = true, dart = true, web = true } = {}) {
+function buildTargets(base, { json = true, dart = true, web = true, theme = true } = {}) {
   const targets = [];
   if (json) {
     targets.push({ path: path.join(OUTPUT_DIR, 'tokens.json'), content: generateTokensJson(base) });
+  }
+  if (theme) {
+    targets.push({ path: path.join(OUTPUT_DIR, 'theme.json'), content: generateThemeJson(base) });
   }
   if (dart) {
     targets.push({ path: path.join(OUTPUT_DIR, 'tokens.dart'), content: generateDart(base) });
@@ -503,9 +552,10 @@ function main() {
       json: command === 'all' || command === 'json',
       dart: command === 'all' || command === 'dart',
       web: command === 'all' || command === 'web',
+      theme: command === 'all' || command === 'theme',
     };
-    if (!opts.json && !opts.dart && !opts.web) {
-      console.error(`✗ Unknown command "${command}". Use: all | json | dart | web | check.`);
+    if (!opts.json && !opts.dart && !opts.web && !opts.theme) {
+      console.error(`✗ Unknown command "${command}". Use: all | json | dart | web | theme | check.`);
       process.exit(1);
     }
 
@@ -533,9 +583,11 @@ module.exports = {
   loadBase,
   oklchToLinearSrgb,
   oklchToArgbHex,
+  oklchToCssHex,
   toCamelCase,
   remToPx,
   generateTokensJson,
+  generateThemeJson,
   generateDart,
   generateCssRegion,
   syncGlobalsCss,
