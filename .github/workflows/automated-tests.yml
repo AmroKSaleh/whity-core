@@ -96,7 +96,7 @@ jobs:
       # loaded PHP extensions, which live outside vendor/), so one shared key
       # warms them all and cuts redundant cache entries under the 10 GB budget.
       - name: Cache Composer dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor
           key: composer-${{ hashFiles('composer.lock') }}
@@ -144,7 +144,7 @@ jobs:
       # every run seeds from the most recent cache; PHPStan invalidates internally
       # on any file/config/version change, so a stale restore is always safe.
       - name: Cache PHPStan result cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .phpstan-cache
           key: phpstan-${{ github.sha }}
@@ -214,7 +214,7 @@ jobs:
           coverage: none
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor
           key: composer-${{ hashFiles('composer.lock') }}
@@ -355,7 +355,7 @@ jobs:
       # source hash so a dependency or source change seeds from the most recent
       # cache (restore-keys) rather than building fully cold.
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: web/.next/cache
           key: nextjs-${{ hashFiles('package-lock.json') }}-${{ hashFiles('web/**/*.[jt]s', 'web/**/*.[jt]sx') }}
