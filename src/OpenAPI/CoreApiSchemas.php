@@ -1029,6 +1029,35 @@ final class CoreApiSchemas
                     502 => self::errorResponse('The store package could not be fetched'),
                 ],
             ]),
+            self::permissionRoute('GET', '/api/plugins/store/allowed', 'plugins:read', [
+                'summary' => 'List the trusted store hosts (for the store-browser UI)',
+                'description' => 'Returns the operator `plugins.store_allowed_hosts` allowlist and whether '
+                    . 'installing from a store is enabled. Read-only; makes no outbound request.',
+                'tags' => ['platform-ops'],
+                'responses' => [
+                    200 => self::jsonResponse('Allowed store hosts', 'StoreAllowedHostsResponse'),
+                    500 => self::errorResponse('Internal error'),
+                ],
+            ]),
+            self::permissionRoute('GET', '/api/plugins/store/catalog', 'plugins:read', [
+                'summary' => 'Browse (and search) a trusted store\'s public catalogue',
+                'description' => 'Server-side proxy to a store\'s public catalogue for the admin UI. Query: '
+                    . '`store_url` (a bare https origin that MUST be on the allowlist) and optional `q` '
+                    . '(case-insensitive substring over slug/name/description/author/tags). The browser '
+                    . 'never contacts the store directly.',
+                'tags' => ['platform-ops'],
+                'parameters' => [
+                    ['name' => 'store_url', 'in' => 'query', 'required' => true, 'schema' => ['type' => 'string']],
+                    ['name' => 'q', 'in' => 'query', 'required' => false, 'schema' => ['type' => 'string']],
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Store catalogue (optionally filtered)', 'StoreCatalogueResponse'),
+                    403 => self::errorResponse('Feature disabled or store host not in the allowlist'),
+                    422 => self::errorResponse('store_url is required or not a bare https origin'),
+                    500 => self::errorResponse('Internal error'),
+                    502 => self::errorResponse('The store catalogue could not be fetched'),
+                ],
+            ]),
         ];
     }
 
@@ -1452,6 +1481,29 @@ final class CoreApiSchemas
                     'description' => 'Optional store access token (opaque bearer credential).',
                 ]),
             ], ['store_url', 'slug', 'version']),
+
+            // GET /api/plugins/store/allowed — the configured trusted store hosts.
+            'StoreAllowedHostsResponse' => self::object([
+                'data' => self::object([
+                    'enabled' => self::bool(),
+                    'hosts' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], ['enabled', 'hosts']),
+            ], ['data']),
+
+            // GET /api/plugins/store/catalog — a store's public catalogue entry.
+            'StoreCataloguePlugin' => self::object([
+                'slug' => self::str(),
+                'name' => self::str(),
+                'description' => self::str(),
+                'author' => self::str(),
+                'tags' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'latest_version' => self::str(true),
+            ], ['slug', 'name']),
+            'StoreCatalogueResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/StoreCataloguePlugin']],
+                'store_url' => self::str(),
+                'count' => ['type' => 'integer'],
+            ], ['data']),
 
             // POST /api/login — 200 success (single membership → session issued,
             // OR multi-membership → requires_tenant_selection prompt).

@@ -6783,6 +6783,196 @@
                 ]
             }
         },
+        "/api/v1/plugins/store/allowed": {
+            "get": {
+                "operationId": "get_api_v1_plugins_store_allowed",
+                "summary": "List the trusted store hosts (for the store-browser UI)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Allowed store hosts",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/StoreAllowedHostsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plugins/store/catalog": {
+            "get": {
+                "operationId": "get_api_v1_plugins_store_catalog",
+                "summary": "Browse (and search) a trusted store's public catalogue",
+                "tags": [
+                    "platform-ops"
+                ],
+                "parameters": [
+                    {
+                        "name": "store_url",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Store catalogue (optionally filtered)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/StoreCatalogueResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Feature disabled or store host not in the allowlist",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "store_url is required or not a bare https origin",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The store catalogue could not be fetched",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plugins/upload": {
             "post": {
                 "operationId": "post_api_v1_plugins_upload",
@@ -13801,6 +13991,83 @@
                             "entitled",
                             "drivers"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "StoreAllowedHostsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "enabled": {
+                                "type": "boolean"
+                            },
+                            "hosts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": [
+                            "enabled",
+                            "hosts"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "StoreCataloguePlugin": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "author": {
+                        "type": "string"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "latest_version": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "slug",
+                    "name"
+                ]
+            },
+            "StoreCatalogueResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/StoreCataloguePlugin"
+                        }
+                    },
+                    "store_url": {
+                        "type": "string"
+                    },
+                    "count": {
+                        "type": "integer"
                     }
                 },
                 "required": [

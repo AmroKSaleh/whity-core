@@ -397,6 +397,18 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLUGINS_READ,
     ];
     $items[] = [
+        'id' => 'plugin-store',
+        'label' => 'Plugin Store',
+        'href' => '/admin/plugins/store',
+        'icon' => 'building-store',
+        'group' => 'admin',
+        'order' => 9,
+        // Browse + install from a trusted store. Mirrors GET
+        // /api/plugins/store/catalog (gated plugins:read); the install action on
+        // the page is separately gated plugins:upload server-side.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLUGINS_READ,
+    ];
+    $items[] = [
         'id' => 'website-settings',
         'label' => 'Website Settings',
         'href' => '/admin/settings',
@@ -899,6 +911,11 @@ $installFromStoreHandler = new \Whity\Api\InstallFromStoreApiHandler(
     $auditLogger
 );
 $router->register('POST', '/api/plugins/install-from-store', [$installFromStoreHandler, 'install'], null, null, CorePermissions::PLUGINS_UPLOAD);
+// Store BROWSE surface for the admin UI (read-only, allowlist-gated proxy to a
+// trusted store's public catalogue). Gated on PLUGINS_READ — browsing needs no
+// more than the plugins list itself; installing still needs PLUGINS_UPLOAD.
+$router->register('GET', '/api/plugins/store/allowed', [$installFromStoreHandler, 'allowedStores'], null, null, CorePermissions::PLUGINS_READ);
+$router->register('GET', '/api/plugins/store/catalog', [$installFromStoreHandler, 'browseCatalog'], null, null, CorePermissions::PLUGINS_READ);
 
 $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migrations');
 // Only allow read-only access to migration status via API
