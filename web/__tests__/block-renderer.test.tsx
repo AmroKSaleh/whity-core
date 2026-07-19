@@ -943,3 +943,273 @@ describe('BlockRenderer — chart (WC-240)', () => {
     expect(screen.getByText(/Unsupported block/i)).toBeInTheDocument();
   });
 });
+
+// ---- WC-241: dataTable/dataList inline sort/filter/pagination ----
+
+describe('BlockRenderer — dataTable inline sort/filter/pagination (WC-241)', () => {
+  const rows = [
+    { name: 'Camille', role: 'Viewer' },
+    { name: 'Anika', role: 'Administrator' },
+    { name: 'Bjorn', role: 'Editor' },
+  ];
+
+  it('a sortable column header toggles asc -> desc -> unsorted order on click', async () => {
+    const user = userEvent.setup();
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name', sortable: true }],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+    const cellOrder = () =>
+      screen.getAllByRole('cell').map((cell) => cell.textContent);
+
+    // Original (unsorted) fetch order.
+    expect(cellOrder()).toEqual(['Camille', 'Anika', 'Bjorn']);
+
+    await user.click(screen.getByRole('columnheader', { name: /Name/i }));
+    expect(cellOrder()).toEqual(['Anika', 'Bjorn', 'Camille']);
+
+    await user.click(screen.getByRole('columnheader', { name: /Name/i }));
+    expect(cellOrder()).toEqual(['Camille', 'Bjorn', 'Anika']);
+
+    await user.click(screen.getByRole('columnheader', { name: /Name/i }));
+    expect(cellOrder()).toEqual(['Camille', 'Anika', 'Bjorn']);
+  });
+
+  it('a non-sortable column header click does nothing', async () => {
+    const user = userEvent.setup();
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+    await user.click(screen.getByRole('columnheader', { name: /Name/i }));
+
+    const cellOrder = screen.getAllByRole('cell').map((cell) => cell.textContent);
+    expect(cellOrder).toEqual(['Camille', 'Anika', 'Bjorn']);
+  });
+
+  it('a filterable column narrows rows by a case-insensitive substring match', async () => {
+    const user = userEvent.setup();
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [
+              { key: 'name', label: 'Name', filterable: true },
+              { key: 'role', label: 'Role' },
+            ],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+
+    await user.type(screen.getByRole('textbox', { name: /Filter Name/i }), 'ani');
+
+    expect(screen.getByText('Anika')).toBeInTheDocument();
+    expect(screen.queryByText('Camille')).not.toBeInTheDocument();
+    expect(screen.queryByText('Bjorn')).not.toBeInTheDocument();
+  });
+
+  it('pageSize enables Pagination and Next reveals the following page', async () => {
+    const user = userEvent.setup();
+    const manyRows = Array.from({ length: 5 }, (_, i) => ({ name: `Row ${i + 1}` }));
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: manyRows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+            pageSize: 2,
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Row 1')).toBeInTheDocument());
+    expect(screen.getByText('Row 2')).toBeInTheDocument();
+    expect(screen.queryByText('Row 3')).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Pagination' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+
+    expect(screen.getByText('Row 3')).toBeInTheDocument();
+    expect(screen.getByText('Row 4')).toBeInTheDocument();
+    expect(screen.queryByText('Row 1')).not.toBeInTheDocument();
+  });
+
+  it('without pageSize, no Pagination control is rendered', async () => {
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name' }],
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+    expect(screen.queryByRole('navigation', { name: 'Pagination' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * SECURITY (WC-241): sorting, filtering, and paginating operate ENTIRELY on
+   * the rows already fetched from the block's single, ownership-verified
+   * `source` — a crafted interaction sequence must never cause a second
+   * fetch (to `source` or anywhere else).
+   */
+  it('sorting, filtering, and paginating never trigger a second fetch', async () => {
+    const user = userEvent.setup();
+    const manyRows = Array.from({ length: 5 }, (_, i) => ({ name: `Row ${i + 1}` }));
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: manyRows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataTable',
+            source: '/api/v1/x/rows',
+            columns: [{ key: 'name', label: 'Name', sortable: true, filterable: true }],
+            pageSize: 2,
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Row 1')).toBeInTheDocument());
+    expect(mockApiClient).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('columnheader', { name: /Name/i }));
+    await user.type(screen.getByRole('textbox', { name: /Filter Name/i }), 'Row');
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+
+    expect(mockApiClient).toHaveBeenCalledTimes(1);
+    expect(mockApiClient).toHaveBeenCalledWith('/api/v1/x/rows', expect.anything());
+  });
+});
+
+describe('BlockRenderer — dataList inline sort/filter/pagination (WC-241)', () => {
+  const rows = [{ name: 'Camille' }, { name: 'Anika' }, { name: 'Bjorn' }];
+
+  it('sortable toggles alphabetical asc/desc order', async () => {
+    const user = userEvent.setup();
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+            sortable: true,
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+    const itemOrder = () => screen.getAllByRole('listitem').map((li) => li.textContent);
+    expect(itemOrder()).toEqual(['Camille', 'Anika', 'Bjorn']);
+
+    await user.click(screen.getByRole('button', { name: /Sort/i }));
+    expect(itemOrder()).toEqual(['Anika', 'Bjorn', 'Camille']);
+
+    await user.click(screen.getByRole('button', { name: /Sort/i }));
+    expect(itemOrder()).toEqual(['Camille', 'Bjorn', 'Anika']);
+  });
+
+  it('filterable narrows items by a case-insensitive substring match', async () => {
+    const user = userEvent.setup();
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+            filterable: true,
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+    await user.type(screen.getByRole('textbox', { name: /Filter items/i }), 'ani');
+
+    expect(screen.getByText('Anika')).toBeInTheDocument();
+    expect(screen.queryByText('Camille')).not.toBeInTheDocument();
+  });
+
+  it('pageSize enables Pagination for the list', async () => {
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[
+          {
+            type: 'dataList',
+            source: '/api/v1/x/rows',
+            itemField: 'name',
+            pageSize: 2,
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+    expect(screen.getByRole('navigation', { name: 'Pagination' })).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+  });
+
+  it('without sortable/filterable/pageSize, renders exactly the fetched order with no extra controls', async () => {
+    mockApiClient.mockResolvedValue(stubResponse(true, 200, { data: rows }));
+
+    render(
+      <BlockRenderer
+        blocks={[{ type: 'dataList', source: '/api/v1/x/rows', itemField: 'name' }]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('Camille')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /Sort/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /Filter items/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Pagination' })).not.toBeInTheDocument();
+  });
+});

@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -207,10 +207,17 @@ final class BlockContract
             ],
 
             // ---- data-bound leaves (SP2, WC-229) ----
+            // WC-241: 'columns' upgraded to 'dataColumnList' (adds optional
+            // per-column sortable/filterable flags) and a new optional
+            // 'pageSize' enables client-side pagination — the row set itself
+            // still comes from ONE already-verified fetch of 'source'; sort,
+            // filter, and page state are applied entirely client-side over
+            // that response and never trigger a second request.
             'dataTable' => ['container' => false, 'props' => [
-                'source'    => ['type' => 'apiPath',    'required' => true],
-                'columns'   => ['type' => 'columnList', 'required' => true],
-                'emptyText' => ['type' => 'string',     'required' => false],
+                'source'    => ['type' => 'apiPath',        'required' => true],
+                'columns'   => ['type' => 'dataColumnList', 'required' => true],
+                'pageSize'  => ['type' => 'int',            'required' => false],
+                'emptyText' => ['type' => 'string',         'required' => false],
             ]],
             'dataStat' => ['container' => false, 'props' => [
                 'source'     => ['type' => 'apiPath', 'required' => true],
@@ -220,11 +227,17 @@ final class BlockContract
                 'trendField' => ['type' => 'string',  'required' => false],
                 'emptyText'  => ['type' => 'string',  'required' => false],
             ]],
+            // WC-241: 'sortable' (alphabetical toggle) / 'filterable' (a
+            // search box over itemField) / 'pageSize' (client pagination) —
+            // same client-side-only invariant as dataTable above.
             'dataList' => ['container' => false, 'props' => [
-                'source'    => ['type' => 'apiPath',    'required' => true],
-                'itemField' => ['type' => 'string',     'required' => true],
-                'ordered'   => ['type' => 'bool',       'required' => false],
-                'emptyText' => ['type' => 'string',     'required' => false],
+                'source'     => ['type' => 'apiPath',    'required' => true],
+                'itemField'  => ['type' => 'string',     'required' => true],
+                'ordered'    => ['type' => 'bool',       'required' => false],
+                'sortable'   => ['type' => 'bool',       'required' => false],
+                'filterable' => ['type' => 'bool',       'required' => false],
+                'pageSize'   => ['type' => 'int',        'required' => false],
+                'emptyText'  => ['type' => 'string',     'required' => false],
             ]],
             // ---- SP4 chart block (WC-240) ----
             'chart' => ['container' => false, 'props' => [
