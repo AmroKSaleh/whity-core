@@ -91,6 +91,14 @@
       "files": [{ "path": "../packages/ui/src/input.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "pagination",
+      "type": "registry:ui",
+      "title": "Pagination",
+      "description": "Routing-agnostic prev/next pagination control.",
+      "dependencies": ["@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/pagination.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "select",
       "type": "registry:ui",
       "title": "Select",
