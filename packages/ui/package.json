@@ -14,6 +14,7 @@
     "./badge": "./src/badge.tsx",
     "./button": "./src/button.tsx",
     "./card": "./src/card.tsx",
+    "./checkbox": "./src/checkbox.tsx",
     "./dialog": "./src/dialog.tsx",
     "./dropdown-menu": "./src/dropdown-menu.tsx",
     "./empty-state": "./src/empty-state.tsx",

@@ -35,6 +35,14 @@
       "files": [{ "path": "../packages/ui/src/card.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "checkbox",
+      "type": "registry:ui",
+      "title": "Checkbox",
+      "description": "Tri-state (checked/unchecked/indeterminate) checkbox.",
+      "dependencies": ["radix-ui", "@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/checkbox.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "dialog",
       "type": "registry:ui",
       "title": "Dialog",
