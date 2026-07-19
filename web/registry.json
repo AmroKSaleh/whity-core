@@ -52,6 +52,14 @@
       "files": [{ "path": "../packages/ui/src/dropdown-menu.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "empty-state",
+      "type": "registry:ui",
+      "title": "Empty State",
+      "description": "Empty/error placeholder with icon, title, description and action slots.",
+      "dependencies": ["class-variance-authority", "@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/empty-state.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "form",
       "type": "registry:ui",
       "title": "Form",
