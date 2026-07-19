@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* Storybook has no next/font pipeline (that's Next.js-only, see web/app/layout.tsx),
+   so the package's own preview loads Noto Sans + Noto Sans Arabic directly. */
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap");
 
 @custom-variant dark (&:is(.dark *));
 
@@ -94,6 +97,7 @@
     cursor: pointer;
   }
   html {
+    --font-sans: "Noto Sans", "Noto Sans Arabic", ui-sans-serif, system-ui, sans-serif;
     @apply font-sans;
   }
 }

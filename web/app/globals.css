@@ -96,6 +96,12 @@
     cursor: pointer;
   }
   html {
+    /* Noto Sans (latin) + Noto Sans Arabic together, so mixed-script text
+       (an Arabic name inside an English sentence, etc.) renders each glyph
+       in its correct script rather than a browser tofu/fallback font. Each
+       font's own custom property is set by next/font (see layout.tsx); this
+       composes them into the --font-sans the design tokens expose. */
+    --font-sans: var(--font-noto-sans), var(--font-noto-sans-arabic), ui-sans-serif, system-ui, sans-serif;
     @apply font-sans;
   }
 }
