@@ -16,6 +16,7 @@ import {
   IconDownload,
   IconAlertCircle,
   IconRefresh,
+  IconKey,
 } from '@tabler/icons-react';
 
 // Read access to the store browser mirrors the plugins console (plugins:read);
@@ -40,6 +41,7 @@ export default function PluginStorePage() {
   const [browsing, setBrowsing] = useState(false);
   const [installingSlug, setInstallingSlug] = useState<string | null>(null);
   const [hasBrowsed, setHasBrowsed] = useState(false);
+  const [mintingToken, setMintingToken] = useState(false);
 
   // Load the operator's trusted store hosts once, to populate the picker.
   useEffect(() => {
@@ -49,7 +51,7 @@ export default function PluginStorePage() {
       const { data, error } = await api.GET('/api/v1/plugins/store/allowed');
       if (!active) return;
       if (error || !data) {
-        addToast('Could not load the configured stores.', 'error');
+        addToast(error?.error || 'Could not load the configured stores.', 'error');
         return;
       }
       setAllowedHosts(data.data.hosts);
@@ -75,7 +77,7 @@ export default function PluginStorePage() {
         params: { query: { store_url: storeUrl, q: search || undefined } },
       });
       if (error || !data) {
-        addToast('The store catalogue could not be loaded.', 'error');
+        addToast(error?.error || 'The store catalogue could not be loaded.', 'error');
         return;
       }
       setPlugins(data.data);
@@ -94,20 +96,64 @@ export default function PluginStorePage() {
       }
       setInstallingSlug(plugin.slug);
       try {
-        const { error } = await api.POST('/api/v1/plugins/install-from-store', {
+        const { data, error } = await api.POST('/api/v1/plugins/install-from-store', {
           body: { store_url: storeUrl, slug: plugin.slug, version, token: token || undefined },
         });
         if (error) {
-          addToast(`Failed to install "${plugin.name}".`, 'error');
+          // Surface the ACTUAL backend reason (e.g. "A valid store download
+          // token is required", "already installed", allowlist rejection) —
+          // a generic message left every failure equally unexplained,
+          // including the common case of installing without a token.
+          addToast(error.error || `Failed to install "${plugin.name}".`, 'error');
           return;
         }
-        addToast(`"${plugin.name}" v${version} installed (disabled). Enable it from Plugins.`, 'success');
+        addToast(
+          `"${plugin.name}" v${data?.data.version ?? version} installed (disabled). Enable it from Plugins.`,
+          'success',
+        );
       } finally {
         setInstallingSlug(null);
       }
     },
     [storeUrl, token, addToast],
   );
+
+  /**
+   * Convenience for the common case: the store being browsed IS this instance
+   * itself (the operator's own deployment), so the browser already carries a
+   * session on it. Mints a download token via the store's own token-mint route
+   * and fills it in — sparing the operator a separate curl/API call before
+   * every install. This route is plugin-declared (whity-plugin-store), not part
+   * of this instance's OWN OpenAPI contract, so it is called directly rather
+   * than through the typed client; the backend's own admin-role gate is the
+   * real authority regardless of what this button does.
+   */
+  const mintToken = useCallback(async () => {
+    if (!storeUrl) {
+      addToast('Choose a store first.', 'error');
+      return;
+    }
+    setMintingToken(true);
+    try {
+      const res = await fetch(`${storeUrl}/api/v1/plugin-store/tokens`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ label: 'admin-store-page' }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.data?.token) {
+        addToast(body?.error || 'Could not mint a store token for this store.', 'error');
+        return;
+      }
+      setToken(body.data.token);
+      addToast('Store token minted and filled in below.', 'success');
+    } catch {
+      addToast('Could not reach the store to mint a token.', 'error');
+    } finally {
+      setMintingToken(false);
+    }
+  }, [storeUrl, addToast]);
 
   if (isCapabilitiesLoading) {
     return (
@@ -191,14 +237,26 @@ export default function PluginStorePage() {
                 </div>
               </label>
               <label className="flex flex-1 flex-col gap-1 text-sm">
-                <span className="font-medium text-muted-foreground">Access token (optional)</span>
-                <input
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  type="password"
-                  placeholder="store download token"
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                />
+                <span className="font-medium text-muted-foreground">Access token</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    type="password"
+                    placeholder="required to install"
+                    className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={mintToken}
+                    disabled={mintingToken || !storeUrl}
+                    title="Mint a download token from this store (requires an admin session on it)"
+                    className="h-10 w-10 shrink-0 p-0"
+                  >
+                    <IconKey className={`w-4 h-4 ${mintingToken ? 'animate-pulse' : ''}`} />
+                  </Button>
+                </div>
               </label>
               <Button onClick={browse} disabled={browsing || !storeUrl} className="gap-2 h-10">
                 <IconRefresh className={`w-4 h-4 ${browsing ? 'animate-spin' : ''}`} />
