@@ -160,7 +160,9 @@ CI runs PHPUnit + PHPStan on every PR (`.github/workflows/automated-tests.yml`).
 
 Core platform — **delivered**: FrankenPHP runtime, plugin hot-loading + lifecycle, RBAC (registry, hierarchy, OU inheritance), multi-tenant isolation, 2FA, design system, developer docs, and an E2E test suite.
 
-Under consideration: organizational-unit hierarchy visualizer, user profile management, n8n workflow automation, family-relations module, and the Flutter/Electron clients. See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
+Under consideration: organizational-unit hierarchy visualizer, user profile management, family-relations module, and the Flutter/Electron clients. See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
+
+Embedding an n8n workflow engine was **deferred, not adopted** — [ADR 0008](docs/adr/0008-defer-n8n-external-automation-surface.md) reframes automation around MCP (any orchestrator that speaks MCP, including n8n, can already call every permission-gated API route).
 
 ## License
 

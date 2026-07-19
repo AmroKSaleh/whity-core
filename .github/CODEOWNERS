@@ -1,0 +1,26 @@
+# CODEOWNERS — requests review from the listed owner(s) on matching paths.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Last-match-wins: more specific paths below override earlier, broader ones.
+
+# Default: everything falls to the maintainer unless overridden below.
+*               @AmroKSaleh
+
+# Backend core
+/src/           @AmroKSaleh
+
+# Plugin SDK (published standalone; backward-compat contract is stricter here)
+/sdk/           @AmroKSaleh
+
+# Frontend
+/web/           @AmroKSaleh
+/packages/      @AmroKSaleh
+
+# CI/CD and governance — changes here affect what "green" means for every PR
+/.github/       @AmroKSaleh
+
+# Security-sensitive surfaces — flag explicitly even though the default already covers them
+/src/Http/Middleware/  @AmroKSaleh
+/src/Core/Tenant/      @AmroKSaleh
+/src/Auth/             @AmroKSaleh
+SECURITY.md            @AmroKSaleh

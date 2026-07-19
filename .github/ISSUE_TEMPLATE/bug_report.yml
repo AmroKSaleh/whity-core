@@ -1,0 +1,41 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report. **If this is a security vulnerability, do not use this form** — see [SECURITY.md](https://github.com/AmroKSaleh/whity-core/blob/main/SECURITY.md) for private reporting instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Commands run, config/env vars (redact secrets), minimal reproduction if possible.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Whity Core version / commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: PHP version, deployment mode (Docker Compose, bare-metal, etc.), OS.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact secrets and any tenant data.
+      render: shell
