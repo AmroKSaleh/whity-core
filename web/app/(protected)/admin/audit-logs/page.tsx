@@ -6,7 +6,8 @@ import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
-import { IconChevronLeft, IconChevronRight, IconRefresh } from '@tabler/icons-react';
+import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { IconRefresh } from '@tabler/icons-react';
 import type {
   AuditLogEntry,
   AuditLogFilters,
@@ -137,6 +138,24 @@ export default function AuditLogsPage() {
     return keys.map((key) => `${key}: ${String(metadata[key])}`).join(', ');
   };
 
+  const columns: DataTableColumn<AuditLogEntry>[] = [
+    { id: 'time', header: 'Time', cell: (entry) => formatTimestamp(entry.createdAt) },
+    { accessorKey: 'action', header: 'Action' },
+    {
+      id: 'actor',
+      header: 'Actor',
+      cell: (entry) => (entry.actorUserId !== null ? `#${entry.actorUserId}` : 'system'),
+    },
+    { id: 'target', header: 'Target', cell: formatTarget },
+    { accessorKey: 'ipAddress', header: 'IP' },
+    {
+      id: 'details',
+      header: 'Details',
+      cell: (entry) => formatMetadata(entry.metadata),
+      className: 'max-w-md truncate',
+    },
+  ];
+
   return (
     <div className="space-y-8">
       <AdminHeader
@@ -217,99 +236,24 @@ export default function AuditLogsPage() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border border-border overflow-hidden">
-        {isLoading ? (
-          <div className="flex h-64 items-center justify-center bg-muted/50">
-            <div className="text-center">
-              <div className="mx-auto mb-2 h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
-              <p className="text-sm text-muted-foreground">Loading...</p>
-            </div>
-          </div>
-        ) : entries.length === 0 ? (
-          <div className="flex h-64 items-center justify-center bg-muted/50">
-            <p className="text-sm text-muted-foreground">
-              No audit entries found
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-border bg-muted">
-                <tr>
-                  {['Time', 'Action', 'Actor', 'Target', 'IP', 'Details'].map(
-                    (heading) => (
-                      <th
-                        key={heading}
-                        className="px-6 py-3 text-start text-xs font-medium uppercase tracking-wider text-foreground"
-                      >
-                        {heading}
-                      </th>
-                    )
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {entries.map((entry) => (
-                  <tr
-                    key={entry.id}
-                    className="transition-colors hover:bg-muted/50"
-                  >
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-foreground">
-                      {formatTimestamp(entry.createdAt)}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-foreground">
-                      {entry.action}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-muted-foreground">
-                      {entry.actorUserId !== null ? `#${entry.actorUserId}` : 'system'}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-muted-foreground">
-                      {formatTarget(entry)}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-muted-foreground">
-                      {entry.ipAddress ?? '-'}
-                    </td>
-                    <td className="max-w-md truncate px-6 py-4 text-sm text-muted-foreground">
-                      {formatMetadata(entry.metadata)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Pagination */}
-      {!isLoading && entries.length > 0 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            {total} {total === 1 ? 'entry' : 'entries'} &middot; page {page} of{' '}
-            {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              aria-label="Previous page"
-            >
-              <IconChevronLeft size={16} />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              aria-label="Next page"
-            >
-              <IconChevronRight size={16} />
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* Table — real server-side pagination (the backend already supports
+          page/per_page and this table's own filters, unlike the other admin
+          list endpoints, so it stays in DataTable's manual/server mode rather
+          than the single-fetch client mode used elsewhere). */}
+      <DataTable
+        columns={columns}
+        data={entries}
+        getRowId={(entry) => String(entry.id)}
+        isLoading={isLoading}
+        emptyState={{ title: 'No audit entries found' }}
+        pagination={{
+          pageIndex: page - 1,
+          pageSize: PER_PAGE,
+          pageCount: totalPages,
+          total,
+          onPaginationChange: (nextPageIndex) => setPage(nextPageIndex + 1),
+        }}
+      />
     </div>
   );
 }

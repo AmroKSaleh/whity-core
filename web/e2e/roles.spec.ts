@@ -44,7 +44,7 @@ test.describe('Roles CRUD (admin)', () => {
     await expect(table.getByRole('cell', { name: 'user', exact: true })).toBeVisible();
 
     // Filtering by "admin" keeps the admin role and hides the user role.
-    await page.getByTestId('roles-search').fill('admin');
+    await page.getByPlaceholder('Search roles…').fill('admin');
     await expect(table.getByRole('cell', { name: 'admin', exact: true })).toBeVisible();
     await expect(table.getByRole('cell', { name: 'user', exact: true })).toHaveCount(0);
   });

@@ -1,14 +1,14 @@
 ﻿'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api/client';
+import { apiClient } from '@/lib/api-client';
 import type { components } from '@/lib/api/schema';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { USERS_WRITE, USERS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type Column } from '@/components/admin/data-table';
+import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
@@ -39,12 +39,19 @@ export default function UsersPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
+  // The backend supports page/per_page but not sort/filter query params, so
+  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
+  // the backend's own page-size ceiling (100) rather than its 25-row default
+  // fixes the previous silent page-1-only truncation for the common case.
+  // Tenants with >100 users are still capped until the backend grows real
+  // search/sort support; that's a pre-existing limit, just moved further out.
   const { data, loading: isLoading, error, refetch: fetchUsers } = useFetch(async () => {
-    const { data: responseData } = await api.GET('/api/v1/users');
-    if (responseData === undefined) {
+    const response = await apiClient('/api/v1/users?per_page=100');
+    if (!response.ok) {
       throw new Error('Failed to fetch users');
     }
-    return responseData.data;
+    const body: { data: User[] } = await response.json();
+    return body.data;
   }, []);
 
   const users = data ?? [];
@@ -65,12 +72,12 @@ export default function UsersPage() {
     setIsDeleteModalOpen(true);
   };
 
-  const columns: Column<User>[] = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'email', label: 'Email', sortable: true },
-    { key: 'role', label: 'Role', sortable: true },
-    { key: 'tenantId', label: 'Tenant ID', sortable: false },
-    { key: 'createdAt', label: 'Created At', sortable: true },
+  const columns: DataTableColumn<User>[] = [
+    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'email', header: 'Email', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'role', header: 'Role', enableSorting: true },
+    { accessorKey: 'tenantId', header: 'Tenant ID' },
+    { accessorKey: 'createdAt', header: 'Created At', enableSorting: true },
   ];
 
   const rowActions = (user: User) => {
@@ -122,8 +129,12 @@ export default function UsersPage() {
       <DataTable
         columns={columns}
         data={users}
+        getRowId={(user) => String(user.id)}
         rowActions={rowActions}
         isLoading={isLoading}
+        enableGlobalFilter
+        globalFilterPlaceholder="Search users…"
+        pagination={{ pageSize: 10 }}
       />
 
       <CreateUserModal

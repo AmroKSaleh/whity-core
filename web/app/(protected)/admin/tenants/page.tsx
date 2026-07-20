@@ -7,7 +7,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { TENANTS_WRITE, TENANTS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type Column } from '@/components/admin/data-table';
+import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
@@ -41,8 +41,14 @@ export default function TenantsPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
 
+  // The backend supports page/per_page but not sort/filter query params, so
+  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
+  // the backend's own page-size ceiling (100) rather than its default fixes
+  // the previous silent page-1-only truncation for the common case. Tenants
+  // beyond 100 rows are still capped; that's a pre-existing limit, just moved
+  // further out.
   const { data, loading: isLoading, error, refetch: fetchTenants } = useFetch(async () => {
-    const response = await apiClient('/api/v1/tenants');
+    const response = await apiClient('/api/v1/tenants?per_page=100');
     if (!response.ok) {
       throw new Error('Failed to fetch tenants');
     }
@@ -68,11 +74,11 @@ export default function TenantsPage() {
     setIsDeleteModalOpen(true);
   };
 
-  const columns: Column<Tenant>[] = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'slug', label: 'Slug', sortable: true },
-    { key: 'userCount', label: 'User Count', sortable: true },
-    { key: 'createdAt', label: 'Created At', sortable: true },
+  const columns: DataTableColumn<Tenant>[] = [
+    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'slug', header: 'Slug', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'userCount', header: 'User Count', enableSorting: true },
+    { accessorKey: 'createdAt', header: 'Created At', enableSorting: true },
   ];
 
   const rowActions = (tenant: Tenant) => {
@@ -124,8 +130,12 @@ export default function TenantsPage() {
       <DataTable
         columns={columns}
         data={tenants}
+        getRowId={(tenant) => String(tenant.id)}
         rowActions={rowActions}
         isLoading={isLoading}
+        enableGlobalFilter
+        globalFilterPlaceholder="Search tenants…"
+        pagination={{ pageSize: 10 }}
       />
 
       <CreateTenantModal

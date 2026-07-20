@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type Column } from '@/components/admin/data-table';
+import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { IconPlus, IconShare, IconShieldLock } from '@tabler/icons-react';
@@ -37,10 +37,22 @@ export default function DelegationsPage() {
   const [isRevokeOpen, setIsRevokeOpen] = useState(false);
   const [selected, setSelected] = useState<Delegation | null>(null);
 
+  // The backend supports page/per_page but not sort/filter query params, so
+  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
+  // the backend's own page-size ceiling (100) rather than its default fixes
+  // the previous silent page-1-only truncation for the common case. Tenants
+  // with >100 delegations are still capped until the backend grows real
+  // search/sort support; that's a pre-existing limit, just moved further out.
   const fetchDelegations = useCallback(async () => {
     try {
       setIsLoading(true);
-      const { data, response } = await api.GET('/api/v1/delegations');
+      const { data, response } = await api.GET('/api/v1/delegations', {
+        // The generated OpenAPI schema for this endpoint doesn't document
+        // per_page (a spec gap — see the migration note above), but the
+        // controller runs through the same PaginationParams helper as the
+        // other list endpoints and honors it identically.
+        params: { query: { per_page: 100 } as never },
+      });
 
       if (response.status === 403) {
         // The acting user lacks delegation:manage — show an access-denied state
@@ -87,11 +99,21 @@ export default function DelegationsPage() {
     [delegations]
   );
 
-  const columns: Column<DelegationRow>[] = [
-    { key: 'permission', label: 'Permission', sortable: true },
-    { key: 'grantee', label: 'Grantee', sortable: true },
-    { key: 'scope', label: 'Scope', sortable: true },
-    { key: 'status', label: 'Status', sortable: true },
+  const columns: DataTableColumn<DelegationRow>[] = [
+    {
+      accessorKey: 'permission',
+      header: 'Permission',
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    {
+      accessorKey: 'grantee',
+      header: 'Grantee',
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    { accessorKey: 'scope', header: 'Scope', enableSorting: true },
+    { accessorKey: 'status', header: 'Status', enableSorting: true },
   ];
 
   const handleRevokeClick = (delegation: Delegation) => {
@@ -115,71 +137,61 @@ export default function DelegationsPage() {
     );
   };
 
-  if (isForbidden) {
-    return (
-      <div className="space-y-8">
-        <AdminHeader
-          title="Delegations"
-          description="Delegate a subset of your permissions to roles or users."
-        />
-        <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-          <IconShieldLock
-            size={32}
-            className="mx-auto mb-3 text-muted-foreground"
-          />
-          <h2 className="font-heading text-sm font-medium">Access denied</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            You need the delegation:manage permission to manage delegations.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const isEmpty = !isLoading && rows.length === 0;
+  const accessDenied = isForbidden ? (
+    <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
+      <IconShieldLock size={32} className="mx-auto mb-3 text-muted-foreground" />
+      <h2 className="font-heading text-sm font-medium">Access denied</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        You need the delegation:manage permission to manage delegations.
+      </p>
+    </div>
+  ) : undefined;
 
   return (
     <div className="space-y-8">
       <AdminHeader
         title="Delegations"
-        description="Delegate a subset of your permissions to roles or users, scoped to a tenant or an organizational unit."
+        description={
+          isForbidden
+            ? 'Delegate a subset of your permissions to roles or users.'
+            : 'Delegate a subset of your permissions to roles or users, scoped to a tenant or an organizational unit.'
+        }
         action={
-          <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
-            <IconPlus size={18} />
-            Create Delegation
-          </Button>
+          isForbidden ? undefined : (
+            <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
+              <IconPlus size={18} />
+              Create Delegation
+            </Button>
+          )
         }
       />
 
-      {isEmpty ? (
-        <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-          <IconShare
-            size={32}
-            className="mx-auto mb-3 text-muted-foreground"
-          />
-          <h2 className="font-heading text-sm font-medium">
-            No delegations yet
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Delegate a subset of your permissions to a role or a user.
-          </p>
-          <Button
-            onClick={() => setIsCreateOpen(true)}
-            variant="outline"
-            className="mt-4 gap-2"
-          >
-            <IconPlus size={18} />
-            Create the first delegation
-          </Button>
-        </div>
-      ) : (
-        <DataTable
-          columns={columns}
-          data={rows}
-          rowActions={rowActions}
-          isLoading={isLoading}
-        />
-      )}
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(row) => String(row.id)}
+        rowActions={rowActions}
+        isLoading={isLoading}
+        overrideContent={accessDenied}
+        enableGlobalFilter
+        globalFilterPlaceholder="Search delegations…"
+        pagination={{ pageSize: 10 }}
+        emptyState={{
+          icon: <IconShare size={32} className="text-muted-foreground" />,
+          title: 'No delegations yet',
+          description: 'Delegate a subset of your permissions to a role or a user.',
+          action: (
+            <Button
+              onClick={() => setIsCreateOpen(true)}
+              variant="outline"
+              className="gap-2"
+            >
+              <IconPlus size={18} />
+              Create the first delegation
+            </Button>
+          ),
+        }}
+      />
 
       <CreateDelegationModal
         // Remount on each open so the form resets to its defaults without a

@@ -5,9 +5,8 @@ import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type Column } from '@/components/admin/data-table';
+import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import {
   IconBinaryTree2,
@@ -63,7 +62,6 @@ export default function RelationsPage() {
   const [types, setTypes] = useState<RelationshipType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isForbidden, setIsForbidden] = useState(false);
-  const [search, setSearch] = useState('');
 
   // Lazily restore the persisted view (List default). The typeof guard keeps the
   // initializer safe under SSR pre-render where window is undefined.
@@ -90,8 +88,14 @@ export default function RelationsPage() {
   const fetchAll = useCallback(async () => {
     try {
       setIsLoading(true);
+      // The backend supports page/per_page but not sort/filter query params, so
+      // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
+      // the backend's own page-size ceiling (100) rather than its default fixes
+      // the previous silent page-1-only truncation for the common case. Tenants
+      // with >100 people are still capped until the backend grows real
+      // search/sort support; that's a pre-existing limit, just moved further out.
       const [personsRes, edgesRes, typesRes] = await Promise.all([
-        apiClient('/api/v1/persons'),
+        apiClient('/api/v1/persons?per_page=100'),
         apiClient('/api/v1/relations'),
         apiClient('/api/v1/relationship-types'),
       ]);
@@ -132,32 +136,22 @@ export default function RelationsPage() {
     [persons, selectedId]
   );
 
-  // Client-side name search keeps filtering instant and robust regardless of the
-  // server query path.
-  const filteredPersons = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (term === '') {
-      return persons;
-    }
-    return persons.filter((p) => p.displayName.toLowerCase().includes(term));
-  }, [persons, search]);
-
   const rows: PersonRow[] = useMemo(
     () =>
-      filteredPersons.map((p) => ({
+      persons.map((p) => ({
         id: p.id,
         name: p.displayName,
         account: p.hasAccount ? 'Account' : '—',
         relations: p.relationCount,
         source: p,
       })),
-    [filteredPersons]
+    [persons]
   );
 
-  const columns: Column<PersonRow>[] = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'account', label: 'Has account', sortable: true },
-    { key: 'relations', label: 'Relations', sortable: true },
+  const columns: DataTableColumn<PersonRow>[] = [
+    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'account', header: 'Has account', enableSorting: true },
+    { accessorKey: 'relations', header: 'Relations', enableSorting: true },
   ];
 
   const handleAction = (action: PersonAction, person: Person) => {
@@ -206,25 +200,20 @@ export default function RelationsPage() {
     </div>
   );
 
-  if (isForbidden) {
-    return (
-      <div className="space-y-8">
-        <AdminHeader
-          title="Family Relations"
-          description="Record and manage familial relationships between people in your tenant."
-        />
-        <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-          <IconShieldLock size={32} className="mx-auto mb-3 text-muted-foreground" />
-          <h2 className="font-heading text-sm font-medium">Access denied</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            You need the relations:read permission to view family relations.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Converted from an early-return that skipped rendering DataTable entirely
+  // into `overrideContent` (list mode only — see below); graph mode is
+  // untouched by this bypass either way since it never reaches DataTable.
+  const accessDeniedContent = (
+    <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
+      <IconShieldLock size={32} className="mx-auto mb-3 text-muted-foreground" />
+      <h2 className="font-heading text-sm font-medium">Access denied</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        You need the relations:read permission to view family relations.
+      </p>
+    </div>
+  );
 
-  const isEmpty = !isLoading && persons.length === 0;
+  const isEmpty = !isLoading && !isForbidden && persons.length === 0;
 
   return (
     <div className="space-y-8">
@@ -244,16 +233,6 @@ export default function RelationsPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         {ViewToggle}
-        {view === 'list' && !isEmpty && (
-          <Input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name…"
-            aria-label="Search persons by name"
-            className="w-full max-w-xs"
-          />
-        )}
       </div>
 
       {isLoading ? (
@@ -281,7 +260,17 @@ export default function RelationsPage() {
           )}
         </div>
       ) : view === 'list' ? (
-        <DataTable columns={columns} data={rows} rowActions={rowActions} isLoading={isLoading} />
+        <DataTable
+          columns={columns}
+          data={rows}
+          getRowId={(row) => String(row.id)}
+          rowActions={rowActions}
+          isLoading={isLoading}
+          enableGlobalFilter
+          globalFilterPlaceholder="Search by name…"
+          pagination={{ pageSize: 10 }}
+          overrideContent={isForbidden ? accessDeniedContent : undefined}
+        />
       ) : (
         <RelationsGraph
           persons={persons}
