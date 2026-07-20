@@ -232,6 +232,9 @@ export default function PluginStorePage() {
                       if (e.key === 'Enter') browse();
                     }}
                     placeholder="name, slug, tag…"
+                    type="search"
+                    name="plugin-store-search"
+                    autoComplete="off"
                     className="flex-1 bg-transparent text-sm outline-none"
                   />
                 </div>
@@ -243,6 +246,8 @@ export default function PluginStorePage() {
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
                     type="password"
+                    name="plugin-store-access-token"
+                    autoComplete="new-password"
                     placeholder="required to install"
                     className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm"
                   />

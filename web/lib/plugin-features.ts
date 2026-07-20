@@ -462,8 +462,17 @@ function isFeatureListResponse(body: unknown): body is { data: PluginFeature[] }
  * network error) — callers render "no plugin features" rather than crash.
  */
 export async function fetchPluginFeatures(): Promise<PluginFeature[]> {
+  // Bounded for the same reason as NavigationProvider's fetch (see
+  // navigation-context.tsx): this provider also wraps the whole
+  // authenticated app, so an unbounded hang here blocks every admin page. A
+  // plain setTimeout+abort rather than AbortSignal.timeout(), which is
+  // unsupported in the jsdom test environment this is exercised under.
+  const controller = new AbortController();
+  const hangGuard = setTimeout(() => controller.abort(), 15_000);
   try {
-    const response = await apiClient('/api/v1/frontend/features');
+    const response = await apiClient('/api/v1/frontend/features', {
+      signal: controller.signal,
+    });
     if (!response.ok) {
       return [];
     }
@@ -474,5 +483,7 @@ export async function fetchPluginFeatures(): Promise<PluginFeature[]> {
     return body.data;
   } catch {
     return [];
+  } finally {
+    clearTimeout(hangGuard);
   }
 }

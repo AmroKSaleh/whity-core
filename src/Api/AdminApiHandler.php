@@ -32,6 +32,18 @@ class AdminApiHandler
      */
     private const SYSTEM_TENANT_ID = 0;
 
+    /**
+     * Bound on the eight-odd COUNT/GROUP BY queries below, in milliseconds.
+     * These are read-only aggregates that are normally fast; if the DB is
+     * unhealthy (lock contention, connection exhaustion) they must fail loudly
+     * rather than hang the worker's PDO connection indefinitely — this
+     * connection is PERSISTENT across requests in FrankenPHP worker mode
+     * (Database::getPdo() docblock), so a genuinely unbounded query here would
+     * starve every later request this worker serves, not just this one.
+     * Overridable via env for environments with a legitimately slower DB.
+     */
+    private const DEFAULT_STATS_QUERY_TIMEOUT_MS = 5000;
+
     private Database $db;
     private string $migrationDir;
 
@@ -49,6 +61,42 @@ class AdminApiHandler
         try {
             $pdo = $this->db->getPdo();
 
+            // SET LOCAL is transaction-scoped: it reverts automatically at
+            // commit/rollback, so it can never leak onto this shared, worker-
+            // persistent connection's later requests even if something below
+            // throws. All queries in this method are read-only, so wrapping
+            // them in a transaction purely to scope this timeout is safe.
+            $timeoutMs = (int) (getenv('STATS_QUERY_TIMEOUT_MS') ?: self::DEFAULT_STATS_QUERY_TIMEOUT_MS);
+            $pdo->beginTransaction();
+            try {
+                // statement_timeout is Postgres-only syntax (SQLite -- used by
+                // the unit/RealEngine test suite -- has no equivalent and has
+                // no unbounded-query risk to guard against anyway, being
+                // in-memory).
+                if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql') {
+                    $pdo->exec('SET LOCAL statement_timeout = ' . max(1, $timeoutMs));
+                }
+                $response = $this->collectStats($pdo);
+                $pdo->commit();
+                return $response;
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+        } catch (\Exception $e) {
+            error_log('[AdminApiHandler] stats failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch system stats', 500);
+        }
+    }
+
+    /**
+     * The actual stats-gathering body, run inside the timeout-scoped
+     * transaction {@see stats()} opens.
+     */
+    private function collectStats(PDO $pdo): Response
+    {
             // Scope every aggregate to the caller (WC-50). System users
             // (tenant_id=0) see platform-wide totals; a regular tenant sees only
             // its own figures. A null/unresolved context is treated as a regular
@@ -205,10 +253,6 @@ class AdminApiHandler
                     'system' => $systemInfo
                 ]
             ]);
-        } catch (\Exception $e) {
-            error_log('[AdminApiHandler] stats failed: ' . $e->getMessage());
-            return Response::error('Failed to fetch system stats', 500);
-        }
     }
 
     /**

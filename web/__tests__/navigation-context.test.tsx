@@ -134,6 +134,7 @@ describe('NavigationProvider auth-awareness', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledWith('/api/v1/navigation', {
       credentials: 'include',
+      signal: expect.any(AbortSignal),
     });
   });
 

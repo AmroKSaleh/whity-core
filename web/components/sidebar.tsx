@@ -34,7 +34,7 @@ import {
   IconSun,
   IconMoon,
 } from '@tabler/icons-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Icon } from '@tabler/icons-react';
 
 /**
@@ -214,11 +214,38 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { logout, user, memberships } = useAuth();
-  const { getGroupedItems } = useNavigation();
+  const { items: navItemsFlat, getGroupedItems } = useNavigation();
   const branding = useBranding();
   const { dir, toggle: toggleDirection } = useDirection();
   const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeMode();
   const groupedItems = getGroupedItems();
+
+  // The single most-specific nav item matching the current path (e.g. on
+  // /admin/plugins/store, "Plugin Store" (/admin/plugins/store) wins over
+  // "Plugins" (/admin/plugins) even though both prefix-match) — without this,
+  // any parent-ish item whose href is a PREFIX of a more specific sibling's
+  // href highlights alongside it. An exact match always wins outright; among
+  // prefix matches, the longest href (most specific route) wins.
+  const activeItemId = useMemo(() => {
+    let bestId: string | null = null;
+    let bestLength = -1;
+    for (const item of navItemsFlat) {
+      const hrefSegments = item.href.split('/').filter(Boolean).length;
+      const isExact = pathname === item.href;
+      const isPrefix = hrefSegments > 1 && pathname.startsWith(item.href + '/');
+      if (!isExact && !isPrefix) continue;
+      // An exact match is always at least as specific as any prefix match of
+      // the same or shorter length, so scoring exact matches one tier higher
+      // than the longest possible prefix length is sufficient.
+      const score = item.href.length + (isExact ? 1_000_000 : 0);
+      if (score > bestLength) {
+        bestLength = score;
+        bestId = item.id;
+      }
+    }
+    return bestId;
+  }, [navItemsFlat, pathname]);
+
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -338,9 +365,7 @@ export function Sidebar() {
                 <div className="space-y-1">
                   {navItems.map((item, index) => {
                     const Icon = resolveIcon(item.icon);
-                    const hrefSegments = item.href.split('/').filter(Boolean).length;
-                    const isActive = pathname === item.href ||
-                      (pathname.startsWith(item.href + '/') && hrefSegments > 1);
+                    const isActive = item.id === activeItemId;
 
                     return (
                       <Link

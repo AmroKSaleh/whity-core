@@ -78,9 +78,19 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     if (userIdRef.current === null) {
       return [];
     }
+    // Bounded so an unhealthy backend degrades to an empty sidebar (still
+    // caught below) instead of hanging every admin page forever — this
+    // provider wraps the whole authenticated app (root layout), so an
+    // unbounded hang here blocks EVERY page, not just one. A plain
+    // setTimeout+abort rather than AbortSignal.timeout(), which (like
+    // AbortSignal.any()) is unsupported in the jsdom test environment this
+    // is exercised under.
+    const controller = new AbortController();
+    const hangGuard = setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch('/api/v1/navigation', {
         credentials: 'include',
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error('Failed to fetch navigation');
       const data = await response.json();
@@ -88,6 +98,8 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     } catch (error) {
       console.error('Error fetching navigation:', error);
       return [];
+    } finally {
+      clearTimeout(hangGuard);
     }
   }, []);
 

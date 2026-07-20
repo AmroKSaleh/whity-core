@@ -22,6 +22,8 @@ import {
 
 import { StatsChart } from "@/components/admin/stats-chart";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@amroksaleh/ui/tabs";
+import { Alert, AlertTitle, AlertDescription, AlertAction } from "@amroksaleh/ui/alert";
+import { Button } from "@amroksaleh/ui/button";
 
 interface StatsData {
   totals: {
@@ -55,28 +57,58 @@ interface StatsData {
   };
 }
 
+// The stats query aggregates several COUNT/GROUP BY queries server-side with
+// no request-level timeout of its own (see AdminApiHandler::stats()) — if the
+// backend is unhealthy (DB lock contention, connection exhaustion during a
+// crash-loop recovery, etc.) the fetch can otherwise hang indefinitely and
+// this page would show its loading skeletons forever with no way out. Bound
+// it client-side so a stuck backend degrades to a retryable error instead.
+const STATS_FETCH_TIMEOUT_MS = 15_000;
+
 export default function AdminStats() {
   const { apiClient } = useAuth();
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    // Plain setTimeout+abort rather than AbortSignal.timeout(), which is
+    // unsupported in the jsdom test environment this page is exercised under.
+    const hangGuard = setTimeout(() => controller.abort(), STATS_FETCH_TIMEOUT_MS);
+
     async function fetchStats() {
+      setLoading(true);
+      setError(false);
       try {
-        const response = await apiClient("/api/v1/admin/stats");
+        const response = await apiClient("/api/v1/admin/stats", {
+          signal: controller.signal,
+        });
+        if (cancelled) return;
         if (response.ok) {
           const data = await response.json();
-          setStats(data.stats);
+          if (!cancelled) setStats(data.stats);
+        } else {
+          setError(true);
         }
-      } catch (error) {
-        console.error("Failed to fetch stats:", error);
+      } catch (err) {
+        console.error("Failed to fetch stats:", err);
+        if (!cancelled) setError(true);
       } finally {
-        setLoading(false);
+        clearTimeout(hangGuard);
+        if (!cancelled) setLoading(false);
       }
     }
 
     fetchStats();
-  }, [apiClient]);
+    return () => {
+      cancelled = true;
+      clearTimeout(hangGuard);
+      controller.abort();
+    };
+  }, [apiClient, retryKey]);
 
   const statCards = [
     {
@@ -116,6 +148,22 @@ export default function AdminStats() {
         title="System Statistics"
         description="Real-time overview of system-wide metrics"
       />
+
+      {error && (
+        <Alert variant="destructive" data-testid="stats-fetch-error">
+          <AlertTitle>Couldn&rsquo;t load system statistics</AlertTitle>
+          <AlertDescription>
+            The request failed or timed out. This page&rsquo;s data comes from several
+            database queries with no bound of their own — a slow/unhealthy
+            backend can take a while to respond.
+          </AlertDescription>
+          <AlertAction>
+            <Button size="xs" variant="outline" onClick={() => setRetryKey((k) => k + 1)}>
+              Retry
+            </Button>
+          </AlertAction>
+        </Alert>
+      )}
 
       {/* Stats Cards */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
