@@ -23,6 +23,7 @@ use Whity\Auth\SessionService;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\TotpService;
 use Whity\Core\Delegation\DelegationRepository;
+use Whity\Core\Deployment\DeploymentManager;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Hooks\HookManager;
@@ -948,6 +949,74 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             'b@t2.example',
             $this->pdo->query("SELECT value FROM tenant_settings WHERE tenant_id = 2 AND setting_key = 'support_email'")->fetchColumn(),
             "Tenant B's override must be byte-for-byte untouched by Tenant A's write"
+        );
+    }
+
+    // ==================== deployments / migration_rollbacks (WC-569 follow-up) ====================
+
+    public function testDeploymentStatusReadIsTenantScoped(): void
+    {
+        $manager = new DeploymentManager($this->pdo, sys_get_temp_dir());
+        $this->pdo->exec("
+            INSERT INTO deployments (tenant_id, current_version, status, applied_at) VALUES
+            (1, '1.0.0', 'applied', NOW()),
+            (2, '9.9.9', 'applied', NOW())
+        ");
+
+        $aStatus = $manager->getStatus(self::TENANT_A);
+        self::assertCount(1, $aStatus);
+        self::assertSame('1.0.0', $aStatus[0]['current_version']);
+
+        $bStatus = $manager->getStatus(self::TENANT_B);
+        self::assertCount(1, $bStatus);
+        self::assertSame('9.9.9', $bStatus[0]['current_version']);
+    }
+
+    public function testDeploymentRollbackIsTenantScopedAndLeavesForeignRowUntouched(): void
+    {
+        $manager = new DeploymentManager($this->pdo, sys_get_temp_dir());
+        $this->pdo->exec("
+            INSERT INTO deployments (tenant_id, current_version, previous_version, status, applied_at) VALUES
+            (1, '1.0.0', NULL,      'applied', '2026-01-01 00:00:00'),
+            (1, '2.0.0', '1.0.0',   'applied', '2026-01-02 00:00:00'),
+            (2, '5.0.0', '4.0.0',   'applied', '2026-01-02 00:00:00')
+        ");
+
+        $manager->rollback(self::TENANT_A);
+
+        // Tenant A's current version is rolled back, its previous version is
+        // re-applied — the tenant_id predicate means this can never touch
+        // Tenant B's row.
+        self::assertSame(
+            'rolled_back',
+            $this->pdo->query("SELECT status FROM deployments WHERE tenant_id = 1 AND current_version = '2.0.0'")->fetchColumn()
+        );
+        self::assertSame(
+            'applied',
+            $this->pdo->query("SELECT status FROM deployments WHERE tenant_id = 1 AND current_version = '1.0.0'")->fetchColumn()
+        );
+        self::assertSame(
+            'applied',
+            $this->pdo->query("SELECT status FROM deployments WHERE tenant_id = 2 AND current_version = '5.0.0'")->fetchColumn(),
+            "Tenant B's deployment must be byte-for-byte untouched by Tenant A's rollback"
+        );
+    }
+
+    public function testRollbackMigrationInsertIsTenantScoped(): void
+    {
+        $manager = new DeploymentManager($this->pdo, sys_get_temp_dir());
+
+        $manager->rollbackMigration(self::TENANT_A, '020_some_migration');
+
+        $rows = $this->pdo->query('SELECT tenant_id, migration_name FROM migration_rollbacks')->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(1, $rows, 'The rollback record must be inserted exactly once');
+        self::assertSame(1, (int) $rows[0]['tenant_id'], 'The rollback record must carry the calling tenant, never a foreign one');
+        self::assertSame('020_some_migration', $rows[0]['migration_name']);
+
+        self::assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM migration_rollbacks WHERE tenant_id = 2")->fetchColumn(),
+            "Tenant B must have no migration_rollbacks row from Tenant A's rollback"
         );
     }
 
