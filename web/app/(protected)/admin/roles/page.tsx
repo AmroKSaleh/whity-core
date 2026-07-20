@@ -7,16 +7,15 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { ROLES_WRITE, ROLES_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type Column } from '@/components/admin/data-table';
+import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
-import { IconMenu2, IconPlus, IconSearch } from '@tabler/icons-react';
+import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { CreateRoleModal } from './create-modal';
 import { EditRoleModal } from './edit-modal';
 import { DeleteRoleModal } from './delete-modal';
@@ -36,13 +35,18 @@ export default function RolesPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isPermissionsPanelOpen, setIsPermissionsPanelOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
-  const [query, setQuery] = useState('');
   const [cloneInitial, setCloneInitial] = useState<
     { name: string; description: string; permissionIds: number[] } | undefined
   >(undefined);
 
+  // The backend supports page/per_page but not sort/filter query params, so
+  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
+  // the backend's own page-size ceiling (100) rather than its default fixes
+  // the previous silent page-1-only truncation for the common case. Tenants
+  // with >100 roles are still capped until the backend grows real
+  // search/sort support; that's a pre-existing limit, just moved further out.
   const { data, loading: isLoading, error, refetch: fetchRoles } = useFetch(async () => {
-    const response = await apiClient('/api/v1/roles');
+    const response = await apiClient('/api/v1/roles?per_page=100');
     if (!response.ok) {
       throw new Error('Failed to fetch roles');
     }
@@ -50,13 +54,7 @@ export default function RolesPage() {
     return (data.data ?? []) as Role[];
   }, [apiClient]);
 
-  const allRoles = data ?? [];
-  const q = query.trim().toLowerCase();
-  const roles = q
-    ? allRoles.filter(
-        (r) => r.name.toLowerCase().includes(q) || (r.description ?? '').toLowerCase().includes(q)
-      )
-    : allRoles;
+  const roles = data ?? [];
 
   useEffect(() => {
     if (error) {
@@ -101,10 +99,10 @@ export default function RolesPage() {
     }
   };
 
-  const columns: Column<Role>[] = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'description', label: 'Description', sortable: true },
-    { key: 'permissionCount', label: 'Permission Count', sortable: false },
+  const columns: DataTableColumn<Role>[] = [
+    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'description', header: 'Description', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'permissionCount', header: 'Permission Count', enableSorting: false },
   ];
 
   const rowActions = (role: Role) => {
@@ -187,25 +185,15 @@ export default function RolesPage() {
         }
       />
 
-      <div className="relative max-w-sm">
-        <IconSearch
-          size={16}
-          className="pointer-events-none absolute inset-s-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          data-testid="roles-search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Filter roles…"
-          className="ps-8"
-        />
-      </div>
-
       <DataTable
         columns={columns}
         data={roles}
+        getRowId={(role) => String(role.id)}
         rowActions={rowActions}
         isLoading={isLoading}
+        enableGlobalFilter
+        globalFilterPlaceholder="Search roles…"
+        pagination={{ pageSize: 10 }}
       />
 
       <CreateRoleModal

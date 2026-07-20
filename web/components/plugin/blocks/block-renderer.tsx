@@ -51,6 +51,7 @@ import type {
   TextInputBlock,
 } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
+import { DataTable as SharedDataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Input } from '@amroksaleh/ui/input';
 import { Pagination } from '@amroksaleh/ui/pagination';
 import { Textarea } from '@amroksaleh/ui/textarea';
@@ -585,11 +586,14 @@ function CodeRenderer({ block }: { block: CodeBlock }) {
 
 /**
  * InteractiveDataTable (WC-241) — renders the rows already fetched by
- * `DataTableRenderer` with inline client-side sort/filter/pagination. All
- * three operate ENTIRELY on the in-memory `rows` array: there is no second
- * fetch, no route other than the block's original (already ownership
- * verified) `source` is ever touched. Sortable/filterable are per-column
- * booleans; a column with neither behaves exactly like a static `table`.
+ * `DataTableRenderer` with sort/filter/pagination, now delegated to the
+ * shared `@amroksaleh/ui` DataTable engine instead of a bespoke
+ * implementation. All three still operate ENTIRELY on the in-memory `rows`
+ * array: there is no second fetch, no route other than the block's original
+ * (already ownership-verified) `source` is ever touched. Sortable/filterable
+ * are per-column booleans; a column with neither behaves exactly like a
+ * static `table`. The plugin-facing schema (`block.columns`/`block.pageSize`)
+ * is unchanged — only the rendering engine underneath it is.
  */
 function InteractiveDataTable({
   columns,
@@ -600,130 +604,21 @@ function InteractiveDataTable({
   rows: Record<string, string>[];
   pageSize?: number;
 }) {
-  const [filters, setFilters] = React.useState<Record<string, string>>({});
-  const [sortKey, setSortKey] = React.useState<string | null>(null);
-  const [sortDir, setSortDir] = React.useState<'asc' | 'desc'>('asc');
-  const [page, setPage] = React.useState(1);
-
-  const filterableColumns = columns.filter((c) => c.filterable === true);
-
-  const filtered = React.useMemo(() => {
-    const active = Object.entries(filters).filter(([, v]) => v.trim() !== '');
-    if (active.length === 0) return rows;
-    return rows.filter((row) =>
-      active.every(([key, needle]) =>
-        (row[key] ?? '').toLowerCase().includes(needle.trim().toLowerCase())
-      )
-    );
-  }, [rows, filters]);
-
-  const sorted = React.useMemo(() => {
-    if (sortKey === null) return filtered;
-    const copy = [...filtered];
-    copy.sort((a, b) => {
-      const cmp = (a[sortKey] ?? '').localeCompare(b[sortKey] ?? '');
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return copy;
-  }, [filtered, sortKey, sortDir]);
-
-  const paginate = pageSize !== undefined && pageSize > 0;
-  const effectivePageSize = paginate ? pageSize : Math.max(sorted.length, 1);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / effectivePageSize));
-  const clampedPage = Math.min(page, totalPages);
-  const paged = paginate
-    ? sorted.slice((clampedPage - 1) * effectivePageSize, clampedPage * effectivePageSize)
-    : sorted;
-
-  const handleSort = (col: { key: string; sortable?: boolean }) => {
-    if (col.sortable !== true) return;
-    if (sortKey === col.key) {
-      if (sortDir === 'asc') {
-        setSortDir('desc');
-      } else {
-        setSortKey(null);
-        setSortDir('asc');
-      }
-    } else {
-      setSortKey(col.key);
-      setSortDir('asc');
-    }
-    setPage(1);
-  };
+  const dataTableColumns: DataTableColumn<Record<string, string>>[] = columns.map((col) => ({
+    id: col.key,
+    accessorKey: col.key,
+    header: col.label,
+    enableSorting: col.sortable === true,
+    enableColumnFilter: col.filterable === true,
+  }));
 
   return (
-    <div className="space-y-2">
-      {filterableColumns.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {filterableColumns.map((col) => (
-            <div key={col.key} className="relative">
-              <IconSearch
-                className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <Input
-                value={filters[col.key] ?? ''}
-                onChange={(e) => {
-                  setFilters((f) => ({ ...f, [col.key]: e.target.value }));
-                  setPage(1);
-                }}
-                placeholder={`Filter ${col.label}`}
-                aria-label={`Filter ${col.label}`}
-                className="h-8 ps-7 text-xs"
-              />
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
-        <table className="w-full border-collapse text-xs/relaxed">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              {columns.map((col) => (
-                <th
-                  key={col.key}
-                  onClick={() => handleSort(col)}
-                  className={cn(
-                    'px-3 py-2 text-start font-medium text-muted-foreground',
-                    col.sortable === true && 'cursor-pointer select-none hover:bg-muted/60'
-                  )}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {col.label}
-                    {col.sortable === true && sortKey === col.key && (
-                      sortDir === 'asc' ? (
-                        <IconChevronUp className="size-3.5" aria-hidden />
-                      ) : (
-                        <IconChevronDown className="size-3.5" aria-hidden />
-                      )
-                    )}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {paged.map((row, rowIndex) => (
-              <tr key={rowIndex} className="border-b border-border last:border-0">
-                {columns.map((col) => (
-                  <td key={col.key} className="px-3 py-2 text-foreground">
-                    {row[col.key] ?? ''}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {paginate && (
-        <Pagination
-          page={clampedPage}
-          perPage={effectivePageSize}
-          total={sorted.length}
-          onPageChange={setPage}
-        />
-      )}
-    </div>
+    <SharedDataTable
+      columns={dataTableColumns}
+      data={rows}
+      getRowId={(_row, index) => String(index)}
+      pagination={pageSize !== undefined && pageSize > 0 ? { pageSize } : undefined}
+    />
   );
 }
 

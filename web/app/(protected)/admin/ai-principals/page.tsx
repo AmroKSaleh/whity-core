@@ -7,7 +7,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { MCP_TOKENS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DataTable, type Column } from '@/components/admin/data-table';
+import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import {
   DropdownMenu,
@@ -39,8 +39,12 @@ export default function AiPrincipalsPage() {
   const [isRevokeModalOpen, setIsRevokeModalOpen] = useState(false);
   const [selectedPrincipal, setSelectedPrincipal] = useState<AiPrincipal | null>(null);
 
+  // The backend supports page/per_page but not sort/filter query params, so
+  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
+  // the backend's own page-size ceiling (100) rather than its 25-row default
+  // fixes the previous silent page-1-only truncation for the common case.
   const { data, loading: isLoading, error, refetch } = useFetch(async () => {
-    const response = await apiClient('/api/v1/admin/mcp/tokens');
+    const response = await apiClient('/api/v1/admin/mcp/tokens?per_page=100');
     if (!response.ok) {
       throw new Error('Failed to fetch AI principals');
     }
@@ -67,22 +71,23 @@ export default function AiPrincipalsPage() {
     return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString();
   };
 
-  const columns: Column<AiPrincipal>[] = [
-    { key: 'name', label: 'Name', sortable: true },
-    { key: 'principalKind', label: 'Kind', sortable: true },
-    { key: 'userId', label: 'User ID', sortable: true },
-    { key: 'expiresAt', label: 'Expires', sortable: true },
-    { key: 'createdAt', label: 'Created', sortable: true },
+  const columns: DataTableColumn<AiPrincipal>[] = [
+    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
+    { accessorKey: 'principalKind', header: 'Kind', enableSorting: true },
+    { accessorKey: 'userId', header: 'User ID', enableSorting: true },
+    {
+      accessorKey: 'expiresAt',
+      header: 'Expires',
+      enableSorting: true,
+      cell: (row) => formatDate(row.expiresAt),
+    },
+    {
+      accessorKey: 'createdAt',
+      header: 'Created',
+      enableSorting: true,
+      cell: (row) => formatDate(row.createdAt),
+    },
   ];
-
-  // DataTable renders cell values via String(row[column.key]). For columns
-  // that need custom formatting (dates, scope array) we override the raw value
-  // by transforming the data before passing it to the table.
-  const tableData = principals.map((p) => ({
-    ...p,
-    expiresAt: formatDate(p.expiresAt),
-    createdAt: formatDate(p.createdAt),
-  }));
 
   const rowActions = (principal: AiPrincipal) => {
     if (!canManage) return null;
@@ -125,9 +130,13 @@ export default function AiPrincipalsPage() {
 
       <DataTable
         columns={columns}
-        data={tableData}
+        data={principals}
+        getRowId={(principal) => String(principal.id)}
         rowActions={canManage ? rowActions : undefined}
         isLoading={isLoading}
+        enableGlobalFilter
+        globalFilterPlaceholder="Search AI principals…"
+        pagination={{ pageSize: 10 }}
         emptyState={{
           title: 'No active credentials',
           description:
