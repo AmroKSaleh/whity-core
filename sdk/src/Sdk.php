@@ -52,13 +52,17 @@ namespace Whity\Sdk;
  * variable overrides the host applies at render time. Same ownership model
  * as data-bound block sources — the declared route must be one this plugin
  * actually registered — and the host independently revalidates every
- * returned key/value before it ever reaches a `<style>` tag, WC-242).
+ * returned key/value before it ever reaches a `<style>` tag, WC-242) →
+ * 1.13 (`screen: 'embed'` frontend-feature value — the host iframes a
+ * plugin's own RBAC-protected GET route with zero host-application edits,
+ * WC-246 — plus real multipart file uploads for `screen: 'action'` fields,
+ * WC-247).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.12.0';
+    public const VERSION = '1.13.0';
 
     /**
      * Static identity only — never instantiated.

@@ -46,8 +46,7 @@ namespace Whity\Sdk;
  *     with ZERO host-application edits, unlike `'custom'`. The framed
  *     response can be any self-contained HTML document (inline
  *     `<script>`/`<style>`); it is NOT constrained to the strict JSON-API
- *     default `Content-Security-Policy`/`X-Frame-Options` — see
- *     `Whity\Http\SecurityHeaders::respectingHandlerCsp()`, which lets a
+ *     default `Content-Security-Policy`/`X-Frame-Options` — the host lets a
  *     handler-set CSP with a non-`'none'` `frame-ancestors` survive, and also
  *     drops the legacy `X-Frame-Options: DENY` in that case.
  * - `requiredPermission` (string, REQUIRED — fail-closed, there are no
