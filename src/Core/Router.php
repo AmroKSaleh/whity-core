@@ -311,10 +311,11 @@ class Router
      * Converts path patterns like /users/{id}/posts/{postId} to regex patterns
      * that can match requests and capture parameters. A placeholder may carry
      * an inline regex constraint — `{id:\d+}` only matches digit segments
-     * (WC-160). Constraints must not contain `{`, `}`, parentheses or `#`
-     * (the pattern delimiter) — such constraints are rejected at registration
-     * time. Without a constraint the parameter matches any single segment
-     * ([^/]+).
+     * (WC-160). A constraint MAY itself contain `{n}` / `{n,m}` quantifiers
+     * (e.g. `{code:[a-f0-9]{10}}` for exactly 10 hex chars — WC-569); any other
+     * unescaped `{`/`}` inside a constraint, or parentheses, or `#` (the
+     * pattern delimiter), are rejected at registration time. Without a
+     * constraint the parameter matches any single segment ([^/]+).
      *
      * @param string $path Path pattern with {param} or {param:regex} placeholders
      * @return string Regex pattern
@@ -322,10 +323,23 @@ class Router
      */
     private function pathToPattern(string $path): string
     {
-        // Replace {param} / {param:regex} placeholders with named capture groups
+        // How many placeholders APPEAR to open in $path — used below to detect
+        // one that the extraction regex failed to fully consume (WC-569): a
+        // constraint with brace usage that isn't a simple {n}/{n,m} quantifier
+        // leaves the raw '{...}' text behind, which would otherwise silently
+        // become a literal-text requirement a real request can never satisfy.
+        $placeholderStarts = preg_match_all('#\{[a-zA-Z_][a-zA-Z0-9_]*(?::|\})#', $path);
+        $placeholdersMatched = 0;
+
+        // Replace {param} / {param:regex} placeholders with named capture
+        // groups. The constraint body allows runs of non-brace characters
+        // interleaved with `{digits}` / `{digits,digits}` quantifier tokens,
+        // so `[a-f0-9]{10}` is captured as part of the constraint rather than
+        // prematurely closing the placeholder at its first '}'.
         $pattern = preg_replace_callback(
-            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^{}]+))?\}#',
-            static function (array $matches) use ($path): string {
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::((?:[^{}]|\{\d+(?:,\d*)?\})+))?\}#',
+            static function (array $matches) use ($path, &$placeholdersMatched): string {
+                $placeholdersMatched++;
                 $paramName = $matches[1];
                 $constraint = $matches[2] ?? '';
                 if ($constraint === '') {
@@ -344,6 +358,13 @@ class Router
         );
 
         $pattern = is_string($pattern) ? $pattern : '';
+
+        if ($placeholdersMatched !== $placeholderStarts) {
+            throw new \InvalidArgumentException(
+                "Route '{$path}': a placeholder constraint has unbalanced or unsupported '{'/'}' usage "
+                . '(only simple {n} / {n,m} quantifiers are allowed inside a constraint)'
+            );
+        }
 
         // Now escape the remaining special regex characters (but not our capture groups)
         // We do this by replacing our capture groups temporarily
