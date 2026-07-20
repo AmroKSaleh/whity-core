@@ -56,10 +56,13 @@ export type RegistryEntry = components['schemas']['SettingsRegistryEntry'] & {
  */
 export type SettingsMap = Record<string, string>;
 
-// The known text keys, kept in display order. Used by the per-tenant form (which
-// renders this fixed set) and as a stable ordering hint; the registry stays
-// authoritative for which keys actually exist.
-export const SETTING_KEYS: readonly SettingKey[] = ['site_name', 'timezone', 'locale', 'support_email'];
+/** The General tab's tenant-overridable key set. */
+export type GeneralSettingKey = 'site_name' | 'timezone' | 'support_email';
+
+// The General tab's tenant-overridable keys, kept in display order. `locale`
+// lives on the Branding tab instead (grouped with logos/colors as the
+// instance's "identity & language" surface) — see branding/page.tsx.
+export const GENERAL_SETTING_KEYS: readonly GeneralSettingKey[] = ['site_name', 'timezone', 'support_email'];
 
 export const FIELD_LABELS: Record<SettingKey, string> = {
   site_name: 'Site name',
@@ -384,8 +387,14 @@ function LocaleSelect({ id, value, disabled, invalid, describedBy, onChange }: N
  * `requireSiteName` is true for the GLOBAL defaults form, where an empty
  * site_name is meaningless. For the TENANT form an empty value CLEARS the
  * override (falls back to global/default), so emptiness is not an error there.
+ *
+ * Only inspects `site_name`/`support_email` — callers may pass a partial
+ * settings object (e.g. the General tab, which no longer carries `locale`).
  */
-export function validate(values: SettingsValueMap, requireSiteName: boolean): string | null {
+export function validate(
+  values: Pick<SettingsValueMap, 'site_name' | 'support_email'>,
+  requireSiteName: boolean
+): string | null {
   if (requireSiteName && values.site_name.trim() === '') {
     return 'Site name cannot be empty.';
   }

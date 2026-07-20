@@ -282,7 +282,7 @@ function EmailSettingsForm({
         title="Email"
         description="Outgoing email (SMTP) for this instance. Managed by the system tenant."
       />
-      <SettingsTabs active="email" showGlobal showEmail showSso={canManageProviders} />
+      <SettingsTabs active="email" showSignup showEmail showStorage showSso={canManageProviders} />
 
       {/* Transport */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-transport-card">

@@ -4,21 +4,29 @@ import { createAuthedApi } from './support/api';
 import { systemStatePath } from './support/storage';
 
 /**
- * E2E for the GLOBAL Instance Settings page + first-run onboarding wizard
- * (WC-2b9d4f6a), driven against the full live stack (browser → Next proxy →
- * backend). These prove the REAL path, not a mocked client.
+ * E2E for the Sign-up governance page + first-run onboarding wizard
+ * (WC-2b9d4f6a / WC-tabs-nav follow-up), driven against the full live stack
+ * (browser → Next proxy → backend). These prove the REAL path, not a mocked
+ * client.
+ *
+ * The standalone "Global Settings" page was split up: its "General"/
+ * "Integrations" registry sections folded into a "Platform defaults" card on
+ * the General tab (/admin/settings), and "Sign-up governance" became its own
+ * top-level page (/admin/settings/signup) — the only piece this spec still
+ * covers directly, since it's the one carrying the toggled-and-persisted
+ * governance flag.
  *
  * Coverage:
- *  1. System-tenant operator loads /admin/settings/global, sees the
- *     registry-driven sections, TOGGLES a governance flag, saves, and the new
- *     value is persisted (verified via the API, then across a reload).
- *  2. A regular-tenant admin is DENIED the global page (403 → Access Denied),
- *     even though it holds settings:manage in its own tenant.
+ *  1. System-tenant operator loads /admin/settings/signup, TOGGLES a
+ *     governance flag, saves, and the new value is persisted (verified via
+ *     the API, then across a reload).
+ *  2. A regular-tenant admin is DENIED the Sign-up page (403 → Access
+ *     Denied), even though it holds settings:manage in its own tenant.
  *  3. Regression for the system-tenant per-tenant gate (WC-224): the operator
  *     is shown the "no per-tenant overrides" notice on /admin/settings, never
  *     an editable tenant form that would 422.
  *  4. The onboarding wizard renders, steps through, and finishing with no
- *     changes lands the operator on Global Settings (no mutation, re-runnable).
+ *     changes lands the operator on General settings (no mutation, re-runnable).
  *
  * The governance key exercised is a literal-boolean setting; we read its current
  * value from the API first and restore it in a finally block so the shared dev
@@ -83,12 +91,12 @@ async function expectBooleanFlag(page: Page, key: string, value: 'true' | 'false
   await expect(input).toHaveValue(value);
 }
 
-test.describe('Global Settings — system-tenant operator (settings:manage, tenant 0)', () => {
-  // The global surface is system-tenant-only (WC-235): drive it as the seeded
+test.describe('Sign-up governance — system-tenant operator (settings:manage, tenant 0)', () => {
+  // Sign-up governance is system-tenant-only (WC-235): drive it as the seeded
   // system-tenant admin, overriding the [admin] project's tenant-admin session.
   test.use({ storageState: systemStatePath });
 
-  test('renders registry-driven sections and toggles a governance flag that persists', async ({
+  test('renders the registry-driven section and toggles a governance flag that persists', async ({
     page,
     baseURL,
   }) => {
@@ -98,17 +106,14 @@ test.describe('Global Settings — system-tenant operator (settings:manage, tena
     const target = original === 'true' ? 'false' : 'true';
 
     try {
-      await page.goto('/admin/settings/global');
-      await expect(page.getByRole('heading', { name: 'Global Settings' })).toBeVisible();
-
-      // Registry-driven sections are present (General + Sign-up governance).
-      await expect(page.getByTestId('settings-section-general')).toBeVisible();
+      await page.goto('/admin/settings/signup');
+      await expect(page.getByRole('heading', { name: 'Sign-up' })).toBeVisible();
       await expect(page.getByTestId('settings-section-signup')).toBeVisible();
 
       await expectBooleanFlag(page, GOVERNANCE_KEY, original as 'true' | 'false');
 
       // Save is disabled until something changes.
-      const save = page.getByTestId('global-settings-save');
+      const save = page.getByTestId('signup-settings-save');
       await expect(save).toBeDisabled();
 
       await setBooleanFlag(page, GOVERNANCE_KEY, target as 'true' | 'false');
@@ -120,7 +125,7 @@ test.describe('Global Settings — system-tenant operator (settings:manage, tena
       );
       await save.click();
       expect((await patch).status(), 'PATCH /api/v1/settings/global should succeed').toBe(200);
-      await expect(page.getByText('Global defaults saved.')).toBeVisible();
+      await expect(page.getByText('Sign-up settings saved.')).toBeVisible();
 
       // Persisted at the source of truth…
       expect(await readGlobal(api, GOVERNANCE_KEY)).toBe(target);
@@ -138,14 +143,15 @@ test.describe('Global Settings — system-tenant operator (settings:manage, tena
     page,
   }) => {
     await page.goto('/admin/settings');
-    await expect(page.getByRole('heading', { name: 'Website Settings' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
     // The system tenant has globals only: the editable tenant form is hidden and
-    // a notice points at the Global defaults page instead of a form that 422s.
+    // a notice points at the Platform defaults card (rendered on this same page)
+    // instead of a form that 422s.
     await expect(page.getByTestId('tenant-no-override-notice')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save tenant settings' })).toHaveCount(0);
   });
 
-  test('onboarding wizard steps through and finishing with defaults lands on Global Settings', async ({
+  test('onboarding wizard steps through and finishing with defaults lands on General settings', async ({
     page,
   }) => {
     await page.goto('/onboarding');
@@ -163,23 +169,23 @@ test.describe('Global Settings — system-tenant operator (settings:manage, tena
     await expect(finish).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Review & finish' })).toBeVisible();
 
-    // No changes made → finishing performs no write and routes to Global Settings.
+    // No changes made → finishing performs no write and routes to General settings.
     await finish.click();
-    await expect(page).toHaveURL(/\/admin\/settings\/global$/);
-    await expect(page.getByRole('heading', { name: 'Global Settings' })).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/settings$/);
+    await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
   });
 });
 
-test.describe('Global Settings — regular-tenant admin is denied (WC-235)', () => {
+test.describe('Sign-up governance — regular-tenant admin is denied (WC-235)', () => {
   // Inherits the [admin] project's tenant-admin session (admin@example.com,
   // tenant 1). It holds settings:manage in its OWN tenant but must never reach
   // the platform-wide defaults.
 
-  test('is shown Access Denied on the global page and is not seeded a form', async ({ page }) => {
-    await page.goto('/admin/settings/global');
+  test('is shown Access Denied on the Sign-up page and is not seeded a form', async ({ page }) => {
+    await page.goto('/admin/settings/signup');
     await expect(page.getByRole('heading', { name: 'Access Denied' })).toBeVisible();
-    await expect(page.getByTestId('global-settings-save')).toHaveCount(0);
-    await expect(page.getByTestId('settings-section-general')).toHaveCount(0);
+    await expect(page.getByTestId('signup-settings-save')).toHaveCount(0);
+    await expect(page.getByTestId('settings-section-signup')).toHaveCount(0);
   });
 
   test('onboarding wizard refuses a non-operator', async ({ page }) => {

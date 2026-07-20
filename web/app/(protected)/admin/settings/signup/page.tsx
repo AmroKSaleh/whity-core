@@ -10,8 +10,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { IconAlertCircle, IconDeviceFloppy, IconRocket } from '@tabler/icons-react';
-import { BrandingSettings } from '@/components/branding-settings';
+import { IconAlertCircle, IconDeviceFloppy } from '@tabler/icons-react';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -28,18 +27,14 @@ import {
 const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
 /**
- * System-wide GLOBAL defaults (WC-235 / WC-2b9d4f6a). These apply to every
- * tenant that has not overridden a value, so they are a SYSTEM-TENANT resource:
- * the page is gated on the system tenant (id 0) AND settings:manage. This mirrors
- * the backend, which returns 403 for a non-system caller even if they hold
- * settings:manage (a regular tenant's admin does) — never present a form the
- * backend will reject. Per-tenant settings live on /admin/settings.
- *
- * The form is REGISTRY-DRIVEN: it renders one control per descriptor the backend
- * publishes, grouped into friendly sections, so governance / SSO / storage keys
- * (and any future key) surface automatically without a frontend change.
+ * Sign-up governance (formerly part of Global Settings' "General"/"Sign-up
+ * governance" section stack — WC-235 / WC-2b9d4f6a). Controls whether and how
+ * new people can create accounts on this instance. A SYSTEM-TENANT resource:
+ * gated on the system tenant (id 0) AND settings:manage, mirroring the
+ * backend, which returns 403 for a non-system caller even if they hold
+ * settings:manage (a regular tenant's admin does).
  */
-export default function GlobalSettingsPage() {
+export default function SignupSettingsPage() {
   const { addToast } = useToast();
   const { user } = useAuth();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
@@ -56,7 +51,7 @@ export default function GlobalSettingsPage() {
     );
   }
 
-  // Global defaults are system-tenant only. A regular tenant's admin holds
+  // Sign-up governance is system-tenant only. A regular tenant's admin holds
   // settings:manage within its own tenant, but must never manage platform-wide
   // defaults — so gate on BOTH the system tenant and the permission.
   if (!isSystemTenant || !canManage) {
@@ -67,10 +62,10 @@ export default function GlobalSettingsPage() {
         </div>
         <h2 className="text-xl font-bold mb-2">Access Denied</h2>
         <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          Global (system-wide) defaults can only be managed from the system tenant. Your tenant&rsquo;s
+          Sign-up governance can only be managed from the system tenant. Your tenant&rsquo;s
           settings are on the{' '}
           <Link href="/admin/settings" className="font-medium underline">
-            Website Settings
+            General
           </Link>{' '}
           page.
         </p>
@@ -84,44 +79,34 @@ export default function GlobalSettingsPage() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
       <AdminHeader
-        title="Global Settings"
-        description="System-wide defaults applied to every tenant that has not overridden a value. Managed by the system tenant only."
-        action={
-          <Button asChild variant="outline" className="gap-2">
-            <Link href="/onboarding">
-              <IconRocket className="w-4 h-4" />
-              Setup wizard
-            </Link>
-          </Button>
-        }
+        title="Sign-up"
+        description="Control whether and how new people can create accounts on this instance."
       />
-      <SettingsTabs active="global" showGlobal showEmail showSso={canManageProviders} />
-      <GlobalSettingsForm addToast={addToast} />
-      <BrandingSettings variant="global" />
+      <SettingsTabs active="signup" showSignup showEmail showStorage showSso={canManageProviders} />
+      <SignupSettingsForm addToast={addToast} />
     </div>
   );
 }
 
-function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
+function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
   const { data, loading, error, refetch } = useFetch(async () => {
     const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
     if (body === undefined) {
-      throw new Error(errorMessage(getError, 'Failed to load global defaults'));
+      throw new Error(errorMessage(getError, 'Failed to load sign-up settings'));
     }
     return body.data;
   }, []);
 
-  // Draft overlay: only the keys the operator has edited live here, displayed
-  // as `draft[key] ?? global[key] ?? registry default`. Only these keys are sent
-  // on save, so an untouched (and possibly not-yet-writable) key is never
-  // submitted — a partial backend surface can't 422 a value the user didn't set.
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
   const global = data?.global as SettingsMap | undefined;
   const registry = useMemo<RegistryEntry[]>(() => data?.registry ?? [], [data]);
-  const sections = useMemo(() => groupRegistry(registry), [registry]);
+  const sections = useMemo(
+    () => groupRegistry(registry).filter((s) => s.section.id === 'signup'),
+    [registry]
+  );
   const dirty = Object.keys(draft).length > 0;
 
   useEffect(() => {
@@ -135,7 +120,6 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
 
   const setField = (key: string, value: string) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
-    // Clear a stale per-field error the moment the operator edits that field.
     setFieldErrors((prev) => {
       if (!(key in prev)) return prev;
       const next = { ...prev };
@@ -147,8 +131,6 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
   const handleSave = async () => {
     if (!global || !dirty) return;
 
-    // Send ONLY edited keys. An empty string clears the key back to its
-    // registry default; booleans always send the literal 'true'/'false'.
     const settings: Record<string, string> = {};
     for (const key of Object.keys(draft)) {
       settings[key] = draft[key].trim();
@@ -162,13 +144,13 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
       });
       if (patchError) {
         setFieldErrors(fieldErrorsFrom(patchError));
-        throw new Error(errorMessage(patchError, 'Failed to save global defaults'));
+        throw new Error(errorMessage(patchError, 'Failed to save sign-up settings'));
       }
-      addToast('Global defaults saved.', 'success');
+      addToast('Sign-up settings saved.', 'success');
       setDraft({});
       refetch();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to save global defaults', 'error');
+      addToast(err instanceof Error ? err.message : 'Failed to save sign-up settings', 'error');
     } finally {
       setSaving(false);
     }
@@ -179,11 +161,11 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg font-bold font-heading">
-            <h2>Global defaults</h2>
+            <h2>Sign-up governance</h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+          {Array.from({ length: 2 }).map((_, i) => (
             <div key={i} className="h-12 animate-pulse rounded-md bg-muted/40" />
           ))}
         </CardContent>
@@ -193,29 +175,11 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
 
   return (
     <div className="space-y-6">
-      {sections.length > 1 && (
-        <nav
-          aria-label="Jump to section"
-          data-testid="global-settings-quicknav"
-          className="flex flex-wrap gap-2 text-xs"
-        >
-          {sections.map(({ section }) => (
-            <a
-              key={section.id}
-              href={`#section-${section.id}`}
-              className="rounded-full border border-border bg-muted/40 px-3 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              {section.title}
-            </a>
-          ))}
-        </nav>
-      )}
       {sections.map(({ section, entries }) => (
         <Card
           key={section.id}
-          id={`section-${section.id}`}
           data-testid={`settings-section-${section.id}`}
-          className="scroll-mt-6 border border-border bg-card shadow-sm"
+          className="border border-border bg-card shadow-sm"
         >
           <CardHeader>
             <CardTitle className="text-lg font-bold font-heading">
@@ -230,7 +194,7 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
               <RegistrySettingControl
                 key={entry.key}
                 entry={entry}
-                idPrefix="global"
+                idPrefix="signup"
                 value={valueOf(entry)}
                 error={fieldErrors[entry.key]}
                 onChange={(value) => setField(entry.key, value)}
@@ -240,15 +204,15 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
         </Card>
       ))}
 
-      <div className="sticky bottom-4 flex justify-end">
+      <div className="flex justify-end">
         <Button
           onClick={handleSave}
           disabled={saving || !dirty}
-          className="gap-2 shadow-md"
-          data-testid="global-settings-save"
+          className="gap-2"
+          data-testid="signup-settings-save"
         >
           <IconDeviceFloppy className="w-4 h-4" />
-          {saving ? 'Saving…' : 'Save global defaults'}
+          {saving ? 'Saving…' : 'Save sign-up settings'}
         </Button>
       </div>
     </div>

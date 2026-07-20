@@ -27,7 +27,7 @@ const READONLY_USER = {
 
 async function openWebsiteSettings(page: Page): Promise<void> {
   await page.goto('/admin/settings');
-  await expect(page.getByRole('heading', { name: 'Website Settings' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
 }
 
 test.describe('Website Settings — admin (settings:read/write/manage)', () => {
@@ -70,23 +70,23 @@ test.describe('Website Settings — admin (settings:read/write/manage)', () => {
 
     // Reload — the override is reflected in the effective settings.
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Website Settings' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
     await expect(page.getByLabel('Site name', { exact: true })).toHaveValue(newName);
     await expect(page.getByLabel('Timezone', { exact: true })).toHaveValue(newTz);
   });
 
-  test('global defaults are off the tenant page and denied to a non-system-tenant admin (WC-235)', async ({ page }) => {
-    // Global (system-wide) defaults moved to /admin/settings/global and are gated
-    // to the system tenant (id 0). ADMIN is a REGULAR tenant admin: even though it
-    // holds settings:manage, it must NOT see the global form on the tenant page…
+  test('platform defaults are off the tenant page and Sign-up is denied to a non-system-tenant admin (WC-235)', async ({ page }) => {
+    // System-wide defaults are gated to the system tenant (id 0). ADMIN is a
+    // REGULAR tenant admin: even though it holds settings:manage, it must NOT
+    // see the Platform defaults card on the General page…
     await openWebsiteSettings(page);
-    await expect(page.getByRole('heading', { name: 'Global defaults' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Platform defaults' })).toHaveCount(0);
     await expect(page.getByLabel('Global site name', { exact: true })).toHaveCount(0);
 
-    // …and must be denied when navigating directly to the global page.
-    await page.goto('/admin/settings/global');
+    // …and must be denied when navigating directly to the (also system-tenant-only) Sign-up page.
+    await page.goto('/admin/settings/signup');
     await expect(page.getByRole('heading', { name: 'Access Denied' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Global defaults' })).toHaveCount(0);
+    await expect(page.getByTestId('settings-section-signup')).toHaveCount(0);
   });
 });
 
@@ -122,7 +122,7 @@ test.describe('Website Settings — read-only delegate (settings:read only)', ()
     await api.dispose();
   });
 
-  test('tenant form is read-only and the Global defaults section is hidden', async ({ page }) => {
+  test('tenant form is read-only and the Platform defaults section is hidden', async ({ page }) => {
     await new LoginPage(page).loginExpectingSuccess(READONLY_USER);
 
     await openWebsiteSettings(page);
@@ -135,7 +135,7 @@ test.describe('Website Settings — read-only delegate (settings:read only)', ()
       page.getByRole('button', { name: 'Save tenant settings' })
     ).toHaveCount(0);
 
-    // settings:manage is absent → no Global defaults section.
-    await expect(page.getByRole('heading', { name: 'Global defaults' })).toHaveCount(0);
+    // settings:manage is absent → no Platform defaults section.
+    await expect(page.getByRole('heading', { name: 'Platform defaults' })).toHaveCount(0);
   });
 });
