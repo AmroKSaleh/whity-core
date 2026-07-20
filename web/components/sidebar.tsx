@@ -276,15 +276,15 @@ export function Sidebar() {
         className={`
           transition-all duration-300 ease-in-out
           ${isMobile
-            ? `fixed top-0 inset-s-0 h-screen ${sidebarWidth} bg-muted border-e border-border flex flex-col z-40 ${
+            ? `fixed top-0 inset-s-0 h-screen ${sidebarWidth} bg-sidebar text-sidebar-foreground border-e border-sidebar-border flex flex-col z-40 ${
                 isOpen ? 'translate-x-0' : 'ltr:-translate-x-full rtl:translate-x-full'
               }`
-            : `relative h-screen ${sidebarWidth} bg-muted border-e border-border flex flex-col`
+            : `relative h-screen ${sidebarWidth} bg-sidebar text-sidebar-foreground border-e border-sidebar-border flex flex-col`
           }
         `}
       >
         {/* Header with collapse button for desktop */}
-        <div className={`border-b border-border transition-all duration-300 flex items-center justify-between ${isCollapsed ? 'p-3' : 'p-6'}`}>
+        <div className={`border-b border-sidebar-border transition-all duration-300 flex items-center justify-between ${isCollapsed ? 'p-3' : 'p-6'}`}>
           <div className="flex-1">
             {!isCollapsed ? (
               <>
@@ -374,7 +374,7 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className={`border-t border-border transition-all duration-300 ${isCollapsed ? 'p-2' : 'p-4'} space-y-2`}>
+        <div className={`border-t border-sidebar-border transition-all duration-300 ${isCollapsed ? 'p-2' : 'p-4'} space-y-2`}>
           {/*
             User menu: the "logged in as" footer doubles as the entry point to the
             self-service profile page (WC-64), which was previously orphaned (no
