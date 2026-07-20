@@ -1,0 +1,45 @@
+name: Publish @amroksaleh/tokens
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/tokens/**"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@amroksaleh"
+
+      - name: Install dependencies
+        working-directory: packages/tokens
+        run: npm install
+
+      # Idempotent publish: this workflow runs on any push touching packages/tokens,
+      # but a change without a version bump must NOT fail (npm returns 409
+      # "cannot publish over existing version"). Publish only when the current
+      # version isn't already in the registry; otherwise skip with a notice.
+      - name: Publish if the version is new
+        working-directory: packages/tokens
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::$NAME@$VERSION is already published — skipping. Bump the version in packages/tokens/package.json to publish a new release."
+          else
+            echo "Publishing $NAME@$VERSION"
+            npm publish
+          fi

@@ -13,10 +13,20 @@
       "location": "./generated/tokens.dart",
       "description": "Dart constants for Flutter Material Design 3 integration"
     },
+    "flutter": {
+      "type": "dart-constants",
+      "location": "../../../flutter/whity_tokens/lib/src/generated/tokens.dart",
+      "description": "Same Dart constants as \"mobile\", packaged as the flutter/whity_tokens git-dependency package for external Flutter client repos (see that package's README)."
+    },
     "json": {
       "type": "json",
       "location": "./generated/tokens.json",
       "description": "Flat JSON export for programmatic / white-label tooling consumption"
+    },
+    "tokensPackage": {
+      "type": "npm-package",
+      "location": "../../../packages/tokens/generated/{tokens.json,theme.css}",
+      "description": "@amroksaleh/tokens — standalone, Next.js-independent JSON + Tailwind v4 theme CSS for non-Next clients (Tauri/Vite SPAs, etc.)."
     }
   },
   "colors": {

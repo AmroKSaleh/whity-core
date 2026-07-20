@@ -26,6 +26,18 @@ jobs:
         working-directory: packages/ui
         run: npm install
 
+      # Guarantees every component stays usable from a plain Vite/Tauri SPA,
+      # not just Next.js — fails the build if a Next-only import ever sneaks
+      # in, rather than relying on a one-time audit staying true forever.
+      - name: Guard against Next.js-only imports
+        working-directory: packages/ui
+        run: |
+          if grep -rEn "from ['\"]next/" src --include="*.tsx" --include="*.ts"; then
+            echo "::error::A packages/ui component imports a Next.js-only module (next/*). This package must stay usable from a plain Vite/Tauri SPA — remove the Next-specific dependency (inject as a prop/adapter instead)."
+            exit 1
+          fi
+          echo "No Next.js-only imports found."
+
       # Idempotent publish: this workflow runs on any push touching packages/ui,
       # but a change without a version bump must NOT fail (npm returns 409
       # "cannot publish over existing version"). Publish only when the current
