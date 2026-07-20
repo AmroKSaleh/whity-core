@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amro
 import { Input } from '@amroksaleh/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
 import { Badge } from '@amroksaleh/ui/badge';
+import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import {
   IconAlertCircle,
   IconCopy,
@@ -182,18 +183,19 @@ export default function SsoProvidersPage() {
 
   if (!canManage) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center bg-card border border-border rounded-2xl shadow-sm">
-        <div className="p-4 bg-destructive/10 rounded-full text-destructive mb-4">
-          <IconAlertCircle size={48} />
-        </div>
-        <h2 className="text-xl font-bold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          You need the <code>auth_providers:manage</code> permission to configure single sign-on.
-        </p>
-        <Button onClick={() => window.history.back()} variant="outline">
-          Go Back
-        </Button>
-      </div>
+      <AccessDenied
+        description={
+          <>
+            You need the <code>auth_providers:manage</code> permission to configure single
+            sign-on.
+          </>
+        }
+        action={
+          <Button onClick={() => window.history.back()} variant="outline">
+            Go Back
+          </Button>
+        }
+      />
     );
   }
 

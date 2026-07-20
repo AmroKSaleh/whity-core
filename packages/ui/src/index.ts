@@ -1,3 +1,4 @@
+export * from "./access-denied"
 export * from "./alert-dialog"
 export * from "./alert"
 export * from "./badge"

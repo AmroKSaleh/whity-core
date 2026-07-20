@@ -9,7 +9,8 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { IconAlertCircle, IconDeviceFloppy } from '@tabler/icons-react';
+import { IconDeviceFloppy } from '@tabler/icons-react';
+import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { BrandingSettings } from '@/components/branding-settings';
 import { SettingsTabs } from '../settings-tabs';
 import {
@@ -58,18 +59,19 @@ export default function BrandingSettingsPage() {
 
   if (!canRead) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center bg-card border border-border rounded-2xl shadow-sm">
-        <div className="p-4 bg-destructive/10 rounded-full text-destructive mb-4">
-          <IconAlertCircle size={48} />
-        </div>
-        <h2 className="text-xl font-bold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          You do not have the required permission (<code>settings:read</code>) to view Branding.
-        </p>
-        <Button onClick={() => window.history.back()} variant="outline">
-          Go Back
-        </Button>
-      </div>
+      <AccessDenied
+        description={
+          <>
+            You do not have the required permission (<code>settings:read</code>) to view
+            Branding.
+          </>
+        }
+        action={
+          <Button onClick={() => window.history.back()} variant="outline">
+            Go Back
+          </Button>
+        }
+      />
     );
   }
 

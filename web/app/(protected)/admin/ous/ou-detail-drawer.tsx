@@ -13,6 +13,7 @@ import {
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import {
   Select,
   SelectContent,
@@ -285,9 +286,11 @@ export function OuDetailDrawer({ ou, onClose, onAction, onChanged }: OuDetailDra
                   ))}
                 </ul>
               )}
-              <p className="text-[0.625rem] text-muted-foreground">
-                Members are read-only here; assign users to an OU from user management.
-              </p>
+              <Alert variant="info">
+                <AlertDescription>
+                  Members are read-only here; assign users to an OU from user management.
+                </AlertDescription>
+              </Alert>
             </section>
           </>
         )}

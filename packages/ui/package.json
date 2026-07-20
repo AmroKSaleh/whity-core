@@ -1,6 +1,6 @@
 {
   "name": "@amroksaleh/ui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared UI primitives for Whity products",
   "license": "UNLICENSED",
   "scripts": {
@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./access-denied": "./src/access-denied.tsx",
     "./alert-dialog": "./src/alert-dialog.tsx",
     "./alert": "./src/alert.tsx",
     "./badge": "./src/badge.tsx",

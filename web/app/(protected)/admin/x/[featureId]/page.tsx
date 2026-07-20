@@ -12,7 +12,8 @@ import { ActionScreen } from '@/components/plugin/action-screen';
 import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { IconPuzzle, IconShieldLock } from '@tabler/icons-react';
+import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { IconPuzzle } from '@tabler/icons-react';
 
 /**
  * Renders a registry override. Declared at module level and fed the component
@@ -73,19 +74,15 @@ export default function PluginFeaturePage() {
           title="Feature unavailable"
           description="This plugin feature could not be resolved."
         />
-        <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-          <IconShieldLock
-            size={32}
-            className="mx-auto mb-3 text-muted-foreground"
-          />
-          <h2 className="font-heading text-sm font-medium">
-            Not available
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            The feature &apos;{featureId}&apos; does not exist or you do not
-            have permission to use it.
-          </p>
-        </div>
+        <AccessDenied
+          title="Not available"
+          description={
+            <>
+              The feature &apos;{featureId}&apos; does not exist or you do not
+              have permission to use it.
+            </>
+          }
+        />
       </div>
     );
   }

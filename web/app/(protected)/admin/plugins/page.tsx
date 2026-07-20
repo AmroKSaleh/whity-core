@@ -15,6 +15,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { PermissionButton } from '@/components/rbac/permission-button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import {
   Dialog,
   DialogContent,
@@ -132,18 +133,19 @@ export default function PluginsPage() {
   // RBAC gate: Access Denied if user lacks plugins:read
   if (!hasAccess) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center bg-card border border-border rounded-2xl shadow-sm">
-        <div className="p-4 bg-destructive/10 rounded-full text-destructive mb-4">
-          <IconAlertCircle size={48} />
-        </div>
-        <h2 className="text-xl font-bold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          You do not have the required permissions (`plugins:read`) to access the Plugin Management Console.
-        </p>
-        <Button onClick={() => window.history.back()} variant="outline">
-          Go Back
-        </Button>
-      </div>
+      <AccessDenied
+        description={
+          <>
+            You do not have the required permissions (`plugins:read`) to access the Plugin
+            Management Console.
+          </>
+        }
+        action={
+          <Button onClick={() => window.history.back()} variant="outline">
+            Go Back
+          </Button>
+        }
+      />
     );
   }
 
