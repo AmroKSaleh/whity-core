@@ -11691,7 +11691,8 @@
                             "crud",
                             "custom",
                             "action",
-                            "blocks"
+                            "blocks",
+                            "embed"
                         ]
                     },
                     "resource": {
@@ -11769,6 +11770,18 @@
                             "fields"
                         ]
                     },
+                    "embed": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                            "path": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "path"
+                        ]
+                    },
                     "requiredPermission": {
                         "type": "string"
                     },
@@ -11809,6 +11822,7 @@
                     "screen",
                     "resource",
                     "action",
+                    "embed",
                     "requiredPermission",
                     "capabilities"
                 ]

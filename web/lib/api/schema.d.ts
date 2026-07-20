@@ -1728,7 +1728,7 @@ export interface components {
             group: string;
             order: number;
             /** @enum {string} */
-            screen: "crud" | "custom" | "action" | "blocks";
+            screen: "crud" | "custom" | "action" | "blocks" | "embed";
             resource: {
                 basePath: string;
                 titleField: string | null;
@@ -1745,6 +1745,9 @@ export interface components {
                     accept: string | null;
                     required: boolean;
                 }[];
+            } | null;
+            embed: {
+                path: string;
             } | null;
             requiredPermission: string;
             capabilities: {

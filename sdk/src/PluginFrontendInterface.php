@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * Optional frontend feature declaration for plugins (SDK v1.2).
+ * Optional frontend feature declaration for plugins (SDK v1.2; `'embed'`
+ * screens and multipart `action` file fields added in SDK v1.13, #246/#247).
  *
  * A plugin MAY implement this interface — in addition to
  * {@see PluginInterface} — to describe the admin-UI screens it contributes.
@@ -39,6 +40,15 @@ namespace Whity\Sdk;
  *     that are not CRUD resources, with zero per-app frontend code;
  *   - `'custom'` — the host application must register a bespoke component for
  *     this id in its UI registry, otherwise a placeholder renders.
+ *   - `'embed'` — the host renders an iframe pointed at the plugin's own
+ *     declared `embed.path` route (RBAC-protected like any other plugin
+ *     route) — for a bespoke UI a backend-only, deploy-copied plugin can ship
+ *     with ZERO host-application edits, unlike `'custom'`. The framed
+ *     response can be any self-contained HTML document (inline
+ *     `<script>`/`<style>`); it is NOT constrained to the strict JSON-API
+ *     default `Content-Security-Policy`/`X-Frame-Options` — the host lets a
+ *     handler-set CSP with a non-`'none'` `frame-ancestors` survive, and also
+ *     drops the legacy `X-Frame-Options: DENY` in that case.
  * - `requiredPermission` (string, REQUIRED — fail-closed, there are no
  *   permissionless screens): must match
  *   `/^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$/` and be a permission this plugin
@@ -71,9 +81,18 @@ namespace Whity\Sdk;
  *       EQUAL the descriptor's.
  *     - `fields` (list, optional): the inputs the form renders, each
  *       `{name, label?, kind?: 'text'|'textarea'|'file', accept?, required?}`.
- *       A `'file'` field is read client-side as TEXT into the named JSON
- *       property (the host is a JSON API); binary uploads are out of scope.
+ *       When ANY field is `kind: 'file'`, the host submits the whole form as
+ *       real `multipart/form-data` (file fields as actual binary parts, other
+ *       fields as plain form fields) instead of JSON — read it via the
+ *       standard SDK `Request::getUploadedFiles()`, the same mechanism the
+ *       core plugin-upload route already uses. A descriptor with no `'file'`
+ *       field submits as JSON exactly as before (non-breaking).
  *     - `submitLabel` (string, optional): the submit button label.
+ * - `embed` (array, REQUIRED when `screen` is `'embed'`):
+ *     - `path` (string): the plugin's OWN GET route, starting with `'/api/'`.
+ *       Validated identically to `resource.basePath` — the plugin must have
+ *       ACTUALLY REGISTERED this GET route, and its own `requiredPermission`
+ *       must EQUAL the descriptor's.
  * - `icon` (string, optional): kebab-case tabler icon name. Default: none.
  * - `group` (string, optional non-empty): navigation group. Default `'plugins'`.
  * - `order` (int, optional): sort order within the group. Default `100`.

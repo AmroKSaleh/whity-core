@@ -18,13 +18,18 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 /**
  * Generic "action" screen (WC-169 follow-up): renders the form declared by a
  * `screen: 'action'` feature descriptor and submits it to the descriptor's
- * route as a JSON body. A `file` field is read client-side as TEXT into its
- * named property (the host is a JSON API). On success the screen downloads a
- * returned file (response carries `Content-Disposition`) or reports success;
- * on a 4xx it renders the server's JSON report (an `issues` array) or error.
+ * route. On success the screen downloads a returned file (response carries
+ * `Content-Disposition`) or reports success; on a 4xx it renders the server's
+ * JSON report (an `issues` array) or error.
  *
  * Unlike the CRUD screen this needs no OpenAPI fetch — the descriptor's
  * `action.fields` fully describe the form.
+ *
+ * File fields (WC-247): when ANY field is `kind: 'file'`, the form submits as
+ * real `multipart/form-data` — the file travels as a genuine binary part, not
+ * base64/text — with no explicit `Content-Type` header (the browser sets the
+ * multipart boundary itself). A descriptor with no `'file'` field submits as
+ * JSON exactly as before.
  *
  * `ActionIssue`, `extractIssues`, and `extractError` are now imported from
  * `@/lib/plugin-action-submit` (WC-235 DRY refactor); this component's
@@ -83,17 +88,35 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
     return errors;
   };
 
-  const buildPayload = async (): Promise<Record<string, string>> => {
+  const hasFileField = submitAction.fields.some((field) => field.kind === 'file');
+
+  /** JSON body path — used when the form has no file field. */
+  const buildJsonPayload = (): Record<string, string> => {
     const payload: Record<string, string> = {};
+    for (const field of submitAction.fields) {
+      payload[field.name] = texts[field.name] ?? '';
+    }
+    return payload;
+  };
+
+  /**
+   * multipart/form-data path (WC-247) — used when the form has any file
+   * field. Files travel as real binary parts; other fields as plain form
+   * fields alongside them.
+   */
+  const buildFormData = (): FormData => {
+    const formData = new FormData();
     for (const field of submitAction.fields) {
       if (field.kind === 'file') {
         const file = files[field.name];
-        payload[field.name] = file ? await file.text() : '';
+        if (file !== null && file !== undefined) {
+          formData.append(field.name, file);
+        }
       } else {
-        payload[field.name] = texts[field.name] ?? '';
+        formData.append(field.name, texts[field.name] ?? '');
       }
     }
-    return payload;
+    return formData;
   };
 
   const submit = async (): Promise<void> => {
@@ -106,12 +129,18 @@ export function ActionScreen({ feature }: { feature: PluginFeature }) {
     setIsSubmitting(true);
     setIssues(null);
     try {
-      const payload = await buildPayload();
-      const response = await apiClient(submitAction.path, {
-        method: submitAction.method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = hasFileField
+        ? await apiClient(submitAction.path, {
+            method: submitAction.method,
+            // No explicit Content-Type: the browser sets the multipart
+            // boundary itself from the FormData body.
+            body: buildFormData(),
+          })
+        : await apiClient(submitAction.path, {
+            method: submitAction.method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildJsonPayload()),
+          });
 
       if (response.ok) {
         const disposition = response.headers.get('Content-Disposition');

@@ -14,6 +14,7 @@ const feature: PluginFeature = {
   screen: "custom",
   resource: { basePath: "/api/v1/hello/greetings", titleField: "message" },
   action: null,
+  embed: null,
   requiredPermission: "hello:read",
   capabilities: { canCreate: true, canEdit: true, canDelete: true },
 }

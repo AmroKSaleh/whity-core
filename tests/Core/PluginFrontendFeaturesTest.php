@@ -37,6 +37,7 @@ final class PluginFrontendFeaturesTest extends TestCase
     private static string $mismatchDir;
     private static string $shadowDir;
     private static string $actionDir;
+    private static string $embedDir;
     private static string $blocksDir;
 
     public static function setUpBeforeClass(): void
@@ -50,6 +51,7 @@ final class PluginFrontendFeaturesTest extends TestCase
         self::$mismatchDir = sys_get_temp_dir() . '/whity_feat_mismatch_' . uniqid();
         self::$shadowDir = sys_get_temp_dir() . '/whity_feat_shadow_' . uniqid();
         self::$actionDir = sys_get_temp_dir() . '/whity_feat_action_' . uniqid();
+        self::$embedDir = sys_get_temp_dir() . '/whity_feat_embed_' . uniqid();
         self::$blocksDir = sys_get_temp_dir() . '/whity_feat_blocks_' . uniqid();
 
         // ---- mainDir: one healthy plugin with a crud + a custom descriptor ----
@@ -381,6 +383,50 @@ PHP);
     }
 PHP);
 
+        // ---- embedDir: screen='embed' descriptors (SDK 1.13, WC-246) ----
+        self::writePlugin(self::$embedDir, 'FeatEmbed', <<<'PHP'
+    public function getPermissions(): array { return ['featembed:view', 'featembed:other']; }
+    public function getRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/featembed/tool',
+                'handler' => static fn (Request $r): Response => Response::json(['ok' => true]),
+                'requiredRole' => null,
+                'requiredPermission' => 'featembed:view',
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/featembed/other',
+                'handler' => static fn (Request $r): Response => Response::json(['ok' => true]),
+                'requiredRole' => null,
+                'requiredPermission' => 'featembed:other',
+            ],
+        ];
+    }
+    public function getFrontendFeatures(): array
+    {
+        return [
+            // missing embed object
+            ['id' => 'emb-no-embed', 'label' => 'X', 'screen' => 'embed', 'requiredPermission' => 'featembed:view'],
+            // non-/api path
+            ['id' => 'emb-non-api-path', 'label' => 'X', 'screen' => 'embed', 'requiredPermission' => 'featembed:view',
+             'embed' => ['path' => 'featembed/tool']],
+            // path the plugin does not serve as GET
+            ['id' => 'emb-foreign', 'label' => 'X', 'screen' => 'embed', 'requiredPermission' => 'featembed:view',
+             'embed' => ['path' => '/api/somebody/else']],
+            // descriptor permission != the route's permission
+            ['id' => 'emb-mismatch', 'label' => 'X', 'screen' => 'embed', 'requiredPermission' => 'featembed:view',
+             'embed' => ['path' => '/api/featembed/other']],
+            // the single VALID survivor
+            ['id' => 'emb-valid', 'label' => 'Embedded Tool', 'screen' => 'embed', 'requiredPermission' => 'featembed:view',
+             'icon' => 'window', 'order' => 3,
+             'embed' => ['path' => '/api/featembed/tool']],
+        ];
+    }
+PHP);
+
         // ---- blocksDir: screen='blocks' descriptors (SDK 1.6, WC-225/226) ----
         // The loader admits a `screen:'blocks'` feature whose `blocks` tree
         // passes the SDK BlockValidator, drops a tree with an unknown block type
@@ -421,7 +467,7 @@ PHP);
         $dirs = [
             self::$mainDir, self::$invalidDir, self::$dupDir, self::$throwingDir,
             self::$routePermDir, self::$hardeningDir, self::$mismatchDir, self::$shadowDir,
-            self::$actionDir, self::$blocksDir,
+            self::$actionDir, self::$embedDir, self::$blocksDir,
         ];
         foreach ($dirs as $dir) {
             self::removeDirectory($dir);
@@ -480,6 +526,7 @@ PHP);
             'screen' => 'crud',
             'resource' => ['basePath' => '/api/feat/items', 'titleField' => 'name'],
             'action' => null,
+            'embed' => null,
             'requiredPermission' => 'feat:view',
         ], $byId['feat-items']);
 
@@ -495,6 +542,7 @@ PHP);
             'screen' => 'custom',
             'resource' => null,
             'action' => null,
+            'embed' => null,
             'requiredPermission' => 'feat:manage',
         ], $byId['feat-dashboard']);
     }
@@ -634,8 +682,45 @@ PHP);
                     ['name' => 'note', 'label' => 'note', 'kind' => 'text', 'accept' => null, 'required' => false],
                 ],
             ],
+            'embed' => null,
             'requiredPermission' => 'featact:run',
         ], $byId['act-valid']);
+    }
+
+    // ==================== screen='embed' (iframed plugin-owned URL) ====================
+
+    /**
+     * An `embed` descriptor must point at a GET route the plugin actually
+     * registered, gated on the SAME permission — validated identically to
+     * crud's resource.basePath. Every violation drops fail-closed; the one
+     * valid descriptor normalizes (defaults filled, embed populated).
+     */
+    public function testEmbedDescriptorValidationAndNormalization(): void
+    {
+        [$loader] = $this->loadDir(self::$embedDir);
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $ids = array_keys($byId);
+
+        $this->assertSame(['emb-valid'], $ids, 'Only the single valid embed descriptor survives');
+        $this->assertNotContains('emb-no-embed', $ids, "screen='embed' without an embed object must drop");
+        $this->assertNotContains('emb-non-api-path', $ids, "embed.path must start with '/api/'");
+        $this->assertNotContains('emb-foreign', $ids, 'embed.path must be a GET route this plugin registered');
+        $this->assertNotContains('emb-mismatch', $ids, "embed route permission must equal the descriptor's");
+
+        $this->assertSame([
+            'id' => 'emb-valid',
+            'plugin' => 'FeatEmbed',
+            'label' => 'Embedded Tool',
+            'icon' => 'window',
+            'group' => 'plugins',
+            'order' => 3,
+            'screen' => 'embed',
+            'resource' => null,
+            'action' => null,
+            'embed' => ['path' => '/api/featembed/tool'],
+            'requiredPermission' => 'featembed:view',
+        ], $byId['emb-valid']);
     }
 
     // ==================== screen='blocks' (declarative block screens) ====================
@@ -669,6 +754,7 @@ PHP);
             'screen' => 'blocks',
             'resource' => null,
             'action' => null,
+            'embed' => null,
             'requiredPermission' => 'featblk:view',
             'blocks' => [
                 ['type' => 'section', 'title' => 'Demo', 'children' => [

@@ -16,6 +16,7 @@ const feature: PluginFeature = {
   screen: "crud",
   resource: { basePath: BASE, titleField: "title" },
   action: null,
+  embed: null,
   requiredPermission: "notes:read",
   capabilities: { canCreate: true, canEdit: true, canDelete: true },
 }
