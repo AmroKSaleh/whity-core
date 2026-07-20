@@ -96,6 +96,10 @@
     cursor: pointer;
   }
   html {
+    /* Lets native form controls (scrollbars, date/color pickers, etc. — see
+       lib/theme-mode-context.tsx for the `.dark` class itself) pick their own
+       light/dark chrome instead of always rendering light-themed. */
+    color-scheme: light;
     /* Noto Sans (latin) + Noto Sans Arabic together, so mixed-script text
        (an Arabic name inside an English sentence, etc.) renders each glyph
        in its correct script rather than a browser tofu/fallback font. Each
@@ -106,13 +110,17 @@
   }
 }
 
+.dark {
+  color-scheme: dark;
+}
+
 /* katex dark-mode overrides */
 .dark .katex { color: var(--foreground); }
 .dark .katex-error { color: var(--destructive); }
 
 /* === AUTO-GENERATED TOKENS: do not edit between markers — run `npm run tokens:generate` === */
 :root {
-  --background: oklch(1 0 0);
+  --background: oklch(0.98 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
@@ -212,7 +220,7 @@
   --chart-3: oklch(0.708 0 0);
   --chart-4: oklch(0.439 0 0);
   --chart-5: oklch(0.371 0 0);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.17 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.7 0.15 255);
   --sidebar-primary-foreground: oklch(0.205 0 0);

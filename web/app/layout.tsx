@@ -12,6 +12,7 @@ import "@/lib/plugin-screens";
 import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
+import { ThemeModeProvider, ThemeModeInitScript } from "@/lib/theme-mode-context";
 
 // Design-token font families (see src/design/tokens/base.json): Noto Sans
 // (latin) + Noto Sans Arabic together drive --font-sans / --font-heading (see
@@ -65,7 +66,19 @@ export default async function RootLayout({
         geistMono.variable,
         "font-sans"
       )}
+      // The blocking init script (see <head> below) toggles the `dark` class
+      // on this element before hydration, based on localStorage/system
+      // preference the server can't know — an expected, benign mismatch.
+      suppressHydrationWarning
     >
+      <head>
+        {/*
+          Blocking, must run before first paint to avoid a flash of the wrong
+          color scheme (see lib/theme-mode-context.tsx) — rendered here, ahead
+          of globals.css, rather than left to ThemeModeProvider's own effects.
+        */}
+        <ThemeModeInitScript />
+      </head>
       {/*
         suppressHydrationWarning (one level deep, body attributes only): browser
         extensions such as Grammarly inject attributes onto <body> after the SSR
@@ -78,18 +91,20 @@ export default async function RootLayout({
         {/* React 19 hoists <style> into <head> regardless of nesting position. */}
         {overrideCss !== "" && <style>{`:root{${overrideCss}}`}</style>}
         <BrandingProvider initial={branding}>
-          <DirectionProvider>
-            <AuthProvider>
-              <ToastProvider>
-                <NavigationProvider>
-                  <PluginFeaturesProvider>
-                    {children}
-                    <ToastContainer />
-                  </PluginFeaturesProvider>
-                </NavigationProvider>
-              </ToastProvider>
-            </AuthProvider>
-          </DirectionProvider>
+          <ThemeModeProvider>
+            <DirectionProvider>
+              <AuthProvider>
+                <ToastProvider>
+                  <NavigationProvider>
+                    <PluginFeaturesProvider>
+                      {children}
+                      <ToastContainer />
+                    </PluginFeaturesProvider>
+                  </NavigationProvider>
+                </ToastProvider>
+              </AuthProvider>
+            </DirectionProvider>
+          </ThemeModeProvider>
         </BrandingProvider>
       </body>
     </html>

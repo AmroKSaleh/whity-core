@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 class AppTokens {
   // Light mode colors
   static const lightColors = <String, Color>{
-    'background': Color(0xFFFFFFFF),
+    'background': Color(0xFFF8F8F8),
     'foreground': Color(0xFF0A0A0A),
     'card': Color(0xFFFFFFFF),
     'cardForeground': Color(0xFF0A0A0A),
@@ -85,7 +85,7 @@ class AppTokens {
     'chart3': Color(0xFFA1A1A1),
     'chart4': Color(0xFF525252),
     'chart5': Color(0xFF404040),
-    'sidebar': Color(0xFF171717),
+    'sidebar': Color(0xFF0F0F0F),
     'sidebarForeground': Color(0xFFFAFAFA),
     'sidebarPrimary': Color(0xFF59A0F9),
     'sidebarPrimaryForeground': Color(0xFF171717),

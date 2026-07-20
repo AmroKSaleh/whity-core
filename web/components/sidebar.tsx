@@ -7,6 +7,7 @@ import type { Membership } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
 import { useDirection } from '@/lib/direction-context';
+import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import {
@@ -30,6 +31,8 @@ import {
   IconChevronDown,
   IconCheck,
   IconLanguage,
+  IconSun,
+  IconMoon,
 } from '@tabler/icons-react';
 import { useState, useEffect, useCallback } from 'react';
 import type { Icon } from '@tabler/icons-react';
@@ -214,6 +217,7 @@ export function Sidebar() {
   const { getGroupedItems } = useNavigation();
   const branding = useBranding();
   const { dir, toggle: toggleDirection } = useDirection();
+  const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeMode();
   const groupedItems = getGroupedItems();
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -419,6 +423,23 @@ export function Sidebar() {
           >
             <IconLanguage size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
             {(!isCollapsed || isMobile) && (dir === 'rtl' ? 'English (LTR)' : 'العربية (RTL)')}
+          </Button>
+          {/* Light / dark color scheme (see lib/theme-mode-context.tsx). */}
+          <Button
+            onClick={toggleTheme}
+            variant="outline"
+            size={isCollapsed && !isMobile ? 'icon' : 'default'}
+            className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
+            title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            aria-label="Toggle color scheme"
+            data-testid="theme-toggle"
+          >
+            {resolvedTheme === 'dark' ? (
+              <IconSun size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
+            ) : (
+              <IconMoon size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
+            )}
+            {(!isCollapsed || isMobile) && (resolvedTheme === 'dark' ? 'Light mode' : 'Dark mode')}
           </Button>
           <Button
             onClick={handleLogout}
