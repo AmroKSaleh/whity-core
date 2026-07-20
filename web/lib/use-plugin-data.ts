@@ -68,6 +68,14 @@ export function usePluginData<T>(
   useEffect(() => {
     const key = fetchKey;
     const controller = new AbortController();
+    // Hang guard on the SAME controller already used for unmount/re-fetch
+    // cleanup (a plain setTimeout+abort, not AbortSignal.any/.timeout() —
+    // both are unsupported in the jsdom test environment this hook is
+    // exercised under). A data-bound block's source can be any plugin-owned
+    // route, so there is no bound on how long it might take an unhealthy
+    // backend to answer (or never answer) without this — the block would
+    // show its loading state forever with no way out.
+    const hangGuard = setTimeout(() => controller.abort(), 15_000);
 
     const run = async (): Promise<void> => {
       try {
@@ -121,6 +129,7 @@ export function usePluginData<T>(
     void run();
 
     return () => {
+      clearTimeout(hangGuard);
       controller.abort();
     };
     // `parse` is intentionally excluded: callers typically pass an inline
