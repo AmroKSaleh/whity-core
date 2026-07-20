@@ -117,6 +117,11 @@ final class TenantOwnedTables
         // tenant_id (list/get additionally RBAC-filter server-side).
         'document_templates' => '059_create_document_designer_tables.php',
         'document_blocks'    => '059_create_document_designer_tables.php',
+
+        // WC-525 — admin-enforced 2FA policy registry (migration 061): tenant/OU/
+        // user-scoped rows an admin sets to require 2FA enrollment. Every query
+        // binds tenant_id so a policy can never leak across tenants.
+        'two_factor_policies' => '061_create_two_factor_policies.php',
     ];
 
     /**
