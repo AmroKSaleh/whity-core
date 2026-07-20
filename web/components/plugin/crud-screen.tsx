@@ -38,6 +38,7 @@ import {
   SelectValue,
 } from '@amroksaleh/ui/select';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { ErrorState } from '@amroksaleh/ui/empty-state';
 import {
   IconAlertTriangle,
   IconMenu2,
@@ -626,17 +627,11 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     return (
       <div className="space-y-8">
         <AdminHeader title={feature.label} description={description} />
-        <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-          <IconShieldLock
-            size={32}
-            className="mx-auto mb-3 text-muted-foreground"
-          />
-          <h2 className="font-heading text-sm font-medium">Access denied</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            You need the {feature.requiredPermission} permission to use this
-            feature.
-          </p>
-        </div>
+        <ErrorState
+          icon={<IconShieldLock />}
+          title="Access denied"
+          description={`You need the ${feature.requiredPermission} permission to use this feature.`}
+        />
       </div>
     );
   }

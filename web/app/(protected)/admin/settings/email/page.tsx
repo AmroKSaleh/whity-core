@@ -12,8 +12,9 @@ import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Input } from '@amroksaleh/ui/input';
 import { Badge } from '@amroksaleh/ui/badge';
+import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import {
-  IconAlertCircle,
   IconDeviceFloppy,
   IconMail,
   IconSend,
@@ -107,19 +108,19 @@ export default function EmailSettingsPage() {
 
   if (!isSystemTenant || !canManage) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center bg-card border border-border rounded-2xl shadow-sm">
-        <div className="p-4 bg-destructive/10 rounded-full text-destructive mb-4">
-          <IconAlertCircle size={48} />
-        </div>
-        <h2 className="text-xl font-bold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          Outgoing email is an instance-wide setting managed by the system tenant with the{' '}
-          <code>settings:manage</code> permission.
-        </p>
-        <Button onClick={() => window.history.back()} variant="outline">
-          Go Back
-        </Button>
-      </div>
+      <AccessDenied
+        description={
+          <>
+            Outgoing email is an instance-wide setting managed by the system tenant with
+            the <code>settings:manage</code> permission.
+          </>
+        }
+        action={
+          <Button onClick={() => window.history.back()} variant="outline">
+            Go Back
+          </Button>
+        }
+      />
     );
   }
 
@@ -302,14 +303,16 @@ function EmailSettingsForm({
         <CardContent className="space-y-4">
           {control(MAIL_KEYS.transport)}
           {transport === 'none' && (
-            <p data-testid="email-transport-note" className="text-sm text-muted-foreground">
-              Email is disabled — nothing is sent.
-            </p>
+            <Alert variant="info" data-testid="email-transport-note">
+              <AlertDescription>Email is disabled — nothing is sent.</AlertDescription>
+            </Alert>
           )}
           {transport === 'log' && (
-            <p data-testid="email-transport-note" className="text-sm text-muted-foreground">
-              Emails are written to the server log (dev only) — not delivered.
-            </p>
+            <Alert variant="info" data-testid="email-transport-note">
+              <AlertDescription>
+                Emails are written to the server log (dev only) — not delivered.
+              </AlertDescription>
+            </Alert>
           )}
         </CardContent>
       </Card>

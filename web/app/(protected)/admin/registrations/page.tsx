@@ -8,7 +8,8 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { IconAlertCircle, IconCheck, IconInbox, IconX } from '@tabler/icons-react';
+import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { IconCheck, IconInbox, IconX } from '@tabler/icons-react';
 
 /**
  * Pending self-service registrations (WC-235 admin-approval activation).
@@ -126,26 +127,24 @@ export default function PendingRegistrationsPage() {
   // backend (which 403s any other caller).
   if (!isSystemTenant || !canApprove) {
     return (
-      <div
-        className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center bg-card border border-border rounded-2xl shadow-sm"
+      <AccessDenied
         data-testid="registrations-access-denied"
-      >
-        <div className="p-4 bg-destructive/10 rounded-full text-destructive mb-4">
-          <IconAlertCircle size={48} />
-        </div>
-        <h2 className="text-xl font-bold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          Pending registrations can only be reviewed from the system tenant. Your tenant&rsquo;s
-          settings are on the{' '}
-          <Link href="/admin/settings" className="font-medium underline">
-            Website Settings
-          </Link>{' '}
-          page.
-        </p>
-        <Button onClick={() => window.history.back()} variant="outline">
-          Go Back
-        </Button>
-      </div>
+        description={
+          <>
+            Pending registrations can only be reviewed from the system tenant. Your
+            tenant&rsquo;s settings are on the{' '}
+            <Link href="/admin/settings" className="font-medium underline">
+              Website Settings
+            </Link>{' '}
+            page.
+          </>
+        }
+        action={
+          <Button onClick={() => window.history.back()} variant="outline">
+            Go Back
+          </Button>
+        }
+      />
     );
   }
 

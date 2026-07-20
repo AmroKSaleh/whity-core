@@ -8,6 +8,7 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { ErrorState } from '@amroksaleh/ui/empty-state';
 import {
   IconBinaryTree2,
   IconList,
@@ -204,13 +205,11 @@ export default function RelationsPage() {
   // into `overrideContent` (list mode only — see below); graph mode is
   // untouched by this bypass either way since it never reaches DataTable.
   const accessDeniedContent = (
-    <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-      <IconShieldLock size={32} className="mx-auto mb-3 text-muted-foreground" />
-      <h2 className="font-heading text-sm font-medium">Access denied</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
-        You need the relations:read permission to view family relations.
-      </p>
-    </div>
+    <ErrorState
+      icon={<IconShieldLock />}
+      title="Access denied"
+      description="You need the relations:read permission to view family relations."
+    />
   );
 
   const isEmpty = !isLoading && !isForbidden && persons.length === 0;

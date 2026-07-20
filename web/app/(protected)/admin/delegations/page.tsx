@@ -7,6 +7,7 @@ import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
+import { ErrorState } from '@amroksaleh/ui/empty-state';
 import { IconPlus, IconShare, IconShieldLock } from '@tabler/icons-react';
 import { CreateDelegationModal } from './create-modal';
 import { RevokeDelegationModal } from './revoke-modal';
@@ -138,13 +139,11 @@ export default function DelegationsPage() {
   };
 
   const accessDenied = isForbidden ? (
-    <div className="rounded-lg border border-dashed border-border bg-card p-10 text-center">
-      <IconShieldLock size={32} className="mx-auto mb-3 text-muted-foreground" />
-      <h2 className="font-heading text-sm font-medium">Access denied</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
-        You need the delegation:manage permission to manage delegations.
-      </p>
-    </div>
+    <ErrorState
+      icon={<IconShieldLock />}
+      title="Access denied"
+      description="You need the delegation:manage permission to manage delegations."
+    />
   ) : undefined;
 
   return (

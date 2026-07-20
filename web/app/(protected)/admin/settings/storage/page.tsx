@@ -10,7 +10,8 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { IconAlertCircle, IconDeviceFloppy } from '@tabler/icons-react';
+import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { IconDeviceFloppy } from '@tabler/icons-react';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -50,23 +51,23 @@ export default function StorageSettingsPage() {
 
   if (!isSystemTenant || !canManage) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center bg-card border border-border rounded-2xl shadow-sm">
-        <div className="p-4 bg-destructive/10 rounded-full text-destructive mb-4">
-          <IconAlertCircle size={48} />
-        </div>
-        <h2 className="text-xl font-bold mb-2">Access Denied</h2>
-        <p className="text-muted-foreground max-w-md mb-6 text-sm">
-          Storage configuration can only be managed from the system tenant. Your tenant&rsquo;s
-          settings are on the{' '}
-          <Link href="/admin/settings" className="font-medium underline">
-            General
-          </Link>{' '}
-          page.
-        </p>
-        <Button onClick={() => window.history.back()} variant="outline">
-          Go Back
-        </Button>
-      </div>
+      <AccessDenied
+        description={
+          <>
+            Storage configuration can only be managed from the system tenant. Your tenant&rsquo;s
+            settings are on the{' '}
+            <Link href="/admin/settings" className="font-medium underline">
+              General
+            </Link>{' '}
+            page.
+          </>
+        }
+        action={
+          <Button onClick={() => window.history.back()} variant="outline">
+            Go Back
+          </Button>
+        }
+      />
     );
   }
 

@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@amroksaleh/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import {
   Select,
   SelectContent,
@@ -167,9 +168,11 @@ export function AddRelationModal({
                 ))}
               </SelectContent>
             </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              The reciprocal is shown automatically from the other person&rsquo;s side.
-            </p>
+            <Alert variant="info" className="mt-1">
+              <AlertDescription>
+                The reciprocal is shown automatically from the other person&rsquo;s side.
+              </AlertDescription>
+            </Alert>
           </div>
 
           <div>

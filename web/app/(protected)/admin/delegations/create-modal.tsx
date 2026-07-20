@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@amroksaleh/ui/select';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import type {
   GranteeType,
   OuOption,
@@ -246,10 +247,12 @@ export function CreateDelegationModal({
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
-                When set, the delegation applies only to grantees within that OU
-                or its descendants.
-              </p>
+              <Alert variant="info">
+                <AlertDescription>
+                  When set, the delegation applies only to grantees within that OU
+                  or its descendants.
+                </AlertDescription>
+              </Alert>
             </div>
 
             {/* Permissions */}
