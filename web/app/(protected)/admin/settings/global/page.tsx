@@ -10,8 +10,9 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { IconAlertCircle, IconDeviceFloppy, IconMail, IconRocket } from '@tabler/icons-react';
+import { IconAlertCircle, IconDeviceFloppy, IconRocket } from '@tabler/icons-react';
 import { BrandingSettings } from '@/components/branding-settings';
+import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
   SYSTEM_TENANT_ID,
@@ -23,6 +24,8 @@ import {
   type SettingsMap,
   type AddToast,
 } from '../settings-shared';
+
+const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
 /**
  * System-wide GLOBAL defaults (WC-235 / WC-2b9d4f6a). These apply to every
@@ -42,6 +45,7 @@ export default function GlobalSettingsPage() {
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
 
   const canManage = hasPermission(SETTINGS_MANAGE);
+  const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   if (isCapabilitiesLoading) {
@@ -91,21 +95,8 @@ export default function GlobalSettingsPage() {
           </Button>
         }
       />
+      <SettingsTabs active="global" showGlobal showEmail showSso={canManageProviders} />
       <GlobalSettingsForm addToast={addToast} />
-      <Link
-        href="/admin/settings/email"
-        className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 p-4 text-sm hover:bg-muted/70 transition-colors"
-      >
-        <span className="p-2 bg-primary/10 rounded-lg text-primary">
-          <IconMail className="w-5 h-5" />
-        </span>
-        <span>
-          <span className="font-medium text-foreground">Email (SMTP)</span>
-          <span className="block text-muted-foreground">
-            Configure outgoing email and send a test message →
-          </span>
-        </span>
-      </Link>
       <BrandingSettings variant="global" />
     </div>
   );
@@ -202,11 +193,29 @@ function GlobalSettingsForm({ addToast }: { addToast: AddToast }) {
 
   return (
     <div className="space-y-6">
+      {sections.length > 1 && (
+        <nav
+          aria-label="Jump to section"
+          data-testid="global-settings-quicknav"
+          className="flex flex-wrap gap-2 text-xs"
+        >
+          {sections.map(({ section }) => (
+            <a
+              key={section.id}
+              href={`#section-${section.id}`}
+              className="rounded-full border border-border bg-muted/40 px-3 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {section.title}
+            </a>
+          ))}
+        </nav>
+      )}
       {sections.map(({ section, entries }) => (
         <Card
           key={section.id}
+          id={`section-${section.id}`}
           data-testid={`settings-section-${section.id}`}
-          className="border border-border bg-card shadow-sm"
+          className="scroll-mt-6 border border-border bg-card shadow-sm"
         >
           <CardHeader>
             <CardTitle className="text-lg font-bold font-heading">
