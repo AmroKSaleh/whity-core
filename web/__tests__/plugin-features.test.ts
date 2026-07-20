@@ -26,6 +26,7 @@ const FEATURE: PluginFeature = {
   screen: 'crud',
   resource: { basePath: '/api/hello/greetings', titleField: 'message' },
   action: null,
+  embed: null,
   requiredPermission: 'hello:view',
   capabilities: { canCreate: true, canEdit: true, canDelete: false },
 };

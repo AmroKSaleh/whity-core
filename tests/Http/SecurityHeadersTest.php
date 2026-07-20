@@ -181,11 +181,52 @@ class SecurityHeadersTest extends TestCase
         $merged = SecurityHeaders::respectingHandlerCsp($securityHeaders, $responseHeaders);
 
         $this->assertSame('nosniff', $merged['X-Content-Type-Options'] ?? null);
+        // No frame-ancestors directive at all in the handler's CSP: X-Frame-Options
+        // is the ONLY clickjacking defense in force, so it must NOT be dropped.
         $this->assertSame('DENY', $merged['X-Frame-Options'] ?? null);
         $this->assertSame('no-referrer', $merged['Referrer-Policy'] ?? null);
         $this->assertSame(
             'max-age=31536000; includeSubDomains',
             $merged['Strict-Transport-Security'] ?? null
         );
+    }
+
+    /**
+     * WC-246: a plugin serving a `screen: 'embed'` feature wants its OWN
+     * response framed by the admin shell. When its CSP explicitly declares a
+     * frame-ancestors directive that isn't 'none', the legacy X-Frame-Options:
+     * DENY must also be dropped — otherwise it would silently re-block the
+     * exact framing the handler's own CSP just opted into.
+     */
+    public function testRespectingHandlerCspDropsXFrameOptionsWhenCspExplicitlyAllowsFraming(): void
+    {
+        $securityHeaders = SecurityHeaders::headers('production');
+        $responseHeaders = [
+            'content-security-policy' => "default-src 'self'; frame-ancestors 'self'",
+        ];
+
+        $merged = SecurityHeaders::respectingHandlerCsp($securityHeaders, $responseHeaders);
+
+        $this->assertArrayNotHasKey(
+            'X-Frame-Options',
+            $merged,
+            "A CSP with an explicit non-'none' frame-ancestors must drop the legacy X-Frame-Options."
+        );
+    }
+
+    /**
+     * A handler CSP that explicitly declares `frame-ancestors 'none'` must
+     * keep X-Frame-Options: DENY (both agree — no framing, no regression).
+     */
+    public function testRespectingHandlerCspKeepsXFrameOptionsWhenCspFrameAncestorsIsExplicitlyNone(): void
+    {
+        $securityHeaders = SecurityHeaders::headers('production');
+        $responseHeaders = [
+            'content-security-policy' => "default-src 'self'; frame-ancestors 'none'",
+        ];
+
+        $merged = SecurityHeaders::respectingHandlerCsp($securityHeaders, $responseHeaders);
+
+        $this->assertSame('DENY', $merged['X-Frame-Options'] ?? null);
     }
 }

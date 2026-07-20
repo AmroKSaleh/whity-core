@@ -2586,8 +2586,8 @@ class PluginLoader
         }
 
         $screen = $descriptor['screen'] ?? null;
-        if ($screen !== 'crud' && $screen !== 'custom' && $screen !== 'action' && $screen !== 'blocks') {
-            return $drop("screen must be 'crud', 'custom', 'action', or 'blocks'", $id);
+        if ($screen !== 'crud' && $screen !== 'custom' && $screen !== 'action' && $screen !== 'blocks' && $screen !== 'embed') {
+            return $drop("screen must be 'crud', 'custom', 'action', 'blocks', or 'embed'", $id);
         }
 
         // (b) requiredPermission: well-formed AND owned by THIS plugin. A
@@ -2675,6 +2675,46 @@ class PluginLoader
             $resource = ['basePath' => $basePath, 'titleField' => $titleField];
         }
 
+        // (c1) embed: REQUIRED for embed screens (WC-246). Declares the plugin's
+        // own GET route the host iframes into the admin shell — validated
+        // IDENTICALLY to crud's resource.basePath: the plugin must have
+        // ACTUALLY REGISTERED this GET route, and its requiredPermission must
+        // EQUAL the descriptor's (menu gate and data gate can never diverge).
+        $embed = null;
+        if ($screen === 'embed') {
+            $rawEmbed = $descriptor['embed'] ?? null;
+            if (!is_array($rawEmbed)) {
+                return $drop("screen 'embed' requires an embed array with path", $id);
+            }
+
+            $embedPath = $rawEmbed['path'] ?? null;
+            if (!is_string($embedPath) || !str_starts_with($embedPath, '/api/')) {
+                return $drop("embed.path must be a string starting with '/api/'", $id);
+            }
+            if (!array_key_exists($embedPath, $registeredGetRoutes)) {
+                return $drop("embed.path '{$embedPath}' is not a GET route this plugin registered", $id);
+            }
+            if ($registeredGetRoutes[$embedPath] !== $permission) {
+                return $drop(
+                    "embed.path '{$embedPath}' route requiredPermission '"
+                    . ($registeredGetRoutes[$embedPath] ?? 'none')
+                    . "' does not match the descriptor's '{$permission}'",
+                    $id
+                );
+            }
+
+            // Same versioning rewrite as resource.basePath/action.path above.
+            $vp = $this->router->getVersionPrefix();
+            if ($vp !== '') {
+                $pos = strpos($embedPath, '/', 1);
+                $embedPath = $pos === false
+                    ? $embedPath . $vp
+                    : substr($embedPath, 0, $pos) . $vp . substr($embedPath, $pos);
+            }
+
+            $embed = ['path' => $embedPath];
+        }
+
         // (c2) action: REQUIRED for action screens. Declares the POST/PUT route
         // the host's generic action form submits to (a JSON body) and the
         // optional input fields it renders. Ownership is judged exactly like
@@ -2710,9 +2750,10 @@ class PluginLoader
                 );
             }
 
-            // Input fields the generic form renders (optional). A 'file' field
-            // is read client-side as TEXT into the named JSON property (the host
-            // is a JSON API); binary uploads are out of scope here.
+            // Input fields the generic form renders (optional). When ANY field
+            // is 'file' (WC-247), the host submits the whole form as real
+            // multipart/form-data instead of JSON — read via the plugin's own
+            // Request::getUploadedFiles(), same as the core plugin-upload route.
             $fields = [];
             $rawFields = $rawAction['fields'] ?? [];
             if (!is_array($rawFields)) {
@@ -2978,6 +3019,7 @@ class PluginLoader
             'screen' => $screen,
             'resource' => $resource,
             'action' => $action,
+            'embed' => $embed,
             'requiredPermission' => $permission,
         ];
 

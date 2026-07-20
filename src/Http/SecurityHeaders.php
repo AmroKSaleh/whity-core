@@ -21,7 +21,10 @@ namespace Whity\Http;
  *
  *  - X-Frame-Options: DENY
  *      Legacy clickjacking defense for older browsers that do not honor the
- *      CSP frame-ancestors directive. Paired with the CSP below.
+ *      CSP frame-ancestors directive. Paired with the CSP below. Also
+ *      handler-overridable in the one case where a plugin genuinely wants its
+ *      own response framed (WC-246, `screen: 'embed'`) — see
+ *      {@see self::respectingHandlerCsp()}.
  *
  *  - Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
  *      The modern clickjacking defense (frame-ancestors). Because this policy
@@ -52,6 +55,7 @@ final class SecurityHeaders
 {
     private const CSP_HEADER_NAME = 'Content-Security-Policy';
     private const CSP_HEADER_KEY = 'content-security-policy';
+    private const FRAME_OPTIONS_HEADER_NAME = 'X-Frame-Options';
 
     private const NOSNIFF = 'nosniff';
     private const FRAME_OPTIONS = 'DENY';
@@ -105,25 +109,60 @@ final class SecurityHeaders
      * silently overwrite: `Response::withHeaders()` lets the LATER array
      * (these hardening headers) win over anything already on the response.
      *
-     * Every OTHER hardening header (nosniff, frame-options, referrer-policy,
-     * HSTS) is still enforced unconditionally regardless of what a handler
-     * sets — only CSP is handler-overridable, and only when the handler
-     * actually set one. A response with no CSP of its own still gets the
-     * strict default (secure by default).
+     * Every OTHER hardening header (nosniff, referrer-policy, HSTS) is still
+     * enforced unconditionally regardless of what a handler sets — only CSP
+     * (and, conditionally, X-Frame-Options — see below) are handler-
+     * overridable, and only when the handler actually set a CSP of its own. A
+     * response with no CSP of its own still gets the strict default (secure
+     * by default).
+     *
+     * X-Frame-Options (WC-246): a plugin can also want ITS OWN response
+     * embedded in an iframe inside the admin shell (a `screen: 'embed'`
+     * feature) — the still-unconditional `X-Frame-Options: DENY` would block
+     * that even after the CSP override above. Modern browsers already let
+     * CSP's `frame-ancestors` supersede the legacy `X-Frame-Options` when
+     * both are present, so X-Frame-Options is ALSO dropped, but ONLY when the
+     * handler's own CSP declares an EXPLICIT `frame-ancestors` directive that
+     * isn't `'none'` — `frame-ancestors` does not fall back to `default-src`
+     * per the CSP spec, so a handler CSP with no `frame-ancestors` directive
+     * at all leaves X-Frame-Options as the only clickjacking defense in
+     * force, and dropping it there would be a real regression, not a feature.
      *
      * @param array<string, string> $securityHeaders The output of {@see self::headers()}.
      * @param array<string, string> $responseHeaders The response's CURRENT
      *        headers (already normalized to lowercase-hyphenated keys by
      *        {@see \Whity\Sdk\Http\Response::getHeaders()}).
      * @return array<string, string> The hardening headers to merge, with CSP
-     *         dropped if the response already declared its own.
+     *         (and, conditionally, X-Frame-Options) dropped as described above.
      */
     public static function respectingHandlerCsp(array $securityHeaders, array $responseHeaders): array
     {
-        if (array_key_exists(self::CSP_HEADER_KEY, $responseHeaders)) {
-            unset($securityHeaders[self::CSP_HEADER_NAME]);
+        $handlerCsp = $responseHeaders[self::CSP_HEADER_KEY] ?? null;
+        if (!is_string($handlerCsp)) {
+            return $securityHeaders;
+        }
+
+        unset($securityHeaders[self::CSP_HEADER_NAME]);
+
+        if (self::cspAllowsFraming($handlerCsp)) {
+            unset($securityHeaders[self::FRAME_OPTIONS_HEADER_NAME]);
         }
 
         return $securityHeaders;
+    }
+
+    /**
+     * True when a CSP string declares an explicit `frame-ancestors` directive
+     * that permits at least some framing (anything other than `'none'`).
+     *
+     * @param string $csp A Content-Security-Policy header value.
+     */
+    private static function cspAllowsFraming(string $csp): bool
+    {
+        if (preg_match('/frame-ancestors\s+([^;]+)/i', $csp, $matches) !== 1) {
+            return false;
+        }
+
+        return trim($matches[1]) !== "'none'";
     }
 }

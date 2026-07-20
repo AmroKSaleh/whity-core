@@ -9,6 +9,7 @@ import {
 } from '@/lib/plugin-ui-registry';
 import { CrudScreen } from '@/components/plugin/crud-screen';
 import { ActionScreen } from '@/components/plugin/action-screen';
+import { EmbedScreen } from '@/components/plugin/embed-screen';
 import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
@@ -38,7 +39,8 @@ function OverrideScreen({
  *   1. a registry override registered for the feature id,
  *   2. the generic schema-driven CRUD screen (crud features with a resource),
  *   3. the generic action form (action features with an action route),
- *   4. a placeholder asking the app to register a custom screen.
+ *   4. the generic embed screen (embed features with an embed route, WC-246),
+ *   5. a placeholder asking the app to register a custom screen.
  */
 export default function PluginFeaturePage() {
   // Client pages read dynamic segments via useParams (Next 16 app router).
@@ -100,6 +102,10 @@ export default function PluginFeaturePage() {
 
   if (feature.screen === 'action' && feature.action !== null) {
     return <ActionScreen feature={feature} />;
+  }
+
+  if (feature.screen === 'embed' && feature.embed !== null) {
+    return <EmbedScreen feature={feature} />;
   }
 
   if (feature.screen === 'blocks') {

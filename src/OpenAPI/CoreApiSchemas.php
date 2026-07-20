@@ -2055,7 +2055,7 @@ final class CoreApiSchemas
                 'icon' => self::str(true),
                 'group' => self::str(),
                 'order' => self::int(),
-                'screen' => ['type' => 'string', 'enum' => ['crud', 'custom', 'action', 'blocks']],
+                'screen' => ['type' => 'string', 'enum' => ['crud', 'custom', 'action', 'blocks', 'embed']],
                 'resource' => [
                     'type' => 'object',
                     'nullable' => true,
@@ -2087,6 +2087,16 @@ final class CoreApiSchemas
                     ],
                     'required' => ['method', 'path', 'submitLabel', 'fields'],
                 ],
+                // WC-246: present (non-null) only for screen=embed — the
+                // plugin's own GET route the host iframes into the admin shell.
+                'embed' => [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'properties' => [
+                        'path' => self::str(),
+                    ],
+                    'required' => ['path'],
+                ],
                 'requiredPermission' => self::str(),
                 'capabilities' => self::object([
                     'canCreate' => self::bool(),
@@ -2102,7 +2112,7 @@ final class CoreApiSchemas
                     'type' => 'array',
                     'items' => ['type' => 'object', 'additionalProperties' => true],
                 ],
-            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'requiredPermission', 'capabilities']),
+            ], ['id', 'plugin', 'label', 'icon', 'group', 'order', 'screen', 'resource', 'action', 'embed', 'requiredPermission', 'capabilities']),
             'FrontendFeatureListResponse' => self::listEnvelope('FrontendFeature'),
 
             // WC-176 (#205): the caller's effective permission slugs. Mirrors

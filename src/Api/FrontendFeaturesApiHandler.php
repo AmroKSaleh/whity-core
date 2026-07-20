@@ -213,6 +213,13 @@ final class FrontendFeaturesApiHandler
             ];
         }
 
+        $embed = null;
+        if (isset($feature['embed']) && is_array($feature['embed'])) {
+            $embed = [
+                'path' => (string) ($feature['embed']['path'] ?? ''),
+            ];
+        }
+
         $public = [
             'id' => (string) ($feature['id'] ?? ''),
             'plugin' => (string) ($feature['plugin'] ?? ''),
@@ -223,6 +230,7 @@ final class FrontendFeaturesApiHandler
             'screen' => (string) ($feature['screen'] ?? 'custom'),
             'resource' => $resource,
             'action' => $action,
+            'embed' => $embed,
             'requiredPermission' => $permission,
             'capabilities' => $this->resolveCapabilities($basePath, $userId, $tenantId),
         ];

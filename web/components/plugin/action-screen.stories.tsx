@@ -13,6 +13,7 @@ const feature: PluginFeature = {
   order: 2,
   screen: "action",
   resource: null,
+  embed: null,
   action: {
     method: "POST",
     path: "/api/v1/bom/documents",

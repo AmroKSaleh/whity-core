@@ -401,9 +401,10 @@ export interface PluginFeature {
   /**
    * "crud" renders the generic schema-driven screen; "action" renders the
    * generic action form; "blocks" renders a platform-neutral block tree;
-   * "custom" expects a registered override.
+   * "embed" iframes the plugin's own declared route; "custom" expects a
+   * registered override.
    */
-  screen: 'crud' | 'custom' | 'action' | 'blocks';
+  screen: 'crud' | 'custom' | 'action' | 'blocks' | 'embed';
   /** REST resource backing a crud screen; null for custom/action screens. */
   resource: {
     /** Collection endpoint, e.g. "/api/v1/hello/greetings". */
@@ -425,13 +426,22 @@ export interface PluginFeature {
       name: string;
       /** Field label. */
       label: string;
-      /** "text" | "textarea" | "file" (file is read as text into `name`). */
+      /**
+       * "text" | "textarea" | "file". When ANY field in the form is "file",
+       * the whole form submits as real multipart/form-data (the file as a
+       * genuine binary part) instead of JSON.
+       */
       kind: 'text' | 'textarea' | 'file';
       /** Accept filter for file inputs (e.g. ".csv"), or null. */
       accept: string | null;
       /** Whether the field is required. */
       required: boolean;
     }[];
+  } | null;
+  /** GET route backing an "embed" screen; null for other screens. */
+  embed: {
+    /** The plugin's own route the host iframes, e.g. "/api/v1/bom/tool". */
+    path: string;
   } | null;
   /**
    * Block tree backing a `screen: 'blocks'` feature; absent for other screens.

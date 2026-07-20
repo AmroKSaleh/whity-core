@@ -330,6 +330,7 @@ describe('PluginsPage optimistic sidenav on disable', () => {
           screen: 'crud',
           resource: { basePath: '/api/v1/hello/greetings', titleField: 'message' },
           action: null,
+          embed: null,
           requiredPermission: 'hello:view',
           capabilities: { canCreate: true, canEdit: true, canDelete: true },
         },
