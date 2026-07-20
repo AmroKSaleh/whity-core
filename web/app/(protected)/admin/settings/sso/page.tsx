@@ -21,6 +21,13 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 import { SettingsTabs } from '../settings-tabs';
+import { api } from '@/lib/api/client';
+import {
+  RegistrySettingControl,
+  errorMessage,
+  type RegistryEntry,
+  type SettingsMap,
+} from '../settings-shared';
 
 /** Only the system tenant (id 0) is the operator/global scope. */
 const SYSTEM_TENANT_ID = 0;
@@ -232,7 +239,15 @@ export default function SsoProvidersPage() {
           ) : undefined
         }
       />
-      <SettingsTabs active="sso" showGlobal={isSystemTenant} showEmail={isSystemTenant} showSso />
+      <SettingsTabs
+        active="sso"
+        showSignup={isSystemTenant}
+        showEmail={isSystemTenant}
+        showStorage={isSystemTenant}
+        showSso
+      />
+
+      {isSystemTenant && <SsoMasterToggle addToast={addToast} />}
 
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <IconShieldLock className="w-4 h-4 text-primary" aria-hidden="true" />
@@ -360,6 +375,70 @@ export default function SsoProvidersPage() {
         </div>
       )}
     </div>
+  );
+}
+
+const SSO_ENABLED_KEY = 'auth.sso_enabled';
+
+/**
+ * The instance-wide "is SSO on at all" switch (formerly Global Settings'
+ * "Sign-in & SSO" section). System-tenant only — when off, every configured
+ * identity provider is disabled instance-wide regardless of its own
+ * `enabled` flag, so it lives right above the provider list it gates.
+ */
+function SsoMasterToggle({ addToast }: { addToast: ReturnType<typeof useToast>['addToast'] }) {
+  const { data, error, refetch } = useFetch(async () => {
+    const { data: body, error: getError } = await api.GET('/api/v1/settings/global');
+    if (body === undefined) {
+      throw new Error(errorMessage(getError, 'Failed to load the SSO master switch'));
+    }
+    return body.data;
+  }, []);
+
+  const [saving, setSaving] = useState(false);
+
+  const global = data?.global as SettingsMap | undefined;
+  const registry = (data?.registry ?? []) as RegistryEntry[];
+  const entry = registry.find((e) => e.key === SSO_ENABLED_KEY);
+  const value = global?.[SSO_ENABLED_KEY] ?? entry?.default ?? 'false';
+
+  if (error) {
+    return null; // Non-fatal: the provider list below still works.
+  }
+  if (!entry) {
+    return null; // Backend hasn't published this key yet.
+  }
+
+  const handleToggle = async (next: string) => {
+    setSaving(true);
+    try {
+      const { error: patchError } = await api.PATCH('/api/v1/settings/global', {
+        body: { settings: { [SSO_ENABLED_KEY]: next } },
+      });
+      if (patchError) {
+        throw new Error(errorMessage(patchError, 'Failed to save'));
+      }
+      addToast(next === 'true' ? 'Single sign-on enabled.' : 'Single sign-on disabled.', 'success');
+      refetch();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to save', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="border border-border bg-card shadow-sm" data-testid="sso-master-toggle-card">
+      <CardContent className="pt-6">
+        <RegistrySettingControl
+          entry={entry}
+          idPrefix="sso-master"
+          value={value}
+          disabled={saving}
+          onChange={(v) => void handleToggle(v)}
+        />
+      </CardContent>
+    </Card>
   );
 }
 

@@ -170,7 +170,7 @@ test.describe('Branding — display wiring (Slice 4, no upload UI)', () => {
 
 // ---------------------------------------------------------------------------
 // Logo/favicon round-trips — require Slice-5 upload UI, driven on the GLOBAL
-// branding page (web/components/branding-settings.tsx at /admin/settings/global).
+// branding page (web/components/branding-settings.tsx at /admin/settings/branding).
 //
 // These assert the DISPLAY surfaces (dashboard sidebar, favicon <link>). The
 // public branding endpoint resolves the tenant by host and carries no auth, so
@@ -198,13 +198,13 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
   });
 
   test('uploading a wide logo shows an <img> in the sidebar (not text)', async ({ page, baseURL }) => {
-    // Navigate to /admin/settings/global, find the BrandingSettings "Wide logo"
+    // Navigate to /admin/settings/branding, find the BrandingSettings "Wide logo"
     // global-scope file input (data-testid), upload a PNG, wait for the
     // success toast, then navigate to the dashboard and assert the sidebar
     // renders an <img alt="…"> rather than an <h1> text node.
     if (!baseURL) test.skip();
 
-    await page.goto('/admin/settings/global');
+    await page.goto('/admin/settings/branding');
     await expect(
       page.getByRole('heading', { name: 'Global branding defaults', exact: true })
     ).toBeVisible();
@@ -268,7 +268,7 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     // route. This is testable via page.evaluate on document.head.
     if (!baseURL) test.skip();
 
-    await page.goto('/admin/settings/global');
+    await page.goto('/admin/settings/branding');
 
     // Minimal ICO header — keep the bytes so we can assert round-trip integrity.
     const uploadedIcoBytes = Buffer.from('00000100', 'hex');
@@ -305,7 +305,7 @@ test.describe('Branding — logo/favicon round-trips (requires Slice 5)', () => 
     // With a logo uploaded from the previous test, click the Clear button for
     // the wide logo in the branding settings (global scope), then assert the
     // sidebar reverts to text.
-    await page.goto('/admin/settings/global');
+    await page.goto('/admin/settings/branding');
     await page.getByTestId('branding-clear-btn-logo_wide-global').click();
     await expect(page.getByText('Wide logo cleared.')).toBeVisible({ timeout: 10_000 });
 

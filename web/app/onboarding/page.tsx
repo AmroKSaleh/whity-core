@@ -385,8 +385,8 @@ function OnboardingWizard() {
       setSaving(true);
       try {
         await markInstanceConfigured();
-        addToast('Setup complete. You can fine-tune everything in Global Settings.', 'success');
-        router.push('/admin/settings/global');
+        addToast('Setup complete. You can fine-tune everything in Settings.', 'success');
+        router.push('/admin/settings');
       } catch (err) {
         addToast(err instanceof Error ? err.message : 'Could not finalize setup', 'error');
       } finally {
@@ -416,7 +416,7 @@ function OnboardingWizard() {
       }
       await markInstanceConfigured();
       addToast('Setup complete. Your instance is ready.', 'success');
-      router.push('/admin/settings/global');
+      router.push('/admin/settings');
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Could not save your settings', 'error');
     } finally {
