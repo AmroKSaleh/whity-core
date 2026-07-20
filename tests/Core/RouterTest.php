@@ -337,6 +337,55 @@ class RouterTest extends TestCase
         }
     }
 
+    /**
+     * WC-569: a constraint may itself contain a `{n}` / `{n,m}` quantifier —
+     * e.g. exactly 10 hex characters — and it must actually be enforced, not
+     * silently fall through to a literal-text (never-matching) requirement.
+     */
+    public function testMatchesPathParamWithBraceQuantifierConstraint(): void
+    {
+        $this->router->register('GET', '/api/documents/{code:[a-f0-9]{10}}', static fn() => 'r');
+
+        $match = $this->router->match(new Request('GET', '/api/documents/03d01101ef'));
+        $this->assertNotNull($match);
+        $this->assertSame('03d01101ef', $match['params']['code']);
+
+        // Too short / too long / non-hex must NOT match.
+        $this->assertNull($this->router->match(new Request('GET', '/api/documents/03d0110')));
+        $this->assertNull($this->router->match(new Request('GET', '/api/documents/03d01101ef00')));
+        $this->assertNull($this->router->match(new Request('GET', '/api/documents/zzzzzzzzzz')));
+    }
+
+    /**
+     * WC-569: a `{n,m}` range quantifier inside a constraint works the same way.
+     */
+    public function testMatchesPathParamWithRangeQuantifierConstraint(): void
+    {
+        $this->router->register('GET', '/api/x/{code:\d{2,4}}', static fn() => 'r');
+
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/x/12')));
+        $this->assertNotNull($this->router->match(new Request('GET', '/api/x/1234')));
+        $this->assertNull($this->router->match(new Request('GET', '/api/x/1')));
+        $this->assertNull($this->router->match(new Request('GET', '/api/x/12345')));
+    }
+
+    /**
+     * WC-569: a constraint with brace usage that ISN'T a simple {n}/{n,m}
+     * quantifier (so the placeholder can't be fully parsed) must fail loudly
+     * at registration — never silently become an unmatchable literal route.
+     */
+    public function testRegisterRejectsUnparsableBraceUsageInConstraint(): void
+    {
+        foreach (['/api/x/{id:[0-9]{}', '/api/x/{id:[0-9]{abc}}'] as $path) {
+            try {
+                $this->router->register('GET', $path, static fn() => 'r');
+                $this->fail("Registering {$path} should throw");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString("'{'", $e->getMessage());
+            }
+        }
+    }
+
     // ===== WC-206: URL-prefix versioning =====
 
     /**
