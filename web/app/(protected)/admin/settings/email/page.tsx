@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { api } from '@/lib/api/client';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/lib/toast-context';
@@ -19,6 +18,7 @@ import {
   IconMail,
   IconSend,
 } from '@tabler/icons-react';
+import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
   SYSTEM_TENANT_ID,
@@ -28,6 +28,8 @@ import {
   type RegistryEntry,
   type SettingsMap,
 } from '../settings-shared';
+
+const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
 /**
  * Outgoing email (SMTP) settings — WC-3ac81b7e. Operator-only: the non-secret
@@ -92,6 +94,7 @@ export default function EmailSettingsPage() {
   const { hasPermission, loading: capsLoading } = useCapabilities();
 
   const canManage = hasPermission(SETTINGS_MANAGE);
+  const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   if (capsLoading) {
@@ -120,14 +123,22 @@ export default function EmailSettingsPage() {
     );
   }
 
-  return <EmailSettingsForm adminEmail={user?.email ?? ''} addToast={addToast} />;
+  return (
+    <EmailSettingsForm
+      adminEmail={user?.email ?? ''}
+      canManageProviders={canManageProviders}
+      addToast={addToast}
+    />
+  );
 }
 
 function EmailSettingsForm({
   adminEmail,
+  canManageProviders,
   addToast,
 }: {
   adminEmail: string;
+  canManageProviders: boolean;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
   const { data, error, refetch } = useFetch(async () => {
@@ -271,6 +282,7 @@ function EmailSettingsForm({
         title="Email"
         description="Outgoing email (SMTP) for this instance. Managed by the system tenant."
       />
+      <SettingsTabs active="email" showGlobal showEmail showSso={canManageProviders} />
 
       {/* Transport */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-transport-card">
@@ -424,14 +436,6 @@ function EmailSettingsForm({
           )}
         </CardContent>
       </Card>
-
-      <p className="text-xs text-muted-foreground">
-        Back to{' '}
-        <Link href="/admin/settings/global" className="underline">
-          Global Settings
-        </Link>
-        .
-      </p>
     </div>
   );
 }

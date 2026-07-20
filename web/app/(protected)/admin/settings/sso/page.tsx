@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/lib/toast-context';
 import { useAuth } from '@/lib/auth-context';
@@ -21,6 +20,7 @@ import {
   IconShieldLock,
   IconTrash,
 } from '@tabler/icons-react';
+import { SettingsTabs } from '../settings-tabs';
 
 /** Only the system tenant (id 0) is the operator/global scope. */
 const SYSTEM_TENANT_ID = 0;
@@ -232,6 +232,7 @@ export default function SsoProvidersPage() {
           ) : undefined
         }
       />
+      <SettingsTabs active="sso" showGlobal={isSystemTenant} showEmail={isSystemTenant} showSso />
 
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <IconShieldLock className="w-4 h-4 text-primary" aria-hidden="true" />
@@ -358,14 +359,6 @@ export default function SsoProvidersPage() {
           ))}
         </div>
       )}
-
-      <p className="text-xs text-muted-foreground">
-        Manage your workspace defaults on the{' '}
-        <Link href="/admin/settings" className="underline">
-          Website Settings
-        </Link>{' '}
-        page.
-      </p>
     </div>
   );
 }
