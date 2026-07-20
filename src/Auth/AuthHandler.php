@@ -363,10 +363,17 @@ class AuthHandler
             }
 
             // Short-lived 'temp' token (5 min) — not epoch-checked (wrong type).
-            CookieManager::setTempToken(
-                $this->jwtParser->create($tempClaims, 300, 'temp'),
-                300
-            );
+            $tempJwt = $this->jwtParser->create($tempClaims, 300, 'temp');
+
+            // Token mode (#391): a bearer client has no cookie jar to read the
+            // temp token back from, so it must travel in the body instead —
+            // same "no Set-Cookie in token mode" contract every other
+            // issuance endpoint already honors.
+            if (self::isTokenMode($request)) {
+                return Response::json(['requires_2fa' => true, 'temp_token' => $tempJwt], 202);
+            }
+
+            CookieManager::setTempToken($tempJwt, 300);
 
             return Response::json(['requires_2fa' => true], 202);
         }
@@ -629,6 +636,36 @@ class AuthHandler
         }
 
         return null;
+    }
+
+    /**
+     * Resolve the short-lived 2FA temp token from the request (#391).
+     *
+     * Cookie-first (classic browser flow, set by the login step's
+     * `requires_2fa` branch), then `Authorization: Bearer`, then a
+     * `temp_token` body field — same precedence design as
+     * {@see resolveAccessClaims()} and {@see handleRefresh()}'s token
+     * resolution, so a token-mode client that received the temp token in the
+     * login response body (no cookie jar) can still complete the 2FA step.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return string|null The raw (unparsed) temp token JWT, or null if absent.
+     */
+    private function resolveTempToken(Request $request): ?string
+    {
+        $fromCookie = CookieManager::getTempToken();
+        if ($fromCookie !== null) {
+            return $fromCookie;
+        }
+
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
+            return $m[1];
+        }
+
+        $body = JsonBody::parsed($request);
+        $bodyToken = $body['temp_token'] ?? null;
+        return is_string($bodyToken) && $bodyToken !== '' ? $bodyToken : null;
     }
 
     /**
@@ -1818,8 +1855,10 @@ class AuthHandler
      */
     public function handle2fa(Request $request, array $params = []): Response
     {
-        // Get temporary token from cookie
-        $tempToken = CookieManager::getTempToken();
+        // Cookie-first, then Bearer/body fallback (#391) — mirrors
+        // resolveAccessClaims()'s cookie-then-Bearer precedence so a token-mode
+        // client (no cookie jar) can complete a 2FA login.
+        $tempToken = $this->resolveTempToken($request);
 
         if ($tempToken === null) {
             return Response::error('Invalid or expired temporary token', 401);

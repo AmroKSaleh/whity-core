@@ -2194,9 +2194,21 @@ class PluginLoader
         // The seeder is optional (not wired in tests that lack a DB); errors
         // are swallowed internally so a seeding failure never prevents the
         // plugin from becoming active.
-        if ($this->roleSeeder !== null && $plugin instanceof PluginRolesInterface) {
-            $tenantId = TenantContext::getTenantId() ?? PluginRoleSeeder::SYSTEM_TENANT_ID;
-            $this->roleSeeder->seed($plugin, $tenantId);
+        if ($plugin instanceof PluginRolesInterface) {
+            if ($this->roleSeeder !== null) {
+                $tenantId = TenantContext::getTenantId() ?? PluginRoleSeeder::SYSTEM_TENANT_ID;
+                $this->roleSeeder->seed($plugin, $tenantId);
+            } else {
+                // Silent no-op here is exactly what made #527 expensive to
+                // debug: a plugin's declared roles never appear and nothing
+                // says why. Surface it once, at activation.
+                $this->logger?->warning(
+                    "Plugin '{$plugin->getName()}' implements PluginRolesInterface but no "
+                        . 'PluginRoleSeeder is wired into this PluginLoader — its declared '
+                        . 'roles will NOT be seeded.',
+                    ['event' => 'plugin.role_seeder.missing', 'plugin' => $plugin->getName()]
+                );
+            }
         }
 
         // Store the plugin instance and its registration bookkeeping

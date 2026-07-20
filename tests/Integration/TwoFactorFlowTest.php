@@ -354,6 +354,41 @@ class TwoFactorFlowTest extends TestCase
     }
 
     /**
+     * #390 regression: a token-mode client (no cookie jar) authenticates via
+     * `Authorization: Bearer` instead — every 2FA management endpoint used to
+     * read `TokenValidator::validateAccessToken()` (cookie-only), so a bearer
+     * client got 401 on all five. Uses status() as the representative
+     * endpoint; the fix is the same shared resolveAccessClaims() helper for
+     * all five, so this stands in for the others.
+     */
+    public function testStatusAuthenticatesViaBearerTokenWithoutCookie(): void
+    {
+        unset($_COOKIE['access_token']);
+        $token = $this->jwtParser->create([
+            'profile_id'       => self::TEST_PROFILE_ID,
+            'active_tenant_id' => self::TEST_TENANT_ID,
+            'email'            => self::TEST_USER_EMAIL,
+            'type'             => 'access',
+        ], 3600);
+
+        $mockPdo = $this->createMockPdo([
+            'two_factor_enabled' => true,
+            'two_factor_backup_codes_version' => 1,
+        ]);
+        $tokenValidator = new TokenValidator($this->jwtParser, $mockPdo);
+        $backupCodesService = $this->createMock(BackupCodesService::class);
+        $backupCodesService->method('getAvailableCodeCount')->willReturn(10);
+        $handler = new TwoFactorHandler($mockPdo, $this->totpService, $backupCodesService, $tokenValidator);
+
+        $request = new Request('GET', '/api/auth/2fa/status', ['Authorization' => 'Bearer ' . $token]);
+        $response = $handler->status($request);
+
+        $this->assertSame(200, $response->getStatusCode(), 'Bearer-only request must authenticate, not 401');
+        $data = json_decode($response->getBody(), true);
+        $this->assertTrue($data['enabled']);
+    }
+
+    /**
      * Test 7: All endpoints require valid token
      */
     public function testEndpointsRequireValidToken(): void

@@ -133,6 +133,55 @@ final class UpdateMeRealEngineTest extends TestCase
         $this->assertSame(0, (int) $stmt->fetchColumn(), 'An email-only change must NOT bump the token_epoch.');
     }
 
+    // ==================== token-mode password change (#392) ====================
+
+    /**
+     * #392: a token-mode client (X-Auth-Mode: token, no cookie jar) that
+     * changes its password must get a FRESH token pair in the response body
+     * instead of Set-Cookie — its presented bearer token is revoked by the
+     * epoch bump the moment the change lands, so without this it would be
+     * locked out until a full re-login.
+     */
+    public function testTokenModePasswordChangeReturnsFreshTokensInBody(): void
+    {
+        $profileId = $this->seedProfile('tokenmode@example.com', 'old-password');
+        $accessToken = $this->jwtParser->create([
+            'profile_id'       => $profileId,
+            'active_tenant_id' => self::TENANT,
+            'email'            => 'tokenmode@example.com',
+            'role'             => 'user',
+            'token_epoch'      => 0,
+        ], 900, 'access');
+
+        $request = new Request(
+            'PATCH',
+            '/api/me',
+            ['Authorization' => 'Bearer ' . $accessToken, 'X-Auth-Mode' => 'token'],
+            (string) json_encode([
+                'password'         => 'brand-new-pass',
+                'current_password' => 'old-password',
+            ])
+        );
+
+        $response = $this->handler()->handleUpdateMe($request);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $this->assertArrayHasKey('access_token', $data, 'token mode must return a fresh access_token in the body');
+        $this->assertArrayHasKey('refresh_token', $data, 'token mode must return a fresh refresh_token in the body');
+        $this->assertSame('Bearer', $data['token_type'] ?? null);
+        $this->assertSame(900, $data['expires_in'] ?? null);
+
+        // The fresh access token carries the bumped epoch and authenticates.
+        $newClaims = $this->jwtParser->parse($data['access_token']);
+        $this->assertNotNull($newClaims);
+        $this->assertSame(1, $newClaims['token_epoch'] ?? null, 'fresh token must carry the post-change epoch');
+
+        // The OLD presented bearer token must now be dead (epoch-checked).
+        $oldClaims = (new TokenValidator($this->jwtParser, $this->pdo))->validateAccessTokenFromBearer($accessToken);
+        $this->assertNull($oldClaims, 'the presented (pre-change) bearer token must be rejected after the epoch bump');
+    }
+
     // ==================== self-only authorization ====================
 
     public function testCannotUpdateAnotherProfileEvenWhenIdIsSentInBody(): void

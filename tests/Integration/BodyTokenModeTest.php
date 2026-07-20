@@ -691,6 +691,99 @@ class BodyTokenModeTest extends TestCase
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
+     * #391 regression: the LOGIN step's `requires_2fa` 202 response must carry
+     * the temp token in the body when the caller is in token mode — a bearer
+     * client has no cookie jar to read `temp_auth_token` back from. Before the
+     * fix, `handle()`'s 2FA branch unconditionally set the cookie and never put
+     * the token in the response body, so a pure-bearer client could never even
+     * START the 2FA step.
+     */
+    public function testLoginRequires2faInTokenModeReturnsTempTokenInBody(): void
+    {
+        [$handler] = $this->make2faHandlerAndCode();
+
+        $response = $handler->handle($this->loginRequest(self::TWOFA_EMAIL, true));
+
+        $this->assertSame(202, $response->getStatusCode());
+        $data = $this->json($response);
+        $this->assertTrue($data['requires_2fa'] ?? false);
+        $this->assertArrayHasKey('temp_token', $data, 'token mode must return temp_token in the 202 body');
+
+        $claims = $this->jwtParser->parse($data['temp_token']);
+        $this->assertNotNull($claims, 'temp_token must be a valid JWT');
+        $this->assertSame('temp', $claims['type'] ?? null);
+        $this->assertSame(self::TWOFA_USER_ID, $claims['profile_id'] ?? null);
+    }
+
+    /**
+     * Non-regression: WITHOUT the token-mode header, the classic cookie-only
+     * shape is unchanged (no temp_token leaks into the body for a browser).
+     */
+    public function testLoginRequires2faWithoutTokenModeDoesNotReturnTempTokenInBody(): void
+    {
+        [$handler] = $this->make2faHandlerAndCode();
+
+        $response = $handler->handle($this->loginRequest(self::TWOFA_EMAIL, false));
+
+        $this->assertSame(202, $response->getStatusCode());
+        $data = $this->json($response);
+        $this->assertTrue($data['requires_2fa'] ?? false);
+        $this->assertArrayNotHasKey('temp_token', $data, 'cookie mode must not put temp_token in body');
+    }
+
+    /**
+     * #391 regression: handle2fa() must accept the temp token from the request
+     * BODY (`temp_token` field) when no cookie is present — completing the full
+     * bearer-client flow the login step above now enables.
+     */
+    public function testHandle2faCompletesFromBodyTempTokenWithoutCookie(): void
+    {
+        [$handler, $code] = $this->make2faHandlerAndCode();
+
+        $tempToken = $this->jwtParser->create([
+            'profile_id'       => self::TWOFA_USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::TWOFA_EMAIL,
+        ], 300, 'temp');
+
+        // Deliberately no $_COOKIE['temp_auth_token'] set — only the body field.
+        $request = new Request('POST', '/api/login/2fa', ['X-Auth-Mode' => 'token'],
+            (string) json_encode(['code' => $code, 'temp_token' => $tempToken]));
+
+        $response = $handler->handle2fa($request);
+        $this->assertSame(200, $response->getStatusCode());
+        $data = $this->json($response);
+        $this->assertArrayHasKey('access_token', $data);
+    }
+
+    /**
+     * #391 regression: handle2fa() must also accept the temp token via
+     * `Authorization: Bearer` when no cookie is present.
+     */
+    public function testHandle2faCompletesFromBearerTempTokenWithoutCookie(): void
+    {
+        [$handler, $code] = $this->make2faHandlerAndCode();
+
+        $tempToken = $this->jwtParser->create([
+            'profile_id'       => self::TWOFA_USER_ID,
+            'active_tenant_id' => self::TENANT_ID,
+            'email'            => self::TWOFA_EMAIL,
+        ], 300, 'temp');
+
+        $request = new Request(
+            'POST',
+            '/api/login/2fa',
+            ['X-Auth-Mode' => 'token', 'Authorization' => 'Bearer ' . $tempToken],
+            (string) json_encode(['code' => $code])
+        );
+
+        $response = $handler->handle2fa($request);
+        $this->assertSame(200, $response->getStatusCode());
+        $data = $this->json($response);
+        $this->assertArrayHasKey('access_token', $data);
+    }
+
+    /**
      * A 2FA user completing /login/2fa WITH X-Auth-Mode: token gets access +
      * refresh tokens in the BODY (not cookies).
      */

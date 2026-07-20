@@ -97,6 +97,7 @@ use Whity\Core\Router;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\PluginLoader;
+use Whity\Core\PluginRoleSeeder;
 use Whity\Auth\JwtParser;
 use Whity\Auth\JwtSecretGuard;
 use Whity\Auth\RoleChecker;
@@ -591,7 +592,8 @@ $pluginLoader = new PluginLoader(
     $router,
     $permissionRegistry,
     $hookManager,
-    $logger
+    $logger,
+    new PluginRoleSeeder($db->getPdo(), $logger)
 );
 
 // 9b. Initialize deployment manager
