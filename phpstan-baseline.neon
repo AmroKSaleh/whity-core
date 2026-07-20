@@ -826,8 +826,13 @@ parameters:
 			path: tests/Integration/AuthFlowTest.php
 
 		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
+
+		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 43
+			count: 47
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
 
 		-
