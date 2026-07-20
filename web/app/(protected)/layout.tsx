@@ -82,7 +82,7 @@ export default function ProtectedLayout({
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen overflow-hidden bg-background">
         {/* Sidebar - responsive widths handled in component */}
         <Sidebar />
 
