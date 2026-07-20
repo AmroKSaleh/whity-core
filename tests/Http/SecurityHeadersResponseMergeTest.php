@@ -89,6 +89,46 @@ class SecurityHeadersResponseMergeTest extends TestCase
         $this->assertArrayHasKey('strict-transport-security', $headers);
     }
 
+    /**
+     * WC-531: mirrors the real public/index.php merge expression —
+     *
+     *     $response->withHeaders(array_merge(
+     *         $corsHeaders,
+     *         SecurityHeaders::respectingHandlerCsp($securityHeaders, $response->getHeaders())
+     *     ))
+     *
+     * — for a plugin-served HTML response that set its own permissive CSP.
+     * That policy must reach the client unchanged; every other hardening
+     * header must still be present.
+     */
+    public function testHandlerSetCspSurvivesTheFullMergeExpression(): void
+    {
+        $securityHeaders = SecurityHeaders::headers('production');
+        $corsHeaders = Cors::headers('https://app.example.com', ['https://app.example.com']);
+
+        $pluginResponse = new Response(200, '<html>...</html>', [
+            'Content-Type' => 'text/html',
+            'Content-Security-Policy' => "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+        ]);
+
+        $merged = $pluginResponse->withHeaders(array_merge(
+            $corsHeaders,
+            SecurityHeaders::respectingHandlerCsp($securityHeaders, $pluginResponse->getHeaders())
+        ));
+
+        $headers = $merged->getHeaders();
+        $this->assertSame(
+            "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+            $headers['content-security-policy'],
+            'The plugin-set CSP must survive the merge, not the strict JSON-API default.'
+        );
+        // Every other hardening header is still enforced.
+        $this->assertSame('nosniff', $headers['x-content-type-options']);
+        $this->assertSame('DENY', $headers['x-frame-options']);
+        $this->assertSame('no-referrer', $headers['referrer-policy']);
+        $this->assertSame('max-age=31536000; includeSubDomains', $headers['strict-transport-security']);
+    }
+
     public function testDevelopmentResponseOmitsHsts(): void
     {
         $securityHeaders = SecurityHeaders::headers('development');

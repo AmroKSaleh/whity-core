@@ -25,12 +25,15 @@ namespace Whity\Http;
  *
  *  - Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
  *      The modern clickjacking defense (frame-ancestors). Because this policy
- *      only ever guards JSON API responses — never a rendered HTML document
+ *      is calibrated for a JSON API response — never a rendered HTML document
  *      that loads scripts/styles/images — the strictest possible base of
  *      default-src 'none' is safe and adds defense in depth: even if a response
  *      were ever mis-rendered as a document it could load no subresources. The
  *      separate, app-aware frontend CSP lives in web/next.config.ts and is NOT
- *      this strict (see that file).
+ *      this strict (see that file). A plugin CAN serve an actual HTML document
+ *      (e.g. the `screen: 'custom'` fallback) that needs a different policy —
+ *      see {@see self::respectingHandlerCsp()}, which lets a handler-set CSP
+ *      survive the merge instead of being silently overwritten by this default.
  *
  *  - Referrer-Policy: no-referrer
  *      An API response carries no navigational context worth leaking; sending
@@ -47,6 +50,9 @@ namespace Whity\Http;
  */
 final class SecurityHeaders
 {
+    private const CSP_HEADER_NAME = 'Content-Security-Policy';
+    private const CSP_HEADER_KEY = 'content-security-policy';
+
     private const NOSNIFF = 'nosniff';
     private const FRAME_OPTIONS = 'DENY';
     // JSON-only surface: lock everything down. frame-ancestors is the
@@ -85,5 +91,39 @@ final class SecurityHeaders
         }
 
         return $headers;
+    }
+
+    /**
+     * Merge the hardening headers into a response's headers, but let a
+     * HANDLER-SET Content-Security-Policy survive (WC-531).
+     *
+     * The strict `default-src 'none'` default above is calibrated for a JSON
+     * API surface. A plugin can also serve a self-contained HTML document
+     * (e.g. the sanctioned `screen: 'custom'` fallback) with its own inline
+     * `<script>`/`<style>` — that response needs a policy that actually
+     * permits its own content, which `default-src 'none'` would otherwise
+     * silently overwrite: `Response::withHeaders()` lets the LATER array
+     * (these hardening headers) win over anything already on the response.
+     *
+     * Every OTHER hardening header (nosniff, frame-options, referrer-policy,
+     * HSTS) is still enforced unconditionally regardless of what a handler
+     * sets — only CSP is handler-overridable, and only when the handler
+     * actually set one. A response with no CSP of its own still gets the
+     * strict default (secure by default).
+     *
+     * @param array<string, string> $securityHeaders The output of {@see self::headers()}.
+     * @param array<string, string> $responseHeaders The response's CURRENT
+     *        headers (already normalized to lowercase-hyphenated keys by
+     *        {@see \Whity\Sdk\Http\Response::getHeaders()}).
+     * @return array<string, string> The hardening headers to merge, with CSP
+     *         dropped if the response already declared its own.
+     */
+    public static function respectingHandlerCsp(array $securityHeaders, array $responseHeaders): array
+    {
+        if (array_key_exists(self::CSP_HEADER_KEY, $responseHeaders)) {
+            unset($securityHeaders[self::CSP_HEADER_NAME]);
+        }
+
+        return $securityHeaders;
     }
 }

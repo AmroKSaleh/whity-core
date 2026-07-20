@@ -1391,9 +1391,15 @@ if ($isWorker) {
                 $response = $kernel->handle($request);
 
                 // Merge CORS + security hardening headers into the response (WC-53, WC-187).
-                // withHeaders() preserves the concrete response type (StreamedResponse etc.)
-                // so the streamer is not lost when merging headers.
-                $response = $response->withHeaders(array_merge($corsHeaders, $securityHeaders));
+                // respectingHandlerCsp() lets a handler-set Content-Security-Policy survive
+                // (WC-531) — e.g. a plugin serving a self-contained HTML screen — instead of
+                // being silently clobbered by the strict JSON-API default. withHeaders()
+                // preserves the concrete response type (StreamedResponse etc.) so the
+                // streamer is not lost when merging headers.
+                $response = $response->withHeaders(array_merge(
+                    $corsHeaders,
+                    SecurityHeaders::respectingHandlerCsp($securityHeaders, $response->getHeaders())
+                ));
 
                 // Send response to client
                 $response->send();
@@ -1505,9 +1511,15 @@ if ($isWorker) {
         $response = $kernel->handle($request);
 
         // Merge CORS + security hardening headers into the response (WC-53, WC-187).
-        // withHeaders() preserves the concrete response type (StreamedResponse etc.)
-        // so the streamer is not lost when merging headers.
-        $response = $response->withHeaders(array_merge($corsHeaders, $securityHeaders));
+        // respectingHandlerCsp() lets a handler-set Content-Security-Policy survive
+        // (WC-531) — e.g. a plugin serving a self-contained HTML screen — instead of
+        // being silently clobbered by the strict JSON-API default. withHeaders()
+        // preserves the concrete response type (StreamedResponse etc.) so the
+        // streamer is not lost when merging headers.
+        $response = $response->withHeaders(array_merge(
+            $corsHeaders,
+            SecurityHeaders::respectingHandlerCsp($securityHeaders, $response->getHeaders())
+        ));
 
         // Send response to client
         $response->send();

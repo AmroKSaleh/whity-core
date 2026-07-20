@@ -135,4 +135,57 @@ class SecurityHeadersTest extends TestCase
             'The API CSP must not contain a wildcard source.'
         );
     }
+
+    /**
+     * WC-531: a handler (e.g. a plugin serving a self-contained HTML screen)
+     * that already set its own Content-Security-Policy must have that policy
+     * survive the hardening-header merge, instead of being silently
+     * overwritten by the strict JSON-API default.
+     */
+    public function testRespectingHandlerCspDropsTheDefaultWhenResponseAlreadyHasOne(): void
+    {
+        $securityHeaders = SecurityHeaders::headers('production');
+        $responseHeaders = [
+            'content-type' => 'text/html',
+            'content-security-policy' => "default-src 'self'; script-src 'unsafe-inline'",
+        ];
+
+        $merged = SecurityHeaders::respectingHandlerCsp($securityHeaders, $responseHeaders);
+
+        $this->assertArrayNotHasKey(
+            'Content-Security-Policy',
+            $merged,
+            'The strict default CSP must be dropped so the handler-set one survives array_merge().'
+        );
+    }
+
+    public function testRespectingHandlerCspKeepsTheDefaultWhenResponseHasNone(): void
+    {
+        $securityHeaders = SecurityHeaders::headers('production');
+        $responseHeaders = ['content-type' => 'application/json'];
+
+        $merged = SecurityHeaders::respectingHandlerCsp($securityHeaders, $responseHeaders);
+
+        $this->assertSame(
+            $securityHeaders['Content-Security-Policy'],
+            $merged['Content-Security-Policy'] ?? null,
+            'A response with no CSP of its own must still get the strict default (secure by default).'
+        );
+    }
+
+    public function testRespectingHandlerCspLeavesOtherHardeningHeadersUntouched(): void
+    {
+        $securityHeaders = SecurityHeaders::headers('production');
+        $responseHeaders = ['content-security-policy' => "default-src 'self'"];
+
+        $merged = SecurityHeaders::respectingHandlerCsp($securityHeaders, $responseHeaders);
+
+        $this->assertSame('nosniff', $merged['X-Content-Type-Options'] ?? null);
+        $this->assertSame('DENY', $merged['X-Frame-Options'] ?? null);
+        $this->assertSame('no-referrer', $merged['Referrer-Policy'] ?? null);
+        $this->assertSame(
+            'max-age=31536000; includeSubDomains',
+            $merged['Strict-Transport-Security'] ?? null
+        );
+    }
 }
