@@ -11,20 +11,24 @@
  *                              color name, its light/dark oklch value, and a
  *                              resolved hex preview of each — the one file to
  *                              open to see the whole palette at a glance)
- *   - generated/tokens.dart   (Flutter Material 3 constants)
+ *   - generated/tokens.dart   (Flutter Material 3 constants — see flutter/whity_tokens
+ *                              for the actual Dart package target, ../../../flutter/whity_tokens/lib/src/generated/tokens.dart)
  *   - ../../../web/app/globals.css  (CSS custom properties, synced between sentinel markers)
+ *   - ../../../packages/tokens/generated/{tokens.json,theme.css}  (@amroksaleh/tokens —
+ *     standalone, Next-independent JSON + Tailwind v4 theme CSS for non-Next clients)
  *
  * Determinism: output is a pure function of base.json (no timestamps), so
  * regenerating without source changes produces byte-identical files.
  *
  * Usage:
- *   node generate-tokens.js [all|json|dart|web|theme|check]
- *     all   - regenerate every target (default)
- *     json  - regenerate generated/tokens.json
- *     dart  - regenerate generated/tokens.dart
- *     web   - sync web/app/globals.css
- *     theme - regenerate generated/theme.json
- *     check - regenerate in-memory and fail (exit 1) if any target is stale
+ *   node generate-tokens.js [all|json|dart|web|theme|tokensPackage|check]
+ *     all           - regenerate every target (default)
+ *     json          - regenerate generated/tokens.json
+ *     dart          - regenerate generated/tokens.dart (+ the Flutter package copy)
+ *     web           - sync web/app/globals.css
+ *     theme         - regenerate generated/theme.json
+ *     tokensPackage - regenerate packages/tokens/generated/{tokens.json,theme.css}
+ *     check         - regenerate in-memory and fail (exit 1) if any target is stale
  */
 
 'use strict';
@@ -35,6 +39,10 @@ const path = require('path');
 const BASE_PATH = path.join(__dirname, 'base.json');
 const OUTPUT_DIR = path.join(__dirname, 'generated');
 const GLOBALS_CSS_PATH = path.join(__dirname, '..', '..', '..', 'web', 'app', 'globals.css');
+const TOKENS_PACKAGE_DIR = path.join(__dirname, '..', '..', '..', 'packages', 'tokens', 'generated');
+const FLUTTER_TOKENS_DART_PATH = path.join(
+  __dirname, '..', '..', '..', 'flutter', 'whity_tokens', 'lib', 'src', 'generated', 'tokens.dart'
+);
 
 // Sentinel markers delimiting the generated region inside globals.css.
 const CSS_BEGIN = '/* === AUTO-GENERATED TOKENS: do not edit between markers — run `npm run tokens:generate` === */';
@@ -393,6 +401,98 @@ function generateDart(base) {
 }
 
 /**
+ * The `@theme inline` block mapping Tailwind v4's theme keys to the plain CSS
+ * custom properties this generator defines — built from base.json so a new
+ * color/typography token automatically gets a matching Tailwind utility
+ * without a hand-edit. (The radius scale is a fixed ratio table, not
+ * base.json data, same as the hand-authored block it replaces.)
+ */
+function generateThemeInlineBlock(base) {
+  const typo = base.typography;
+  const lines = [];
+  lines.push('@custom-variant dark (&:is(.dark *));');
+  lines.push('');
+  lines.push('@theme inline {');
+  lines.push('  /* Typography */');
+  lines.push('  --font-sans: var(--font-sans);');
+  lines.push('  --font-mono: var(--font-mono);');
+  lines.push('  --font-heading: var(--font-heading);');
+  for (const name of Object.keys(typo.fontSize)) lines.push(`  --text-${name}: var(--text-${name});`);
+  for (const name of Object.keys(typo.fontWeight)) lines.push(`  --font-weight-${name}: var(--font-weight-${name});`);
+  for (const name of Object.keys(typo.lineHeight)) lines.push(`  --leading-${name}: var(--leading-${name});`);
+  for (const name of Object.keys(typo.letterSpacing)) lines.push(`  --tracking-${name}: var(--tracking-${name});`);
+  lines.push('');
+  for (const key of Object.keys(base.colors.light)) {
+    lines.push(`  --color-${key}: var(--${key});`);
+  }
+  lines.push('  --radius-sm: calc(var(--radius) * 0.6);');
+  lines.push('  --radius-md: calc(var(--radius) * 0.8);');
+  lines.push('  --radius-lg: var(--radius);');
+  lines.push('  --radius-xl: calc(var(--radius) * 1.4);');
+  lines.push('  --radius-2xl: calc(var(--radius) * 1.8);');
+  lines.push('  --radius-3xl: calc(var(--radius) * 2.2);');
+  lines.push('  --radius-4xl: calc(var(--radius) * 2.6);');
+  lines.push('}');
+  return lines.join('\n');
+}
+
+/**
+ * Standalone Tailwind v4 theme CSS for `@amroksaleh/tokens` — the whole file
+ * is generated (unlike the sentinel-spliced web/app/globals.css region),
+ * since a client importing it owns nothing else about it. Deliberately has NO
+ * Next.js/shadcn/font-loader dependency: font-family values are the real
+ * strings from base.json (not a `next/font`-set variable like
+ * `--font-geist-mono`), so the file works standing alone in a Vite/Tauri app.
+ * Assumes the consumer's own entry CSS already has `@import "tailwindcss";`
+ * — this file only contributes the theme layer, not Tailwind itself.
+ */
+function generateTokensPackageCss(base) {
+  const typo = base.typography;
+  const lines = [];
+  lines.push('/**');
+  lines.push(' * Whity design tokens — standalone Tailwind v4 theme CSS.');
+  lines.push(` * Source of truth: src/design/tokens/base.json (version ${base.version}).`);
+  lines.push(' * Do not edit manually - run: npm run tokens:generate');
+  lines.push(' *');
+  lines.push(' * Import this AFTER `@import "tailwindcss";` in your own entry CSS. Every');
+  lines.push(' * value below is a real, self-sufficient default (no Next.js/font-loader');
+  lines.push(' * dependency) — override any custom property afterwards to customize.');
+  lines.push(' */');
+  lines.push('');
+  lines.push(generateThemeInlineBlock(base));
+  lines.push('');
+  lines.push(':root {');
+  lines.push(`  --font-sans: ${typo.fontFamily.sans};`);
+  lines.push(`  --font-mono: ${typo.fontFamily.mono};`);
+  lines.push(`  --font-heading: ${typo.fontFamily.heading};`);
+  for (const [key, value] of Object.entries(base.colors.light)) {
+    lines.push(`  --${key}: ${value};`);
+  }
+  lines.push(`  --radius: ${base.borderRadius.base};`);
+  for (const [name, def] of Object.entries(typo.fontSize)) {
+    lines.push(`  --text-${name}: ${def.rem};`);
+  }
+  for (const [name, value] of Object.entries(typo.fontWeight)) {
+    lines.push(`  --font-weight-${name}: ${value};`);
+  }
+  for (const [name, value] of Object.entries(typo.lineHeight)) {
+    lines.push(`  --leading-${name}: ${value};`);
+  }
+  for (const [name, value] of Object.entries(typo.letterSpacing)) {
+    lines.push(`  --tracking-${name}: ${value};`);
+  }
+  lines.push('}');
+  lines.push('');
+  lines.push('.dark {');
+  for (const [key, value] of Object.entries(base.colors.dark)) {
+    lines.push(`  --${key}: ${value};`);
+  }
+  lines.push('}');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
  * Build the generated CSS region: :root, .dark, and the typography
  * @theme inline declarations. The static (hand-authored) parts of
  * globals.css live outside the sentinel markers.
@@ -477,7 +577,7 @@ function loadBase() {
 /**
  * Build the full set of target outputs as { path, content } records.
  */
-function buildTargets(base, { json = true, dart = true, web = true, theme = true } = {}) {
+function buildTargets(base, { json = true, dart = true, web = true, theme = true, tokensPackage = true } = {}) {
   const targets = [];
   if (json) {
     targets.push({ path: path.join(OUTPUT_DIR, 'tokens.json'), content: generateTokensJson(base) });
@@ -486,7 +586,13 @@ function buildTargets(base, { json = true, dart = true, web = true, theme = true
     targets.push({ path: path.join(OUTPUT_DIR, 'theme.json'), content: generateThemeJson(base) });
   }
   if (dart) {
-    targets.push({ path: path.join(OUTPUT_DIR, 'tokens.dart'), content: generateDart(base) });
+    const dartContent = generateDart(base);
+    targets.push({ path: path.join(OUTPUT_DIR, 'tokens.dart'), content: dartContent });
+    // Same content, second location: the flutter/whity_tokens git-dependency
+    // package a Flutter client points its pubspec.yaml at (see that package's
+    // README). Kept as a plain copy rather than a symlink for Windows/git
+    // portability.
+    targets.push({ path: FLUTTER_TOKENS_DART_PATH, content: dartContent });
   }
   if (web) {
     const existing = fs.existsSync(GLOBALS_CSS_PATH)
@@ -494,14 +600,19 @@ function buildTargets(base, { json = true, dart = true, web = true, theme = true
       : '';
     targets.push({ path: GLOBALS_CSS_PATH, content: syncGlobalsCss(existing, base) });
   }
+  if (tokensPackage) {
+    targets.push({ path: path.join(TOKENS_PACKAGE_DIR, 'tokens.json'), content: generateTokensJson(base) });
+    targets.push({ path: path.join(TOKENS_PACKAGE_DIR, 'theme.css'), content: generateTokensPackageCss(base) });
+  }
   return targets;
 }
 
 function writeTargets(targets) {
-  if (!fs.existsSync(OUTPUT_DIR)) {
-    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-  }
   for (const { path: p, content } of targets) {
+    const dir = path.dirname(p);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
     fs.writeFileSync(p, content, 'utf8');
   }
 }
@@ -553,9 +664,10 @@ function main() {
       dart: command === 'all' || command === 'dart',
       web: command === 'all' || command === 'web',
       theme: command === 'all' || command === 'theme',
+      tokensPackage: command === 'all' || command === 'tokensPackage',
     };
-    if (!opts.json && !opts.dart && !opts.web && !opts.theme) {
-      console.error(`✗ Unknown command "${command}". Use: all | json | dart | web | theme | check.`);
+    if (!opts.json && !opts.dart && !opts.web && !opts.theme && !opts.tokensPackage) {
+      console.error(`✗ Unknown command "${command}". Use: all | json | dart | web | theme | tokensPackage | check.`);
       process.exit(1);
     }
 

@@ -1,5 +1,11 @@
 # @amroksaleh/ui
 
+## 0.3.1
+
+### Patch Changes
+
+- `globals.css` now sources its theme tokens from the new `@amroksaleh/tokens` package instead of a hand-maintained, manually-synced block — no visible behavior change, but removes a duplication risk between this package and `web/app/globals.css`. Also adds a CI guard that fails the build if a Next.js-only import ever appears in this package (it must stay usable from a plain Vite/Tauri SPA).
+
 ## 0.3.0
 
 ### Minor Changes

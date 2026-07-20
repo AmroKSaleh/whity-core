@@ -22,6 +22,6 @@
   "menuColor": "inverted",
   "menuAccent": "subtle",
   "registries": {
-    "@whity": "http://localhost:3000/r/{name}.json"
+    "@whity": "https://whity.jameedium.org/r/{name}.json"
   }
 }
