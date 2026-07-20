@@ -107,7 +107,7 @@ test.describe('Sign-up governance — system-tenant operator (settings:manage, t
 
     try {
       await page.goto('/admin/settings/signup');
-      await expect(page.getByRole('heading', { name: 'Sign-up' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Sign-up', exact: true })).toBeVisible();
       await expect(page.getByTestId('settings-section-signup')).toBeVisible();
 
       await expectBooleanFlag(page, GOVERNANCE_KEY, original as 'true' | 'false');
