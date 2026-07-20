@@ -15,9 +15,9 @@
       "darkHex": "#fafafa"
     },
     "background": {
-      "light": "oklch(1 0 0)",
+      "light": "oklch(0.98 0 0)",
       "dark": "oklch(0.145 0 0)",
-      "lightHex": "#ffffff",
+      "lightHex": "#f8f8f8",
       "darkHex": "#0a0a0a"
     },
     "border": {
@@ -178,9 +178,9 @@
     },
     "sidebar": {
       "light": "oklch(0.985 0 0)",
-      "dark": "oklch(0.205 0 0)",
+      "dark": "oklch(0.17 0 0)",
       "lightHex": "#fafafa",
-      "darkHex": "#171717"
+      "darkHex": "#0f0f0f"
     },
     "sidebar-accent": {
       "light": "oklch(0.97 0 0)",
