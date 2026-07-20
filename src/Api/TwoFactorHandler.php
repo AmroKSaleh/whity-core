@@ -63,6 +63,30 @@ class TwoFactorHandler
     }
 
     /**
+     * Resolve the caller's access-token claims: cookie first (classic browser
+     * flow), then `Authorization: Bearer` (#390) — same precedence as
+     * AuthHandler::resolveAccessClaims(), so a token-mode client (no cookie
+     * jar) can manage 2FA instead of getting 401 on every call here.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return array<string, mixed>|null Decoded claims, or null when no valid token.
+     */
+    private function resolveAccessClaims(Request $request): ?array
+    {
+        $fromCookie = $this->tokenValidator->validateAccessToken();
+        if ($fromCookie !== null) {
+            return $fromCookie;
+        }
+
+        $authHeader = $request->getHeader('Authorization');
+        if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
+            return $this->tokenValidator->validateAccessTokenFromBearer($m[1]);
+        }
+
+        return null;
+    }
+
+    /**
      * Coerce a DB boolean column to a real bool across drivers.
      *
      * CRITICAL: this codebase's pdo_pgsql returns the STRING "f" for a false
@@ -213,7 +237,7 @@ class TwoFactorHandler
     {
         try {
             // Validate access token
-            $claims = $this->tokenValidator->validateAccessToken();
+            $claims = $this->resolveAccessClaims($request);
             if ($claims === null) {
                 return Response::error('Unauthorized', 401);
             }
@@ -270,7 +294,7 @@ class TwoFactorHandler
     {
         try {
             // Validate access token
-            $claims = $this->tokenValidator->validateAccessToken();
+            $claims = $this->resolveAccessClaims($request);
             if ($claims === null) {
                 return Response::error('Unauthorized', 401);
             }
@@ -356,7 +380,7 @@ class TwoFactorHandler
     {
         try {
             // Validate access token
-            $claims = $this->tokenValidator->validateAccessToken();
+            $claims = $this->resolveAccessClaims($request);
             if ($claims === null) {
                 return Response::error('Unauthorized', 401);
             }
@@ -411,7 +435,7 @@ class TwoFactorHandler
     {
         try {
             // Validate access token
-            $claims = $this->tokenValidator->validateAccessToken();
+            $claims = $this->resolveAccessClaims($request);
             if ($claims === null) {
                 return Response::error('Unauthorized', 401);
             }
@@ -489,7 +513,7 @@ class TwoFactorHandler
     {
         try {
             // Validate access token
-            $claims = $this->tokenValidator->validateAccessToken();
+            $claims = $this->resolveAccessClaims($request);
             if ($claims === null) {
                 return Response::error('Unauthorized', 401);
             }
