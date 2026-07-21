@@ -141,7 +141,66 @@ final class AuthHandlerTwoFactorPolicyRealEngineTest extends TestCase
         $this->assertSame(200, $response->getStatusCode(), 'A tenant-1 policy must never gate a tenant-2 login.');
     }
 
+    public function testRefreshIsRefusedPastDeadlineEvenForAnExistingSession(): void
+    {
+        $profileId = $this->seedProfile('henry@example.com', 1, null);
+        $this->insertPolicy(1, 'tenant', null, 0);
+
+        // A session token minted BEFORE the policy existed (or during grace) —
+        // refresh must still be gated, not just the original login.
+        $refreshToken = $this->mintToken($profileId, 1, 'henry@example.com', 'refresh', 604800);
+        $request = new Request('POST', '/api/auth/refresh', [
+            'X-Auth-Mode'   => 'token',
+            'Authorization' => 'Bearer ' . $refreshToken,
+        ], '');
+
+        $response = $this->authHandler->handleRefresh($request);
+
+        $this->assertSame(202, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertTrue($body['requires_2fa_enrollment'] ?? false);
+        $this->assertArrayNotHasKey('access_token', $body, 'A refused refresh must never mint a new access token.');
+    }
+
+    public function testLogoutOthersRefusalNeverBumpsTheCallersOwnEpoch(): void
+    {
+        $profileId = $this->seedProfile('iris@example.com', 1, null);
+        $this->insertPolicy(1, 'tenant', null, 0);
+
+        $accessToken = $this->mintToken($profileId, 1, 'iris@example.com', 'access', 900);
+        $request = new Request('POST', '/api/auth/logout-others', [
+            'X-Auth-Mode'   => 'token',
+            'Authorization' => 'Bearer ' . $accessToken,
+        ], '');
+
+        $response = $this->authHandler->handleLogoutOthers($request);
+
+        $this->assertSame(202, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertTrue($body['requires_2fa_enrollment'] ?? false);
+
+        $epochStmt = $this->pdo->prepare('SELECT token_epoch FROM profiles WHERE id = ?');
+        $epochStmt->execute([$profileId]);
+        $this->assertSame(
+            0,
+            (int) $epochStmt->fetchColumn(),
+            'A refused logout-others must NEVER bump the epoch — that would invalidate the ' .
+            'caller\'s own still-valid session out from under them with nothing minted to replace it.'
+        );
+    }
+
     // ==================== Helpers ====================
+
+    private function mintToken(int $profileId, int $tenantId, string $email, string $type, int $ttl): string
+    {
+        return $this->jwtParser->create([
+            'profile_id'       => $profileId,
+            'active_tenant_id' => $tenantId,
+            'email'            => $email,
+            'role'             => 'user',
+            'token_epoch'      => 0,
+        ], $ttl, $type);
+    }
 
     private function login(string $email): \Whity\Core\Response
     {
