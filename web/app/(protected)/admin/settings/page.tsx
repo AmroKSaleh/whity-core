@@ -16,6 +16,7 @@ import {
   SETTINGS_READ,
   SETTINGS_WRITE,
   SETTINGS_MANAGE,
+  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   GENERAL_SETTING_KEYS,
   FIELD_LABELS,
@@ -47,6 +48,7 @@ export default function AdminSettingsPage() {
   const canWrite = hasPermission(SETTINGS_WRITE);
   const canManageGlobal = hasPermission(SETTINGS_MANAGE);
   const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
+  const canManageSecurity = hasPermission(SECURITY_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   if (isCapabilitiesLoading) {
@@ -87,6 +89,7 @@ export default function AdminSettingsPage() {
         showEmail={isSystemTenant}
         showStorage={isSystemTenant}
         showSso={canManageProviders}
+        showSecurity={canManageSecurity}
       />
       <TenantSettingsSection canWrite={canWrite} addToast={addToast} />
       {isSystemTenant && canManageGlobal && <PlatformDefaultsSection addToast={addToast} />}

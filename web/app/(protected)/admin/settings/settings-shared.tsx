@@ -33,6 +33,9 @@ export const SETTINGS_READ = 'settings:read';
 export const SETTINGS_WRITE = 'settings:write';
 export const SETTINGS_MANAGE = 'settings:manage';
 
+/** Admin-enforced 2FA policy CRUD + status (WC-525), tenant-scoped self-service. */
+export const SECURITY_MANAGE = 'security:manage';
+
 /** The system tenant (id 0) is the only tenant that may manage global defaults. */
 export const SYSTEM_TENANT_ID = 0;
 

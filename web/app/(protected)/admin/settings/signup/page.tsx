@@ -15,6 +15,7 @@ import { IconDeviceFloppy } from '@tabler/icons-react';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
+  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   RegistrySettingControl,
   groupRegistry,
@@ -83,7 +84,7 @@ export default function SignupSettingsPage() {
         title="Sign-up"
         description="Control whether and how new people can create accounts on this instance."
       />
-      <SettingsTabs active="signup" showSignup showEmail showStorage showSso={canManageProviders} />
+      <SettingsTabs active="signup" showSignup showEmail showStorage showSso={canManageProviders} showSecurity={hasPermission(SECURITY_MANAGE)} />
       <SignupSettingsForm addToast={addToast} />
     </div>
   );
