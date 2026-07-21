@@ -123,3 +123,106 @@ export const Empty: Story = {
     },
   },
 }
+
+// WC-532: a resource with a LocalizedText field (`x-whity-localized-text`),
+// exercising the list-view dir-preferred/fallback/"Untranslated" rendering
+// and the BilingualInput-backed create/edit form field.
+const QUESTIONS_BASE = "/api/v1/questions"
+
+const questionsFeature: PluginFeature = {
+  id: "questions",
+  plugin: "Assessments",
+  label: "Questions",
+  icon: "notes",
+  group: "plugins",
+  order: 1,
+  screen: "crud",
+  resource: { basePath: QUESTIONS_BASE, titleField: null },
+  action: null,
+  embed: null,
+  requiredPermission: "questions:read",
+  capabilities: { canCreate: true, canEdit: true, canDelete: true },
+}
+
+const questionsOpenapi = {
+  paths: {
+    [QUESTIONS_BASE]: {
+      get: {
+        responses: {
+          "200": {
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { data: { type: "array", items: { $ref: "#/components/schemas/Question" } } },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        requestBody: {
+          content: { "application/json": { schema: { $ref: "#/components/schemas/QuestionInput" } } },
+        },
+      },
+    },
+    [`${QUESTIONS_BASE}/{id}`]: {
+      patch: {
+        requestBody: {
+          content: { "application/json": { schema: { $ref: "#/components/schemas/QuestionInput" } } },
+        },
+      },
+      delete: {},
+    },
+  },
+  components: {
+    schemas: {
+      Question: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          stem: {
+            type: "object",
+            "x-whity-localized-text": true,
+            properties: { ar: { type: "string" }, en: { type: "string" } },
+          },
+        },
+      },
+      QuestionInput: {
+        type: "object",
+        required: ["stem"],
+        properties: {
+          stem: {
+            type: "object",
+            "x-whity-localized-text": true,
+            properties: { ar: { type: "string" }, en: { type: "string" } },
+          },
+        },
+      },
+    },
+  },
+}
+
+const questionRows = [
+  { id: 1, stem: { ar: "ما هي عاصمة فرنسا؟", en: "What is the capital of France?" } },
+  { id: 2, stem: { en: "Untranslated-only stem (no Arabic yet)" } },
+  { id: 3, stem: { ar: "سؤال بدون ترجمة إنجليزية" } },
+  { id: 4, stem: {} },
+]
+
+export const LocalizedTextField: Story = {
+  args: { feature: questionsFeature },
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("*/openapi.json", () => HttpResponse.json(questionsOpenapi)),
+        http.get(`*${QUESTIONS_BASE}`, () => HttpResponse.json({ data: questionRows })),
+        http.post(`*${QUESTIONS_BASE}`, () => HttpResponse.json({ data: { id: 99 } })),
+        http.patch(`*${QUESTIONS_BASE}/:id`, () => HttpResponse.json({ data: questionRows[0] })),
+        http.delete(`*${QUESTIONS_BASE}/:id`, () => new HttpResponse(null, { status: 204 })),
+        ...defaultHandlers,
+      ],
+    },
+  },
+}

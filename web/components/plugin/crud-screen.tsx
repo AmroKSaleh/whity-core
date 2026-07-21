@@ -7,13 +7,16 @@ import {
   effectiveCapabilities,
   type CrudField,
   type CrudModel,
+  type LocalizedTextValue,
   type OpenApiSpec,
 } from '@/lib/plugin-crud-schema';
 import type { PluginFeature } from '@/lib/plugin-features';
 import { useToast } from '@/lib/toast-context';
+import { useDirection } from '@/lib/direction-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
 import { Button } from '@amroksaleh/ui/button';
+import { BilingualInput } from '@amroksaleh/ui/bilingual-input';
 import {
   Dialog,
   DialogContent,
@@ -118,8 +121,39 @@ async function fetchSpec(): Promise<OpenApiSpec | null> {
   }
 }
 
-/** Form values: strings for text-ish inputs, booleans for checkboxes. */
-type FormValues = Record<string, string | boolean>;
+/** Form values: strings for text-ish inputs, booleans for checkboxes, {ar,en} for LocalizedText. */
+type FormValues = Record<string, string | boolean | LocalizedTextValue>;
+
+/** Narrow an unknown raw value to a {@link LocalizedTextValue}, defensively. */
+function toLocalizedTextValue(raw: unknown): LocalizedTextValue {
+  if (typeof raw !== 'object' || raw === null) {
+    return {};
+  }
+  const record = raw as Record<string, unknown>;
+  const value: LocalizedTextValue = {};
+  if (typeof record.ar === 'string') {
+    value.ar = record.ar;
+  }
+  if (typeof record.en === 'string') {
+    value.en = record.en;
+  }
+  return value;
+}
+
+/**
+ * WC-532: the dir-preferred language for a LocalizedText value, falling back
+ * to the other language when the preferred one is empty, or `null` when both
+ * are empty (the caller renders an "untranslated" marker in that case).
+ */
+function preferredLocalizedText(
+  value: LocalizedTextValue,
+  dir: 'ltr' | 'rtl'
+): string | null {
+  const preferred = dir === 'rtl' ? value.ar : value.en;
+  const fallback = dir === 'rtl' ? value.en : value.ar;
+  const chosen = preferred?.trim() ? preferred : fallback?.trim() ? fallback : null;
+  return chosen;
+}
 
 /** Seed form values from the field list and (for edit) the selected row. */
 function initialFormValues(
@@ -131,6 +165,8 @@ function initialFormValues(
     const raw = row?.[field.name];
     if (field.kind === 'checkbox') {
       values[field.name] = typeof raw === 'boolean' ? raw : false;
+    } else if (field.kind === 'localized-text') {
+      values[field.name] = toLocalizedTextValue(raw);
     } else if (
       typeof raw === 'string' ||
       typeof raw === 'number' ||
@@ -152,6 +188,16 @@ function validateFormValues(
   const errors: Record<string, string> = {};
   for (const field of fields) {
     if (field.kind === 'checkbox') {
+      continue;
+    }
+    if (field.kind === 'localized-text') {
+      const value = values[field.name];
+      const localized = typeof value === 'object' ? value : {};
+      // Required means AT LEAST ONE language is filled — Phase-1 does not
+      // force translating both languages before saving.
+      if (field.required && !localized.ar?.trim() && !localized.en?.trim()) {
+        errors[field.name] = `${field.label} is required (at least one language)`;
+      }
       continue;
     }
     const value = values[field.name];
@@ -182,6 +228,15 @@ function toPayload(
     const value = values[field.name];
     if (field.kind === 'checkbox') {
       payload[field.name] = value === true;
+      continue;
+    }
+    if (field.kind === 'localized-text') {
+      const localized = typeof value === 'object' ? value : {};
+      const isEmpty = !localized.ar?.trim() && !localized.en?.trim();
+      if (isEmpty && !field.required) {
+        continue;
+      }
+      payload[field.name] = { ar: localized.ar ?? '', en: localized.en ?? '' };
       continue;
     }
     const text = typeof value === 'string' ? value : '';
@@ -229,7 +284,7 @@ function CrudFormDialog({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const setValue = (name: string, value: string | boolean) => {
+  const setValue = (name: string, value: string | boolean | LocalizedTextValue) => {
     setValues((current) => ({ ...current, [name]: value }));
   };
 
@@ -286,6 +341,24 @@ function CrudFormDialog({
                     />
                     <span className="text-sm font-medium">{field.label}</span>
                   </label>
+                  {error && <p className="text-xs text-destructive">{error}</p>}
+                </div>
+              );
+            }
+
+            if (field.kind === 'localized-text') {
+              const localized = typeof value === 'object' ? value : {};
+              return (
+                <div key={field.name} className="space-y-2">
+                  <span className="text-sm font-medium">
+                    {field.label}
+                    {field.required && <span className="text-destructive"> *</span>}
+                  </span>
+                  <BilingualInput
+                    id={inputId}
+                    value={localized}
+                    onChange={(next) => setValue(field.name, next)}
+                  />
                   {error && <p className="text-xs text-destructive">{error}</p>}
                 </div>
               );
@@ -447,6 +520,7 @@ function CrudDeleteDialog({
  */
 export function CrudScreen({ feature }: { feature: PluginFeature }) {
   const { addToast } = useToast();
+  const { dir } = useDirection();
   const basePath = feature.resource?.basePath ?? null;
 
   const [model, setModel] = useState<CrudModel | null>(null);
@@ -651,9 +725,33 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
     sortable: true,
   }));
 
+  // WC-532: the thin admin DataTable adapter renders cells via String(...) —
+  // a raw {ar,en} LocalizedText value would show "[object Object]". Build a
+  // DISPLAY-only row set with those columns replaced by the dir-preferred
+  // string (falling back to the other language, or a literal "untranslated"
+  // marker when both are empty). `rowActions`/edit below look the ORIGINAL
+  // row back up by id, so editing still seeds the real {ar,en} object.
+  const localizedColumnKeys = (model?.columns ?? [])
+    .filter((column) => column.isLocalizedText)
+    .map((column) => column.key);
+
+  const displayRows: CrudRow[] =
+    localizedColumnKeys.length === 0
+      ? rows
+      : rows.map((row) => {
+          const displayRow: CrudRow = { ...row };
+          for (const key of localizedColumnKeys) {
+            const preferred = preferredLocalizedText(toLocalizedTextValue(row[key]), dir);
+            displayRow[key] = preferred ?? 'Untranslated';
+          }
+          return displayRow;
+        });
+
   const rowActions =
     capabilities.canEdit || capabilities.canDelete
-      ? (row: CrudRow) => (
+      ? (displayRow: CrudRow) => {
+          const row = rows.find((candidate) => candidate.id === displayRow.id) ?? displayRow;
+          return (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon-sm" aria-label="Row actions">
@@ -684,7 +782,8 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-        )
+          );
+        }
       : undefined;
 
   return (
@@ -726,7 +825,7 @@ export function CrudScreen({ feature }: { feature: PluginFeature }) {
       ) : (
         <DataTable
           columns={columns}
-          data={rows}
+          data={displayRows}
           rowActions={rowActions}
           isLoading={isLoading}
           emptyState={{

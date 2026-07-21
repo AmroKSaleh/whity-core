@@ -458,3 +458,88 @@ describe('deriveCrudModel — dangling refs', () => {
     ]);
   });
 });
+
+describe('deriveCrudModel — LocalizedText convention (WC-532)', () => {
+  function specWithStem(stemSchema: Record<string, unknown>): OpenApiSpec {
+    return {
+      paths: {
+        '/api/questions': {
+          get: {
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        data: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              id: { type: 'integer' },
+                              stem: stemSchema,
+                              plainNote: { type: 'object', properties: { x: { type: 'string' } } },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          post: {
+            requestBody: {
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    required: ['stem'],
+                    properties: { stem: stemSchema },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+  }
+
+  const STEM_SCHEMA = {
+    type: 'object',
+    'x-whity-localized-text': true,
+    properties: { ar: { type: 'string' }, en: { type: 'string' } },
+  };
+
+  it('surfaces a marked object property as a "localized-text" column, unlike a plain object', () => {
+    const model = deriveCrudModel(specWithStem(STEM_SCHEMA), '/api/questions');
+
+    expect(model.columns).toEqual([
+      { key: 'id', label: 'ID' },
+      { key: 'stem', label: 'Stem', isLocalizedText: true },
+      // plainNote (an unmarked object) is skipped, exactly as before this convention existed.
+    ]);
+  });
+
+  it('does NOT mark an unmarked object property, even with the same {ar,en}-shaped properties', () => {
+    const unmarked = {
+      type: 'object',
+      properties: { ar: { type: 'string' }, en: { type: 'string' } },
+    };
+    const model = deriveCrudModel(specWithStem(unmarked), '/api/questions');
+
+    // Without the x-whity-localized-text marker, "stem" is a plain object and is skipped.
+    expect(model.columns).toEqual([{ key: 'id', label: 'ID' }]);
+  });
+
+  it('derives a "localized-text" create-form field, required flag preserved', () => {
+    const model = deriveCrudModel(specWithStem(STEM_SCHEMA), '/api/questions');
+
+    expect(model.createFields).toEqual([
+      { name: 'stem', label: 'Stem', kind: 'localized-text', required: true },
+    ]);
+  });
+});

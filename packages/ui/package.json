@@ -13,6 +13,7 @@
     "./alert-dialog": "./src/alert-dialog.tsx",
     "./alert": "./src/alert.tsx",
     "./badge": "./src/badge.tsx",
+    "./bilingual-input": "./src/bilingual-input.tsx",
     "./breadcrumb": "./src/breadcrumb.tsx",
     "./button": "./src/button.tsx",
     "./card": "./src/card.tsx",
