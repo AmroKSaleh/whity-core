@@ -53,6 +53,85 @@ final class SettingsApiHandler
     }
 
     /**
+     * The settings console's tab bar, in display order. Each tab optionally
+     * declares `requiredPermission` and/or `systemTenantOnly` — mirrors
+     * {@see NavigationApiHandler}'s item-gate shape so the same client-side
+     * filtering mental model applies, but this is a small, FIXED, core-only
+     * list (not hook/plugin-extensible like the sidebar), so it lives here
+     * rather than behind the `navigation.register` hook.
+     *
+     * @var list<array{id: string, href: string, label: string, requiredPermission?: string, systemTenantOnly?: bool}>
+     */
+    private const TABS = [
+        ['id' => 'general', 'href' => '/admin/settings', 'label' => 'General', 'requiredPermission' => CorePermissions::SETTINGS_READ],
+        ['id' => 'branding', 'href' => '/admin/settings/branding', 'label' => 'Branding', 'requiredPermission' => CorePermissions::SETTINGS_READ],
+        ['id' => 'signup', 'href' => '/admin/settings/signup', 'label' => 'Sign-up', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
+        ['id' => 'sso', 'href' => '/admin/settings/sso', 'label' => 'Single sign-on', 'requiredPermission' => CorePermissions::AUTH_PROVIDERS_MANAGE],
+        ['id' => 'email', 'href' => '/admin/settings/email', 'label' => 'Email', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
+        ['id' => 'storage', 'href' => '/admin/settings/storage', 'label' => 'Storage', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
+        ['id' => 'security', 'href' => '/admin/settings/security', 'label' => 'Security', 'requiredPermission' => CorePermissions::SECURITY_MANAGE],
+    ];
+
+    /**
+     * GET /api/v1/settings/tabs — the settings console's tab bar, RBAC-filtered
+     * server-side (WC-tabs-nav-be) so every tab's visibility rule lives in ONE
+     * place instead of being re-derived by every settings page. No single
+     * required permission gates this route (registered permission-free, like
+     * {@see NavigationApiHandler}): a caller who holds ONLY
+     * `auth_providers:manage` (and not `settings:read`) must still see the
+     * Single sign-on tab, so the route itself only requires a real
+     * authenticated caller, and each tab's own gate is checked individually.
+     */
+    public function tabs(Request $request): Response
+    {
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            return Response::error('Tenant context is required', 403);
+        }
+
+        $actor = $request->user;
+        $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+            ? $actor->profile_id
+            : null;
+        if ($userId === null) {
+            return Response::error('Authentication required', 403);
+        }
+
+        $visible = array_values(array_filter(
+            self::TABS,
+            fn (array $tab): bool => $this->tabVisibleTo($tab, $userId, $tenantId)
+        ));
+
+        $data = array_map(
+            static fn (array $tab): array => ['id' => $tab['id'], 'href' => $tab['href'], 'label' => $tab['label']],
+            $visible
+        );
+
+        return Response::json(['data' => $data], 200);
+    }
+
+    /**
+     * Whether the caller satisfies a tab's declared gate(s). Mirrors
+     * {@see NavigationApiHandler::isVisibleTo()}'s ALL-gates-must-pass model.
+     *
+     * @param array{id: string, href: string, label: string, requiredPermission?: string, systemTenantOnly?: bool} $tab
+     */
+    private function tabVisibleTo(array $tab, int $userId, int $tenantId): bool
+    {
+        $requiredPermission = $tab['requiredPermission'] ?? null;
+        if (is_string($requiredPermission) && $requiredPermission !== ''
+            && !$this->roleChecker->hasPermissionForProfile($userId, $requiredPermission, $tenantId)) {
+            return false;
+        }
+
+        if (($tab['systemTenantOnly'] ?? false) === true && $tenantId !== SettingsService::SYSTEM_TENANT_ID) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * GET /api/v1/settings — the caller tenant's effective settings.
      */
     public function get(Request $request): Response

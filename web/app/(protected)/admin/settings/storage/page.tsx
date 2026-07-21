@@ -15,7 +15,6 @@ import { IconDeviceFloppy } from '@tabler/icons-react';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
-  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   RegistrySettingControl,
   groupRegistry,
@@ -25,8 +24,6 @@ import {
   type SettingsMap,
   type AddToast,
 } from '../settings-shared';
-
-const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
 /**
  * Storage — where uploaded files and assets are kept (formerly Global
@@ -39,7 +36,6 @@ export default function StorageSettingsPage() {
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
 
   const canManage = hasPermission(SETTINGS_MANAGE);
-  const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   if (isCapabilitiesLoading) {
@@ -78,7 +74,7 @@ export default function StorageSettingsPage() {
         title="Storage"
         description="Where uploaded files and assets are kept for this instance."
       />
-      <SettingsTabs active="storage" showSignup showEmail showStorage showSso={canManageProviders} showSecurity={hasPermission(SECURITY_MANAGE)} />
+      <SettingsTabs active="storage" />
       <StorageSettingsForm addToast={addToast} />
     </div>
   );

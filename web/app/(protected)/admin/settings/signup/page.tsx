@@ -15,7 +15,6 @@ import { IconDeviceFloppy } from '@tabler/icons-react';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
-  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   RegistrySettingControl,
   groupRegistry,
@@ -25,8 +24,6 @@ import {
   type SettingsMap,
   type AddToast,
 } from '../settings-shared';
-
-const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
 /**
  * Sign-up governance (formerly part of Global Settings' "General"/"Sign-up
@@ -42,7 +39,6 @@ export default function SignupSettingsPage() {
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
 
   const canManage = hasPermission(SETTINGS_MANAGE);
-  const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   if (isCapabilitiesLoading) {
@@ -84,7 +80,7 @@ export default function SignupSettingsPage() {
         title="Sign-up"
         description="Control whether and how new people can create accounts on this instance."
       />
-      <SettingsTabs active="signup" showSignup showEmail showStorage showSso={canManageProviders} showSecurity={hasPermission(SECURITY_MANAGE)} />
+      <SettingsTabs active="signup" />
       <SignupSettingsForm addToast={addToast} />
     </div>
   );

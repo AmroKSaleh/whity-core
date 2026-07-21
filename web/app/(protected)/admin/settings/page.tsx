@@ -16,7 +16,6 @@ import {
   SETTINGS_READ,
   SETTINGS_WRITE,
   SETTINGS_MANAGE,
-  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   GENERAL_SETTING_KEYS,
   FIELD_LABELS,
@@ -32,8 +31,6 @@ import {
   type AddToast,
 } from './settings-shared';
 
-const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
-
 /**
  * General — the CURRENT tenant's overrides (site name, timezone, support
  * email). Locale + logos/colors live on the Branding tab; SSO, Sign-up,
@@ -47,8 +44,6 @@ export default function AdminSettingsPage() {
   const canRead = hasPermission(SETTINGS_READ);
   const canWrite = hasPermission(SETTINGS_WRITE);
   const canManageGlobal = hasPermission(SETTINGS_MANAGE);
-  const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
-  const canManageSecurity = hasPermission(SECURITY_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   if (isCapabilitiesLoading) {
@@ -83,14 +78,7 @@ export default function AdminSettingsPage() {
         title="General"
         description="Your tenant's instance identity. Cleared fields fall back to the platform-wide global default. Editing requires the settings:write permission."
       />
-      <SettingsTabs
-        active="general"
-        showSignup={isSystemTenant}
-        showEmail={isSystemTenant}
-        showStorage={isSystemTenant}
-        showSso={canManageProviders}
-        showSecurity={canManageSecurity}
-      />
+      <SettingsTabs active="general" />
       <TenantSettingsSection canWrite={canWrite} addToast={addToast} />
       {isSystemTenant && canManageGlobal && <PlatformDefaultsSection addToast={addToast} />}
     </div>

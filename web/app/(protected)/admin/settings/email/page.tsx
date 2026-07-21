@@ -22,7 +22,6 @@ import {
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
-  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   RegistrySettingControl,
   errorMessage,
@@ -30,8 +29,6 @@ import {
   type RegistryEntry,
   type SettingsMap,
 } from '../settings-shared';
-
-const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
 /**
  * Outgoing email (SMTP) settings — WC-3ac81b7e. Operator-only: the non-secret
@@ -96,7 +93,6 @@ export default function EmailSettingsPage() {
   const { hasPermission, loading: capsLoading } = useCapabilities();
 
   const canManage = hasPermission(SETTINGS_MANAGE);
-  const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   if (capsLoading) {
@@ -128,8 +124,6 @@ export default function EmailSettingsPage() {
   return (
     <EmailSettingsForm
       adminEmail={user?.email ?? ''}
-      canManageProviders={canManageProviders}
-      canManageSecurity={hasPermission(SECURITY_MANAGE)}
       addToast={addToast}
     />
   );
@@ -137,13 +131,9 @@ export default function EmailSettingsPage() {
 
 function EmailSettingsForm({
   adminEmail,
-  canManageProviders,
-  canManageSecurity,
   addToast,
 }: {
   adminEmail: string;
-  canManageProviders: boolean;
-  canManageSecurity: boolean;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
   const { data, error, refetch } = useFetch(async () => {
@@ -287,7 +277,7 @@ function EmailSettingsForm({
         title="Email"
         description="Outgoing email (SMTP) for this instance. Managed by the system tenant."
       />
-      <SettingsTabs active="email" showSignup showEmail showStorage showSso={canManageProviders} showSecurity={canManageSecurity} />
+      <SettingsTabs active="email" />
 
       {/* Transport */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-transport-card">

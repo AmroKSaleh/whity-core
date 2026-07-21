@@ -24,7 +24,6 @@ import {
 import { SettingsTabs } from '../settings-tabs';
 import { api } from '@/lib/api/client';
 import {
-  SECURITY_MANAGE,
   RegistrySettingControl,
   errorMessage,
   type RegistryEntry,
@@ -242,14 +241,7 @@ export default function SsoProvidersPage() {
           ) : undefined
         }
       />
-      <SettingsTabs
-        active="sso"
-        showSignup={isSystemTenant}
-        showEmail={isSystemTenant}
-        showStorage={isSystemTenant}
-        showSso
-        showSecurity={hasPermission(SECURITY_MANAGE)}
-      />
+      <SettingsTabs active="sso" />
 
       {isSystemTenant && <SsoMasterToggle addToast={addToast} />}
 

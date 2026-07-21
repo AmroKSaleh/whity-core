@@ -82,14 +82,7 @@ export default function SecurityPolicySettingsPage() {
         title="Security"
         description="Require two-factor authentication tenant-wide, for an organizational unit, or for a specific person."
       />
-      <SettingsTabs
-        active="security"
-        showSignup={false}
-        showEmail={false}
-        showStorage={false}
-        showSso={false}
-        showSecurity
-      />
+      <SettingsTabs active="security" />
       <TwoFactorPoliciesSection addToast={addToast} onPoliciesChanged={() => setStatusRefreshKey((k) => k + 1)} />
       <EnrollmentStatusSection refreshKey={statusRefreshKey} />
     </div>

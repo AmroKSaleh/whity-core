@@ -16,15 +16,12 @@ import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_READ,
   SETTINGS_WRITE,
-  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   FIELD_LABELS,
   errorMessage,
   SettingsField,
   type AddToast,
 } from '../settings-shared';
-
-const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
 /**
  * Branding — the instance's visual + language identity: locale, logos,
@@ -39,8 +36,6 @@ export default function BrandingSettingsPage() {
 
   const canRead = hasPermission(SETTINGS_READ);
   const canWrite = hasPermission(SETTINGS_WRITE);
-  const canManageProviders = hasPermission(AUTH_PROVIDERS_MANAGE);
-  const canManageSecurity = hasPermission(SECURITY_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   // Fetch tenant_overridable at the page level so it can be passed to
@@ -83,14 +78,7 @@ export default function BrandingSettingsPage() {
         title="Branding"
         description="Language, logos, favicon, and colors for this tenant."
       />
-      <SettingsTabs
-        active="branding"
-        showSignup={isSystemTenant}
-        showEmail={isSystemTenant}
-        showStorage={isSystemTenant}
-        showSso={canManageProviders}
-        showSecurity={canManageSecurity}
-      />
+      <SettingsTabs active="branding" />
       <LocaleSection canWrite={canWrite} tenantOverridable={tenantOverridable} addToast={addToast} />
       <BrandingSettings variant="tenant" tenantOverridable={tenantOverridable} />
       {isSystemTenant && <BrandingSettings variant="global" />}

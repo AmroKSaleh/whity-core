@@ -972,6 +972,11 @@ $router->register('GET',   '/api/settings',        [$settingsHandler, 'get'],   
 $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'],       null, null, CorePermissions::SETTINGS_WRITE);
 $router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlobal'], null, null, CorePermissions::SETTINGS_MANAGE);
+// WC-tabs-nav-be: the settings console's tab bar, RBAC-filtered server-side
+// per tab — no single required permission gates the route itself (a caller
+// holding only auth_providers:manage must still see the SSO tab), mirroring
+// /api/navigation's permission-free registration.
+$router->register('GET', '/api/settings/tabs', [$settingsHandler, 'tabs']);
 
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved

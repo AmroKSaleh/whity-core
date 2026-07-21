@@ -1224,6 +1224,22 @@ final class CoreApiSchemas
                     422 => self::errorResponse('Validation failed (unknown key or invalid value)'),
                 ] + self::authErrors(),
             ]),
+            // No single required permission — each tab is individually RBAC-
+            // filtered server-side, mirroring GET /api/navigation.
+            [
+                'method' => 'GET',
+                'path' => '/api/settings/tabs',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the settings console tabs visible to the caller',
+                    'tags' => ['settings'],
+                    'responses' => [
+                        200 => self::jsonResponse('The visible settings tabs, in display order', 'SettingsTabListResponse'),
+                        403 => self::errorResponse('Unauthenticated or tenant not resolved'),
+                    ],
+                ],
+            ],
         ];
     }
 
@@ -2201,6 +2217,14 @@ final class CoreApiSchemas
                 'requiredPermission' => self::str(true),
             ], ['id', 'label', 'href', 'icon', 'group', 'order']),
             'NavigationListResponse' => self::listEnvelope('NavigationItem'),
+
+            // GET /api/settings/tabs (WC-tabs-nav-be)
+            'SettingsTab' => self::object([
+                'id' => self::str(),
+                'label' => self::str(),
+                'href' => self::str(),
+            ], ['id', 'label', 'href']),
+            'SettingsTabListResponse' => self::listEnvelope('SettingsTab'),
 
             // WC-209: the dynamic OpenAPI document is itself an OpenAPI spec —
             // a free-form object whose top-level keys (openapi/info/paths/

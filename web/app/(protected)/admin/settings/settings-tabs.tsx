@@ -3,9 +3,13 @@
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { tabsListVariants } from '@amroksaleh/ui/tabs';
+import { api } from '@/lib/api/client';
+import { useFetch } from '@/hooks/useFetch';
+import type { components } from '@/lib/api/schema';
 
 /**
- * Shared tab navigation across the settings routes (WC-tabs-nav).
+ * Shared tab navigation across the settings routes (WC-tabs-nav /
+ * WC-tabs-nav-be).
  *
  * These stay SEPARATE PAGES/ROUTES (each has its own RBAC gate and an
  * extensive existing test suite built around that separation, notably the
@@ -15,52 +19,37 @@ import { tabsListVariants } from '@amroksaleh/ui/tabs';
  * where each "tab" is a `<Link>` to its own route rather than a
  * Radix-controlled panel.
  *
- * Each page passes its own `active` id (no `usePathname()` — keeps this
- * dependency-free for the existing RTL unit tests, which render each page
- * directly without a router context) and the conditional tabs' visibility,
- * computed the SAME way each page already gated the content it owns.
- *
- * General and Branding are always shown (any settings:read caller). Sign-up,
- * Email, and Storage are system-tenant-only surfaces (mirroring the removed
- * inline links' `isSystemTenant` gate); Single sign-on is shown to whoever
- * holds `auth_providers:manage`, tenant or system. Security (admin-enforced
- * 2FA policy, WC-525) is tenant-scoped self-service like Storage's
- * `storage:manage` — shown to whoever holds `security:manage`, tenant or
- * system.
+ * The tab SET and its per-caller visibility are fetched from
+ * `GET /api/v1/settings/tabs` (RBAC-filtered server-side, mirroring the
+ * sidebar's `/api/v1/navigation`) rather than computed here from a pile of
+ * `show*` booleans threaded through every settings page. That prop-drilling
+ * pattern had drifted inconsistent across pages (some passed
+ * `showSignup={isSystemTenant}`, others a bare `showSignup` — same intent,
+ * different derivations, one source of truth lost) — this component now
+ * has exactly one job: render whatever the backend says is visible. Only
+ * `active` (the current page's own tab id) still comes from the caller —
+ * no `usePathname()`, keeping this dependency-free for the existing RTL
+ * unit tests, which render each page directly without a router context.
  */
 
 export type SettingsTabId = 'general' | 'branding' | 'signup' | 'sso' | 'email' | 'storage' | 'security';
 
 interface SettingsTabsProps {
   active: SettingsTabId;
-  showSignup: boolean;
-  showEmail: boolean;
-  showStorage: boolean;
-  showSso: boolean;
-  showSecurity: boolean;
 }
 
-const TAB_DEFS: ReadonlyArray<{ id: SettingsTabId; href: string; label: string }> = [
-  { id: 'general', href: '/admin/settings', label: 'General' },
-  { id: 'branding', href: '/admin/settings/branding', label: 'Branding' },
-  { id: 'signup', href: '/admin/settings/signup', label: 'Sign-up' },
-  { id: 'sso', href: '/admin/settings/sso', label: 'Single sign-on' },
-  { id: 'email', href: '/admin/settings/email', label: 'Email' },
-  { id: 'storage', href: '/admin/settings/storage', label: 'Storage' },
-  { id: 'security', href: '/admin/settings/security', label: 'Security' },
-];
+type SettingsTab = components['schemas']['SettingsTab'];
 
-export function SettingsTabs({ active, showSignup, showEmail, showStorage, showSso, showSecurity }: SettingsTabsProps) {
-  const visible = TAB_DEFS.filter((tab) => {
-    if (tab.id === 'signup') return showSignup;
-    if (tab.id === 'email') return showEmail;
-    if (tab.id === 'storage') return showStorage;
-    if (tab.id === 'sso') return showSso;
-    if (tab.id === 'security') return showSecurity;
-    return true;
-  });
+export function SettingsTabs({ active }: SettingsTabsProps) {
+  const { data: tabs } = useFetch<SettingsTab[]>(async () => {
+    const { data: body } = await api.GET('/api/v1/settings/tabs');
+    return body?.data ?? [];
+  }, []);
 
-  // Nothing to switch between (e.g. a regular tenant admin without
+  const visible = tabs ?? [];
+
+  // Nothing to switch between yet (still loading), or nothing the caller may
+  // see beyond the current page (e.g. a regular tenant admin without
   // auth_providers:manage) — no point rendering a single-item tab bar.
   if (visible.length <= 1) {
     return null;
