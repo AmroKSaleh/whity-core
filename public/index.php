@@ -1015,6 +1015,22 @@ $router->register('GET',    '/api/storage-config', [$tenantStorageConfigHandler,
 $router->register('PUT',    '/api/storage-config', [$tenantStorageConfigHandler, 'put'],    null, null, CorePermissions::STORAGE_MANAGE);
 $router->register('DELETE', '/api/storage-config', [$tenantStorageConfigHandler, 'delete'], null, null, CorePermissions::STORAGE_MANAGE);
 
+// 13a-quinquies. Admin-enforced 2FA policy CRUD + status (WC-525 PR-3).
+// Tenant-scoped via TenantContext and gated on security:manage. Reuses the
+// SAME $twoFactorPolicyResolver instance AuthHandler's login-time enforcement
+// consults (built above), so status() reports the exact deadlines login
+// would actually apply.
+$twoFactorPoliciesHandler = new \Whity\Api\TwoFactorPoliciesApiHandler(
+    $db->getPdo(),
+    $twoFactorPolicyResolver,
+    $auditLogger
+);
+$router->register('GET',    '/api/2fa-policies',        [$twoFactorPoliciesHandler, 'list'],   null, null, CorePermissions::SECURITY_MANAGE);
+$router->register('POST',   '/api/2fa-policies',        [$twoFactorPoliciesHandler, 'create'], null, null, CorePermissions::SECURITY_MANAGE);
+$router->register('GET',    '/api/2fa-policies/status', [$twoFactorPoliciesHandler, 'status'], null, null, CorePermissions::SECURITY_MANAGE);
+$router->register('PATCH',  '/api/2fa-policies/{id:\d+}', [$twoFactorPoliciesHandler, 'update'], null, null, CorePermissions::SECURITY_MANAGE);
+$router->register('DELETE', '/api/2fa-policies/{id:\d+}', [$twoFactorPoliciesHandler, 'delete'], null, null, CorePermissions::SECURITY_MANAGE);
+
 // 13a-quater. Operator subscription-plan admin API (WC-plans, ADR 0010): catalog
 // CRUD of plans + their entitlement bundles, and applying a plan to a target
 // tenant (which materialises the bundle into that tenant's entitlements). Gated
