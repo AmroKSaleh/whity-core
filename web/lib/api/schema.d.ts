@@ -1359,6 +1359,23 @@ export interface paths {
         patch: operations["patch_api_v1_settings_global"];
         trace?: never;
     };
+    "/api/v1/settings/tabs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the settings console tabs visible to the caller */
+        get: operations["get_api_v1_settings_tabs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/storage-config": {
         parameters: {
             query?: never;
@@ -2344,6 +2361,14 @@ export interface components {
                 overridden: string[];
                 tenant_overridable: boolean;
             };
+        };
+        SettingsTab: {
+            id: string;
+            label: string;
+            href: string;
+        };
+        SettingsTabListResponse: {
+            data: components["schemas"]["SettingsTab"][];
         };
         SettingsUpdateRequest: {
             settings: {
@@ -10381,6 +10406,62 @@ export interface operations {
             };
             /** @description Validation failed (unknown key or invalid value) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_settings_tabs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The visible settings tabs, in display order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsTabListResponse"];
+                };
+            };
+            /** @description Unauthenticated or tenant not resolved */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };

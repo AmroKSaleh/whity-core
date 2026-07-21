@@ -125,16 +125,35 @@ function brandingResponse() {
   return { data: { data: BRANDING_NO_ASSETS }, error: undefined };
 }
 
+/** `<SettingsTabs>`'s own fetch (WC-tabs-nav-be) — a fixed, RBAC-filtered-server-side
+ * tab list. The exact set doesn't matter to these page-level tests (nothing here
+ * asserts on the tab bar itself), so a static General+Branding pair is enough to
+ * keep `SettingsTabs` from crashing on the wrong response shape.
+ */
+function settingsTabsResponse() {
+  return {
+    data: {
+      data: [
+        { id: 'general', href: '/admin/settings', label: 'General' },
+        { id: 'branding', href: '/admin/settings/branding', label: 'Branding' },
+      ],
+    },
+    error: undefined,
+  };
+}
+
 /**
  * Default GET router: `/api/v1/settings` → tenant payload,
  * `/api/v1/settings/global` → global payload, `/api/v1/branding` → a
  * no-assets branding payload (BrandingSettings' own fetch, mounted inside
- * BrandingSettingsPage — separately covered by branding-settings.test.tsx).
+ * BrandingSettingsPage — separately covered by branding-settings.test.tsx),
+ * `/api/v1/settings/tabs` → the settings tab bar's own fetch.
  */
 function routeGet(overridden: string[] = ['site_name'], tenantOverridable = true, registry = REGISTRY, global = GLOBAL) {
   mockApiGet.mockImplementation((path: string) => {
     if (path === '/api/v1/settings/global') return Promise.resolve(globalResponse(registry, global));
     if (path === '/api/v1/branding') return Promise.resolve(brandingResponse());
+    if (path === '/api/v1/settings/tabs') return Promise.resolve(settingsTabsResponse());
     return Promise.resolve(settingsResponse(overridden, tenantOverridable));
   });
 }

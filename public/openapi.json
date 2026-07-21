@@ -9373,6 +9373,67 @@
                 ]
             }
         },
+        "/api/v1/settings/tabs": {
+            "get": {
+                "operationId": "get_api_v1_settings_tabs",
+                "summary": "List the settings console tabs visible to the caller",
+                "tags": [
+                    "settings"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The visible settings tabs, in display order",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SettingsTabListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Unauthenticated or tenant not resolved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/storage-config": {
             "delete": {
                 "operationId": "delete_api_v1_storage_config",
@@ -14383,6 +14444,39 @@
                             "overridden",
                             "tenant_overridable"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "SettingsTab": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "href": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "label",
+                    "href"
+                ]
+            },
+            "SettingsTabListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SettingsTab"
+                        }
                     }
                 },
                 "required": [
