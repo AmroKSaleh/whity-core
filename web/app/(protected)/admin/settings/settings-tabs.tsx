@@ -23,10 +23,13 @@ import { tabsListVariants } from '@amroksaleh/ui/tabs';
  * General and Branding are always shown (any settings:read caller). Sign-up,
  * Email, and Storage are system-tenant-only surfaces (mirroring the removed
  * inline links' `isSystemTenant` gate); Single sign-on is shown to whoever
- * holds `auth_providers:manage`, tenant or system.
+ * holds `auth_providers:manage`, tenant or system. Security (admin-enforced
+ * 2FA policy, WC-525) is tenant-scoped self-service like Storage's
+ * `storage:manage` — shown to whoever holds `security:manage`, tenant or
+ * system.
  */
 
-export type SettingsTabId = 'general' | 'branding' | 'signup' | 'sso' | 'email' | 'storage';
+export type SettingsTabId = 'general' | 'branding' | 'signup' | 'sso' | 'email' | 'storage' | 'security';
 
 interface SettingsTabsProps {
   active: SettingsTabId;
@@ -34,6 +37,7 @@ interface SettingsTabsProps {
   showEmail: boolean;
   showStorage: boolean;
   showSso: boolean;
+  showSecurity: boolean;
 }
 
 const TAB_DEFS: ReadonlyArray<{ id: SettingsTabId; href: string; label: string }> = [
@@ -43,14 +47,16 @@ const TAB_DEFS: ReadonlyArray<{ id: SettingsTabId; href: string; label: string }
   { id: 'sso', href: '/admin/settings/sso', label: 'Single sign-on' },
   { id: 'email', href: '/admin/settings/email', label: 'Email' },
   { id: 'storage', href: '/admin/settings/storage', label: 'Storage' },
+  { id: 'security', href: '/admin/settings/security', label: 'Security' },
 ];
 
-export function SettingsTabs({ active, showSignup, showEmail, showStorage, showSso }: SettingsTabsProps) {
+export function SettingsTabs({ active, showSignup, showEmail, showStorage, showSso, showSecurity }: SettingsTabsProps) {
   const visible = TAB_DEFS.filter((tab) => {
     if (tab.id === 'signup') return showSignup;
     if (tab.id === 'email') return showEmail;
     if (tab.id === 'storage') return showStorage;
     if (tab.id === 'sso') return showSso;
+    if (tab.id === 'security') return showSecurity;
     return true;
   });
 

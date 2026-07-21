@@ -15,6 +15,7 @@ import { IconDeviceFloppy } from '@tabler/icons-react';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
+  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   RegistrySettingControl,
   groupRegistry,
@@ -77,7 +78,7 @@ export default function StorageSettingsPage() {
         title="Storage"
         description="Where uploaded files and assets are kept for this instance."
       />
-      <SettingsTabs active="storage" showSignup showEmail showStorage showSso={canManageProviders} />
+      <SettingsTabs active="storage" showSignup showEmail showStorage showSso={canManageProviders} showSecurity={hasPermission(SECURITY_MANAGE)} />
       <StorageSettingsForm addToast={addToast} />
     </div>
   );

@@ -22,6 +22,7 @@ import {
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
+  SECURITY_MANAGE,
   SYSTEM_TENANT_ID,
   RegistrySettingControl,
   errorMessage,
@@ -128,6 +129,7 @@ export default function EmailSettingsPage() {
     <EmailSettingsForm
       adminEmail={user?.email ?? ''}
       canManageProviders={canManageProviders}
+      canManageSecurity={hasPermission(SECURITY_MANAGE)}
       addToast={addToast}
     />
   );
@@ -136,10 +138,12 @@ export default function EmailSettingsPage() {
 function EmailSettingsForm({
   adminEmail,
   canManageProviders,
+  canManageSecurity,
   addToast,
 }: {
   adminEmail: string;
   canManageProviders: boolean;
+  canManageSecurity: boolean;
   addToast: ReturnType<typeof useToast>['addToast'];
 }) {
   const { data, error, refetch } = useFetch(async () => {
@@ -283,7 +287,7 @@ function EmailSettingsForm({
         title="Email"
         description="Outgoing email (SMTP) for this instance. Managed by the system tenant."
       />
-      <SettingsTabs active="email" showSignup showEmail showStorage showSso={canManageProviders} />
+      <SettingsTabs active="email" showSignup showEmail showStorage showSso={canManageProviders} showSecurity={canManageSecurity} />
 
       {/* Transport */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-transport-card">
