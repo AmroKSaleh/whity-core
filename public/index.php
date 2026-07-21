@@ -159,6 +159,7 @@ use Whity\Auth\TotpService;
 use Whity\Auth\BackupCodesService;
 use Whity\Auth\TokenValidator;
 use Whity\Auth\LoginThrottleService;
+use Whity\Auth\TwoFactorPolicyResolver;
 use Whity\Core\Store\DatabaseSharedStore;
 use Whity\Core\RateLimit\SharedStoreRateLimitStore;
 use Whity\Core\RateLimit\RateLimitMiddleware;
@@ -611,7 +612,10 @@ $loginThrottle = new LoginThrottleService(
     (int) ($_ENV['LOGIN_THROTTLE_IP_THRESHOLD']    ?? getenv('LOGIN_THROTTLE_IP_THRESHOLD')    ?: LoginThrottleService::DEFAULT_IP_THRESHOLD),
     (int) ($_ENV['LOGIN_THROTTLE_WINDOW_SECONDS']  ?? getenv('LOGIN_THROTTLE_WINDOW_SECONDS')  ?: LoginThrottleService::DEFAULT_WINDOW_SECONDS),
 );
-$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle);
+// WC-525: admin-enforced 2FA policy resolver — checked at the session-issuing
+// chokepoint inside AuthHandler for every login-completion path.
+$twoFactorPolicyResolver = new TwoFactorPolicyResolver($db, $logger);
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle, $twoFactorPolicyResolver);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // WC-235: public self-service registration — provisions a new tenant + owner
 // (profile + primary email + active admin membership). Public + no required

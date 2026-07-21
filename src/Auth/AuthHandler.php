@@ -94,6 +94,15 @@ class AuthHandler
     private ?LoginThrottleService $loginThrottle;
 
     /**
+     * Optional admin-enforced 2FA policy resolver (WC-525). When set,
+     * {@see self::issueSessionForProfile()} checks every applicable policy
+     * (tenant-wide, the profile's OU chain, or the profile directly) before
+     * minting a session for a profile that has not enrolled in 2FA. Null
+     * disables the feature entirely (keeps existing tests untouched).
+     */
+    private ?TwoFactorPolicyResolver $twoFactorPolicyResolver;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
@@ -110,6 +119,9 @@ class AuthHandler
      *     omitted, login/2FA events are not audited (keeps existing tests untouched).
      * @param LoginThrottleService|null $loginThrottle Optional brute-force throttle (WC-0abcc29f).
      *     When omitted, throttling is disabled (keeps existing tests untouched).
+     * @param TwoFactorPolicyResolver|null $twoFactorPolicyResolver Optional admin-enforced 2FA
+     *     policy resolver (WC-525). When omitted, no policy is enforced (keeps existing tests
+     *     untouched).
      */
     public function __construct(
         PDO $db,
@@ -119,7 +131,8 @@ class AuthHandler
         ?TotpService $totpService = null,
         ?LoggerInterface $logger = null,
         ?AuditLogger $auditLogger = null,
-        ?LoginThrottleService $loginThrottle = null
+        ?LoginThrottleService $loginThrottle = null,
+        ?TwoFactorPolicyResolver $twoFactorPolicyResolver = null
     ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
@@ -129,6 +142,7 @@ class AuthHandler
         $this->logger = $logger ?? new NullLogger();
         $this->auditLogger = $auditLogger;
         $this->loginThrottle = $loginThrottle;
+        $this->twoFactorPolicyResolver = $twoFactorPolicyResolver;
     }
 
     /**
@@ -730,7 +744,7 @@ class AuthHandler
         // @tenant-guard-ignore: memberships is the canonical role store (ADR 0005 §6)
         $roleName = '';
         $membershipStmt = $this->db->prepare(
-            "SELECT r.name AS role
+            "SELECT r.name AS role, m.ou_id AS ou_id
              FROM memberships m
              LEFT JOIN roles r ON r.id = m.role_id
              WHERE m.profile_id = ? AND m.tenant_id = ? AND m.status = 'active'
@@ -750,6 +764,46 @@ class AuthHandler
             return Response::json(['error' => 'No active membership for the requested tenant'], 401);
         }
         $roleName = (string) ($membershipRow['role'] ?? '');
+        $ouId = ($membershipRow['ou_id'] ?? null) !== null ? (int) $membershipRow['ou_id'] : null;
+
+        // WC-525: admin-enforced 2FA policy gate. Checked at THIS chokepoint —
+        // every login-completion path (direct login, post-2FA-verify,
+        // post-tenant-selection) converges here — so a single check covers all
+        // of them rather than duplicating it per path. Before the deadline,
+        // $enrollmentDeadline is non-null but the session still mints (with a
+        // nag flag in the response); at/after it, issueTwoFactorEnrollmentGate()
+        // returns a refusal Response instead of ever reaching the claim-issuing
+        // code below.
+        $enrollmentDeadline = null;
+        if ($this->twoFactorPolicyResolver !== null && !self::dbTruthy($this->profileTwoFactorEnabled($profileId))) {
+            if ($this->twoFactorPolicyResolver->isEnforced($activeTenantId, $profileId, $ouId)) {
+                $enrollmentDeadline = $this->twoFactorPolicyResolver->enforcementDeadline(
+                    $activeTenantId,
+                    $profileId,
+                    $ouId
+                );
+
+                if ($enrollmentDeadline !== null && time() >= $enrollmentDeadline) {
+                    $this->audit('auth.two_factor_policy.login_refused', $request, $activeTenantId, $profileId);
+
+                    $enrollmentClaims = [
+                        'profile_id'       => $profileId,
+                        'active_tenant_id' => $activeTenantId,
+                        'email'            => $email,
+                        'token_epoch'      => $profileEpoch,
+                    ];
+                    $enrollmentJwt = $this->jwtParser->create($enrollmentClaims, 600, 'two_factor_enrollment');
+
+                    return Response::json([
+                        'requires_2fa_enrollment' => true,
+                        'enrollment_token'        => $enrollmentJwt,
+                        'enrollment_deadline'     => $enrollmentDeadline,
+                    ], 202);
+                }
+
+                $this->audit('auth.two_factor_policy.enrollment_required', $request, $activeTenantId, $profileId);
+            }
+        }
 
         $claims = [
             'profile_id'       => $profileId,
@@ -797,6 +851,12 @@ class AuthHandler
             'tenant_id' => $activeTenantId,
         ];
 
+        // WC-525: nag fields, present only during an applicable policy's grace
+        // period (a hard refusal above never reaches this point).
+        $enrollmentNag = $enrollmentDeadline !== null
+            ? ['two_factor_enrollment_required' => true, 'two_factor_enrollment_deadline' => $enrollmentDeadline]
+            : [];
+
         if ($tokenMode) {
             return Response::json([
                 'access_token'  => $accessTokenStr,
@@ -804,10 +864,28 @@ class AuthHandler
                 'token_type'    => 'Bearer',
                 'expires_in'    => 900,
                 'user'          => $userShape,
-            ], 200);
+            ] + $enrollmentNag, 200);
         }
 
-        return Response::json(['user' => $userShape], 200);
+        return Response::json(['user' => $userShape] + $enrollmentNag, 200);
+    }
+
+    /**
+     * Read `profiles.two_factor_enabled` for the WC-525 policy check. Returns
+     * the raw column value (use {@see self::dbTruthy()}), or false when the
+     * profile row is missing (should not happen — issueSessionForProfile()
+     * only reaches this after a live membership join proved the profile
+     * exists — but fails closed rather than throwing).
+     *
+     * @return mixed
+     */
+    private function profileTwoFactorEnabled(int $profileId)
+    {
+        $stmt = $this->db->prepare('SELECT two_factor_enabled FROM profiles WHERE id = ? LIMIT 1');
+        $stmt->execute([$profileId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? false : ($row['two_factor_enabled'] ?? false);
     }
 
     /**
