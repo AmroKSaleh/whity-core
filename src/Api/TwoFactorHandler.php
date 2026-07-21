@@ -68,6 +68,14 @@ class TwoFactorHandler
      * AuthHandler::resolveAccessClaims(), so a token-mode client (no cookie
      * jar) can manage 2FA instead of getting 401 on every call here.
      *
+     * Also accepts a 2FA-ENROLLMENT bearer token (WC-525): when an admin-
+     * enforced 2FA policy's grace period has expired, login refuses to mint a
+     * full session and instead returns this narrowly-typed token so the caller
+     * can complete setup()/confirm() without one. Widening this here (rather
+     * than only on setup/confirm) is safe: disable()/regenerateCodes() require
+     * two_factor_enabled=true (never true yet for an enrollment-token caller)
+     * and status() merely reports the (still-false) state.
+     *
      * @param Request $request The incoming HTTP request.
      * @return array<string, mixed>|null Decoded claims, or null when no valid token.
      */
@@ -80,7 +88,8 @@ class TwoFactorHandler
 
         $authHeader = $request->getHeader('Authorization');
         if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
-            return $this->tokenValidator->validateAccessTokenFromBearer($m[1]);
+            return $this->tokenValidator->validateAccessTokenFromBearer($m[1])
+                ?? $this->tokenValidator->validateTwoFactorEnrollmentToken($m[1]);
         }
 
         return null;

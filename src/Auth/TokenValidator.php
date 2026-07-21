@@ -404,6 +404,52 @@ class TokenValidator
     }
 
     /**
+     * Validate a 2FA-ENROLLMENT token passed as a Bearer string (WC-525).
+     *
+     * Issued by {@see AuthHandler::issueSessionForProfile()} instead of a real
+     * session when an admin-enforced 2FA policy's grace period has expired for
+     * a profile that has not yet enrolled — narrowly scoped to let the caller
+     * complete {@see \Whity\Api\TwoFactorHandler::setup()}/`confirm()` without a
+     * full session. Checks: signature + expiry (via JwtParser), type =
+     * 'two_factor_enrollment', jti not revoked, epoch current (a password
+     * change invalidates a pending enrollment token too), and the active
+     * membership guard.
+     *
+     * @param string $token Raw bearer token string.
+     * @return array<string, mixed>|null Decoded claims, or null on any failure.
+     */
+    public function validateTwoFactorEnrollmentToken(string $token): ?array
+    {
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null) {
+            return null;
+        }
+
+        if (($claims['type'] ?? null) !== 'two_factor_enrollment') {
+            return null;
+        }
+
+        $jti = $claims['jti'] ?? null;
+        if (!is_string($jti) || $jti === '') {
+            return null;
+        }
+
+        if ($this->isTokenRevoked($jti)) {
+            return null;
+        }
+
+        if (!$this->isTokenEpochCurrent($claims)) {
+            return null;
+        }
+
+        if (!$this->membershipGuard->allows($claims)) {
+            return null;
+        }
+
+        return $claims;
+    }
+
+    /**
      * Derive the MCP principal's [profileId, tenantId] from post-cutover claims.
      *
      * WC-idcut-E: profile_id/active_tenant_id only. Non-integer values fail closed.

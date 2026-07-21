@@ -94,6 +94,15 @@ class AuthHandler
     private ?LoginThrottleService $loginThrottle;
 
     /**
+     * Optional admin-enforced 2FA policy resolver (WC-525). When set,
+     * {@see self::issueSessionForProfile()} checks every applicable policy
+     * (tenant-wide, the profile's OU chain, or the profile directly) before
+     * minting a session for a profile that has not enrolled in 2FA. Null
+     * disables the feature entirely (keeps existing tests untouched).
+     */
+    private ?TwoFactorPolicyResolver $twoFactorPolicyResolver;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
@@ -110,6 +119,9 @@ class AuthHandler
      *     omitted, login/2FA events are not audited (keeps existing tests untouched).
      * @param LoginThrottleService|null $loginThrottle Optional brute-force throttle (WC-0abcc29f).
      *     When omitted, throttling is disabled (keeps existing tests untouched).
+     * @param TwoFactorPolicyResolver|null $twoFactorPolicyResolver Optional admin-enforced 2FA
+     *     policy resolver (WC-525). When omitted, no policy is enforced (keeps existing tests
+     *     untouched).
      */
     public function __construct(
         PDO $db,
@@ -119,7 +131,8 @@ class AuthHandler
         ?TotpService $totpService = null,
         ?LoggerInterface $logger = null,
         ?AuditLogger $auditLogger = null,
-        ?LoginThrottleService $loginThrottle = null
+        ?LoginThrottleService $loginThrottle = null,
+        ?TwoFactorPolicyResolver $twoFactorPolicyResolver = null
     ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
@@ -129,6 +142,7 @@ class AuthHandler
         $this->logger = $logger ?? new NullLogger();
         $this->auditLogger = $auditLogger;
         $this->loginThrottle = $loginThrottle;
+        $this->twoFactorPolicyResolver = $twoFactorPolicyResolver;
     }
 
     /**
@@ -730,7 +744,7 @@ class AuthHandler
         // @tenant-guard-ignore: memberships is the canonical role store (ADR 0005 §6)
         $roleName = '';
         $membershipStmt = $this->db->prepare(
-            "SELECT r.name AS role
+            "SELECT r.name AS role, m.ou_id AS ou_id
              FROM memberships m
              LEFT JOIN roles r ON r.id = m.role_id
              WHERE m.profile_id = ? AND m.tenant_id = ? AND m.status = 'active'
@@ -750,6 +764,20 @@ class AuthHandler
             return Response::json(['error' => 'No active membership for the requested tenant'], 401);
         }
         $roleName = (string) ($membershipRow['role'] ?? '');
+        $ouId = ($membershipRow['ou_id'] ?? null) !== null ? (int) $membershipRow['ou_id'] : null;
+
+        // WC-525: admin-enforced 2FA policy gate. Checked at THIS chokepoint —
+        // every login-completion path (direct login, post-2FA-verify,
+        // post-tenant-selection) converges here — so a single check covers all
+        // of them rather than duplicating it per path. Before the deadline,
+        // $enrollmentDeadline is non-null but the session still mints (with a
+        // nag flag in the response); at/after it, a refusal Response is
+        // returned instead of ever reaching the claim-issuing code below.
+        $refusal = $this->twoFactorPolicyRefusal($profileId, $activeTenantId, $ouId, $email, $profileEpoch, $request);
+        if ($refusal !== null) {
+            return $refusal;
+        }
+        $enrollmentDeadline = $this->twoFactorPolicyNagDeadline($profileId, $activeTenantId, $ouId, $request);
 
         $claims = [
             'profile_id'       => $profileId,
@@ -797,6 +825,12 @@ class AuthHandler
             'tenant_id' => $activeTenantId,
         ];
 
+        // WC-525: nag fields, present only during an applicable policy's grace
+        // period (a hard refusal above never reaches this point).
+        $enrollmentNag = $enrollmentDeadline !== null
+            ? ['two_factor_enrollment_required' => true, 'two_factor_enrollment_deadline' => $enrollmentDeadline]
+            : [];
+
         if ($tokenMode) {
             return Response::json([
                 'access_token'  => $accessTokenStr,
@@ -804,10 +838,142 @@ class AuthHandler
                 'token_type'    => 'Bearer',
                 'expires_in'    => 900,
                 'user'          => $userShape,
-            ], 200);
+            ] + $enrollmentNag, 200);
         }
 
-        return Response::json(['user' => $userShape], 200);
+        return Response::json(['user' => $userShape] + $enrollmentNag, 200);
+    }
+
+    /**
+     * Read `profiles.two_factor_enabled` for the WC-525 policy check. Returns
+     * the raw column value (use {@see self::dbTruthy()}), or false when the
+     * profile row is missing (should not happen — issueSessionForProfile()
+     * only reaches this after a live membership join proved the profile
+     * exists — but fails closed rather than throwing).
+     *
+     * @return mixed
+     */
+    private function profileTwoFactorEnabled(int $profileId)
+    {
+        $stmt = $this->db->prepare('SELECT two_factor_enabled FROM profiles WHERE id = ? LIMIT 1');
+        $stmt->execute([$profileId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? false : ($row['two_factor_enabled'] ?? false);
+    }
+
+    /**
+     * The profile's `ou_id` from its ACTIVE membership in the given tenant, or
+     * null when there is no OU assignment (or no active membership at all —
+     * callers that need a hard membership guarantee already re-check it via
+     * {@see self::issueSessionForProfile()}'s own join).
+     */
+    private function activeMembershipOuId(int $profileId, int $activeTenantId): ?int
+    {
+        $stmt = $this->db->prepare(
+            "SELECT ou_id FROM memberships WHERE profile_id = ? AND tenant_id = ? AND status = 'active' LIMIT 1"
+        );
+        $stmt->execute([$profileId, $activeTenantId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false || ($row['ou_id'] ?? null) === null) {
+            return null;
+        }
+
+        return (int) $row['ou_id'];
+    }
+
+    /**
+     * WC-525 refusal check: builds the `requires_2fa_enrollment` gate Response
+     * when an applicable admin 2FA policy's grace period has expired for a
+     * profile that has not enrolled, or null when the caller may proceed
+     * (no policy, already enrolled, or still within grace).
+     *
+     * Exposed as its OWN method — not inlined into
+     * {@see self::issueSessionForProfile()} — so a caller that does
+     * DESTRUCTIVE work before re-minting a session (e.g.
+     * {@see self::handleLogoutOthers()}, which revokes every other session and
+     * bumps the profile's token_epoch) can check this FIRST and skip that work
+     * entirely on a refusal, rather than destroying the caller's OWN
+     * still-valid session out from under them only to then refuse to replace
+     * it.
+     */
+    private function twoFactorPolicyRefusal(
+        int $profileId,
+        int $activeTenantId,
+        ?int $ouId,
+        string $email,
+        int $profileEpoch,
+        Request $request
+    ): ?Response {
+        if ($this->twoFactorPolicyResolver === null) {
+            return null;
+        }
+        if (self::dbTruthy($this->profileTwoFactorEnabled($profileId))) {
+            return null;
+        }
+        if (!$this->twoFactorPolicyResolver->isEnforced($activeTenantId, $profileId, $ouId)) {
+            return null;
+        }
+
+        $deadline = $this->twoFactorPolicyResolver->enforcementDeadline($activeTenantId, $profileId, $ouId);
+        if ($deadline === null || time() < $deadline) {
+            return null;
+        }
+
+        $this->audit('auth.two_factor_policy.login_refused', $request, $activeTenantId, $profileId);
+
+        $enrollmentClaims = [
+            'profile_id'       => $profileId,
+            'active_tenant_id' => $activeTenantId,
+            'email'            => $email,
+            'token_epoch'      => $profileEpoch,
+        ];
+        $enrollmentJwt = $this->jwtParser->create($enrollmentClaims, 600, 'two_factor_enrollment');
+
+        return Response::json([
+            'requires_2fa_enrollment' => true,
+            'enrollment_token'        => $enrollmentJwt,
+            'enrollment_deadline'     => $deadline,
+        ], 202);
+    }
+
+    /**
+     * WC-525 grace-period nag: the enrollment deadline to surface in a
+     * successful login response (`two_factor_enrollment_required` +
+     * `two_factor_enrollment_deadline`), or null when nothing should be
+     * surfaced (no policy, already enrolled — {@see self::twoFactorPolicyRefusal()}
+     * would already have refused a past-deadline caller before this is ever
+     * reached).
+     *
+     * Also emits the `auth.two_factor_policy.enrollment_required` audit event
+     * — once per session issuance, alongside the login/switch/etc. event
+     * {@see self::issueSessionForProfile()} already records.
+     */
+    private function twoFactorPolicyNagDeadline(
+        int $profileId,
+        int $activeTenantId,
+        ?int $ouId,
+        Request $request
+    ): ?int {
+        if ($this->twoFactorPolicyResolver === null) {
+            return null;
+        }
+        if (self::dbTruthy($this->profileTwoFactorEnabled($profileId))) {
+            return null;
+        }
+        if (!$this->twoFactorPolicyResolver->isEnforced($activeTenantId, $profileId, $ouId)) {
+            return null;
+        }
+
+        $deadline = $this->twoFactorPolicyResolver->enforcementDeadline($activeTenantId, $profileId, $ouId);
+        if ($deadline === null) {
+            return null;
+        }
+
+        $this->audit('auth.two_factor_policy.enrollment_required', $request, $activeTenantId, $profileId);
+
+        return $deadline;
     }
 
     /**
@@ -1325,6 +1491,30 @@ class AuthHandler
         $email = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
         $currentJti = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : '';
 
+        // WC-525: check the 2FA-policy refusal gate BEFORE any destructive work
+        // below. revokeAllExcept() + the epoch bump both take effect
+        // immediately and unconditionally — including on the CALLER's own
+        // current session — on the assumption that issueSessionForProfile()
+        // at the end of this method will always re-mint a fresh session for
+        // this device. If the gate would instead refuse (past an enforced
+        // policy's deadline), that assumption is false: without this
+        // early-exit the caller would have their own live session destroyed
+        // and be handed only a narrow enrollment token in its place — a
+        // caller who merely wanted to sign OTHER devices out would find
+        // THIS device logged out too.
+        $ouId = $this->activeMembershipOuId($profileId, $activeTenantId);
+        $refusal = $this->twoFactorPolicyRefusal(
+            $profileId,
+            $activeTenantId,
+            $ouId,
+            $email,
+            $this->currentProfileTokenEpoch($profileId),
+            $request
+        );
+        if ($refusal !== null) {
+            return $refusal;
+        }
+
         // Mark every OTHER session row revoked (list accuracy + blacklist), keeping
         // the caller's current one (matched by its access jti). Best-effort.
         if ($currentJti !== '') {
@@ -1615,6 +1805,19 @@ class AuthHandler
         }
 
         $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
+        $email = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+
+        // WC-525: a refresh is how a session PERSISTS across the deadline of an
+        // admin-enforced 2FA policy that took effect (or whose grace period
+        // elapsed) after this session was minted — without this check here,
+        // the login-time gate would be enforced exactly once and then never
+        // again for the lifetime of the refresh token (up to 7 days, rotating
+        // indefinitely). Refuse exactly like a fresh login would.
+        $ouId = $this->activeMembershipOuId($profileId, $activeTenantId);
+        $refusal = $this->twoFactorPolicyRefusal($profileId, $activeTenantId, $ouId, $email, $tokenEpoch, $request);
+        if ($refusal !== null) {
+            return $refusal;
+        }
 
         // Post-cutover: carry ONLY the new claims — never emit legacy user_id/tenant_id.
         $newClaims = [
@@ -1635,6 +1838,14 @@ class AuthHandler
             $this->recordSession($accessToken, $newRefreshToken, $profileId, $activeTenantId, $request, false, $oldRefreshJti);
         }
 
+        // WC-525: same grace-period nag as issueSessionForProfile() — the
+        // refusal check above already means we only reach here when not
+        // enforced, already enrolled, or still within grace.
+        $enrollmentDeadline = $this->twoFactorPolicyNagDeadline($profileId, $activeTenantId, $ouId, $request);
+        $enrollmentNag = $enrollmentDeadline !== null
+            ? ['two_factor_enrollment_required' => true, 'two_factor_enrollment_deadline' => $enrollmentDeadline]
+            : [];
+
         if ($tokenMode) {
             // Token-body mode: return new tokens in JSON, set NO cookies.
             return Response::json([
@@ -1642,7 +1853,7 @@ class AuthHandler
                 'refresh_token' => $newRefreshToken,
                 'token_type'    => 'Bearer',
                 'expires_in'    => 900,
-            ], 200);
+            ] + $enrollmentNag, 200);
         }
 
         // Cookie mode: set the new access token cookie (classic browser flow).
@@ -1653,7 +1864,7 @@ class AuthHandler
         // Return success response
         return Response::json([
             'status' => 'success'
-        ], 200);
+        ] + $enrollmentNag, 200);
     }
 
     /**
