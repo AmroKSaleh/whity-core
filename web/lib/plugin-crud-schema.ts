@@ -26,6 +26,21 @@ export interface SchemaObject {
   maxLength?: number;
   minLength?: number;
   format?: string;
+  /**
+   * WC-532: marks a `type: "object"` schema with exactly `{ar?, en?}` string
+   * properties as a LocalizedText field (the bilingual-content convention).
+   * Not `format` — that's JSON-Schema vocabulary for string-leaf refinements
+   * (`date-time`, `email`), and this is an object-shaped construct with no
+   * vanilla-JSON-Schema equivalent, so it needs the `x-*` extension escape
+   * hatch instead.
+   */
+  'x-whity-localized-text'?: boolean;
+}
+
+/** The runtime value shape a LocalizedText field's JSON actually carries. */
+export interface LocalizedTextValue {
+  ar?: string;
+  en?: string;
 }
 
 export interface MediaTypeObject {
@@ -62,7 +77,7 @@ export interface OpenApiSpec {
 }
 
 /** Input control kinds the generic form knows how to render. */
-export type CrudFieldKind = 'text' | 'textarea' | 'number' | 'checkbox' | 'select';
+export type CrudFieldKind = 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'localized-text';
 
 /** A single create/edit form field derived from a request-body schema. */
 export interface CrudField {
@@ -80,6 +95,8 @@ export interface CrudField {
 export interface CrudColumn {
   key: string;
   label: string;
+  /** WC-532: the cell value is a {@link LocalizedTextValue}, not a string. */
+  isLocalizedText?: boolean;
 }
 
 /** Which mutations the spec actually publishes for the resource. */
@@ -190,6 +207,9 @@ function jsonSchema(
  * emails, slugs) best served by a single-line input.
  */
 function fieldKindOf(prop: SchemaObject): CrudFieldKind | null {
+  if (isLocalizedTextSchema(prop)) {
+    return 'localized-text';
+  }
   if (prop.enum !== undefined && prop.enum.length > 0) {
     return 'select';
   }
@@ -208,8 +228,21 @@ function fieldKindOf(prop: SchemaObject): CrudFieldKind | null {
   }
 }
 
+/**
+ * Whether a resolved schema is the WC-532 LocalizedText convention: a
+ * `type: "object"` node explicitly marked `x-whity-localized-text: true`.
+ * The property shape itself (`{ar?, en?}`) isn't re-validated here — the
+ * marker alone is the contract; the backend owns getting the shape right.
+ */
+function isLocalizedTextSchema(prop: SchemaObject): boolean {
+  return prop.type === 'object' && prop['x-whity-localized-text'] === true;
+}
+
 /** Whether a resolved property is a table-renderable primitive. */
 function isPrimitive(prop: SchemaObject): boolean {
+  if (isLocalizedTextSchema(prop)) {
+    return true;
+  }
   if (prop.enum !== undefined && prop.enum.length > 0) {
     return true;
   }
@@ -290,7 +323,11 @@ function columnsFrom(
     if (prop === undefined || !isPrimitive(prop)) {
       continue;
     }
-    columns.push({ key, label: humanizeKey(key) });
+    const column: CrudColumn = { key, label: humanizeKey(key) };
+    if (isLocalizedTextSchema(prop)) {
+      column.isLocalizedText = true;
+    }
+    columns.push(column);
   }
 
   // `id` always leads when present, regardless of declaration order.
