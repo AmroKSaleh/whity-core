@@ -150,6 +150,10 @@ final class CorePermissions
     public const DOCUMENTS_PUBLISH = 'documents:publish';
     public const DOCUMENTS_RENDER = 'documents:render';
 
+    // Admin-enforced 2FA policy (WC-525): tenant/OU/user-scoped rows an admin
+    // sets to require 2FA enrollment. Tenant-scoped.
+    public const SECURITY_MANAGE = 'security:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -197,6 +201,7 @@ final class CorePermissions
             self::DOCUMENTS_WRITE,
             self::DOCUMENTS_PUBLISH,
             self::DOCUMENTS_RENDER,
+            self::SECURITY_MANAGE,
         ];
     }
 }

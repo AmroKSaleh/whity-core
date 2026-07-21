@@ -99,7 +99,8 @@ final class CoreApiSchemas
             self::planRoutes(),
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
-            self::instanceRoutes()
+            self::instanceRoutes(),
+            self::twoFactorPolicyRoutes()
         );
     }
 
@@ -1785,6 +1786,37 @@ final class CoreApiSchemas
                 'public_base_url' => ['type' => 'string', 'format' => 'uri', 'nullable' => true],
             ], ['endpoint', 'region', 'bucket', 'access_key']),
 
+            // ── Admin-enforced 2FA policy (WC-525) ─────────────────────────────
+            'TwoFactorPolicy' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'scope_type' => ['type' => 'string', 'enum' => ['tenant', 'ou', 'user']],
+                'scope_id' => self::int(true),
+                'grace_period_days' => self::int(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'scope_type', 'scope_id', 'grace_period_days', 'created_at', 'updated_at',
+            ]),
+            'TwoFactorPolicyListResponse' => self::listEnvelope('TwoFactorPolicy'),
+            'TwoFactorPolicyDataResponse' => self::dataEnvelope(SchemaBuilder::ref('TwoFactorPolicy')),
+            'TwoFactorPolicyCreateRequest' => self::object([
+                'scope_type' => ['type' => 'string', 'enum' => ['tenant', 'ou', 'user']],
+                'scope_id' => self::int(true),
+                'grace_period_days' => self::int(),
+            ], ['scope_type']),
+            'TwoFactorPolicyUpdateRequest' => self::object([
+                'grace_period_days' => self::int(),
+            ], ['grace_period_days']),
+            'TwoFactorPolicyStatusEntry' => self::object([
+                'profile_id' => self::int(),
+                'email' => self::str(),
+                'enrolled' => self::bool(),
+                'enforcement_deadline' => self::int(true),
+            ], ['profile_id', 'email', 'enrolled', 'enforcement_deadline']),
+            'TwoFactorPolicyStatusResponse' => self::listEnvelope('TwoFactorPolicyStatusEntry'),
+
             // ── Subscription plans (WC-plans, ADR 0010) ───────────────────────
             // A plan row (list shape — no entitlement bundle).
             'PlanSummary' => self::object([
@@ -2591,6 +2623,65 @@ final class CoreApiSchemas
                     204 => ['description' => 'Storage configuration removed'],
                     400 => self::errorResponse('Tenant context is required'),
                     404 => self::errorResponse('No storage configuration to remove'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Admin-enforced 2FA policy CRUD + status (WC-525 PR-3). Tenant-scoped via
+     * TenantContext and gated on `security:manage`.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function twoFactorPolicyRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/2fa-policies', 'security:manage', [
+                'summary' => 'List this tenant\'s admin-enforced 2FA policies',
+                'tags' => ['security'],
+                'responses' => [
+                    200 => self::jsonResponse('Every policy row for this tenant', 'TwoFactorPolicyListResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-policies', 'security:manage', [
+                'summary' => 'Create a tenant/OU/user-scoped 2FA policy',
+                'tags' => ['security'],
+                'request' => 'TwoFactorPolicyCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created policy', 'TwoFactorPolicyDataResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    409 => self::errorResponse('A policy already exists for this scope'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/2fa-policies/status', 'security:manage', [
+                'summary' => 'Enrollment status across every profile any policy covers',
+                'tags' => ['security'],
+                'responses' => [
+                    200 => self::jsonResponse('Per-profile enrollment status + deadline', 'TwoFactorPolicyStatusResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/2fa-policies/{id:\d+}', 'security:manage', [
+                'summary' => 'Change a policy\'s grace period',
+                'tags' => ['security'],
+                'request' => 'TwoFactorPolicyUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated policy', 'TwoFactorPolicyDataResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Policy not found'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/2fa-policies/{id:\d+}', 'security:manage', [
+                'summary' => 'Remove a 2FA policy',
+                'tags' => ['security'],
+                'responses' => [
+                    204 => ['description' => 'Policy removed'],
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Policy not found'),
                 ] + self::authErrors(),
             ]),
         ];
