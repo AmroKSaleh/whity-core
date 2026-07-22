@@ -1,6 +1,14 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import {
+  buildThemeInitScript,
+  isThemeModePreference,
+  resolveIsDark,
+  THEME_STORAGE_KEY,
+  type ResolvedThemeMode,
+  type ThemeModePreference,
+} from '@amroksaleh/ui/theme-mode';
 
 /**
  * App-wide color scheme (light / dark / system), mirroring the
@@ -17,12 +25,15 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
  * which runs before first paint and applies the class synchronously — this
  * provider's own effects only keep DOM state in sync with subsequent
  * user-driven changes, they never own the very first paint.
+ *
+ * The storage key, preference type, and resolution rule are the shared
+ * cross-client contract — see @amroksaleh/ui/theme-mode (and its module doc
+ * comment) for the framework-agnostic half other clients replicate.
  */
 
-export type ThemeModePreference = 'light' | 'dark' | 'system';
-export type ResolvedThemeMode = 'light' | 'dark';
+export type { ThemeModePreference, ResolvedThemeMode };
 
-const STORAGE_KEY = 'whity.theme';
+const STORAGE_KEY = THEME_STORAGE_KEY;
 
 /**
  * Inline script source shared between the blocking <head> script and the
@@ -30,7 +41,7 @@ const STORAGE_KEY = 'whity.theme';
  * in exactly one place conceptually (duplicated verbatim into the script
  * string since it must run standalone, before any React/bundle code).
  */
-const BLOCKING_SCRIPT = `(function(){try{var k=${JSON.stringify(STORAGE_KEY)};var s=localStorage.getItem(k);var d=s==='dark'||(s!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
+const BLOCKING_SCRIPT = buildThemeInitScript();
 
 /**
  * Renders the blocking anti-FOUC script. MUST be placed as early as possible
@@ -70,7 +81,7 @@ export function ThemeModeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const p = Promise.resolve().then(() => {
       const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-      if (stored === 'light' || stored === 'dark' || stored === 'system') {
+      if (isThemeModePreference(stored)) {
         setPreferenceState(stored);
       }
       setResolved(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
@@ -82,7 +93,7 @@ export function ThemeModeProvider({ children }: { children: React.ReactNode }) {
   // while 'system' is active.
   useEffect(() => {
     const apply = () => {
-      const dark = preference === 'dark' || (preference === 'system' && systemPrefersDark());
+      const dark = resolveIsDark(preference, systemPrefersDark());
       document.documentElement.classList.toggle('dark', dark);
       setResolved(dark ? 'dark' : 'light');
     };
@@ -105,7 +116,7 @@ export function ThemeModeProvider({ children }: { children: React.ReactNode }) {
 
   const toggle = useCallback(() => {
     setPreferenceState((prev) => {
-      const currentlyDark = prev === 'dark' || (prev === 'system' && systemPrefersDark());
+      const currentlyDark = resolveIsDark(prev, systemPrefersDark());
       const next: ThemeModePreference = currentlyDark ? 'light' : 'dark';
       try {
         localStorage.setItem(STORAGE_KEY, next);

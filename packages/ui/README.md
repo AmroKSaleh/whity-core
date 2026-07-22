@@ -47,17 +47,61 @@ instead:
 
 ```css
 @import "tailwindcss";
-@import "@amroksaleh/tokens/css";
+@import "@amroksaleh/tokens/css";       /* colors + typography theme */
+@import "@amroksaleh/tokens/base.css";  /* shadcn/Tailwind base-reset layer */
+@import "@amroksaleh/tokens/fonts.css"; /* self-hosted Noto Sans, Noto Sans Arabic, Geist Mono */
 ```
 
 ```ts
 import tokens from "@amroksaleh/tokens"; // tokens.json
 ```
 
-Flutter clients use the same source of truth via a git dependency —
-see `flutter/whity_tokens/README.md` in this repo.
+`./css` gives you the color/typography custom properties and the Tailwind v4
+`@theme inline` mapping. `./base.css` is the same border/ring reset,
+`body` background/foreground, and default font that `web/app/globals.css`
+and this package's own `src/globals.css` used to hand-duplicate — import it
+once instead of re-typing that `@layer base` block per client. `./fonts.css`
+declares `@font-face` rules for the three type families `--font-sans` /
+`--font-mono` reference, backed by the woff2 binaries in this package's
+`fonts/` directory (OFL-licensed, see `fonts/LICENSE-*.txt`) — no network
+fetch, no Next.js font-loader dependency. A Next.js app can skip `fonts.css`
+and keep using `next/font` (as `web/` does) since it gets equivalent
+self-hosting plus build-time optimization for free; `fonts.css` exists for
+every client that doesn't have that pipeline (Tauri, plain Vite, Storybook).
+
+Flutter clients use the same color/typography source of truth via a git
+dependency — see `flutter/whity_tokens/README.md` in this repo. Font
+*binaries* aren't bundled there yet; a Flutter app should declare its own
+font assets in `pubspec.yaml` (family names must match
+`typography.fontFamilyDart` in `src/design/tokens/base.json`: `Noto Sans`,
+`Noto Sans Arabic`, `Geist Mono`).
 
 All three (`@amroksaleh/ui`, `@amroksaleh/tokens`, `flutter/whity_tokens`) are
 generated from the same single source of truth,
 `src/design/tokens/base.json` — run `npm run tokens:generate` (from `web/`)
 after changing it to regenerate every target.
+
+### Theme mode (light/dark/system) contract
+
+Every client should implement light/dark switching the same way so a toggle
+built in one client looks and behaves identically in another:
+
+- **Strategy**: apply/remove a `.dark` class on the root element (`<html>` on
+  web) — the exact selector `@custom-variant dark (&:is(.dark *));` (in
+  `@amroksaleh/tokens/css`) and every `.dark { ... }` token block target. No
+  class means light mode.
+- **Persistence key**: `whity.theme`, storing the raw preference —
+  `'light' | 'dark' | 'system'`, not the resolved value.
+- **Default**: `'system'` when nothing is stored yet, resolved against the
+  OS/platform light-dark setting.
+- **FOUC**: apply the class before first paint. On web this is a small
+  blocking inline `<script>` in `<head>`, before any stylesheet.
+
+`src/theme-mode.ts` (exported as `@amroksaleh/ui/theme-mode`, also available
+via the shadcn registry as `@whity/theme-mode`) is the framework-agnostic
+(no React) half of this contract — the storage key constant, the
+`resolveIsDark()` resolution rule, and `buildThemeInitScript()` for the
+anti-FOUC script source. `web/lib/theme-mode-context.tsx` is the React
+provider built on top of it. A non-JS client (Flutter) can't import this file
+directly but should replicate the same key, values, and resolution rule by
+hand.

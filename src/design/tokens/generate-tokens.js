@@ -14,8 +14,10 @@
  *   - generated/tokens.dart   (Flutter Material 3 constants — see flutter/whity_tokens
  *                              for the actual Dart package target, ../../../flutter/whity_tokens/lib/src/generated/tokens.dart)
  *   - ../../../web/app/globals.css  (CSS custom properties, synced between sentinel markers)
- *   - ../../../packages/tokens/generated/{tokens.json,theme.css}  (@amroksaleh/tokens —
- *     standalone, Next-independent JSON + Tailwind v4 theme CSS for non-Next clients)
+ *   - ../../../packages/tokens/generated/{tokens.json,theme.css,base.css,fonts.css}
+ *     (@amroksaleh/tokens — standalone, Next-independent JSON + Tailwind v4
+ *     theme CSS, shadcn base/reset layer, and self-hosted @font-face CSS for
+ *     non-Next clients; see packages/tokens/fonts/ for the font binaries)
  *
  * Determinism: output is a pure function of base.json (no timestamps), so
  * regenerating without source changes produces byte-identical files.
@@ -27,7 +29,7 @@
  *     dart          - regenerate generated/tokens.dart (+ the Flutter package copy)
  *     web           - sync web/app/globals.css
  *     theme         - regenerate generated/theme.json
- *     tokensPackage - regenerate packages/tokens/generated/{tokens.json,theme.css}
+ *     tokensPackage - regenerate packages/tokens/generated/{tokens.json,theme.css,base.css,fonts.css}
  *     check         - regenerate in-memory and fail (exit 1) if any target is stale
  */
 
@@ -493,6 +495,88 @@ function generateTokensPackageCss(base) {
 }
 
 /**
+ * Self-hosted @font-face declarations for the three type families base.json
+ * ships (Noto Sans, Noto Sans Arabic, Geist Mono) at weights 400/500/600/700
+ * — matches typography.fontWeight.{normal,medium,semibold,bold}. Binaries
+ * live alongside this file in packages/tokens/fonts/ (sourced from
+ * @fontsource/noto-sans, @fontsource/noto-sans-arabic and geist — see that
+ * directory's LICENSE-*.txt files, all OFL). Woff2-only: every browser Whity
+ * supports handles it, and it's the smallest transfer.
+ */
+const FONT_FACES = [
+  { family: 'Noto Sans', fileStem: 'noto-sans-latin', unicodeRange: undefined },
+  { family: 'Noto Sans Arabic', fileStem: 'noto-sans-arabic', unicodeRange: undefined },
+  { family: 'Geist Mono', fileStem: 'geist-mono', unicodeRange: undefined },
+];
+const FONT_WEIGHTS = [400, 500, 600, 700];
+
+function generateFontsCss() {
+  const lines = [];
+  lines.push('/**');
+  lines.push(' * Self-hosted @font-face declarations for @amroksaleh/tokens.');
+  lines.push(' * Do not edit manually - run: npm run tokens:generate');
+  lines.push(' *');
+  lines.push(' * Binaries live in ../fonts (relative to this file once published —');
+  lines.push(' * see package.json "files"). Noto Sans + Noto Sans Arabic + Geist Mono,');
+  lines.push(' * OFL-licensed (packages/tokens/fonts/LICENSE-*.txt). Import this once,');
+  lines.push(' * anywhere before first paint; `--font-sans` / `--font-mono` in');
+  lines.push(' * theme.css already reference these family names.');
+  lines.push(' */');
+  lines.push('');
+  for (const { family, fileStem } of FONT_FACES) {
+    for (const weight of FONT_WEIGHTS) {
+      lines.push('@font-face {');
+      lines.push(`  font-family: '${family}';`);
+      lines.push(`  font-style: normal;`);
+      lines.push(`  font-weight: ${weight};`);
+      lines.push(`  font-display: swap;`);
+      lines.push(`  src: url('../fonts/${fileStem}-${weight}.woff2') format('woff2');`);
+      lines.push('}');
+      lines.push('');
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The shadcn/Tailwind base-reset layer (border/ring reset, body bg/fg,
+ * pointer cursor on buttons, default font) — previously hand-duplicated in
+ * web/app/globals.css and packages/ui/src/globals.css. Deliberately excludes
+ * anything Next.js-specific (no next/font variable composition, no
+ * color-scheme toggling logic — that's the consumer's theme-mode contract,
+ * see docs/theme-mode-contract.md). Assumes theme.css (or an equivalent
+ * :root/.dark token set) is already imported, since it only applies
+ * `@apply border-border outline-ring/50` etc. against those custom properties.
+ */
+function generateBaseCss() {
+  const lines = [];
+  lines.push('/**');
+  lines.push(' * Whity shadcn/Tailwind base-reset layer — standalone, Next-independent.');
+  lines.push(' * Do not edit manually - run: npm run tokens:generate');
+  lines.push(' *');
+  lines.push(' * Import this AFTER `@import "tailwindcss";` and after this package\'s');
+  lines.push(' * `./css` (theme.css) in your own entry CSS.');
+  lines.push(' */');
+  lines.push('');
+  lines.push('@layer base {');
+  lines.push('  * {');
+  lines.push('    @apply border-border outline-ring/50;');
+  lines.push('  }');
+  lines.push('  body {');
+  lines.push('    @apply bg-background text-foreground;');
+  lines.push('  }');
+  lines.push('  button:not(:disabled), [role="button"]:not(:disabled) {');
+  lines.push('    cursor: pointer;');
+  lines.push('  }');
+  lines.push('  html {');
+  lines.push('    @apply font-sans;');
+  lines.push('  }');
+  lines.push('}');
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
  * Build the generated CSS region: :root, .dark, and the typography
  * @theme inline declarations. The static (hand-authored) parts of
  * globals.css live outside the sentinel markers.
@@ -603,6 +687,8 @@ function buildTargets(base, { json = true, dart = true, web = true, theme = true
   if (tokensPackage) {
     targets.push({ path: path.join(TOKENS_PACKAGE_DIR, 'tokens.json'), content: generateTokensJson(base) });
     targets.push({ path: path.join(TOKENS_PACKAGE_DIR, 'theme.css'), content: generateTokensPackageCss(base) });
+    targets.push({ path: path.join(TOKENS_PACKAGE_DIR, 'base.css'), content: generateBaseCss() });
+    targets.push({ path: path.join(TOKENS_PACKAGE_DIR, 'fonts.css'), content: generateFontsCss() });
   }
   return targets;
 }
@@ -701,6 +787,9 @@ module.exports = {
   generateTokensJson,
   generateThemeJson,
   generateDart,
+  generateTokensPackageCss,
+  generateBaseCss,
+  generateFontsCss,
   generateCssRegion,
   syncGlobalsCss,
   buildTargets,
