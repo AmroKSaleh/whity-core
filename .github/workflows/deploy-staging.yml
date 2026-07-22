@@ -69,7 +69,7 @@ jobs:
       (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Resolve image reference
         id: image
@@ -84,7 +84,7 @@ jobs:
           echo "Deploying image: ${name}:${tag}"
 
       - name: Copy compose file to the host
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.STAGING_SSH_HOST }}
           username: ${{ secrets.STAGING_SSH_USER }}
@@ -94,7 +94,7 @@ jobs:
           target: ${{ secrets.STAGING_DEPLOY_DIR || '/opt/whity-staging' }}
 
       - name: Deploy over SSH (pull -> up -> migrate -> health)
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           STAGING_ENV: ${{ secrets.STAGING_ENV }}
