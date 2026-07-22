@@ -34,6 +34,7 @@
     "./switch": "./src/switch.tsx",
     "./table": "./src/table.tsx",
     "./tabs": "./src/tabs.tsx",
+    "./tag-input": "./src/tag-input.tsx",
     "./textarea": "./src/textarea.tsx",
     "./tooltip": "./src/tooltip.tsx",
     "./utils": "./src/utils.ts",
