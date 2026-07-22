@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -99,7 +99,7 @@ jobs:
 
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -160,7 +160,7 @@ jobs:
 
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -222,7 +222,7 @@ jobs:
 
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -451,7 +451,7 @@ jobs:
 
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Create release with generated notes
         env:
