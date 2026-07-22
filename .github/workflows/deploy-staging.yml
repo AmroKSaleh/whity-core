@@ -84,7 +84,7 @@ jobs:
           echo "Deploying image: ${name}:${tag}"
 
       - name: Copy compose file to the host
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.STAGING_SSH_HOST }}
           username: ${{ secrets.STAGING_SSH_USER }}
