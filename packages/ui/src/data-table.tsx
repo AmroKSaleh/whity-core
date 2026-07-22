@@ -316,7 +316,9 @@ export function DataTable<TData>({
         <EmptyState title="No data available" {...emptyState} />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
-          <Table style={{ width: table.getCenterTotalSize() }}>
+          <Table
+            style={enableColumnResizing ? { width: table.getCenterTotalSize() } : undefined}
+          >
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
