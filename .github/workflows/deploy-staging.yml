@@ -94,7 +94,7 @@ jobs:
           target: ${{ secrets.STAGING_DEPLOY_DIR || '/opt/whity-staging' }}
 
       - name: Deploy over SSH (pull -> up -> migrate -> health)
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           STAGING_ENV: ${{ secrets.STAGING_ENV }}
