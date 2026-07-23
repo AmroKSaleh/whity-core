@@ -212,6 +212,35 @@
           "target": "components/admin/stats-chart.tsx"
         }
       ]
+    },
+    {
+      "name": "theme-mode",
+      "type": "registry:lib",
+      "title": "Theme Mode Contract",
+      "description": "Framework-agnostic light/dark/system contract (.dark class, storage key, FOUC init script) shared across clients.",
+      "files": [{ "path": "../packages/ui/src/theme-mode.ts", "type": "registry:lib" }]
+    },
+    {
+      "name": "app-sidebar",
+      "type": "registry:ui",
+      "title": "App Sidebar",
+      "description": "Presentational app-shell sidebar: collapsible desktop rail + mobile slide-over, driven by a plain nav-groups data prop (no data fetching, no hardcoded items).",
+      "dependencies": ["@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/app-sidebar.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "page-header",
+      "type": "registry:ui",
+      "title": "Page Header",
+      "description": "Presentational page header with title, description, breadcrumb and action slots.",
+      "files": [{ "path": "../packages/ui/src/page-header.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "page-shell",
+      "type": "registry:ui",
+      "title": "Page Shell",
+      "description": "Presentational application-frame layout: sidebar + optional top bar + scrollable content region.",
+      "files": [{ "path": "../packages/ui/src/page-shell.tsx", "type": "registry:ui" }]
     }
   ]
 }

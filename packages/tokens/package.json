@@ -1,14 +1,18 @@
 {
   "name": "@amroksaleh/tokens",
   "version": "0.1.0",
-  "description": "Design tokens (colors, typography, spacing, radius) for Whity products — generated from src/design/tokens/base.json. No React/Next dependency: a plain JSON bundle plus a standalone importable Tailwind v4 theme CSS file.",
+  "description": "Design tokens (colors, typography, spacing, radius) for Whity products — generated from src/design/tokens/base.json. No React/Next dependency: a plain JSON bundle plus standalone importable Tailwind v4 theme CSS, a shadcn/Tailwind base-reset layer, and self-hosted @font-face CSS.",
   "license": "UNLICENSED",
   "exports": {
     ".": "./generated/tokens.json",
-    "./css": "./generated/theme.css"
+    "./css": "./generated/theme.css",
+    "./base.css": "./generated/base.css",
+    "./fonts.css": "./generated/fonts.css",
+    "./fonts/*": "./fonts/*"
   },
   "files": [
-    "generated"
+    "generated",
+    "fonts"
   ],
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"

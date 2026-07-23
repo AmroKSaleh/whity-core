@@ -1,0 +1,22 @@
+/**
+ * Whity shadcn/Tailwind base-reset layer — standalone, Next-independent.
+ * Do not edit manually - run: npm run tokens:generate
+ *
+ * Import this AFTER `@import "tailwindcss";` and after this package's
+ * `./css` (theme.css) in your own entry CSS.
+ */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+}

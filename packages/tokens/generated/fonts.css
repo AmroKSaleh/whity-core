@@ -1,0 +1,106 @@
+/**
+ * Self-hosted @font-face declarations for @amroksaleh/tokens.
+ * Do not edit manually - run: npm run tokens:generate
+ *
+ * Binaries live in ../fonts (relative to this file once published —
+ * see package.json "files"). Noto Sans + Noto Sans Arabic + Geist Mono,
+ * OFL-licensed (packages/tokens/fonts/LICENSE-*.txt). Import this once,
+ * anywhere before first paint; `--font-sans` / `--font-mono` in
+ * theme.css already reference these family names.
+ */
+
+@font-face {
+  font-family: 'Noto Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/noto-sans-latin-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/noto-sans-latin-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/noto-sans-latin-600.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/noto-sans-latin-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans Arabic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/noto-sans-arabic-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans Arabic';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/noto-sans-arabic-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans Arabic';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/noto-sans-arabic-600.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Noto Sans Arabic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/noto-sans-arabic-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/geist-mono-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('../fonts/geist-mono-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/geist-mono-600.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/geist-mono-700.woff2') format('woff2');
+}

@@ -1,31 +1,18 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-/* The @theme inline mapping + :root/.dark token values below used to be
-   hand-maintained here in parity with web/app/globals.css's generated region
-   — now sourced from @amroksaleh/tokens (generated from the same base.json,
-   see src/design/tokens/generate-tokens.js's `tokensPackage` target) so there
-   is exactly one place tokens are authored, not two kept in sync by hand. */
+/* The @theme inline mapping + :root/.dark token values, the base-reset layer,
+   and the fonts below used to be hand-maintained here in parity with
+   web/app/globals.css's generated region + its own font-face rules — now all
+   sourced from @amroksaleh/tokens (generated from the same base.json, see
+   src/design/tokens/generate-tokens.js's `tokensPackage` target) so there is
+   exactly one place tokens/base-layer/fonts are authored, not several kept in
+   sync by hand. Storybook has no next/font pipeline (that's Next.js-only, see
+   web/app/layout.tsx), so it uses the package's self-hosted @font-face fonts
+   directly instead of a Google Fonts CDN import. */
 @import "@amroksaleh/tokens/css";
-/* Storybook has no next/font pipeline (that's Next.js-only, see web/app/layout.tsx),
-   so the package's own preview loads Noto Sans + Noto Sans Arabic directly. */
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&display=swap");
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-  button:not(:disabled), [role="button"]:not(:disabled) {
-    cursor: pointer;
-  }
-  html {
-    --font-sans: "Noto Sans", "Noto Sans Arabic", ui-sans-serif, system-ui, sans-serif;
-    @apply font-sans;
-  }
-}
+@import "@amroksaleh/tokens/base.css";
+@import "@amroksaleh/tokens/fonts.css";
 
 /* katex dark-mode overrides */
 .dark .katex { color: var(--foreground); }
