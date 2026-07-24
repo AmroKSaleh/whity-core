@@ -1,0 +1,29 @@
+{
+  "name": "spa-harness",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Minimal Vite + Tailwind v4 SPA proving @amroksaleh/ui and @amroksaleh/features render outside Next.js — no next/* anywhere in this app. Not published.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@amroksaleh/features": "file:../features",
+    "@amroksaleh/tokens": "file:../tokens",
+    "@amroksaleh/ui": "file:../ui",
+    "@tabler/icons-react": "^3.45.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vite": "^8"
+  }
+}
