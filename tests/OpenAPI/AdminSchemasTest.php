@@ -56,6 +56,9 @@ final class AdminSchemasTest extends TestCase
         // snapshot regenerates from — matching `generate:openapi`, which loads
         // every plugin under plugins/.
         self::copyDirectory($source . '/UiKitShowcase', self::$referencePluginsDir . '/UiKitShowcase');
+        // DemoCatalog is likewise a committed reference plugin (the multi-client
+        // feature-extraction pilot, see packages/features) — same reasoning.
+        self::copyDirectory($source . '/DemoCatalog', self::$referencePluginsDir . '/DemoCatalog');
     }
 
     public static function tearDownAfterClass(): void
