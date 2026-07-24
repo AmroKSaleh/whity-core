@@ -22,7 +22,9 @@
     "paths": {
       "@/*": ["./*"],
       "@amroksaleh/ui": ["../packages/ui/src/index.ts"],
-      "@amroksaleh/ui/*": ["../packages/ui/src/*"]
+      "@amroksaleh/ui/*": ["../packages/ui/src/*"],
+      "@amroksaleh/features": ["../packages/features/src/index.ts"],
+      "@amroksaleh/features/*": ["../packages/features/src/*"]
     }
   },
   "include": [
