@@ -1,0 +1,33 @@
+{
+  "name": "@amroksaleh/features",
+  "version": "0.1.0",
+  "description": "Client-safe, data-source-agnostic feature UI extracted from web/ — reusable by non-Next clients (Tauri/Vite SPA, Flutter). Formalizes the app-shell nav contract and the adapter-injection pattern feature pages follow.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./nav": "./src/nav/index.ts",
+    "./demo-catalog": "./src/demo-catalog/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "react": ">=19",
+    "react-dom": ">=19"
+  },
+  "dependencies": {
+    "@amroksaleh/ui": "^0.3.1",
+    "@tabler/icons-react": ">=3"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "^5"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

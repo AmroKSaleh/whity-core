@@ -5,7 +5,8 @@
   "description": "Whity monorepo — JS workspaces for the web app and shared UI library.",
   "workspaces": [
     "web",
-    "packages/*"
+    "packages/*",
+    "templates/*"
   ],
   "scripts": {
     "changeset": "changeset",

@@ -67,6 +67,11 @@ final class OpenApiSpecDriftTest extends TestCase
         // of plugins/ includes it and `generate:openapi` bakes its routes into
         // the committed spec. It therefore belongs in this baseline set.
         self::copyDirectory($source . '/UiKitShowcase', self::$referencePluginsDir . '/UiKitShowcase');
+        // DemoCatalog is likewise a COMMITTED reference plugin (the multi-client
+        // feature-extraction pilot, see packages/features) — added to
+        // plugins/.gitignore's allowlist alongside HelloWorld/UiKitShowcase, so
+        // a clean CI checkout includes it too.
+        self::copyDirectory($source . '/DemoCatalog', self::$referencePluginsDir . '/DemoCatalog');
     }
 
     public static function tearDownAfterClass(): void

@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+/* Tailwind v4's automatic content detection excludes node_modules, but our
+   actual component source lives in sibling workspace packages resolved
+   through it (npm workspaces symlinks) — register them explicitly so their
+   classes aren't purged. */
+@source "../../ui/src/**/*.{ts,tsx}";
+@source "../../features/src/**/*.{ts,tsx}";
+
+/* Same three-import recipe packages/ui/src/globals.css uses — tokens/base
+   layer/fonts sourced from @amroksaleh/tokens, not hand-duplicated here. */
+@import "@amroksaleh/tokens/css";
+@import "@amroksaleh/tokens/base.css";
+@import "@amroksaleh/tokens/fonts.css";
