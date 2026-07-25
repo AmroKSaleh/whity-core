@@ -94,6 +94,8 @@ final class CoreApiSchemas
             self::brandingRoutes(),
             self::themeRoutes(),
             self::identityRoutes(),
+            self::meEmailsRoutes(),
+            self::tenantEmailDomainRoutes(),
             self::tenantEntitlementRoutes(),
             self::tenantStorageRoutes(),
             self::planRoutes(),
@@ -1727,6 +1729,49 @@ final class CoreApiSchemas
             ], ['id', 'provider_key', 'linked_at']),
             'MeIdentityListResponse' => self::listEnvelope('MeIdentity'),
 
+            // One of the caller's own email addresses (WC-54fb5c37).
+            'MeEmail' => self::object([
+                'id' => self::int(),
+                'email' => self::str(),
+                'verified' => self::bool(),
+                'isPrimary' => self::bool(),
+                'createdAt' => self::str(),
+            ], ['id', 'email', 'verified', 'isPrimary', 'createdAt']),
+            'MeEmailListResponse' => self::listEnvelope('MeEmail'),
+            'MeEmailResponse' => self::dataEnvelope(SchemaBuilder::ref('MeEmail')),
+            'MeEmailAddRequest' => self::object([
+                'email' => self::str(),
+            ], ['email']),
+
+            // Tenant email-domain policy admin surface (WC-9b87 / WC-628738f5).
+            'DomainVerificationChallenge' => self::object([
+                'record_name' => self::str(),
+                'record_type' => self::str(),
+                'record_value' => self::str(),
+            ], ['record_name', 'record_type', 'record_value']),
+            'TenantEmailDomain' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'domain' => self::str(),
+                'default_role_id' => self::int(),
+                'auto_provision' => self::bool(),
+                'verified_at' => self::str(true),
+                'is_verified' => self::bool(),
+                'created_at' => self::str(),
+                'verification' => SchemaBuilder::ref('DomainVerificationChallenge'),
+            ], ['id', 'tenant_id', 'domain', 'default_role_id', 'auto_provision', 'is_verified', 'created_at']),
+            'TenantEmailDomainListResponse' => self::listEnvelope('TenantEmailDomain'),
+            'TenantEmailDomainResponse' => self::dataEnvelope(SchemaBuilder::ref('TenantEmailDomain')),
+            'TenantEmailDomainVerifyPendingResponse' => self::object([
+                'error' => self::str(),
+                'verification' => SchemaBuilder::ref('DomainVerificationChallenge'),
+            ], ['error', 'verification']),
+            'TenantEmailDomainCreateRequest' => self::object([
+                'domain' => self::str(),
+                'default_role_id' => self::int(),
+                'auto_provision' => self::bool(),
+            ], ['domain', 'default_role_id']),
+
             // ── Operator per-tenant entitlements (WC-ent) ─────────────────────
             // One catalogue entry: how to render + interpret an entitlement.
             'EntitlementCatalogueEntry' => self::object([
@@ -2573,6 +2618,182 @@ final class CoreApiSchemas
             $ssoProviders,
             $meIdentitiesList,
             $meIdentitiesUnlink,
+        ];
+    }
+
+    /**
+     * Authenticated self-service multi-email management (WC-54fb5c37): the
+     * caller lists, adds, resends verification for, promotes, and removes
+     * their own email addresses. Cookie-authenticated by the handler — no
+     * requiredRole/requiredPermission, same pattern as identityRoutes()'s
+     * /api/me/identities surface.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function meEmailsRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/me/emails',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the caller\'s email addresses',
+                    'tags' => ['me'],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s email addresses', 'MeEmailListResponse'),
+                        401 => self::errorResponse('Authentication required'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/emails',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Add a new (unverified) email address for the caller',
+                    'tags' => ['me'],
+                    'request' => 'MeEmailAddRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('The newly added address', 'MeEmailResponse'),
+                        401 => self::errorResponse('Authentication required'),
+                        409 => self::errorResponse('This email address is already registered'),
+                        422 => self::errorResponse('Invalid address, or the maximum number of addresses was reached'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/emails/{id:\d+}/resend-verification',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Resend the verification link for one of the caller\'s addresses',
+                    'tags' => ['me'],
+                    'responses' => [
+                        202 => ['description' => 'Verification email sent'],
+                        400 => self::errorResponse('This email address is already verified'),
+                        401 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('Email address not found'),
+                        429 => self::errorResponse('Too many resend requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/emails/{id:\d+}/set-primary',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Promote one of the caller\'s verified addresses to primary',
+                    'tags' => ['me'],
+                    'responses' => [
+                        200 => self::jsonResponse('The now-primary address', 'MeEmailResponse'),
+                        400 => self::errorResponse('The address must be verified before it can be made primary'),
+                        401 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('Email address not found'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/me/emails/{id:\d+}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Remove one of the caller\'s email addresses',
+                    'tags' => ['me'],
+                    'responses' => [
+                        204 => ['description' => 'Email address removed'],
+                        401 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('Email address not found'),
+                        409 => self::errorResponse('Cannot remove the only or the primary email address'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Tenant email-domain policy admin routes (WC-9b87 / WC-628738f5): manage
+     * which email domains auto-provision/auto-accept memberships into this
+     * tenant. Gated on the `admin` ROLE (requiredRole, not a permission — see
+     * the router.register calls in public/index.php) and tenant-scoped via
+     * TenantContext, so a tenant can only manage its own domain registrations.
+     *
+     * A registered domain never auto-provisions until the tenant proves
+     * ownership via the DNS TXT challenge (POST .../verify) — this closes the
+     * cross-tenant domain-harvesting hole.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tenantEmailDomainRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/email-domains',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the tenant\'s registered email-domain policies',
+                    'tags' => ['email-domains'],
+                    'responses' => [
+                        200 => self::jsonResponse('The tenant\'s domain registrations', 'TenantEmailDomainListResponse'),
+                        400 => self::errorResponse('Tenant context is required'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/email-domains',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Register a new email domain for the tenant',
+                    'tags' => ['email-domains'],
+                    'request' => 'TenantEmailDomainCreateRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('The newly registered (unverified) domain', 'TenantEmailDomainResponse'),
+                        400 => self::errorResponse('Tenant context is required'),
+                        409 => self::errorResponse('This domain is already registered for your tenant'),
+                        422 => self::errorResponse('Invalid domain or missing default_role_id'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/email-domains/{id:\d+}/verify',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Check the DNS TXT challenge and mark the domain verified',
+                    'tags' => ['email-domains'],
+                    'responses' => [
+                        200 => self::jsonResponse('The domain (verified, or still-pending with challenge instructions)', 'TenantEmailDomainResponse'),
+                        400 => self::errorResponse('Tenant context is required or invalid id'),
+                        404 => self::errorResponse('Domain registration not found'),
+                        422 => self::jsonResponse('Ownership not yet verified — publish the returned TXT record and retry', 'TenantEmailDomainVerifyPendingResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/email-domains/{id:\d+}',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Remove a tenant email-domain registration',
+                    'tags' => ['email-domains'],
+                    'responses' => [
+                        204 => ['description' => 'Domain registration deleted'],
+                        400 => self::errorResponse('Tenant context is required or invalid id'),
+                        404 => self::errorResponse('Domain registration not found'),
+                    ] + self::authErrors(),
+                ],
+            ],
         ];
     }
 
