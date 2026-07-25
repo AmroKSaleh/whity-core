@@ -11,6 +11,13 @@ use tauri::State;
 
 /// Shared, mutex-guarded connection handle managed by Tauri (see lib.rs's
 /// `.manage(...)` call) and injected into every command via `State<'_, Db>`.
+///
+/// SCALING NOTE: a single `Mutex<Connection>` serializes every read AND write
+/// through one lock — fine at this demo's scale, but the first thing to
+/// revisit if your app's local dataset grows past "a few tables, occasional
+/// writes": switch the connection to WAL mode
+/// (`PRAGMA journal_mode=WAL`) and move to a small connection pool (e.g.
+/// `r2d2_sqlite`) so readers stop blocking on writers.
 pub struct Db(pub Mutex<Connection>);
 
 /// Mirrors `DemoCatalogItem` in packages/features/src/demo-catalog/types.ts
@@ -29,6 +36,12 @@ pub struct DemoCatalogItem {
 
 /// Mirrors `DemoCatalogItemInput` — what `save()` sends: `id` present means
 /// "update this row", absent means "create".
+///
+/// NO RECONCILIATION/VERSIONING STORY: `save_item` last-writer-wins with no
+/// version/etag check against `updated_at`. Fine for this single-device demo
+/// (nothing else can be writing to this local SQLite file concurrently), but
+/// if you build this into a real MULTI-DEVICE offline-sync feature, you must
+/// design conflict resolution yourself — this pattern does not provide it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DemoCatalogItemInput {

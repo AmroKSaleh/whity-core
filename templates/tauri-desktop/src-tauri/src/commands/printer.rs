@@ -9,6 +9,16 @@
 //!   2. Write a `#[tauri::command] fn your_command(...) -> Result<T, String>`.
 //!   3. Register it in lib.rs's `tauri::generate_handler![...]` list.
 //!   4. Call it from the frontend via `invoke("your_command", { ... })`.
+//!
+//! LIMITATION (deliberate, for this demo): this only demonstrates "print raw
+//! bytes at the printer's default settings" — no paper size, DPI, or
+//! orientation control, because the `printers` crate's cross-platform
+//! abstraction doesn't expose those controls. If your app needs precise
+//! physical output (e.g. forms or labels at exact dimensions), don't reach
+//! for a higher-level abstraction crate at all — go straight to the
+//! platform's own print API instead: Windows GDI/Print Spooler, macOS Core
+//! Graphics, Linux CUPS raw mode. Each of those is its own
+//! `#[tauri::command]`, following the same 4-step recipe above.
 
 use printers::common::base::job::PrinterJobOptions;
 use printers::get_default_printer;

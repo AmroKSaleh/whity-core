@@ -31,4 +31,11 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # The worked "add a crate for custom functionality" example (see
 # src/commands/printer.rs): cross-platform printer discovery + printing,
 # demonstrating the extension pattern with a real capability the web can't do.
-printers = "2"
+#
+# Pinned to ~2.3 (not a bare "2") rather than trusting semver here: this
+# template's own verification already caught two breaking API changes within
+# this crate's 2.x line (PrinterJobOptions's shape, PrintersError not
+# implementing Display) before this pin was added — an unpinned major-only
+# constraint would let a future `cargo update` reintroduce a similar break
+# silently.
+printers = "~2.3"

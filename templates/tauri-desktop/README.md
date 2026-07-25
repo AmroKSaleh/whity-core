@@ -72,6 +72,22 @@ themselves. When you build your own feature, follow this same shape: define
 a small adapter interface, implement the presentational components against
 it, and give each client (web/desktop/mobile) its own implementation.
 
+**No reconciliation/versioning story**: `save_item` is last-writer-wins with
+no version check — fine for this single-device demo, but if you're building
+a real multi-device offline-sync feature you need to design conflict
+resolution yourself (see the note on `DemoCatalogItemInput` in
+`src-tauri/src/commands/items.rs`).
+
+**Alternative to hand-rolled commands**: this template writes one Rust
+command per operation (`list_items`/`get_item`/`save_item`) for compile-time
+type safety end to end. If your app has many entities and you'd rather trade
+that safety for less boilerplate,
+[`tauri-plugin-sql`](https://github.com/tauri-apps/tauri-plugin-sql) (the
+official community SQL plugin) lets the frontend execute SQL directly against
+a managed connection without a dedicated command per query. Either is valid —
+if you're already using `tauri-plugin-sql` elsewhere, there's no need to
+migrate to match this template.
+
 ## Adding your own native capability (the printer recipe)
 
 The printer command follows a four-step recipe — repeat it for any capability
@@ -140,3 +156,24 @@ system dependencies installed (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `libayatana-appindicator3-dev`, `librsvg2-dev`, `libssl-dev`,
 `libsqlite3-dev`, `libcups2-dev`, `pkg-config`) — not just written by hand.
 The frontend was verified with `tsc --noEmit` and a real `vite build`.
+
+### Known gaps — not yet verified
+
+- **Windows.** Not yet built/run natively. Printing especially is the most
+  OS-divergent capability here (Print Spooler vs. CUPS vs. Core Graphics) —
+  don't assume the Linux verification above generalizes. Building natively
+  requires the MSVC C++ build tools (`Microsoft.VisualStudio.2022.BuildTools`
+  with the `Microsoft.VisualStudio.Workload.VCTools` component), which need
+  an elevated (Administrator) install — that blocked an attempt to verify
+  this from an unattended session. Whoever picks this up next: install Rust
+  (`rustup`) + the VS Build Tools workload above, then
+  `cd templates/tauri-desktop && npm install && npm run tauri build`, and
+  specifically exercise the printer command against a real Windows printer
+  (or "Microsoft Print to PDF").
+- **macOS.** Deliberately deferred, not attempted at all yet — a distinct
+  follow-up stage, not scheduled as part of this pass.
+- **Packaging size / startup time.** Not measured on any platform — depends
+  on the platform builds above existing first. Once a real `tauri build`
+  output exists (Windows installer, macOS `.app`/`.dmg`, or the Linux
+  AppImage/deb), report actual installer size and cold-start time here rather
+  than leaving each downstream consumer to measure it independently.
