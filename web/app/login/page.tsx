@@ -12,6 +12,7 @@ import { Input } from '@amroksaleh/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { SsoLoginButtons } from '@/components/sso-login-buttons';
+import { TwoFactorSetupWizard } from '@/components/TwoFactorSettings';
 
 /**
  * Friendly, non-enumerating messages for the SSO return markers the backend
@@ -75,6 +76,14 @@ export default function LoginPage() {
   const [twoFactorLoading, setTwoFactorLoading] = useState(false);
   const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
   const [backupCodeMode, setBackupCodeMode] = useState(false);
+  // Mandatory-2FA enrollment (WC-525): distinct from requires2fa above. The
+  // backend returns this instead when the caller has NOT enrolled a device
+  // and an admin-enforced policy's grace period has already expired — there
+  // is no existing code to challenge, so it hands back a narrowly-scoped
+  // enrollment_token (see TokenValidator::validateTwoFactorEnrollmentToken)
+  // that lets TwoFactorSetupWizard call setup()/confirm() without a session.
+  const [requiresEnrollment, setRequiresEnrollment] = useState(false);
+  const [enrollmentToken, setEnrollmentToken] = useState<string | null>(null);
   // Multi-membership tenant selection (ADR 0005 §6): when login resolves to a
   // profile with 2+ active memberships, the backend returns
   // { requires_tenant_selection: true, memberships: [...] } WITHOUT minting a
@@ -166,15 +175,35 @@ export default function LoginPage() {
       });
 
       if (response.status === 202) {
-        // 2FA required
-        setRequires2fa(true);
-        setEmail('');
-        setPassword('');
-        setFieldErrors({});
-        // Focus on 2FA input after render
-        setTimeout(() => {
-          twoFactorInputRef.current?.focus();
-        }, 0);
+        // try/catch, NOT `.json().catch()`: some 202 mocks in tests (and a
+        // body-less real 202) have no `.json` method at all, which throws
+        // SYNCHRONOUSLY when called — a `.catch()` chained onto that call
+        // never runs since the call itself never returns a promise.
+        let data: { requires_2fa_enrollment?: boolean; enrollment_token?: string } = {};
+        try {
+          data = await response.json();
+        } catch {
+          data = {};
+        }
+        if (data.requires_2fa_enrollment) {
+          // Mandatory 2FA, never enrolled, grace period expired: there is no
+          // code to enter — the user must set up an authenticator now.
+          setRequiresEnrollment(true);
+          setEnrollmentToken(typeof data.enrollment_token === 'string' ? data.enrollment_token : null);
+          setEmail('');
+          setPassword('');
+          setFieldErrors({});
+        } else {
+          // 2FA required
+          setRequires2fa(true);
+          setEmail('');
+          setPassword('');
+          setFieldErrors({});
+          // Focus on 2FA input after render
+          setTimeout(() => {
+            twoFactorInputRef.current?.focus();
+          }, 0);
+        }
       } else if (response.ok) {
         const data = await response.json().catch(() => ({}));
         if (data.requires_tenant_selection && Array.isArray(data.memberships)) {
@@ -305,6 +334,32 @@ export default function LoginPage() {
     }
   };
 
+  const handleEnrollmentComplete = (codes: string[]) => {
+    // Auto-download backup codes, same as the in-settings wizard, since this
+    // is the only time they're ever shown.
+    const text = codes.join('\n');
+    const element = document.createElement('a');
+    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+    element.setAttribute('download', 'whity-backup-codes.txt');
+    element.click();
+
+    // confirm() enables 2FA but does not mint a session (WC-525) — the user
+    // must sign in again, this time completing the normal requires_2fa
+    // challenge with the device they just enrolled.
+    addToast('Two-factor authentication is now set up. Please sign in again with your authenticator code.', 'success');
+    setRequiresEnrollment(false);
+    setEnrollmentToken(null);
+    setTimeout(() => emailInputRef.current?.focus(), 0);
+  };
+
+  const handleEnrollmentCancel = () => {
+    // Backing out doesn't waive the policy — the next login attempt will hit
+    // the same requires_2fa_enrollment response. Just return to the login form.
+    setRequiresEnrollment(false);
+    setEnrollmentToken(null);
+    setTimeout(() => emailInputRef.current?.focus(), 0);
+  };
+
   // On server, always render as enabled to match client hydration
   // After mount, use actual state
   const isFormDisabled = isMounted ? (isSubmitting || isLoading) : false;
@@ -319,16 +374,29 @@ export default function LoginPage() {
           ) : null}
           <CardTitle className="text-2xl">{`Welcome to ${branding.siteName}`}</CardTitle>
           <CardDescription>
-            {requires2fa
-              ? 'Enter your authenticator code'
-              : pendingMemberships
-                ? 'Choose a workspace to continue'
-                : 'Sign in to your account to continue'}
+            {requiresEnrollment
+              ? 'Set up two-factor authentication to continue'
+              : requires2fa
+                ? 'Enter your authenticator code'
+                : pendingMemberships
+                  ? 'Choose a workspace to continue'
+                  : 'Sign in to your account to continue'}
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* MANDATORY 2FA ENROLLMENT (WC-525): the account has no device
+              enrolled and the grace period has already expired, so login
+              cannot be completed without setting one up first. */}
+          {requiresEnrollment && enrollmentToken && (
+            <TwoFactorSetupWizard
+              bearerToken={enrollmentToken}
+              onComplete={handleEnrollmentComplete}
+              onCancel={handleEnrollmentCancel}
+            />
+          )}
+
           {/* LOGIN FORM */}
-          {!requires2fa && !pendingMemberships && (
+          {!requiresEnrollment && !requires2fa && !pendingMemberships && (
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
               {loginError && (

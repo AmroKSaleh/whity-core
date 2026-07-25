@@ -6,6 +6,13 @@ import { AuthProvider } from '@/lib/auth-context';
 import { ToastProvider } from '@/lib/toast-context';
 import { ToastContainer } from '@/components/ui/toast-container';
 
+// jsdom has no TextEncoder; react-qr-code (rendered by the mandatory-2FA
+// enrollment wizard below) needs it to encode the QR payload.
+if (typeof global.TextEncoder === 'undefined') {
+  const { TextEncoder } = require('util');
+  global.TextEncoder = TextEncoder;
+}
+
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
@@ -876,5 +883,61 @@ describe('LoginPage - 2FA Flow', () => {
 
     // ...without firing any "Login failed" error toast.
     expect(screen.queryByText(/Login failed/i)).toBeNull();
+  });
+
+  // WC-525 UX gap: a caller with no enrolled device whose mandatory-2FA grace
+  // period has expired gets requires_2fa_enrollment, NOT requires_2fa — the
+  // login page must show the setup wizard, not an unsatisfiable code prompt.
+  test('test202EnrollmentResponseTriggersSetupWizardNotCodePrompt', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/me
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, status: 401 }); // /api/v1/auth/refresh
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      status: 202,
+      ok: false,
+      json: async () => ({ requires_2fa_enrollment: true, enrollment_token: 'enroll.jwt.token' }),
+    });
+
+    // TwoFactorSetupWizard's own POST /api/v1/auth/2fa/setup (bearerToken path).
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ secret: 'JBSWY3DPEHPK3PXP', qrCodeUrl: 'otpauth://totp/Whity:user?secret=JBSWY3DPEHPK3PXP' }),
+    });
+
+    render(
+      <AuthProvider>
+        <ToastProvider>
+          <LoginPage />
+          <ToastContainer />
+        </ToastProvider>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeTruthy();
+    });
+
+    const emailInput = screen.getByPlaceholderText('Enter your email');
+    const passwordInput = screen.getByPlaceholderText('Enter your password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
+
+    fireEvent.change(emailInput, { target: { value: 'locked-out@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.click(submitButton);
+
+    // The setup wizard appears (QR/secret from /2fa/setup)...
+    await waitFor(() => {
+      expect(screen.getByText(/Enable Two-Factor Authentication/i)).toBeTruthy();
+    });
+    expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeTruthy();
+
+    // ...never the unsatisfiable "enter your existing code" prompt.
+    expect(screen.queryByText(/Enter the 6-digit code from your authenticator app or a backup code/i)).toBeNull();
+
+    // The setup call carried the enrollment token as a Bearer, not a session cookie.
+    const setupCall = (global.fetch as jest.Mock).mock.calls.find(
+      ([url]) => url === '/api/v1/auth/2fa/setup'
+    );
+    expect(setupCall?.[1]?.headers?.Authorization).toBe('Bearer enroll.jwt.token');
   });
 });

@@ -82,7 +82,16 @@ export default function ProtectedLayout({
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    // `fixed inset-0` (not `h-screen`, which is only a same-magnitude
+    // *coincidence* with the viewport, not a binding to it) takes the shell
+    // out of document flow entirely: it always exactly covers the viewport
+    // no matter how tall its content wants to be, so `body` never grows past
+    // one viewport height and the window itself can never scroll. `main`'s
+    // own `overflow-auto` remains the ONLY scroll container — without this,
+    // a tall page (e.g. Settings after WC-fbdc31a2 added the email-addresses
+    // card) grows `body` too, producing a second, outer window scrollbar
+    // that clips the fixed sidebar out of view as you scroll it.
+    <div className="fixed inset-0 flex overflow-hidden bg-background">
         {/* Sidebar - responsive widths handled in component */}
         <Sidebar />
 
