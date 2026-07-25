@@ -63,11 +63,13 @@ final class DemoCatalogGrantMigrationRealEngineTest extends TestCase
 
         (new GrantDemoCatalogPermissionsToAdmin())->up($this->pdo);
 
-        $count = (int) $this->pdo->query(
+        $stmt = $this->pdo->query(
             "SELECT COUNT(*) FROM role_permissions rp
              JOIN roles r ON r.id = rp.role_id
              WHERE r.name = 'admin'"
-        )->fetchColumn();
+        );
+        self::assertNotFalse($stmt);
+        $count = (int) $stmt->fetchColumn();
 
         $this->assertSame(4, $count, 'Two permissions across two admin roles');
     }
@@ -120,9 +122,10 @@ final class DemoCatalogGrantMigrationRealEngineTest extends TestCase
      */
     private function permissionNames(): array
     {
-        $rows = $this->pdo
-            ->query("SELECT name FROM permissions WHERE name LIKE 'demo\_catalog:%' ESCAPE '\\' ORDER BY name")
-            ->fetchAll(PDO::FETCH_COLUMN);
+        $stmt = $this->pdo
+            ->query("SELECT name FROM permissions WHERE name LIKE 'demo\_catalog:%' ESCAPE '\\' ORDER BY name");
+        self::assertNotFalse($stmt);
+        $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
         return array_map('strval', $rows);
     }
