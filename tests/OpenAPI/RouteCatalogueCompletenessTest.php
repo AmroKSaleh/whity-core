@@ -59,12 +59,8 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.
         'GET /api/version',
-        // WC-9b87: tenant email-domain policy admin endpoints — OpenAPI schema
-        // declarations to follow in a separate documentation task.
-        'DELETE /api/email-domains/{id}',
-        'GET /api/email-domains',
-        'POST /api/email-domains',
-        'POST /api/email-domains/{id}/verify', // WC-628738f5: DNS-TXT ownership verification; OpenAPI to follow
+        // WC-9b87 / WC-628738f5: tenant email-domain policy admin endpoints are now
+        // declared in CoreApiSchemas::tenantEmailDomainRoutes().
         // WC-e6287 / WC-f3b17bd2: identity-provider admin CRUD, the public
         // enabled-providers list, and connected-accounts management are now
         // declared in CoreApiSchemas::identityRoutes().
