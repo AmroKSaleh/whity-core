@@ -50,21 +50,20 @@ final class DemoCatalogPluginTest extends TestCase
 
         // Reads gated on demo_catalog:view, writes on demo_catalog:manage — a
         // :view permission never gates a write and vice versa.
-        $this->assertSame('demo_catalog:view', $byKey['GET /api/demo-catalog/items']['requiredPermission']);
-        $this->assertSame('demo_catalog:view', $byKey['GET /api/demo-catalog/items/{id:\d+}']['requiredPermission']);
-        $this->assertSame('demo_catalog:manage', $byKey['POST /api/demo-catalog/items']['requiredPermission']);
-        $this->assertSame('demo_catalog:manage', $byKey['PATCH /api/demo-catalog/items/{id:\d+}']['requiredPermission']);
+        $this->assertSame('demo_catalog:view', $byKey['GET /api/demo-catalog/items']['requiredPermission'] ?? null);
+        $this->assertSame('demo_catalog:view', $byKey['GET /api/demo-catalog/items/{id:\d+}']['requiredPermission'] ?? null);
+        $this->assertSame('demo_catalog:manage', $byKey['POST /api/demo-catalog/items']['requiredPermission'] ?? null);
+        $this->assertSame('demo_catalog:manage', $byKey['PATCH /api/demo-catalog/items/{id:\d+}']['requiredPermission'] ?? null);
 
         foreach ($byKey as $key => $route) {
             $this->assertIsCallable($route['handler'], "{$key} must have a callable handler");
-            $this->assertNull($route['requiredRole'], "{$key} must gate on permission, not role");
+            $this->assertNull($route['requiredRole'] ?? null, "{$key} must gate on permission, not role");
             $this->assertArrayHasKey('schema', $route, "{$key} must declare a typed OpenAPI schema");
         }
 
-        $this->assertArrayHasKey(
-            'DemoCatalogItem',
-            $byKey['GET /api/demo-catalog/items']['schema']['components']
-        );
+        $schema = $byKey['GET /api/demo-catalog/items']['schema'] ?? [];
+        $this->assertArrayHasKey('components', $schema);
+        $this->assertArrayHasKey('DemoCatalogItem', $schema['components']);
     }
 
     public function testDeclaresTheCustomScreenFeature(): void

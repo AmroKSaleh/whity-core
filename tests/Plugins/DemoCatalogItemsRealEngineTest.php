@@ -135,9 +135,11 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
         $this->assertIsInt($body['data']['id']);
         $this->assertIsString($body['data']['createdAt']);
 
+        $stmt = $this->pdo->query('SELECT tenant_id, name FROM demo_catalog_items');
+        self::assertNotFalse($stmt);
         $this->assertSame(
             ['tenant_id' => '1', 'name' => 'Widget'],
-            $this->pdo->query('SELECT tenant_id, name FROM demo_catalog_items')->fetch(PDO::FETCH_ASSOC),
+            $stmt->fetch(PDO::FETCH_ASSOC),
             'The row must be stamped with the CALLER\'s tenant'
         );
     }
@@ -176,7 +178,9 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
             $this->assertSame(400, $response->getStatusCode(), "{$label} must be a 400");
         }
 
-        $this->assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM demo_catalog_items')->fetchColumn());
+        $countStmt = $this->pdo->query('SELECT COUNT(*) FROM demo_catalog_items');
+        self::assertNotFalse($countStmt);
+        $this->assertSame(0, (int) $countStmt->fetchColumn());
     }
 
     public function testCreateAccepts255CharacterName(): void
@@ -222,9 +226,11 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
 
         $this->assertSame(404, $response->getStatusCode(), 'Cross-tenant id probing must report not-found');
         $this->assertStringNotContainsString('b-original', $response->getBody(), 'The refusal must not leak the foreign row');
+        $nameStmt = $this->pdo->query("SELECT name FROM demo_catalog_items WHERE id = {$foreignId}");
+        self::assertNotFalse($nameStmt);
         $this->assertSame(
             'b-original',
-            $this->pdo->query("SELECT name FROM demo_catalog_items WHERE id = {$foreignId}")->fetchColumn(),
+            $nameStmt->fetchColumn(),
             "Tenant B's row must be untouched after the rejected update"
         );
     }
@@ -251,7 +257,9 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
         );
 
         $this->assertSame(400, $response->getStatusCode());
-        $this->assertSame('keep', $this->pdo->query("SELECT name FROM demo_catalog_items WHERE id = {$id}")->fetchColumn());
+        $keepStmt = $this->pdo->query("SELECT name FROM demo_catalog_items WHERE id = {$id}");
+        self::assertNotFalse($keepStmt);
+        $this->assertSame('keep', $keepStmt->fetchColumn());
     }
 
     // ==================== fail-closed ====================
