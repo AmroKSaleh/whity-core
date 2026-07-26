@@ -157,23 +157,59 @@ system dependencies installed (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `libsqlite3-dev`, `libcups2-dev`, `pkg-config`) — not just written by hand.
 The frontend was verified with `tsc --noEmit` and a real `vite build`.
 
+### Windows (native) — verified 2026-07-26
+
+Built and run natively on **Windows 11 (10.0.26200)**, target
+`x86_64-pc-windows-msvc`, with this toolchain:
+
+- **Rust** 1.97.1 (`stable-x86_64-pc-windows-msvc`)
+- **VS 2022 Build Tools** with the *Desktop development with C++* (`VCTools`)
+  workload — MSVC toolset **v14.44.35207**, **Windows SDK 10.0.26100**
+- **WebView2** runtime 150.0.4078 (ships with Win11)
+- **Node** 22.20 / **npm** 11.6; **Tauri** 2.11, `printers` 2.3.0,
+  `rusqlite` 0.31 (`bundled`)
+
+Results:
+
+- `cargo build` (debug) and `npm run tauri build` (release) both compile
+  **clean — zero warnings, zero errors**. No source changes were needed: the
+  `printers` ~2.3 pin and the `PrinterJobOptions`/`PrintersError` usage in
+  `commands/printer.rs` match the crate's Windows API as-is (the two earlier
+  2.x breaks the pin guards against did **not** recur).
+- **The app window launches**, and `db.rs::init_db` creates the SQLite
+  database at
+  `%APPDATA%\com.whity.tauri-desktop-template\whity-desktop.sqlite` on first
+  run (valid `SQLite format 3` file, schema applied).
+- **Demo Catalog persistence** verified at the storage layer with the same
+  schema + SQL as `db.rs`/`commands/items.rs`: create → edit → close the
+  connection → reopen → the edited row is still there.
+- **Printing** — the highest-risk, most OS-divergent piece — verified at
+  runtime against the live **Windows Print Spooler**, not just compiled:
+  `get_printers()` enumerated 10 printers, `get_default_printer()` resolved
+  the default, and `print_text` submitted a **real job** (`printer.print(...)`
+  returned `Ok`) to a physical default printer (Samsung M2020). The Linux/CUPS
+  verification did not need to generalize — the crate's Windows path works
+  unchanged.
+- **Installers** (`bundle.targets: "all"` → both Windows bundlers): MSI
+  **~4.1 MB** (`whity-tauri-desktop-template_0.1.0_x64_en-US.msi`) and NSIS
+  setup **~3.0 MB** (`whity-tauri-desktop-template_0.1.0_x64-setup.exe`); the
+  release app `.exe` is **~10.5 MB**. Tauri auto-downloaded WiX 3.14 and NSIS
+  3.11 on the first Windows build.
+- **Startup:** ~0.5 s from launch to a visible window on the first run (disk
+  cache warm from the build — not a post-reboot cold start), ~60 ms on
+  subsequent launches, on this machine.
+
+One caveat on method: the DemoCatalog create/edit buttons and the Printer-demo
+button were exercised through the underlying Tauri command layer (the exact
+`list_items`/`get_item`/`save_item`/`print_text` commands, same pinned crate
+versions) rather than by hand-clicking the running WebView UI. The frontend
+itself is the same shared-package code already verified by `tsc`/`vite build`,
+and its adapter (`demo-catalog-tauri-adapter.ts`) is a thin `invoke()`
+pass-through to those verified commands.
+
 ### Known gaps — not yet verified
 
-- **Windows.** Not yet built/run natively. Printing especially is the most
-  OS-divergent capability here (Print Spooler vs. CUPS vs. Core Graphics) —
-  don't assume the Linux verification above generalizes. Building natively
-  requires the MSVC C++ build tools (`Microsoft.VisualStudio.2022.BuildTools`
-  with the `Microsoft.VisualStudio.Workload.VCTools` component), which need
-  an elevated (Administrator) install — that blocked an attempt to verify
-  this from an unattended session. Whoever picks this up next: install Rust
-  (`rustup`) + the VS Build Tools workload above, then
-  `cd templates/tauri-desktop && npm install && npm run tauri build`, and
-  specifically exercise the printer command against a real Windows printer
-  (or "Microsoft Print to PDF").
 - **macOS.** Deliberately deferred, not attempted at all yet — a distinct
-  follow-up stage, not scheduled as part of this pass.
-- **Packaging size / startup time.** Not measured on any platform — depends
-  on the platform builds above existing first. Once a real `tauri build`
-  output exists (Windows installer, macOS `.app`/`.dmg`, or the Linux
-  AppImage/deb), report actual installer size and cold-start time here rather
-  than leaving each downstream consumer to measure it independently.
+  follow-up stage, not scheduled as part of this pass. Its packaging size and
+  cold-start also remain unmeasured (the Windows numbers above are
+  Windows-specific and don't carry over to the `.app`/`.dmg` bundle).
