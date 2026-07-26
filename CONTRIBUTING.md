@@ -135,6 +135,19 @@ the repo root** — always `npm ci` at the **root**, never inside `web/`. A
 with `couldn't find next/package.json`. If you have a stale `web/node_modules`
 from before the workspace migration, delete it and reinstall at the root.
 
+`web` carries a `valibot` devDependency that **no source file imports**. Do not
+"clean it up" (WC-609). From 5.4.1 onward `@hookform/resolvers` declares every
+validation library it can bridge as an optional peer, including
+`@typeschema/main`, whose own optional-peer chain (`@typeschema/valibot@0.14.0`
+→ `valibot@^0.39.0`) contradicts the resolvers' `valibot@^1` peer. npm walks
+optional peers when it builds the tree, so a fresh resolve — Dependabot's
+updater, or any `npm install` without an intact lockfile — dies with
+`ERESOLVE ... Found: valibot@0.39.0`. Pinning a real `valibot@^1` in the
+workspace settles the edge before the `@typeschema` chain is ever considered.
+`overrides` do **not** work here: npm does not apply them to `peerOptional`
+edges. Drop the pin once `@hookform/resolvers` stops advertising the abandoned
+`@typeschema` packages.
+
 ```bash
 npm ci                    # clean install of ALL workspaces, from the repo root
 npm run dev -w web        # dev server on http://localhost:3000
