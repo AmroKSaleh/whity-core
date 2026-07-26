@@ -109,6 +109,7 @@ const FORM_INPUT_TYPES = [
   'fileInput',
   'colorInput',
   'bilingualText',
+  'referenceSelect',
 ] as const;
 
 /**
@@ -163,7 +164,8 @@ function collectDefaults(
       input.type === 'select' ||
       input.type === 'slider' ||
       input.type === 'dateInput' ||
-      input.type === 'colorInput'
+      input.type === 'colorInput' ||
+      input.type === 'referenceSelect'
     ) {
       if (typeof input.default === 'string') {
         defaults[input.name] = input.default;
