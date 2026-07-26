@@ -39,6 +39,7 @@ import type {
   ListBlock,
   LocalizedTextValue,
   NumberInputBlock,
+  ReferenceSelectBlock,
   RowBlock,
   SectionBlock,
   SelectBlock,
@@ -1268,6 +1269,61 @@ function BilingualTextRenderer({ block }: { block: BilingualTextInputBlock }) {
   );
 }
 
+// WC-532 A6: a select whose options are fetched from a plugin-owned collection
+// endpoint (usePluginData over `source`), each row mapped {value: valueField,
+// label: labelField}. The value submitted is the chosen valueField string —
+// identical to a static `select` once loaded. Split so the data fetch only
+// runs INSIDE a form: outside one the block degrades and never hits `source`.
+function ReferenceSelectRenderer({ block }: { block: ReferenceSelectBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="referenceSelect" />;
+  return <ReferenceSelectField block={block} ctx={ctx} />;
+}
+
+function ReferenceSelectField({ block, ctx }: { block: ReferenceSelectBlock; ctx: FormBlockContextValue }) {
+  const state = usePluginData<Array<Record<string, unknown>>>(
+    block.source,
+    (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
+  );
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : (block.default ?? '');
+
+  const options =
+    state.status === 'ready'
+      ? state.data.flatMap((row) => {
+          const rawValue = row[block.valueField];
+          const rawLabel = row[block.labelField];
+          if (rawValue === undefined || rawValue === null) return [];
+          return [{
+            value: String(rawValue),
+            label: rawLabel === undefined || rawLabel === null ? String(rawValue) : String(rawLabel),
+          }];
+        })
+      : [];
+
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      {state.status === 'error' ? (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground" data-slot="reference-select-error">
+          <span>Failed to load options.</span>
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>Retry</Button>
+        </div>
+      ) : (
+        <Select value={strValue} onValueChange={(v) => ctx.setValue(block.name, v)} disabled={state.status === 'loading'}>
+          <SelectTrigger aria-label={block.label} data-slot="reference-select-trigger">
+            <SelectValue placeholder={state.status === 'loading' ? 'Loading…' : (block.placeholder ?? `Select ${block.label}`)} />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
+
 const INTERACTIVE_BUTTON_VARIANT: Record<NonNullable<SubmitButtonBlock["variant"]>, React.ComponentProps<typeof Button>["variant"]> = {
   primary: "default",
   secondary: "secondary",
@@ -1602,6 +1658,8 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <ColorInputRenderer block={block} /> : <UnsupportedBlock type="colorInput" />;
     case 'bilingualText':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <BilingualTextRenderer block={block} /> : <UnsupportedBlock type="bilingualText" />;
+    case 'referenceSelect':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <ReferenceSelectRenderer block={block} /> : <UnsupportedBlock type="referenceSelect" />;
     case 'submitButton':
       return isNonEmptyString(block.label) ? <SubmitButtonRenderer block={block} /> : <UnsupportedBlock type="submitButton" />;
     case 'actionButton':

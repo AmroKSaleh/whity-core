@@ -1017,6 +1017,18 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     'arLabel' => 'العنوان بالعربية',
                                     'enLabel' => 'Title (English)',
                                 ],
+                                // WC-532 A6: foreign-key select populated from a
+                                // plugin-owned collection (GET /api/uikit/demo/rows).
+                                // Label avoids "name" to steer clear of the e2e's
+                                // getByLabel('Name') on the textInput above.
+                                [
+                                    'type' => 'referenceSelect',
+                                    'name' => 'assignedRole',
+                                    'label' => 'Assigned role',
+                                    'source' => '/api/uikit/demo/rows',
+                                    'valueField' => 'role',
+                                    'labelField' => 'role',
+                                ],
                                 [
                                     'type' => 'submitButton',
                                     'label' => 'Submit',

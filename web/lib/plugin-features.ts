@@ -355,6 +355,24 @@ export interface BilingualTextInputBlock {
   enLabel?: string;
 }
 
+/**
+ * WC-532 A6: a foreign-key / reference select. Unlike `select` (static
+ * `options`), it populates its dropdown from a resource COLLECTION fetched from
+ * `source` (an ownership-checked, version-rewritten apiPath). Each row's
+ * `valueField` is the submitted value; `labelField` is the display text.
+ */
+export interface ReferenceSelectBlock {
+  type: 'referenceSelect';
+  name: string;
+  label: string;
+  source: string;
+  valueField: string;
+  labelField: string;
+  required?: boolean;
+  placeholder?: string;
+  default?: string;
+}
+
 /** Leaf (form only): triggers form submission. */
 export interface SubmitButtonBlock {
   type: 'submitButton';
@@ -429,6 +447,7 @@ export type Block =
   | FileInputBlock
   | ColorInputBlock
   | BilingualTextInputBlock
+  | ReferenceSelectBlock
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock;

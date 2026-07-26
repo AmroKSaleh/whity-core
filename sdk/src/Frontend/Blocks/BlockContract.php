@@ -346,6 +346,24 @@ final class BlockContract
                 'arLabel'  => ['type' => 'string',    'required' => false],
                 'enLabel'  => ['type' => 'string',    'required' => false],
             ]],
+            // WC-532 A6: a foreign-key / reference select. Unlike `select`
+            // (static `options`), it populates its dropdown from a resource
+            // COLLECTION at `source` — an apiPath, so it is ownership-checked
+            // and version-rewritten by the PluginLoader exactly like a
+            // `dataTable.source` (a plugin can only reference its OWN routes).
+            // Each row's `valueField` becomes the submitted value; `labelField`
+            // is the display text. Also the reusable primitive behind the
+            // Part-B tag-picker.
+            'referenceSelect' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'source'      => ['type' => 'apiPath',    'required' => true],
+                'valueField'  => ['type' => 'string',     'required' => true],
+                'labelField'  => ['type' => 'string',     'required' => true],
+                'required'    => ['type' => 'bool',       'required' => false],
+                'placeholder' => ['type' => 'string',     'required' => false],
+                'default'     => ['type' => 'string',     'required' => false],
+            ]],
             'submitButton' => ['container' => false, 'props' => [
                 'label'              => ['type' => 'string', 'required' => true],
                 'requiredPermission' => ['type' => 'string', 'required' => false],

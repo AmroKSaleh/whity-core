@@ -304,7 +304,7 @@ final class BlockValidatorTest extends TestCase
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
             'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list',
-            'numberInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
+            'numberInput', 'referenceSelect', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
         ];
         sort($expected);
@@ -1098,7 +1098,7 @@ final class BlockValidatorTest extends TestCase
         foreach ([
             'form', 'textInput', 'textArea', 'numberInput', 'select',
             'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-            'bilingualText', 'submitButton', 'actionButton',
+            'bilingualText', 'referenceSelect', 'submitButton', 'actionButton',
         ] as $expectedType) {
             $this->assertContains($expectedType, $types, "'{$expectedType}' must be in BlockContract::types()");
         }
@@ -1109,6 +1109,7 @@ final class BlockValidatorTest extends TestCase
         $this->assertTrue(BlockContract::isContainer('form'));
         foreach (['textInput', 'textArea', 'numberInput', 'select', 'checkbox',
                   'slider', 'dateInput', 'fileInput', 'colorInput',
+                  'bilingualText', 'referenceSelect',
                   'submitButton', 'actionButton'] as $leaf) {
             $this->assertFalse(BlockContract::isContainer($leaf), "'{$leaf}' must be a leaf");
         }
@@ -1346,5 +1347,89 @@ final class BlockValidatorTest extends TestCase
 
         $this->assertFalse($result['ok']);
         $this->assertStringContainsString("duplicate input name 'dup'", implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A6: referenceSelect input ====================
+
+    public function testReferenceSelectInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                [
+                    'type'       => 'referenceSelect',
+                    'name'       => 'ownerId',
+                    'label'      => 'Owner',
+                    'source'     => '/api/uikit/people',
+                    'valueField' => 'id',
+                    'labelField' => 'name',
+                    'required'   => true,
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testReferenceSelectAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X',
+             'source' => '/api/x/rows', 'valueField' => 'id', 'labelField' => 'name'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'referenceSelect' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    public function testReferenceSelectMissingSourceIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X',
+                 'valueField' => 'id', 'labelField' => 'name'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'source'", implode(' | ', $result['errors']));
+    }
+
+    public function testReferenceSelectSourceUsesTheApiPathRule(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X',
+                 'source' => 'https://evil.example/api/x', 'valueField' => 'id', 'labelField' => 'name'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a relative API path', implode(' | ', $result['errors']));
+    }
+
+    public function testReferenceSelectMissingValueOrLabelFieldIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X', 'source' => '/api/x/rows'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString("missing required prop 'valueField'", $joined);
+        $this->assertStringContainsString("missing required prop 'labelField'", $joined);
     }
 }
