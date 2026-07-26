@@ -301,7 +301,7 @@ final class BlockValidatorTest extends TestCase
         // SP1 display types + SP2 data-bound types + SP3 interactive types
         // (WC-233) + SP4 chart type (WC-240)
         $expected = [
-            'actionButton', 'alert', 'badge', 'button', 'card', 'chart', 'checkbox', 'code',
+            'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
             'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list',
             'numberInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
@@ -1098,7 +1098,7 @@ final class BlockValidatorTest extends TestCase
         foreach ([
             'form', 'textInput', 'textArea', 'numberInput', 'select',
             'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-            'submitButton', 'actionButton',
+            'bilingualText', 'submitButton', 'actionButton',
         ] as $expectedType) {
             $this->assertContains($expectedType, $types, "'{$expectedType}' must be in BlockContract::types()");
         }
@@ -1282,5 +1282,69 @@ final class BlockValidatorTest extends TestCase
         $result = BlockValidator::validate($tree);
         $this->assertFalse($result['ok']);
         $this->assertStringContainsString('{field, equals|in} object', implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A4: bilingualText input ====================
+
+    public function testBilingualTextInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                [
+                    'type'     => 'bilingualText',
+                    'name'     => 'displayName',
+                    'label'    => 'Display name',
+                    'required' => true,
+                    'arLabel'  => 'الاسم',
+                    'enLabel'  => 'Name',
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testBilingualTextAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'bilingualText', 'name' => 'x', 'label' => 'X'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'bilingualText' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    public function testBilingualTextMissingNameIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'bilingualText', 'label' => 'X'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result['errors']));
+    }
+
+    public function testDuplicateBilingualTextNameWithinFormIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'bilingualText', 'name' => 'dup', 'label' => 'A'],
+                ['type' => 'textInput', 'name' => 'dup', 'label' => 'B'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'dup'", implode(' | ', $result['errors']));
     }
 }

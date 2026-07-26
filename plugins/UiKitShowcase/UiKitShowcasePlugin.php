@@ -1006,6 +1006,17 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     'label' => 'Accent colour',
                                     'default' => '#6366f1',
                                 ],
+                                // WC-532 A4: bilingual AR/EN paired-text input.
+                                // Labels deliberately avoid the substring "name"
+                                // so they never collide with the e2e's
+                                // getByLabel('Name') on the textInput above.
+                                [
+                                    'type' => 'bilingualText',
+                                    'name' => 'bilingualTitle',
+                                    'label' => 'Bilingual title',
+                                    'arLabel' => 'العنوان بالعربية',
+                                    'enLabel' => 'Title (English)',
+                                ],
                                 [
                                     'type' => 'submitButton',
                                     'label' => 'Submit',

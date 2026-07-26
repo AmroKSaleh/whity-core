@@ -18,6 +18,7 @@ import type {
   ActionButtonBlock,
   AlertBlock,
   BadgeBlock,
+  BilingualTextInputBlock,
   Block,
   ButtonBlock,
   CardBlock,
@@ -36,6 +37,7 @@ import type {
   IconBlock,
   KeyValueBlock,
   ListBlock,
+  LocalizedTextValue,
   NumberInputBlock,
   RowBlock,
   SectionBlock,
@@ -54,6 +56,7 @@ import type {
 import { Chart } from '@amroksaleh/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Input } from '@amroksaleh/ui/input';
+import { BilingualInput } from '@amroksaleh/ui/bilingual-input';
 import { Pagination } from '@amroksaleh/ui/pagination';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import {
@@ -1242,6 +1245,29 @@ function ColorInputRenderer({ block }: { block: ColorInputBlock }) {
   );
 }
 
+// WC-532 A4: paired AR/EN bilingual text input — reads/writes a {ar?, en?}
+// object in the form value map via the shared BilingualInput.
+function BilingualTextRenderer({ block }: { block: BilingualTextInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="bilingualText" />;
+  const inputId = `block-input-${block.name}`;
+  const raw = ctx.values[block.name];
+  const value = raw !== null && typeof raw === 'object' ? raw : {};
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <BilingualInput
+        id={inputId}
+        value={value}
+        onChange={(next) => ctx.setValue(block.name, next)}
+        arLabel={block.arLabel}
+        enLabel={block.enLabel}
+        required={block.required}
+      />
+    </div>
+  );
+}
+
 const INTERACTIVE_BUTTON_VARIANT: Record<NonNullable<SubmitButtonBlock["variant"]>, React.ComponentProps<typeof Button>["variant"]> = {
   primary: "default",
   secondary: "secondary",
@@ -1341,10 +1367,16 @@ function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
  * `equals: 5` matches a form field holding the string `'5'`. Missing → `''`.
  */
 function normalizeVisibilityOperand(
-  value: string | number | boolean | undefined
+  value: string | number | boolean | LocalizedTextValue | undefined
 ): string {
   if (typeof value === 'boolean') {
     return value ? 'true' : 'false';
+  }
+  if (value !== null && typeof value === 'object') {
+    // A bilingualText field (WC-532 A4) holds a {ar,en} object — never a
+    // meaningful scalar equals/in target; normalize to a sentinel that matches
+    // no operand rather than '[object Object]'.
+    return ' object';
   }
   return value === undefined ? '' : String(value);
 }
@@ -1568,6 +1600,8 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <FileInputRenderer block={block} /> : <UnsupportedBlock type="fileInput" />;
     case 'colorInput':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <ColorInputRenderer block={block} /> : <UnsupportedBlock type="colorInput" />;
+    case 'bilingualText':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <BilingualTextRenderer block={block} /> : <UnsupportedBlock type="bilingualText" />;
     case 'submitButton':
       return isNonEmptyString(block.label) ? <SubmitButtonRenderer block={block} /> : <UnsupportedBlock type="submitButton" />;
     case 'actionButton':

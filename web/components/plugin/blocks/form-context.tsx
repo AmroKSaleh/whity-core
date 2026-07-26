@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import type { Block, FormBlock } from '@/lib/plugin-features';
+import type { Block, FormBlock, LocalizedTextValue } from '@/lib/plugin-features';
 import { apiClient } from '@/lib/api-client';
 import { submitPluginAction, type ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
@@ -19,10 +19,16 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 /** Sentinel: when a sensitive field holds this value, it is omitted from the submit payload. */
 export const SENSITIVE_SENTINEL = '••••••';
 
+/**
+ * A single form field's value. Most inputs are `string | boolean`; a
+ * `bilingualText` input (WC-532 A4) holds a `{ar?, en?}` object.
+ */
+export type FormValue = string | boolean | LocalizedTextValue;
+
 /** The value shape exposed to all form descendants via context. */
 export interface FormBlockContextValue {
-  values: Record<string, string | boolean>;
-  setValue(name: string, value: string | boolean): void;
+  values: Record<string, FormValue>;
+  setValue(name: string, value: FormValue): void;
   errors: Record<string, string>;
   isSubmitting: boolean;
   submit(): void;
@@ -102,6 +108,7 @@ const FORM_INPUT_TYPES = [
   'dateInput',
   'fileInput',
   'colorInput',
+  'bilingualText',
 ] as const;
 
 /**
@@ -138,13 +145,17 @@ function collectFormInputs(blocks: Block[]): Block[] {
  */
 function collectDefaults(
   children: FormBlock['children']
-): Record<string, string | boolean> {
-  const defaults: Record<string, string | boolean> = {};
+): Record<string, FormValue> {
+  const defaults: Record<string, FormValue> = {};
   for (const input of collectFormInputs(children)) {
     if (input.type === 'checkbox') {
       if (typeof input.default === 'boolean') {
         defaults[input.name] = input.default;
       }
+    } else if (input.type === 'bilingualText') {
+      // Seed an empty {ar, en} so the field exists in the value map and the
+      // renderer/required-check have a stable object to read.
+      defaults[input.name] = {};
     } else if (
       input.type === 'textInput' ||
       input.type === 'textArea' ||
@@ -182,7 +193,7 @@ export function FormProvider({
 }) {
   const { addToast } = useToast();
 
-  const [values, setValues] = React.useState<Record<string, string | boolean>>(
+  const [values, setValues] = React.useState<Record<string, FormValue>>(
     () => collectDefaults(block.children)
   );
   const [errors, setErrors] = React.useState<Record<string, string>>({});
@@ -202,7 +213,7 @@ export function FormProvider({
         if (data !== null && typeof data === 'object') {
           setValues((prev) => ({
             ...prev,
-            ...(data as Record<string, string | boolean>),
+            ...(data as Record<string, FormValue>),
           }));
         }
         setIsLoading(false);
@@ -243,6 +254,17 @@ export function FormProvider({
         const val = values[child.name];
         const filled =
           typeof val === 'string' ? val.trim() !== '' : val !== undefined;
+        if (!filled) {
+          newErrors[child.name] = `${child.label} is required`;
+        }
+      } else if (child.type === 'bilingualText' && child.required === true) {
+        // A required bilingual field is satisfied by at least one language
+        // (mirrors the CRUD localized-text rule).
+        const val = values[child.name];
+        const filled =
+          val !== null &&
+          typeof val === 'object' &&
+          ((val.ar ?? '').trim() !== '' || (val.en ?? '').trim() !== '');
         if (!filled) {
           newErrors[child.name] = `${child.label} is required`;
         }

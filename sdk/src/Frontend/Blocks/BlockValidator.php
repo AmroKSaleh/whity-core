@@ -31,6 +31,7 @@ final class BlockValidator
     private const INPUT_LEAF_TYPES = [
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
+        'bilingualText',
     ];
 
     /**
@@ -40,7 +41,7 @@ final class BlockValidator
     private const FORM_ONLY_TYPES = [
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-        'submitButton',
+        'bilingualText', 'submitButton',
     ];
 
     /**

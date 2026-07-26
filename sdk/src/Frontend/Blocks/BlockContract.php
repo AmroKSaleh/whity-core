@@ -334,6 +334,18 @@ final class BlockContract
                 'default'     => ['type' => 'string',    'required' => false],
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
+            // WC-532 A4: a paired Arabic/English bilingual text input. Submits a
+            // `{ar?, en?}` LocalizedText object under `name` (matching the
+            // schema-driven CRUD screen's localized-field convention), rendered
+            // via the shared BilingualInput (RTL/LTR synced). `arLabel`/`enLabel`
+            // override the per-field sub-labels.
+            'bilingualText' => ['container' => false, 'props' => [
+                'name'     => ['type' => 'inputName', 'required' => true],
+                'label'    => ['type' => 'string',    'required' => true],
+                'required' => ['type' => 'bool',      'required' => false],
+                'arLabel'  => ['type' => 'string',    'required' => false],
+                'enLabel'  => ['type' => 'string',    'required' => false],
+            ]],
             'submitButton' => ['container' => false, 'props' => [
                 'label'              => ['type' => 'string', 'required' => true],
                 'requiredPermission' => ['type' => 'string', 'required' => false],
