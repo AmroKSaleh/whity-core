@@ -332,6 +332,29 @@ export interface ColorInputBlock {
   visibleWhen?: VisibleWhen;
 }
 
+/**
+ * The `{ar?, en?}` value a bilingual field reads and submits — the same
+ * LocalizedText convention the schema-driven CRUD screens use (WC-532).
+ */
+export interface LocalizedTextValue {
+  ar?: string;
+  en?: string;
+}
+
+/**
+ * WC-532 A4: a paired Arabic/English bilingual text input. Renders the shared
+ * RTL/LTR-synced `BilingualInput` and submits a `{ar?, en?}` object under
+ * `name` — matching how CRUD screens render `x-whity-localized-text` fields.
+ */
+export interface BilingualTextInputBlock {
+  type: 'bilingualText';
+  name: string;
+  label: string;
+  required?: boolean;
+  arLabel?: string;
+  enLabel?: string;
+}
+
 /** Leaf (form only): triggers form submission. */
 export interface SubmitButtonBlock {
   type: 'submitButton';
@@ -405,6 +428,7 @@ export type Block =
   | DateInputBlock
   | FileInputBlock
   | ColorInputBlock
+  | BilingualTextInputBlock
   | SubmitButtonBlock
   | ActionButtonBlock
   | ChartBlock;
