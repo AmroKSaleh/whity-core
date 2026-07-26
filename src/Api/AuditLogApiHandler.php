@@ -258,6 +258,7 @@ final class AuditLogApiHandler
                 $params[':to'] = (string) $query['to'];
             }
 
+            // @tenant-guard-ignore: $conditions ALWAYS begins with 'tenant_id = :tenant_id' (set unconditionally above); every query below binds it. The scanner cannot resolve the imploded builder array, so it must be told this WHERE clause is tenant-scoped. Covers both queries that consume $where.
             $where = ' WHERE ' . implode(' AND ', $conditions);
 
             $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM audit_log' . $where);
