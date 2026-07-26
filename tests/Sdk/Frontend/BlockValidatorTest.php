@@ -1113,4 +1113,174 @@ final class BlockValidatorTest extends TestCase
             $this->assertFalse(BlockContract::isContainer($leaf), "'{$leaf}' must be a leaf");
         }
     }
+
+    // ==================== WC-532 A3: visibleWhen conditional visibility ====================
+
+    /**
+     * An input with `visibleWhen: {field, equals}` and a section with
+     * `visibleWhen: {field, in}` both validate inside a form.
+     */
+    public function testVisibleWhenEqualsAndInAreValid(): void
+    {
+        $tree = [
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [
+                    ['type' => 'select', 'name' => 'kind', 'label' => 'Kind', 'options' => [
+                        ['value' => 'person', 'label' => 'Person'],
+                        ['value' => 'org', 'label' => 'Organisation'],
+                    ]],
+                    // shown only when kind === 'org'
+                    [
+                        'type'        => 'textInput',
+                        'name'        => 'orgName',
+                        'label'       => 'Organisation name',
+                        'visibleWhen' => ['field' => 'kind', 'equals' => 'org'],
+                    ],
+                    // a whole section shown when kind ∈ {person, org}
+                    [
+                        'type'        => 'section',
+                        'title'       => 'Details',
+                        'visibleWhen' => ['field' => 'kind', 'in' => ['person', 'org']],
+                        'children'    => [
+                            ['type' => 'textInput', 'name' => 'note', 'label' => 'Note'],
+                        ],
+                    ],
+                    ['type' => 'submitButton', 'label' => 'Save'],
+                ],
+            ],
+        ];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    /**
+     * `visibleWhen.equals` accepts a boolean (checkbox-driven visibility).
+     */
+    public function testVisibleWhenEqualsAcceptsBoolean(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                ['type' => 'checkbox', 'name' => 'advanced', 'label' => 'Advanced'],
+                [
+                    'type'        => 'textInput',
+                    'name'        => 'tuning',
+                    'label'       => 'Tuning',
+                    'visibleWhen' => ['field' => 'advanced', 'equals' => true],
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testVisibleWhenMissingFieldIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['equals' => 'x']],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.field', implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenWithBothEqualsAndInIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                [
+                    'type'        => 'textInput',
+                    'name'        => 'a',
+                    'label'       => 'A',
+                    'visibleWhen' => ['field' => 'k', 'equals' => 'x', 'in' => ['x', 'y']],
+                ],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'equals' or 'in'", implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenWithNeitherEqualsNorInIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['field' => 'k']],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'equals' or 'in'", implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenInMustBeNonEmptyListOfScalars(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['field' => 'k', 'in' => []]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.in', implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenEqualsMustBeScalar(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                [
+                    'type'        => 'textInput',
+                    'name'        => 'a',
+                    'label'       => 'A',
+                    'visibleWhen' => ['field' => 'k', 'equals' => ['not', 'a', 'scalar']],
+                ],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.equals', implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenAsAListNotObjectIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['field', 'k']],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('{field, equals|in} object', implode(' | ', $result['errors']));
+    }
 }

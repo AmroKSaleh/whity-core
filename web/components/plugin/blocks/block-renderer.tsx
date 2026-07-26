@@ -49,6 +49,7 @@ import type {
   TextAreaBlock,
   TextBlock,
   TextInputBlock,
+  VisibleWhen,
 } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
@@ -78,6 +79,7 @@ import {
   FormProvider,
   useFormBlockContext,
   IssuesReport,
+  type FormBlockContextValue,
 } from '@/components/plugin/blocks/form-context';
 import { submitPluginAction } from '@/lib/plugin-action-submit';
 import type { ActionIssue } from '@/lib/plugin-action-submit';
@@ -1330,14 +1332,66 @@ function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
   );
 }
 
+// ---- WC-532 A3: conditional visibility ----
+
+/**
+ * Normalize a form value / rule operand to a comparable string. Booleans
+ * become `'true'`/`'false'` so a checkbox (`true`) matches `equals: true` and
+ * `equals: 'true'` alike; everything else is `String()`-coerced so a numeric
+ * `equals: 5` matches a form field holding the string `'5'`. Missing → `''`.
+ */
+function normalizeVisibilityOperand(
+  value: string | number | boolean | undefined
+): string {
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  return value === undefined ? '' : String(value);
+}
+
+/**
+ * Evaluate a block's optional `visibleWhen` facet against the enclosing form's
+ * live values. Returns true (visible) when there is no facet, when the block is
+ * outside any form (no sibling field to test), or when the rule is malformed —
+ * i.e. it FAILS OPEN so content is never permanently hidden by a missing
+ * context or a bad rule. The SDK validator already rejects malformed rules at
+ * publish time; this is the render-time counterpart.
+ */
+function isBlockVisible(block: Block, form: FormBlockContextValue | null): boolean {
+  const rule = (block as { visibleWhen?: VisibleWhen }).visibleWhen;
+  if (!rule || typeof rule.field !== 'string' || rule.field === '') {
+    return true;
+  }
+  if (form === null) {
+    return true;
+  }
+  const current = normalizeVisibilityOperand(form.values[rule.field]);
+  if (rule.equals !== undefined) {
+    return current === normalizeVisibilityOperand(rule.equals);
+  }
+  if (Array.isArray(rule.in)) {
+    return rule.in.some((v) => current === normalizeVisibilityOperand(v));
+  }
+  return true;
+}
+
 // ---- dispatch: validate per the contract, then render or degrade ----
 
 /**
  * Render one block. Each branch revalidates the node's required props and enum
  * values; an invalid node falls through to the `UnsupportedBlock` placeholder
  * rather than throwing. The `default` arm catches unknown `type`s.
+ *
+ * WC-532 A3: before rendering, a `visibleWhen` facet is evaluated against the
+ * enclosing form — an unmet predicate renders nothing (the block and its
+ * subtree are hidden). This is presentational only; hidden inputs still exist
+ * in the form's value map, and the server remains authoritative on validation.
  */
-function BlockNode({ block }: { block: Block }): React.ReactElement {
+function BlockNode({ block }: { block: Block }): React.ReactElement | null {
+  const form = useFormBlockContext();
+  if (!isBlockVisible(block, form)) {
+    return null;
+  }
   switch (block.type) {
     case 'section':
       return Array.isArray(block.children) ? (

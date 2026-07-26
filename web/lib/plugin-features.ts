@@ -23,10 +23,25 @@ import { apiClient } from '@/lib/api-client';
  * literal is the discriminant.
  */
 
+/**
+ * WC-532 A3: a presentational conditional-visibility predicate. When a block
+ * carrying `visibleWhen` is inside a `form`, the renderer hides it unless the
+ * referenced sibling field matches. Render-time only — it never affects the
+ * submitted payload or server-side validation. Mirrors the SDK
+ * `visibilityRule` prop type; the SDK validator requires exactly one of
+ * `equals` / `in`.
+ */
+export interface VisibleWhen {
+  field: string;
+  equals?: string | number | boolean;
+  in?: (string | number | boolean)[];
+}
+
 /** Container: a labelled vertical grouping of blocks. */
 export interface SectionBlock {
   type: 'section';
   title?: string;
+  visibleWhen?: VisibleWhen;
   children: Block[];
 }
 
@@ -35,6 +50,7 @@ export interface CardBlock {
   type: 'card';
   title?: string;
   description?: string;
+  visibleWhen?: VisibleWhen;
   children: Block[];
 }
 
@@ -226,6 +242,7 @@ export interface TextInputBlock {
   default?: string;
   /** When true, renders as type="password". The sentinel value '••••••' is never sent on submit. */
   sensitive?: boolean;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a multi-line text area. */
@@ -236,6 +253,7 @@ export interface TextAreaBlock {
   rows?: number;
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a numeric input. */
@@ -248,6 +266,7 @@ export interface NumberInputBlock {
   step?: number;
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a single-select dropdown. */
@@ -258,6 +277,7 @@ export interface SelectBlock {
   options: { value: string; label: string }[];
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a boolean checkbox. */
@@ -266,6 +286,7 @@ export interface CheckboxBlock {
   name: string;
   label: string;
   default?: boolean;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a range slider. */
@@ -277,6 +298,7 @@ export interface SliderBlock {
   max: number;
   step?: number;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a date input. */
@@ -286,6 +308,7 @@ export interface DateInputBlock {
   label: string;
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a file input. Without encoding the content is read as text; with 'base64' it is encoded as a data URI. */
@@ -297,6 +320,7 @@ export interface FileInputBlock {
   required?: boolean;
   /** When 'base64', the file is converted to a data URI via FileReader.readAsDataURL() before submit. */
   encoding?: 'base64';
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a colour picker. */
@@ -305,6 +329,7 @@ export interface ColorInputBlock {
   name: string;
   label: string;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): triggers form submission. */

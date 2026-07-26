@@ -218,7 +218,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -247,7 +247,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -373,6 +373,12 @@ final class BlockValidator
             case 'submitSpec':
                 // SP3 (WC-233): an array with method ∈ ['POST','PUT'] and a valid apiPath endpoint.
                 self::validateSubmitSpec($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'visibilityRule':
+                // WC-532 A3: a presentational `{field, equals|in}` predicate.
+                self::validateVisibilityRule($value, $type, $prop, $path, $errors);
 
                 break;
         }
@@ -614,6 +620,70 @@ final class BlockValidator
         ) {
             $errors[] = "{$path}.endpoint: '{$type}.{$prop}.endpoint' must be a relative API path starting with '/api/' "
                 . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
+        }
+    }
+
+    /**
+     * `visibleWhen` (WC-532 A3): a presentational conditional-visibility rule.
+     * An object `{field: non-empty string}` carrying EXACTLY ONE of:
+     *   - `equals`: a scalar the referenced field's value must equal, or
+     *   - `in`: a non-empty list of scalars the value must be one of.
+     *
+     * This is render-time only — the web renderer hides the block when the
+     * predicate is unmet. It carries NO endpoint or path, so unlike `apiPath`
+     * props there is nothing to ownership-check; it can never widen data access
+     * or bypass server-side validation (the server never trusts it).
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateVisibilityRule(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || array_is_list($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a {field, equals|in} object, got "
+                . get_debug_type($value);
+
+            return;
+        }
+
+        $field = $value['field'] ?? null;
+        if (!\is_string($field) || $field === '') {
+            $errors[] = "{$path}.field: '{$type}.{$prop}.field' must be a non-empty string, got "
+                . self::describeScalar($field);
+        }
+
+        $hasEquals = \array_key_exists('equals', $value);
+        $hasIn     = \array_key_exists('in', $value);
+
+        if ($hasEquals === $hasIn) {
+            // both or neither
+            $errors[] = "{$path}: '{$type}.{$prop}' must carry exactly one of 'equals' or 'in'";
+
+            return;
+        }
+
+        if ($hasEquals && !\is_scalar($value['equals'])) {
+            $errors[] = "{$path}.equals: '{$type}.{$prop}.equals' must be a string, number, or boolean, got "
+                . get_debug_type($value['equals']);
+        }
+
+        if ($hasIn) {
+            $in = $value['in'];
+            if (!\is_array($in) || !array_is_list($in) || $in === []) {
+                $errors[] = "{$path}.in: '{$type}.{$prop}.in' must be a non-empty list of scalars";
+            } else {
+                foreach ($in as $i => $item) {
+                    if (!\is_scalar($item)) {
+                        $errors[] = "{$path}.in[{$i}]: each '{$type}.{$prop}.in' entry must be a string, number, or boolean, got "
+                            . get_debug_type($item);
+                    }
+                }
+            }
         }
     }
 

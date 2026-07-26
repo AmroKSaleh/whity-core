@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -88,6 +88,12 @@ final class BlockContract
                 'container' => true,
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
+                    // WC-532 A3: presentational conditional visibility. When
+                    // inside a `form`, the section (and its subtree) is hidden
+                    // unless the referenced sibling field matches. Purely a
+                    // render-time facet — the server stays authoritative on
+                    // validation and never trusts client-side visibility.
+                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'card' => [
@@ -95,6 +101,7 @@ final class BlockContract
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
                     'description' => ['type' => 'string', 'required' => false],
+                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'grid' => [
@@ -254,65 +261,78 @@ final class BlockContract
                 'submit'             => ['type' => 'submitSpec', 'required' => true],
                 'requiredPermission' => ['type' => 'string',     'required' => false],
             ]],
+            // WC-532 A3: every input carries an optional `visibleWhen`
+            // presentational facet — the web renderer hides the input unless a
+            // sibling field in the same form matches (equals / in). It never
+            // affects submission or server validation.
             'textInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'placeholder' => ['type' => 'string',    'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'textArea' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'rows'     => ['type' => 'int',       'required' => false],
-                'required' => ['type' => 'bool',      'required' => false],
-                'default'  => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'rows'        => ['type' => 'int',       'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'numberInput' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'min'      => ['type' => 'int',       'required' => false],
-                'max'      => ['type' => 'int',       'required' => false],
-                'step'     => ['type' => 'int',       'required' => false],
-                'required' => ['type' => 'bool',      'required' => false],
-                'default'  => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'min'         => ['type' => 'int',       'required' => false],
+                'max'         => ['type' => 'int',       'required' => false],
+                'step'        => ['type' => 'int',       'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'select' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName',    'required' => true],
-                'label'    => ['type' => 'string',       'required' => true],
-                'options'  => ['type' => 'selectOptions', 'required' => true],
-                'required' => ['type' => 'bool',         'required' => false],
-                'default'  => ['type' => 'string',       'required' => false],
+                'name'        => ['type' => 'inputName',    'required' => true],
+                'label'       => ['type' => 'string',       'required' => true],
+                'options'     => ['type' => 'selectOptions', 'required' => true],
+                'required'    => ['type' => 'bool',         'required' => false],
+                'default'     => ['type' => 'string',       'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'checkbox' => ['container' => false, 'props' => [
-                'name'    => ['type' => 'inputName', 'required' => true],
-                'label'   => ['type' => 'string',    'required' => true],
-                'default' => ['type' => 'bool',      'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'default'     => ['type' => 'bool',      'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'slider' => ['container' => false, 'props' => [
-                'name'    => ['type' => 'inputName', 'required' => true],
-                'label'   => ['type' => 'string',    'required' => true],
-                'min'     => ['type' => 'int',       'required' => true],
-                'max'     => ['type' => 'int',       'required' => true],
-                'step'    => ['type' => 'int',       'required' => false],
-                'default' => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'min'         => ['type' => 'int',       'required' => true],
+                'max'         => ['type' => 'int',       'required' => true],
+                'step'        => ['type' => 'int',       'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'dateInput' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'required' => ['type' => 'bool',      'required' => false],
-                'default'  => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'fileInput' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'accept'   => ['type' => 'string',    'required' => false],
-                'required' => ['type' => 'bool',      'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'accept'      => ['type' => 'string',    'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'colorInput' => ['container' => false, 'props' => [
-                'name'    => ['type' => 'inputName', 'required' => true],
-                'label'   => ['type' => 'string',    'required' => true],
-                'default' => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'submitButton' => ['container' => false, 'props' => [
                 'label'              => ['type' => 'string', 'required' => true],
