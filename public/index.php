@@ -1250,6 +1250,23 @@ $meIdentitiesHandler = new \Whity\Api\MeIdentitiesApiHandler($tokenValidator, $e
 $router->register('GET',    '/api/me/identities',            [$meIdentitiesHandler, 'list'],   null);
 $router->register('DELETE', '/api/me/identities/{id:\d+}',   [$meIdentitiesHandler, 'unlink'], null);
 
+// 13h. Authenticated self-service multi-email management: the caller lists,
+// adds, resends verification for, promotes, and removes their own email
+// addresses. Self-authenticating (cookie or Bearer), scoped to the caller's
+// profile — same wiring pattern as the connected-accounts surface above.
+$meEmailsHandler = new \Whity\Api\MeEmailsApiHandler(
+    $tokenValidator,
+    $profileEmailRepository,
+    $emailVerificationProvider,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger,
+);
+$router->register('GET',    '/api/me/emails',                              [$meEmailsHandler, 'list'],              null);
+$router->register('POST',   '/api/me/emails',                              [$meEmailsHandler, 'add'],               null);
+$router->register('POST',   '/api/me/emails/{id:\d+}/resend-verification', [$meEmailsHandler, 'resendVerification'], null);
+$router->register('POST',   '/api/me/emails/{id:\d+}/set-primary',         [$meEmailsHandler, 'setPrimary'],         null);
+$router->register('DELETE', '/api/me/emails/{id:\d+}',                     [$meEmailsHandler, 'remove'],            null);
+
 // 14. Register the family relations API (WC-65). Reads are gated on
 // relations:read, writes on relations:manage (6th positional arg; requiredRole
 // stays null so RbacMiddleware enforces the permission). All routes are

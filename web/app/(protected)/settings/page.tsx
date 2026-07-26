@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { SessionsSettings } from '@/components/SessionsSettings';
+import { EmailAddressesSettings } from '@/components/EmailAddressesSettings';
 import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
@@ -32,6 +33,17 @@ export default function SettingsPage() {
           </div>
 
           <ProfileForm />
+        </CardContent>
+      </Card>
+
+      {/* Email addresses — multi-email self-service (WC-54fb5c37) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Email addresses</CardTitle>
+          <CardDescription>Add, verify, and manage the email addresses on your account</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <EmailAddressesSettings />
         </CardContent>
       </Card>
 
