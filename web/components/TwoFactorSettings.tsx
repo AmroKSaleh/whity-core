@@ -27,9 +27,17 @@ interface TwoFactorStatus {
 interface TwoFactorSetupWizardProps {
   onComplete: (codes: string[]) => void;
   onCancel: () => void;
+  /**
+   * Bearer token to authenticate setup()/confirm() with INSTEAD of the normal
+   * session (via apiClient). Used by the login-time mandatory-enrollment flow
+   * (WC-525), where the caller holds a narrowly-scoped `two_factor_enrollment`
+   * token (see TokenValidator::validateTwoFactorEnrollmentToken) rather than a
+   * full session — there is no session to attach cookies/headers from yet.
+   */
+  bearerToken?: string;
 }
 
-const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete, onCancel }) => {
+export const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete, onCancel, bearerToken }) => {
   const { apiClient } = useAuth();
   const [step, setStep] = useState<'setup' | 'verify'>('setup');
   const [secret, setSecret] = useState<string>('');
@@ -38,10 +46,24 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
+  const doFetch = useCallback((path: string, init?: RequestInit) => {
+    if (bearerToken) {
+      return fetch(path, {
+        ...init,
+        headers: {
+          ...(init?.headers ?? {}),
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${bearerToken}`,
+        },
+      });
+    }
+    return apiClient(path, init);
+  }, [apiClient, bearerToken]);
+
   useEffect(() => {
     const fetchSetup = async () => {
       try {
-        const response = await apiClient('/api/v1/auth/2fa/setup', {
+        const response = await doFetch('/api/v1/auth/2fa/setup', {
           method: 'POST',
         });
 
@@ -60,7 +82,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
     };
 
     fetchSetup();
-  }, [apiClient]);
+  }, [doFetch]);
 
   const handleVerify = async () => {
     if (!code.trim()) {
@@ -72,7 +94,7 @@ const TwoFactorSetupWizard: React.FC<TwoFactorSetupWizardProps> = ({ onComplete,
     setError('');
 
     try {
-      const response = await apiClient('/api/v1/auth/2fa/confirm', {
+      const response = await doFetch('/api/v1/auth/2fa/confirm', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
