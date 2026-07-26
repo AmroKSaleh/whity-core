@@ -6,13 +6,6 @@ import { AuthProvider } from '@/lib/auth-context';
 import { ToastProvider } from '@/lib/toast-context';
 import { ToastContainer } from '@/components/ui/toast-container';
 
-// jsdom has no TextEncoder; react-qr-code (rendered by the mandatory-2FA
-// enrollment wizard below) needs it to encode the QR payload.
-if (typeof global.TextEncoder === 'undefined') {
-  const { TextEncoder } = require('util');
-  global.TextEncoder = TextEncoder;
-}
-
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
   useRouter: jest.fn(),
