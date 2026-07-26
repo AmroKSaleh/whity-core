@@ -816,6 +816,32 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+            // Self-service analogue of GET /api/audit-logs (audit:read-gated,
+            // see auditRoutes()): no permission gate here — every authenticated
+            // caller may see their OWN activity. actor_user_id is pinned to the
+            // caller server-side (AuditLogApiHandler::listOwn()); there is no
+            // `actor` filter to widen this to another profile's rows.
+            [
+                'method' => 'GET',
+                'path' => '/api/me/audit-logs',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the caller\'s own audit entries (newest first, paginated)',
+                    'tags' => ['me'],
+                    'parameters' => [
+                        self::queryParam('action', 'string', 'Exact action match (e.g. users:create)'),
+                        self::queryParam('target_type', 'string', 'Filter by target type'),
+                        self::queryParam('from', 'string', 'Inclusive ISO-8601 lower bound'),
+                        self::queryParam('to', 'string', 'Inclusive ISO-8601 upper bound'),
+                        self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                        self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    ],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s own audit entries with pagination', 'AuditLogListResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
         ];
     }
 

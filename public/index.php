@@ -959,6 +959,11 @@ $router->register('DELETE', '/api/delegations/{id:\d+}', [$delegationsHandler, '
 $auditLogHandler = new AuditLogApiHandler($db->getPdo(), $roleChecker);
 $router->register('GET', '/api/audit-logs', [$auditLogHandler, 'list'], null, null, CorePermissions::AUDIT_READ);
 
+// 13a. Self-service analogue (no permission gate — every authenticated user
+// may see their OWN activity; requiredPermission stays null and listOwn()
+// pins actor_user_id to the caller itself, never a caller-supplied value).
+$router->register('GET', '/api/me/audit-logs', [$auditLogHandler, 'listOwn'], null);
+
 // 13b. Register the Website Settings API (global defaults + per-tenant
 // overrides). Reads are gated on settings:read, current-tenant override writes
 // on settings:write, and global-default reads/writes on settings:manage (6th
