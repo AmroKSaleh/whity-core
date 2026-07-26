@@ -13,5 +13,7 @@
 
 import { registerPluginScreen } from '@/lib/plugin-ui-registry';
 import { HelloGreetingsScreen } from '@/components/hello/greetings-screen';
+import { DemoCatalogScreen } from '@/components/demo-catalog/demo-catalog-screen';
 
 registerPluginScreen('hello-greetings', HelloGreetingsScreen);
+registerPluginScreen('demo-catalog', DemoCatalogScreen);

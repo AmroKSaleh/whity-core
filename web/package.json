@@ -22,6 +22,7 @@
     "tokens:check": "node ../src/design/tokens/generate-tokens.js check"
   },
   "dependencies": {
+    "@amroksaleh/features": "file:../packages/features",
     "@amroksaleh/ui": "file:../packages/ui",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-dialog": "^1.1.21",
