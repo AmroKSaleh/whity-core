@@ -303,8 +303,8 @@ final class BlockValidatorTest extends TestCase
         $expected = [
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
-            'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list',
-            'numberInput', 'referenceSelect', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
+            'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list', 'markdown', 'math',
+            'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
         ];
         sort($expected);
@@ -1098,7 +1098,7 @@ final class BlockValidatorTest extends TestCase
         foreach ([
             'form', 'textInput', 'textArea', 'numberInput', 'select',
             'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-            'bilingualText', 'referenceSelect', 'submitButton', 'actionButton',
+            'bilingualText', 'referenceSelect', 'richTextInput', 'submitButton', 'actionButton',
         ] as $expectedType) {
             $this->assertContains($expectedType, $types, "'{$expectedType}' must be in BlockContract::types()");
         }
@@ -1109,7 +1109,7 @@ final class BlockValidatorTest extends TestCase
         $this->assertTrue(BlockContract::isContainer('form'));
         foreach (['textInput', 'textArea', 'numberInput', 'select', 'checkbox',
                   'slider', 'dateInput', 'fileInput', 'colorInput',
-                  'bilingualText', 'referenceSelect',
+                  'bilingualText', 'referenceSelect', 'richTextInput',
                   'submitButton', 'actionButton'] as $leaf) {
             $this->assertFalse(BlockContract::isContainer($leaf), "'{$leaf}' must be a leaf");
         }
@@ -1515,5 +1515,75 @@ final class BlockValidatorTest extends TestCase
         ]]);
         $this->assertFalse($result['ok']);
         $this->assertStringContainsString('non-empty list of row-action objects', implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A5: math / markdown / richTextInput ====================
+
+    public function testMathAndMarkdownDisplayBlocksAreValid(): void
+    {
+        $tree = [
+            ['type' => 'math', 'expression' => 'e^{i\\pi}+1=0', 'block' => true],
+            ['type' => 'markdown', 'content' => "## Title\n\n**bold** and \$a^2\$"],
+        ];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testMathMissingExpressionIsRejected(): void
+    {
+        $result = BlockValidator::validate([['type' => 'math', 'block' => true]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'expression'", implode(' | ', $result['errors']));
+    }
+
+    public function testMarkdownMissingContentIsRejected(): void
+    {
+        $result = BlockValidator::validate([['type' => 'markdown']]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'content'", implode(' | ', $result['errors']));
+    }
+
+    public function testMathAndMarkdownAreLeafDisplayBlocks(): void
+    {
+        // Display blocks: valid at the top level (NOT form-only) and leaves.
+        $this->assertFalse(BlockContract::isContainer('math'));
+        $this->assertFalse(BlockContract::isContainer('markdown'));
+        $this->assertContains('math', BlockContract::types());
+        $this->assertContains('markdown', BlockContract::types());
+    }
+
+    public function testRichTextInputInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                ['type' => 'richTextInput', 'name' => 'notes', 'label' => 'Notes', 'rows' => 4, 'required' => true],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testRichTextInputAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'richTextInput', 'name' => 'x', 'label' => 'X'],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'richTextInput' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    public function testRichTextInputMissingNameIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'richTextInput', 'label' => 'X'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result['errors']));
     }
 }

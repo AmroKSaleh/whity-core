@@ -639,6 +639,30 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                      'content' => '{ "screen": "blocks" }']
                     PHP,
             ),
+            // WC-532 A5: math + markdown display blocks.
+            $this->demo(
+                'math',
+                'A LaTeX expression rendered with KaTeX (trust:false — never executes).',
+                [
+                    'type' => 'math',
+                    'expression' => 'e^{i\\pi} + 1 = 0',
+                    'block' => true,
+                ],
+                <<<'PHP'
+                    ['type' => 'math', 'expression' => 'e^{i\\pi}+1=0', 'block' => true]
+                    PHP,
+            ),
+            $this->demo(
+                'markdown',
+                'Markdown rendered by the XSS-safe renderer, with inline $…$ math.',
+                [
+                    'type' => 'markdown',
+                    'content' => "## Notes\n\n**Bold**, _italic_, `code`, a [link](/plugins), and inline math \$a^2+b^2=c^2\$.\n\n- first\n- second",
+                ],
+                <<<'PHP'
+                    ['type' => 'markdown', 'content' => "## Notes\n\n**Bold** and math \$a^2\$"]
+                    PHP,
+            ),
         ];
     }
 
@@ -1028,6 +1052,14 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     'source' => '/api/uikit/demo/rows',
                                     'valueField' => 'role',
                                     'labelField' => 'role',
+                                ],
+                                // WC-532 A5: Markdown-aware input with a live
+                                // preview. Label avoids "name" (e2e getByLabel).
+                                [
+                                    'type' => 'richTextInput',
+                                    'name' => 'notes',
+                                    'label' => 'Notes (Markdown)',
+                                    'rows' => 4,
                                 ],
                                 [
                                     'type' => 'submitButton',

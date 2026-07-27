@@ -212,6 +212,24 @@ final class BlockContract
                     'content' => ['type' => 'string', 'required' => true],
                 ],
             ],
+            // ---- WC-532 A5: math + markdown display blocks ----
+            // A LaTeX expression rendered via KaTeX (trust:false, so it can
+            // never inject executable content). `block` selects display mode.
+            'math' => [
+                'container' => false,
+                'props' => [
+                    'expression' => ['type' => 'string', 'required' => true],
+                    'block'      => ['type' => 'bool',   'required' => false],
+                ],
+            ],
+            // Markdown source rendered by the web's dependency-free, XSS-safe
+            // renderer (React elements only, sanitized links, inline $…$ math).
+            'markdown' => [
+                'container' => false,
+                'props' => [
+                    'content' => ['type' => 'string', 'required' => true],
+                ],
+            ],
 
             // ---- data-bound leaves (SP2, WC-229) ----
             // WC-241: 'columns' upgraded to 'dataColumnList' (adds optional
@@ -279,6 +297,17 @@ final class BlockContract
                 'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'textArea' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'rows'        => ['type' => 'int',       'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
+            ]],
+            // WC-532 A5: a Markdown-aware multi-line input. Submits Markdown
+            // SOURCE (a plain string) like textArea; the web renderer shows a
+            // live preview via the same XSS-safe renderer as the markdown block.
+            'richTextInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'rows'        => ['type' => 'int',       'required' => false],
