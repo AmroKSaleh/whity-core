@@ -255,6 +255,21 @@ export interface FormBlock {
   children: Block[];
 }
 
+/**
+ * WC-532 A2: a repeatable field-group (form only). `children` is the per-row
+ * sub-form template; the renderer collects the rows into a JSON array submitted
+ * under `name`. `min`/`max` bound the row count; `itemLabel` names each row.
+ */
+export interface FieldArrayBlock {
+  type: 'fieldArray';
+  name: string;
+  label: string;
+  itemLabel?: string;
+  min?: number;
+  max?: number;
+  children: Block[];
+}
+
 /** Leaf (form only): a single-line text input. */
 export interface TextInputBlock {
   type: 'textInput';
@@ -477,6 +492,7 @@ export type Block =
   | DataStatBlock
   | DataListBlock
   | FormBlock
+  | FieldArrayBlock
   | TextInputBlock
   | TextAreaBlock
   | RichTextInputBlock

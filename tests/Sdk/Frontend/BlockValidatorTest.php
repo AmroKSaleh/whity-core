@@ -303,7 +303,7 @@ final class BlockValidatorTest extends TestCase
         $expected = [
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
-            'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list', 'markdown', 'math',
+            'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list', 'markdown', 'math',
             'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
         ];
@@ -1585,5 +1585,107 @@ final class BlockValidatorTest extends TestCase
         ]]);
         $this->assertFalse($result['ok']);
         $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A2: fieldArray ====================
+
+    public function testFieldArrayWithTemplateInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                [
+                    'type'  => 'fieldArray',
+                    'name'  => 'lineItems',
+                    'label' => 'Line items',
+                    'itemLabel' => 'Line',
+                    'max'   => 5,
+                    'children' => [
+                        ['type' => 'textInput', 'name' => 'description', 'label' => 'Description'],
+                        ['type' => 'numberInput', 'name' => 'qty', 'label' => 'Quantity'],
+                    ],
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testFieldArrayIsAContainerAndInTheWhitelist(): void
+    {
+        $this->assertTrue(BlockContract::isContainer('fieldArray'));
+        $this->assertContains('fieldArray', BlockContract::types());
+    }
+
+    public function testFieldArrayAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'fieldArray', 'name' => 'x', 'label' => 'X', 'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A'],
+            ]],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'fieldArray' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    /**
+     * A fieldArray SCOPES its template names per row: a child named 'label' may
+     * reuse a name that also appears in the OUTER form (or another fieldArray)
+     * without a duplicate-name error — the name is row-local.
+     */
+    public function testFieldArrayTemplateNamesAreScopedNotGlobal(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'],
+                ['type' => 'fieldArray', 'name' => 'rows', 'label' => 'Rows', 'children' => [
+                    ['type' => 'textInput', 'name' => 'title', 'label' => 'Row title'],
+                ]],
+                ['type' => 'fieldArray', 'name' => 'more', 'label' => 'More', 'children' => [
+                    ['type' => 'textInput', 'name' => 'title', 'label' => 'More title'],
+                ]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+        // 'title' appears in the outer form and inside BOTH fieldArrays — all fine.
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testFieldArrayNameCollidingWithSiblingInputIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'dup', 'label' => 'Dup'],
+                ['type' => 'fieldArray', 'name' => 'dup', 'label' => 'Dup array', 'children' => [
+                    ['type' => 'textInput', 'name' => 'a', 'label' => 'A'],
+                ]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'dup'", implode(' | ', $result['errors']));
+    }
+
+    public function testFieldArrayMissingNameIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'fieldArray', 'label' => 'X', 'children' => [
+                    ['type' => 'textInput', 'name' => 'a', 'label' => 'A'],
+                ]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+        $result2 = $result;
+        $this->assertFalse($result2['ok']);
+        $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result2['errors']));
     }
 }

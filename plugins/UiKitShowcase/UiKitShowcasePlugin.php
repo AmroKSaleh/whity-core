@@ -1061,6 +1061,20 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     'label' => 'Notes (Markdown)',
                                     'rows' => 4,
                                 ],
+                                // WC-532 A2: a repeatable field-group. Labels avoid
+                                // "name" (the e2e's getByLabel('Name')); starts with
+                                // zero rows (min unset) so it adds no required fields.
+                                [
+                                    'type' => 'fieldArray',
+                                    'name' => 'lineItems',
+                                    'label' => 'Line items',
+                                    'itemLabel' => 'Line',
+                                    'max' => 5,
+                                    'children' => [
+                                        ['type' => 'textInput', 'name' => 'description', 'label' => 'Description'],
+                                        ['type' => 'numberInput', 'name' => 'qty', 'label' => 'Quantity', 'min' => 0],
+                                    ],
+                                ],
                                 [
                                     'type' => 'submitButton',
                                     'label' => 'Submit',

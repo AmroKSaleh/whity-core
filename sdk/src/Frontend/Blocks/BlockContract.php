@@ -284,6 +284,19 @@ final class BlockContract
                 'submit'             => ['type' => 'submitSpec', 'required' => true],
                 'requiredPermission' => ['type' => 'string',     'required' => false],
             ]],
+            // WC-532 A2: a repeatable field-group. Its `children` are the
+            // per-row sub-form template (input leaves); the web renderer lets
+            // the user add / remove / reorder rows and submits the collected
+            // rows as a JSON array under `name`. Form-only (needs a `form`
+            // ancestor) and, like `form`, scopes its template input names per
+            // row. `min`/`max` bound the row count; `itemLabel` names each row.
+            'fieldArray' => ['container' => true, 'props' => [
+                'name'      => ['type' => 'inputName', 'required' => true],
+                'label'     => ['type' => 'string',    'required' => true],
+                'itemLabel' => ['type' => 'string',    'required' => false],
+                'min'       => ['type' => 'int',       'required' => false],
+                'max'       => ['type' => 'int',       'required' => false],
+            ]],
             // WC-532 A3: every input carries an optional `visibleWhen`
             // presentational facet — the web renderer hides the input unless a
             // sibling field in the same form matches (equals / in). It never

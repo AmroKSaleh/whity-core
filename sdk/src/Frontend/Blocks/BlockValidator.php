@@ -42,6 +42,7 @@ final class BlockValidator
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
         'bilingualText', 'referenceSelect', 'richTextInput', 'submitButton',
+        'fieldArray',
     ];
 
     /**
@@ -165,8 +166,10 @@ final class BlockValidator
         }
 
         // SP3 (WC-233): track input names within their enclosing form for
-        // duplicate detection. Only applies to input leaves (not submitButton).
-        if ($inForm && \in_array($type, self::INPUT_LEAF_TYPES, true)) {
+        // duplicate detection. Applies to input leaves (not submitButton) and
+        // to `fieldArray` (WC-532 A2), whose own `name` is the payload key for
+        // its row array and must not collide with a sibling input.
+        if ($inForm && (\in_array($type, self::INPUT_LEAF_TYPES, true) || $type === 'fieldArray')) {
             $nameValue = $node['name'] ?? null;
             if (\is_string($nameValue) && $nameValue !== '') {
                 if (isset($formNames[$nameValue])) {
@@ -205,8 +208,12 @@ final class BlockValidator
             }
 
             /** @var array<mixed> $children */
-            if ($type === 'form') {
-                // A `form` starts a fresh name registry for its subtree.
+            if ($type === 'form' || $type === 'fieldArray') {
+                // A `form` starts a fresh name registry for its subtree; a
+                // `fieldArray` (WC-532 A2) likewise scopes its template's input
+                // names PER ROW, so they neither collide with the outer form nor
+                // with a sibling fieldArray. Its children still require a form
+                // ancestor, so `$inForm` stays true down this branch.
                 $childFormNames = [];
                 self::validateList($children, "{$path}.children", $depth + 1, $count, $errors, $type, true, $childFormNames);
             } else {

@@ -10,6 +10,8 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconMinus,
+  IconPlus,
+  IconTrash,
   IconPointFilled,
   IconRefresh,
   IconSearch,
@@ -30,6 +32,7 @@ import type {
   DataStatBlock,
   DataTableBlock,
   DateInputBlock,
+  FieldArrayBlock,
   FileInputBlock,
   FormBlock,
   GridBlock,
@@ -87,9 +90,11 @@ import {
 import { PermissionButton } from '@/components/rbac/permission-button';
 import {
   FormProvider,
+  FormScopeProvider,
   useFormBlockContext,
   IssuesReport,
   type FormBlockContextValue,
+  type FieldArrayValue,
 } from '@/components/plugin/blocks/form-context';
 import { submitPluginAction } from '@/lib/plugin-action-submit';
 import type { ActionIssue } from '@/lib/plugin-action-submit';
@@ -1215,6 +1220,86 @@ function FormRenderer({ block }: { block: FormBlock }) {
   );
 }
 
+// WC-532 A2: a repeatable field-group. Owns an array of row-records under
+// block.name in the enclosing form; each row renders the template children
+// through a row-SCOPED FormScopeProvider so the ordinary input renderers work
+// unchanged (their names resolve against the row, not the outer form). The
+// user can add / remove / reorder rows within [min, max].
+function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="fieldArray" />;
+
+  const raw = ctx.values[block.name];
+  const rows: FieldArrayValue = Array.isArray(raw) ? raw : [];
+  const min = typeof block.min === 'number' && block.min > 0 ? block.min : 0;
+  const max = typeof block.max === 'number' && block.max > 0 ? block.max : Infinity;
+  const itemLabel = block.itemLabel ?? 'Item';
+
+  const write = (next: FieldArrayValue) => ctx.setValue(block.name, next);
+  const add = () => { if (rows.length < max) write([...rows, {}]); };
+  const remove = (i: number) => { if (rows.length > min) write(rows.filter((_, j) => j !== i)); };
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= rows.length) return;
+    const next = rows.slice();
+    const tmp = next[i]; next[i] = next[j]; next[j] = tmp;
+    write(next);
+  };
+
+  return (
+    <div className="space-y-2" data-slot="field-array">
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-sm font-medium">{block.label}</label>
+        {ctx.errors[block.name] !== undefined && (
+          <p className="text-xs text-destructive" role="alert">{ctx.errors[block.name]}</p>
+        )}
+      </div>
+
+      {rows.map((row, i) => {
+        const rowCtx: FormBlockContextValue = {
+          values: row,
+          setValue: (childName, v) => {
+            // A row holds only scalar/bilingual values — nested arrays (a
+            // fieldArray inside a row) are out of scope and ignored.
+            if (Array.isArray(v)) return;
+            const next = rows.slice();
+            next[i] = { ...next[i], [childName]: v };
+            write(next);
+          },
+          errors: {},
+          isSubmitting: ctx.isSubmitting,
+          submit: ctx.submit,
+        };
+        return (
+          <div key={i} className="space-y-2 rounded-md border border-border p-3" data-slot="field-array-row">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground">{itemLabel} {i + 1}</span>
+              <div className="flex gap-1">
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${itemLabel} ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)}>
+                  <IconChevronUp className="size-3.5" aria-hidden />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${itemLabel} ${i + 1} down`} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
+                  <IconChevronDown className="size-3.5" aria-hidden />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${itemLabel} ${i + 1}`} disabled={rows.length <= min} onClick={() => remove(i)}>
+                  <IconTrash className="size-3.5" aria-hidden />
+                </Button>
+              </div>
+            </div>
+            <FormScopeProvider value={rowCtx}>
+              <BlockList blocks={block.children} />
+            </FormScopeProvider>
+          </div>
+        );
+      })}
+
+      <Button type="button" variant="outline" size="sm" disabled={rows.length >= max} onClick={add}>
+        <IconPlus className="me-1 size-4" aria-hidden />Add {itemLabel.toLowerCase()}
+      </Button>
+    </div>
+  );
+}
+
 function TextInputRenderer({ block }: { block: TextInputBlock }) {
   const ctx = useFormBlockContext();
   if (ctx === null) return <UnsupportedBlock type="textInput" />;
@@ -1388,7 +1473,7 @@ function BilingualTextRenderer({ block }: { block: BilingualTextInputBlock }) {
   if (ctx === null) return <UnsupportedBlock type="bilingualText" />;
   const inputId = `block-input-${block.name}`;
   const raw = ctx.values[block.name];
-  const value = raw !== null && typeof raw === 'object' ? raw : {};
+  const value = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   return (
     <div className="space-y-1.5">
       <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
@@ -1558,7 +1643,7 @@ function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
  * `equals: 5` matches a form field holding the string `'5'`. Missing → `''`.
  */
 function normalizeVisibilityOperand(
-  value: string | number | boolean | LocalizedTextValue | undefined
+  value: string | number | boolean | LocalizedTextValue | FieldArrayValue | undefined
 ): string {
   if (typeof value === 'boolean') {
     return value ? 'true' : 'false';
@@ -1777,6 +1862,8 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
 
     case 'form':
       return Array.isArray(block.children) && isValidSubmitSpec(block.submit) ? <FormRenderer block={block} /> : <UnsupportedBlock type="form" />;
+    case 'fieldArray':
+      return Array.isArray(block.children) && isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <FieldArrayRenderer block={block} /> : <UnsupportedBlock type="fieldArray" />;
     case 'textInput':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextInputRenderer block={block} /> : <UnsupportedBlock type="textInput" />;
     case 'textArea':
