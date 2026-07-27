@@ -9,8 +9,10 @@ import {
   type CrudModel,
   type LocalizedTextValue,
   type OpenApiSpec,
+  type ReferenceConfig,
 } from '@/lib/plugin-crud-schema';
 import type { PluginFeature } from '@/lib/plugin-features';
+import { usePluginData } from '@/lib/use-plugin-data';
 import { useToast } from '@/lib/toast-context';
 import { useDirection } from '@/lib/direction-context';
 import { AdminHeader } from '@/components/admin/admin-header';
@@ -122,7 +124,7 @@ async function fetchSpec(): Promise<OpenApiSpec | null> {
 }
 
 /** Form values: strings for text-ish inputs, booleans for checkboxes, {ar,en} for LocalizedText. */
-type FormValues = Record<string, string | boolean | LocalizedTextValue>;
+export type FormValues = Record<string, string | boolean | LocalizedTextValue>;
 
 /** Narrow an unknown raw value to a {@link LocalizedTextValue}, defensively. */
 function toLocalizedTextValue(raw: unknown): LocalizedTextValue {
@@ -218,8 +220,11 @@ function validateFormValues(
   return errors;
 }
 
-/** Convert form values to the JSON payload; empty optional fields are omitted. */
-function toPayload(
+/**
+ * Convert form values to the JSON payload; empty optional fields are omitted.
+ * Exported for unit testing (the reference-id coercion in particular).
+ */
+export function toPayload(
   fields: CrudField[],
   values: FormValues
 ): Record<string, unknown> {
@@ -243,9 +248,103 @@ function toPayload(
     if (text === '' && !field.required) {
       continue;
     }
-    payload[field.name] = field.kind === 'number' ? Number(text) : text;
+    // A reference submits its chosen value; coerce a numeric id (the common
+    // FK) to a number, leave a non-numeric key (a string FK) as-is.
+    const asNumber = field.kind === 'number' || (field.kind === 'reference' && /^\d+$/.test(text));
+    payload[field.name] = asNumber ? Number(text) : text;
   }
   return payload;
+}
+
+/**
+ * A `kind: "reference"` form field: a dropdown populated from the referenced
+ * collection (usePluginData over `resource`), each row mapped {value:
+ * valueField, label: labelField}. The submitted value is the chosen FK id
+ * (coerced in toPayload). Mirrors the block-DSL referenceSelect renderer.
+ */
+function ReferenceField({
+  field,
+  reference,
+  value,
+  error,
+  onChange,
+}: {
+  field: CrudField;
+  reference: ReferenceConfig;
+  value: string;
+  error: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const inputId = `crud-field-${field.name}`;
+  const state = usePluginData<Array<Record<string, unknown>>>(
+    reference.resource,
+    (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
+  );
+
+  const options =
+    state.status === 'ready'
+      ? state.data.flatMap((row) => {
+          const rawValue = row[reference.valueField];
+          const rawLabel = row[reference.labelField];
+          if (rawValue === undefined || rawValue === null) {
+            return [];
+          }
+          return [
+            {
+              value: String(rawValue),
+              label:
+                rawLabel === undefined || rawLabel === null
+                  ? String(rawValue)
+                  : String(rawLabel),
+            },
+          ];
+        })
+      : [];
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor={inputId} className="text-sm font-medium">
+        {field.label}
+        {field.required && <span className="text-destructive"> *</span>}
+      </label>
+      {state.status === 'error' ? (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground">
+          <span>Failed to load options.</span>
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+        <Select
+          value={value}
+          onValueChange={onChange}
+          disabled={state.status === 'loading'}
+        >
+          <SelectTrigger
+            id={inputId}
+            className="w-full"
+            aria-invalid={error !== undefined}
+          >
+            <SelectValue
+              placeholder={
+                state.status === 'loading'
+                  ? 'Loading…'
+                  : `Select ${field.label.toLowerCase()}`
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
 }
 
 interface CrudFormDialogProps {
@@ -361,6 +460,19 @@ function CrudFormDialog({
                   />
                   {error && <p className="text-xs text-destructive">{error}</p>}
                 </div>
+              );
+            }
+
+            if (field.kind === 'reference' && field.reference) {
+              return (
+                <ReferenceField
+                  key={field.name}
+                  field={field}
+                  reference={field.reference}
+                  value={text}
+                  error={error}
+                  onChange={(next) => setValue(field.name, next)}
+                />
               );
             }
 

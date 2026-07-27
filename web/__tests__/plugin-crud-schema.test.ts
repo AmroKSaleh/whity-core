@@ -5,6 +5,7 @@ import {
   resolveRef,
   type CrudCapabilities,
   type OpenApiSpec,
+  type SchemaObject,
 } from '@/lib/plugin-crud-schema';
 
 /**
@@ -541,5 +542,76 @@ describe('deriveCrudModel — LocalizedText convention (WC-532)', () => {
     expect(model.createFields).toEqual([
       { name: 'stem', label: 'Stem', kind: 'localized-text', required: true },
     ]);
+  });
+});
+
+describe('deriveCrudModel — x-whity-reference (FK dropdown)', () => {
+  const REF = { resource: '/api/demo/categories', valueField: 'id', labelField: 'name' };
+
+  function specWithCategory(categoryProp: SchemaObject): OpenApiSpec {
+    const listResponse: SchemaObject = {
+      type: 'object',
+      properties: {
+        data: { type: 'array', items: { $ref: '#/components/schemas/Thing' } },
+      },
+    };
+    return {
+      paths: {
+        '/api/demo/things': {
+          get: { responses: { '200': { content: { 'application/json': { schema: listResponse } } } } },
+          post: { requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/ThingInput' } } } } },
+        },
+        '/api/demo/things/{id}': {
+          patch: { requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/ThingInput' } } } } },
+          delete: {},
+        },
+      },
+      components: {
+        schemas: {
+          Thing: {
+            type: 'object',
+            properties: { id: { type: 'integer' }, name: { type: 'string' }, category_id: categoryProp },
+          },
+          ThingInput: {
+            type: 'object',
+            required: ['name', 'category_id'],
+            properties: { name: { type: 'string' }, category_id: categoryProp },
+          },
+        },
+      },
+    };
+  }
+
+  it('derives a "reference" create field carrying its config', () => {
+    const model = deriveCrudModel(
+      specWithCategory({ type: 'integer', 'x-whity-reference': REF }),
+      '/api/demo/things'
+    );
+    const field = model.createFields.find((f) => f.name === 'category_id');
+    expect(field).toEqual({
+      name: 'category_id',
+      label: 'Category ID',
+      kind: 'reference',
+      required: true,
+      reference: REF,
+    });
+  });
+
+  it('marks the FK column with its reference config (still a rendered column)', () => {
+    const model = deriveCrudModel(
+      specWithCategory({ type: 'integer', 'x-whity-reference': REF }),
+      '/api/demo/things'
+    );
+    const column = model.columns.find((c) => c.key === 'category_id');
+    expect(column).toEqual({ key: 'category_id', label: 'Category ID', reference: REF });
+  });
+
+  it('falls back to a plain number field when the marker is incomplete', () => {
+    const model = deriveCrudModel(
+      specWithCategory({ type: 'integer', 'x-whity-reference': { resource: '/api/demo/categories' } }),
+      '/api/demo/things'
+    );
+    const field = model.createFields.find((f) => f.name === 'category_id');
+    expect(field).toEqual({ name: 'category_id', label: 'Category ID', kind: 'number', required: true });
   });
 });
