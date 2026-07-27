@@ -38,8 +38,11 @@ import type {
   KeyValueBlock,
   ListBlock,
   LocalizedTextValue,
+  MarkdownBlock,
+  MathBlock,
   NumberInputBlock,
   ReferenceSelectBlock,
+  RichTextInputBlock,
   RowAction,
   RowBlock,
   SectionBlock,
@@ -59,6 +62,8 @@ import { Chart } from '@amroksaleh/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Input } from '@amroksaleh/ui/input';
 import { BilingualInput } from '@amroksaleh/ui/bilingual-input';
+import { MathText } from '@amroksaleh/ui/math-text';
+import { renderMarkdown } from '@/lib/safe-markdown';
 import { Pagination } from '@amroksaleh/ui/pagination';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import {
@@ -587,6 +592,20 @@ function CodeRenderer({ block }: { block: CodeBlock }) {
       <code>{block.content}</code>
     </pre>
   );
+}
+
+// WC-532 A5: a LaTeX expression via the KaTeX MathText atom (trust:false).
+function MathRenderer({ block }: { block: MathBlock }) {
+  return (
+    <div className="overflow-x-auto" data-slot="math-block">
+      <MathText expression={block.expression} block={block.block === true} />
+    </div>
+  );
+}
+
+// WC-532 A5: Markdown rendered by the dependency-free, XSS-safe renderer.
+function MarkdownRenderer({ block }: { block: MarkdownBlock }) {
+  return <div data-slot="markdown-block">{renderMarkdown(block.content)}</div>;
 }
 
 // ---- SP2 data-bound renderers (WC-231) ----
@@ -1224,6 +1243,28 @@ function TextAreaRenderer({ block }: { block: TextAreaBlock }) {
   );
 }
 
+// WC-532 A5: a Markdown-aware textarea that submits Markdown source and shows
+// a live preview (rendered via the same XSS-safe renderer as the markdown block).
+function RichTextInputRenderer({ block }: { block: RichTextInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="richTextInput" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : '';
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <Textarea id={inputId} value={strValue} rows={block.rows ?? 6} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+      {strValue.trim() !== '' && (
+        <div className="rounded-md border border-border bg-muted/30 p-3" data-slot="richtext-preview">
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Preview</p>
+          {renderMarkdown(strValue)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NumberInputRenderer({ block }: { block: NumberInputBlock }) {
   const ctx = useFormBlockContext();
   if (ctx === null) return <UnsupportedBlock type="numberInput" />;
@@ -1701,6 +1742,10 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       ) : (
         <UnsupportedBlock type="code" />
       );
+    case 'math':
+      return isNonEmptyString(block.expression) ? <MathRenderer block={block} /> : <UnsupportedBlock type="math" />;
+    case 'markdown':
+      return isNonEmptyString(block.content) ? <MarkdownRenderer block={block} /> : <UnsupportedBlock type="markdown" />;
     case 'dataTable':
       return isNonEmptyString(block.source) && isDataColumnList(block.columns) ? (
         <DataTableRenderer block={block} />
@@ -1736,6 +1781,8 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextInputRenderer block={block} /> : <UnsupportedBlock type="textInput" />;
     case 'textArea':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextAreaRenderer block={block} /> : <UnsupportedBlock type="textArea" />;
+    case 'richTextInput':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <RichTextInputRenderer block={block} /> : <UnsupportedBlock type="richTextInput" />;
     case 'numberInput':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <NumberInputRenderer block={block} /> : <UnsupportedBlock type="numberInput" />;
     case 'select':

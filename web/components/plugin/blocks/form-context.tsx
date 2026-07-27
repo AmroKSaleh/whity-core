@@ -110,6 +110,7 @@ const FORM_INPUT_TYPES = [
   'colorInput',
   'bilingualText',
   'referenceSelect',
+  'richTextInput',
 ] as const;
 
 /**
@@ -165,7 +166,8 @@ function collectDefaults(
       input.type === 'slider' ||
       input.type === 'dateInput' ||
       input.type === 'colorInput' ||
-      input.type === 'referenceSelect'
+      input.type === 'referenceSelect' ||
+      input.type === 'richTextInput'
     ) {
       if (typeof input.default === 'string') {
         defaults[input.name] = input.default;
@@ -250,7 +252,8 @@ export function FormProvider({
           child.type === 'numberInput' ||
           child.type === 'select' ||
           child.type === 'dateInput' ||
-          child.type === 'fileInput') &&
+          child.type === 'fileInput' ||
+          child.type === 'richTextInput') &&
         child.required === true
       ) {
         const val = values[child.name];

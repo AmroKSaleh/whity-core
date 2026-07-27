@@ -166,6 +166,19 @@ export interface CodeBlock {
   content: string;
 }
 
+/** WC-532 A5: a LaTeX expression rendered via KaTeX (inline unless `block`). */
+export interface MathBlock {
+  type: 'math';
+  expression: string;
+  block?: boolean;
+}
+
+/** WC-532 A5: Markdown source rendered by the XSS-safe renderer (with $…$ math). */
+export interface MarkdownBlock {
+  type: 'markdown';
+  content: string;
+}
+
 // ---- SP2 data-bound leaf blocks (WC-231) ----
 
 /**
@@ -258,6 +271,21 @@ export interface TextInputBlock {
 /** Leaf (form only): a multi-line text area. */
 export interface TextAreaBlock {
   type: 'textArea';
+  name: string;
+  label: string;
+  rows?: number;
+  required?: boolean;
+  default?: string;
+  visibleWhen?: VisibleWhen;
+}
+
+/**
+ * WC-532 A5: a Markdown-aware multi-line input. Submits Markdown source (a
+ * plain string) like textArea; the renderer shows a live preview via the
+ * XSS-safe renderer.
+ */
+export interface RichTextInputBlock {
+  type: 'richTextInput';
   name: string;
   label: string;
   rows?: number;
@@ -443,12 +471,15 @@ export type Block =
   | ButtonBlock
   | IconBlock
   | CodeBlock
+  | MathBlock
+  | MarkdownBlock
   | DataTableBlock
   | DataStatBlock
   | DataListBlock
   | FormBlock
   | TextInputBlock
   | TextAreaBlock
+  | RichTextInputBlock
   | NumberInputBlock
   | SelectBlock
   | CheckboxBlock
