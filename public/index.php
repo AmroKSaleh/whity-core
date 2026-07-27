@@ -1096,6 +1096,34 @@ $router->register('GET',    '/api/document-templates/{id:\d+}', [$documentTempla
 $router->register('PATCH',  '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
 
+// 13b-ter. Native taxonomy/tagging API (WC-621): a domain-neutral tagging
+// primitive. Tenant-scoped, RBAC-gated CRUD for tag groups + tags, plus a
+// polymorphic tag<->entity association surface (entity_type is an opaque
+// plugin-supplied string, so ANY resource is taggable). Reads require tags:read,
+// writes require tags:manage; every query binds tenant_id.
+$tagGroupRepository = new \Whity\Core\Taxonomy\TagGroupRepository($db->getPdo());
+$tagRepository = new \Whity\Core\Taxonomy\TagRepository($db->getPdo());
+$entityTagRepository = new \Whity\Core\Taxonomy\EntityTagRepository($db->getPdo());
+
+$tagGroupsHandler = new \Whity\Api\TagGroupsApiHandler($tagGroupRepository, $roleChecker);
+$router->register('GET',    '/api/tag-groups',          [$tagGroupsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
+$router->register('POST',   '/api/tag-groups',          [$tagGroupsHandler, 'create'], null, null, CorePermissions::TAGS_MANAGE);
+$router->register('GET',    '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'show'],   null, null, CorePermissions::TAGS_READ);
+$router->register('PATCH',  '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'update'], null, null, CorePermissions::TAGS_MANAGE);
+$router->register('DELETE', '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'delete'], null, null, CorePermissions::TAGS_MANAGE);
+
+$tagsHandler = new \Whity\Api\TagsApiHandler($tagRepository, $tagGroupRepository, $roleChecker);
+$router->register('GET',    '/api/tags',          [$tagsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
+$router->register('POST',   '/api/tags',          [$tagsHandler, 'create'], null, null, CorePermissions::TAGS_MANAGE);
+$router->register('GET',    '/api/tags/{id:\d+}', [$tagsHandler, 'show'],   null, null, CorePermissions::TAGS_READ);
+$router->register('PATCH',  '/api/tags/{id:\d+}', [$tagsHandler, 'update'], null, null, CorePermissions::TAGS_MANAGE);
+$router->register('DELETE', '/api/tags/{id:\d+}', [$tagsHandler, 'delete'], null, null, CorePermissions::TAGS_MANAGE);
+
+$entityTagsHandler = new \Whity\Api\EntityTagsApiHandler($entityTagRepository, $tagRepository, $roleChecker);
+$router->register('GET',    '/api/entity-tags', [$entityTagsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
+$router->register('POST',   '/api/entity-tags', [$entityTagsHandler, 'attach'], null, null, CorePermissions::TAGS_MANAGE);
+$router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], null, null, CorePermissions::TAGS_MANAGE);
+
 // 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
 // plaintext mail.* config is edited via /api/settings/global above; these add the
 // write-only SMTP password (encrypted at rest, never returned) and a live "send
