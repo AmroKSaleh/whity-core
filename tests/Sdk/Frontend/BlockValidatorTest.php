@@ -304,7 +304,7 @@ final class BlockValidatorTest extends TestCase
             'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
             'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list', 'markdown', 'math',
-            'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
+            'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
         ];
         sort($expected);
@@ -1687,5 +1687,68 @@ final class BlockValidatorTest extends TestCase
         $result2 = $result;
         $this->assertFalse($result2['ok']);
         $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result2['errors']));
+    }
+
+    // ==================== WC-532 A7: selector + data-bound params ====================
+
+    public function testSelectorAndDataTableParamsMasterDetailIsValid(): void
+    {
+        $tree = [
+            ['type' => 'selector', 'name' => 'team', 'label' => 'Team',
+             'source' => '/api/x/teams', 'valueField' => 'id', 'labelField' => 'name'],
+            ['type' => 'dataTable', 'source' => '/api/x/members',
+             'columns' => [['key' => 'n', 'label' => 'N']],
+             'params' => [['param' => 'teamId', 'from' => 'team']]],
+        ];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testSelectorIsALeafInTheWhitelistWithOwnedSourceRule(): void
+    {
+        $this->assertFalse(BlockContract::isContainer('selector'));
+        $this->assertContains('selector', BlockContract::types());
+        // Its source uses the shared apiPath rule (ownership-checked at load).
+        $result = BlockValidator::validate([
+            ['type' => 'selector', 'name' => 's', 'label' => 'S',
+             'source' => 'https://evil.example/api/x', 'valueField' => 'id', 'labelField' => 'name'],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a relative API path', implode(' | ', $result['errors']));
+    }
+
+    public function testSelectorMissingValueOrLabelFieldIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'selector', 'name' => 's', 'label' => 'S', 'source' => '/api/x/rows'],
+        ]);
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString("missing required prop 'valueField'", $joined);
+        $this->assertStringContainsString("missing required prop 'labelField'", $joined);
+    }
+
+    public function testDataBoundParamsEntryMustHaveParamAndFrom(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'dataTable', 'source' => '/api/x/rows',
+             'columns' => [['key' => 'a', 'label' => 'A']],
+             'params' => [['param' => 'x']]],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('{param: non-empty string, from: non-empty string}', implode(' | ', $result['errors']));
+    }
+
+    public function testDataStatChartAndDataListAllAcceptParams(): void
+    {
+        $tree = [
+            ['type' => 'dataStat', 'source' => '/api/x/m', 'label' => 'M', 'valueField' => 'v',
+             'params' => [['param' => 'p', 'from' => 'sel']]],
+            ['type' => 'dataList', 'source' => '/api/x/l', 'itemField' => 'name',
+             'params' => [['param' => 'p', 'from' => 'sel']]],
+            ['type' => 'chart', 'source' => '/api/x/c', 'chartType' => 'bar',
+             'series' => [['key' => 'k', 'label' => 'K', 'color' => 1]],
+             'params' => [['param' => 'p', 'from' => 'sel']]],
+        ];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
     }
 }

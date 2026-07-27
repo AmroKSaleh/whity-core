@@ -50,7 +50,9 @@ import type {
   RowBlock,
   SectionBlock,
   SelectBlock,
+  SelectorBlock,
   SliderBlock,
+  SourceParam,
   StatBlock,
   SubmitButtonBlock,
   TabBlock,
@@ -613,6 +615,99 @@ function MarkdownRenderer({ block }: { block: MarkdownBlock }) {
   return <div data-slot="markdown-block">{renderMarkdown(block.content)}</div>;
 }
 
+// ---- WC-532 A7: master-detail (selector → data-bound source params) ----
+
+interface MasterDetail {
+  selections: Record<string, string>;
+  setSelection: (name: string, value: string) => void;
+}
+
+const MasterDetailContext = React.createContext<MasterDetail | null>(null);
+
+function useMasterDetail(): MasterDetail | null {
+  return React.useContext(MasterDetailContext);
+}
+
+/**
+ * Provides the shared selection state that `selector` blocks write and
+ * data-bound blocks' `params` read. Rendered once at the BlockRenderer root, so
+ * a selection is visible to every sibling block on the screen.
+ */
+function MasterDetailProvider({ children }: { children: React.ReactNode }) {
+  const [selections, setSelections] = React.useState<Record<string, string>>({});
+  const setSelection = React.useCallback(
+    (name: string, value: string) => setSelections((prev) => ({ ...prev, [name]: value })),
+    []
+  );
+  const value = React.useMemo<MasterDetail>(() => ({ selections, setSelection }), [selections, setSelection]);
+  return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>;
+}
+
+/**
+ * Compute a data-bound block's EFFECTIVE source: its base `source` plus any
+ * `params` whose named selector currently has a value, appended as URL-encoded
+ * query params. Returns the base source unchanged when there are no params or
+ * no selections yet. usePluginData keys on this string, so a selection change
+ * re-fetches the block.
+ */
+function useEffectiveSource(baseSource: string, params?: SourceParam[]): string {
+  const md = useMasterDetail();
+  if (!params || params.length === 0 || md === null) return baseSource;
+  const qs = params
+    .map((p) => {
+      const v = md.selections[p.from];
+      return v !== undefined && v !== '' ? `${encodeURIComponent(p.param)}=${encodeURIComponent(v)}` : null;
+    })
+    .filter((x): x is string => x !== null)
+    .join('&');
+  if (qs === '') return baseSource;
+  return baseSource + (baseSource.includes('?') ? '&' : '?') + qs;
+}
+
+// WC-532 A7: the master selector — a dropdown fed from an owned collection
+// whose selection is published into the shared master-detail context.
+function SelectorRenderer({ block }: { block: SelectorBlock }) {
+  const md = useMasterDetail();
+  const state = usePluginData<Array<Record<string, unknown>>>(
+    block.source,
+    (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
+  );
+  const current = md?.selections[block.name] ?? '';
+  const options =
+    state.status === 'ready'
+      ? state.data.flatMap((row) => {
+          const rawValue = row[block.valueField];
+          const rawLabel = row[block.labelField];
+          if (rawValue === undefined || rawValue === null) return [];
+          return [{
+            value: String(rawValue),
+            label: rawLabel === undefined || rawLabel === null ? String(rawValue) : String(rawLabel),
+          }];
+        })
+      : [];
+
+  return (
+    <div className="space-y-1.5" data-slot="selector">
+      <label className="text-sm font-medium">{block.label}</label>
+      {state.status === 'error' ? (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground" data-slot="selector-error">
+          <span>Failed to load options.</span>
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>Retry</Button>
+        </div>
+      ) : (
+        <Select value={current} onValueChange={(v) => md?.setSelection(block.name, v)} disabled={state.status === 'loading'}>
+          <SelectTrigger aria-label={block.label} data-slot="selector-trigger">
+            <SelectValue placeholder={state.status === 'loading' ? 'Loading…' : (block.placeholder ?? `Select ${block.label}`)} />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
+
 // ---- SP2 data-bound renderers (WC-231) ----
 
 /**
@@ -746,7 +841,8 @@ function InteractiveDataTable({
  */
 function DataTableRenderer({ block }: { block: DataTableBlock }) {
   type Rows = Record<string, unknown>[];
-  const state = usePluginData<Rows>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
     return body as Rows;
   });
@@ -837,7 +933,8 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
  */
 function DataStatRenderer({ block }: { block: DataStatBlock }) {
   type Metric = Record<string, unknown>;
-  const state = usePluginData<Metric>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Metric>(source, (body) => {
     if (typeof body !== 'object' || body === null) return null;
     const obj = body as Record<string, unknown>;
     if (!(block.valueField in obj)) return null;
@@ -1025,7 +1122,8 @@ function InteractiveList({
  */
 function DataListRenderer({ block }: { block: DataListBlock }) {
   type Rows = Record<string, unknown>[];
-  const state = usePluginData<Rows>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
     return body as Rows;
   });
@@ -1119,7 +1217,8 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
  */
 function ChartRenderer({ block }: { block: ChartBlock }) {
   type Rows = Record<string, unknown>[];
-  const state = usePluginData<Rows>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
     return body as Rows;
   });
@@ -1859,6 +1958,8 @@ function BlockNode({ block }: { block: Block }): React.ReactElement | null {
       ) : (
         <UnsupportedBlock type="chart" />
       );
+    case 'selector':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <SelectorRenderer block={block} /> : <UnsupportedBlock type="selector" />;
 
     case 'form':
       return Array.isArray(block.children) && isValidSubmitSpec(block.submit) ? <FormRenderer block={block} /> : <UnsupportedBlock type="form" />;
@@ -1925,8 +2026,10 @@ function BlockList({ blocks }: { blocks: Block[] }) {
  */
 export function BlockRenderer({ blocks }: { blocks: Block[] }) {
   return (
-    <div className="space-y-4" data-slot="block-renderer">
-      <BlockList blocks={blocks} />
-    </div>
+    <MasterDetailProvider>
+      <div className="space-y-4" data-slot="block-renderer">
+        <BlockList blocks={blocks} />
+      </div>
+    </MasterDetailProvider>
   );
 }

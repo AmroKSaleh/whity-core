@@ -200,6 +200,17 @@ export type RowAction =
   | { label: string; href: string }
   | { label: string; method: 'POST' | 'PUT' | 'DELETE'; endpoint: string; confirm?: string };
 
+/**
+ * WC-532 A7 (master-detail): binds a query `param` on a data-bound block's
+ * `source` to the current value of the `selector` named `from`. The renderer
+ * appends `?param=<selection>` (URL-encoded) at fetch time; the base `source`
+ * is unchanged (still ownership-checked).
+ */
+export interface SourceParam {
+  param: string;
+  from: string;
+}
+
 export interface DataTableBlock {
   type: 'dataTable';
   source: string;
@@ -207,6 +218,7 @@ export interface DataTableBlock {
   pageSize?: number;
   emptyText?: string;
   rowActions?: RowAction[];
+  params?: SourceParam[];
 }
 
 /**
@@ -220,6 +232,7 @@ export interface DataStatBlock {
   hintField?: string;
   trendField?: string;
   emptyText?: string;
+  params?: SourceParam[];
 }
 
 /**
@@ -238,6 +251,7 @@ export interface DataListBlock {
   filterable?: boolean;
   pageSize?: number;
   emptyText?: string;
+  params?: SourceParam[];
 }
 
 // ---- SP3 interactive blocks (WC-235) ----
@@ -460,6 +474,23 @@ export interface ChartBlock {
   series: { key: string; label: string; color: 1 | 2 | 3 | 4 | 5 }[];
   xField?: string;
   emptyText?: string;
+  params?: SourceParam[];
+}
+
+/**
+ * WC-532 A7: the master control. A dropdown populated from an owned collection
+ * `source`; its chosen `valueField` value is published under `name` into the
+ * shared master-detail context and consumed by sibling data-bound blocks'
+ * `params`. Not a form input.
+ */
+export interface SelectorBlock {
+  type: 'selector';
+  name: string;
+  label: string;
+  source: string;
+  valueField: string;
+  labelField: string;
+  placeholder?: string;
 }
 
 /**
@@ -507,7 +538,8 @@ export type Block =
   | ReferenceSelectBlock
   | SubmitButtonBlock
   | ActionButtonBlock
-  | ChartBlock;
+  | ChartBlock
+  | SelectorBlock;
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {

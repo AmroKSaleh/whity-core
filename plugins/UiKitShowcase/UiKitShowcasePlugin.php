@@ -806,6 +806,44 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                             }
                             PHP,
                     ),
+                    // WC-532 A7: master-detail — a selector drives a sibling
+                    // dataTable via its `params` facet. Labels avoid "name".
+                    $this->demo(
+                        'selector + master-detail',
+                        'A selector publishes its choice into the shared context; a sibling dataTable '
+                            . 'appends it to its source as a query param via the `params` facet (WC-532 A7). '
+                            . 'The base source stays a plain owned route — only the whitelisted param interpolates.',
+                        [
+                            'type' => 'section',
+                            'title' => 'Filter members by role',
+                            'children' => [
+                                [
+                                    'type' => 'selector',
+                                    'name' => 'roleFilter',
+                                    'label' => 'Filter by role',
+                                    'source' => '/api/uikit/demo/rows',
+                                    'valueField' => 'role',
+                                    'labelField' => 'role',
+                                ],
+                                // Detail: a dataStat that re-fetches with the
+                                // selected role appended (?role=…) — its base
+                                // source stays a plain owned route.
+                                [
+                                    'type' => 'dataStat',
+                                    'source' => '/api/uikit/demo/metric',
+                                    'label' => 'Users in role',
+                                    'valueField' => 'value',
+                                    'params' => [['param' => 'role', 'from' => 'roleFilter']],
+                                ],
+                            ],
+                        ],
+                        <<<'PHP'
+                            ['type' => 'selector', 'name' => 'roleFilter', 'source' => '/api/uikit/demo/rows',
+                             'valueField' => 'role', 'labelField' => 'role'],
+                            ['type' => 'dataStat', 'source' => '/api/uikit/demo/metric', 'valueField' => 'value',
+                             'params' => [['param' => 'role', 'from' => 'roleFilter']]]
+                            PHP,
+                    ),
                     $this->dataBoundDemo(
                         'dataStat',
                         'A metric tile whose value, trend, and hint are fetched from a plugin endpoint.',

@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -238,6 +238,14 @@ final class BlockContract
             // still comes from ONE already-verified fetch of 'source'; sort,
             // filter, and page state are applied entirely client-side over
             // that response and never trigger a second request.
+            // WC-532 A7 (master-detail): every data-bound block accepts an
+            // optional `params` facet — a list of {param, from} that the web
+            // renderer appends to `source` as query params (URL-encoded), the
+            // value taken from the named `selector`'s current selection. The
+            // base `source` stays a plain owned apiPath (still ownership-checked
+            // + version-rewritten); ONLY whitelisted query params interpolate,
+            // so the SSRF/ownership gate is never widened. Changing a selection
+            // re-fetches the block (usePluginData keys on the effective source).
             'dataTable' => ['container' => false, 'props' => [
                 'source'    => ['type' => 'apiPath',        'required' => true],
                 'columns'   => ['type' => 'dataColumnList', 'required' => true],
@@ -248,6 +256,7 @@ final class BlockContract
                 // `{method, endpoint}` mutation, both templated with `{field}`
                 // placeholders from the row (see rowActionList validation).
                 'rowActions' => ['type' => 'rowActionList', 'required' => false],
+                'params'     => ['type' => 'sourceParamList', 'required' => false],
             ]],
             'dataStat' => ['container' => false, 'props' => [
                 'source'     => ['type' => 'apiPath', 'required' => true],
@@ -256,6 +265,7 @@ final class BlockContract
                 'hintField'  => ['type' => 'string',  'required' => false],
                 'trendField' => ['type' => 'string',  'required' => false],
                 'emptyText'  => ['type' => 'string',  'required' => false],
+                'params'     => ['type' => 'sourceParamList', 'required' => false],
             ]],
             // WC-241: 'sortable' (alphabetical toggle) / 'filterable' (a
             // search box over itemField) / 'pageSize' (client pagination) —
@@ -268,6 +278,7 @@ final class BlockContract
                 'filterable' => ['type' => 'bool',       'required' => false],
                 'pageSize'   => ['type' => 'int',        'required' => false],
                 'emptyText'  => ['type' => 'string',     'required' => false],
+                'params'     => ['type' => 'sourceParamList', 'required' => false],
             ]],
             // ---- SP4 chart block (WC-240) ----
             'chart' => ['container' => false, 'props' => [
@@ -277,6 +288,21 @@ final class BlockContract
                 'series'    => ['type' => 'chartSeriesList', 'required' => true],
                 'xField'    => ['type' => 'string',          'required' => false],
                 'emptyText' => ['type' => 'string',          'required' => false],
+                'params'    => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+            // WC-532 A7: the MASTER control. Populates a dropdown from an
+            // owned collection `source` (ownership-checked like dataTable) and
+            // publishes the chosen `valueField` under `name` into a shared
+            // master-detail context; sibling data-bound blocks read it via
+            // their `params` facet. Not a form input — it drives fetches, not
+            // form submission.
+            'selector' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'source'      => ['type' => 'apiPath',    'required' => true],
+                'valueField'  => ['type' => 'string',     'required' => true],
+                'labelField'  => ['type' => 'string',     'required' => true],
+                'placeholder' => ['type' => 'string',     'required' => false],
             ]],
 
             // ---- interactive blocks (SP3, WC-233) ----
