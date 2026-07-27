@@ -226,7 +226,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -255,7 +255,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -393,6 +393,12 @@ final class BlockValidator
             case 'rowActionList':
                 // WC-532 A1: per-row dataTable actions.
                 self::validateRowActionList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'sourceParamList':
+                // WC-532 A7: master-detail query-param bindings.
+                self::validateSourceParamList($value, $type, $prop, $path, $errors);
 
                 break;
         }
@@ -634,6 +640,42 @@ final class BlockValidator
         ) {
             $errors[] = "{$path}.endpoint: '{$type}.{$prop}.endpoint' must be a relative API path starting with '/api/' "
                 . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
+        }
+    }
+
+    /**
+     * `<dataBound>.params` (WC-532 A7): master-detail query-param bindings.
+     * A list of `{param: non-empty string, from: non-empty string}` where
+     * `param` is the query-param name appended to the block's `source` and
+     * `from` is the name of the `selector` whose current value supplies it.
+     * The base `source` is unchanged (still ownership-checked) — only these
+     * whitelisted params interpolate, URL-encoded, at fetch time on the web.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateSourceParamList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a list of {param, from} objects";
+
+            return;
+        }
+
+        foreach ($value as $i => $item) {
+            if (
+                !\is_array($item)
+                || !isset($item['param']) || !\is_string($item['param']) || $item['param'] === ''
+                || !isset($item['from']) || !\is_string($item['from']) || $item['from'] === ''
+            ) {
+                $errors[] = "{$path}[{$i}]: each '{$type}.{$prop}' entry must be a "
+                    . '{param: non-empty string, from: non-empty string} object';
+            }
         }
     }
 
