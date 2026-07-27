@@ -365,6 +365,27 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::RELATIONS_READ,
     ];
     $items[] = [
+        'id' => 'tag-groups',
+        'label' => 'Tag Groups',
+        'href' => '/admin/tag-groups',
+        'icon' => 'tags',
+        'group' => 'admin',
+        'order' => 8,
+        // WC-621: the taxonomy admin. The nav item carries tags:read so a
+        // permission-aware client hides it; the schema-driven CrudScreen also
+        // fails closed (a 403 on the list renders the access-denied state).
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TAGS_READ,
+    ];
+    $items[] = [
+        'id' => 'tags',
+        'label' => 'Tags',
+        'href' => '/admin/tags',
+        'icon' => 'tag',
+        'group' => 'admin',
+        'order' => 9,
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TAGS_READ,
+    ];
+    $items[] = [
         'id' => 'tenants',
         'label' => 'Tenants',
         'href' => '/admin/tenants',

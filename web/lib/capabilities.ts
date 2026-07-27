@@ -36,6 +36,10 @@ export const TENANTS_DELETE = 'tenants:delete';
 /** Permission for AI principal (MCP credential) management (WC-0208ce4d). */
 export const MCP_TOKENS_MANAGE = 'mcp:tokens:manage';
 
+/** Permissions for the native taxonomy/tagging subsystem (WC-621). */
+export const TAGS_READ = 'tags:read';
+export const TAGS_MANAGE = 'tags:manage';
+
 /**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.
  *
