@@ -154,6 +154,14 @@ final class CorePermissions
     // sets to require 2FA enrollment. Tenant-scoped.
     public const SECURITY_MANAGE = 'security:manage';
 
+    // Native taxonomy/tagging (WC-621). A domain-neutral tagging primitive:
+    // tag groups + tags + polymorphic entity<->tag associations. Tenant-scoped.
+    // read = list/read groups & tags, read an entity's tags, and filter entities
+    // by tag; manage = create/update/delete groups & tags and attach/detach tags
+    // to entities.
+    public const TAGS_READ = 'tags:read';
+    public const TAGS_MANAGE = 'tags:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -202,6 +210,8 @@ final class CorePermissions
             self::DOCUMENTS_PUBLISH,
             self::DOCUMENTS_RENDER,
             self::SECURITY_MANAGE,
+            self::TAGS_READ,
+            self::TAGS_MANAGE,
         ];
     }
 }

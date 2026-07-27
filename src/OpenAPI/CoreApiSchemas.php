@@ -102,7 +102,8 @@ final class CoreApiSchemas
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
             self::instanceRoutes(),
-            self::twoFactorPolicyRoutes()
+            self::twoFactorPolicyRoutes(),
+            self::tagRoutes()
         );
     }
 
@@ -1904,6 +1905,63 @@ final class CoreApiSchemas
             ], ['profile_id', 'email', 'enrolled', 'enforcement_deadline']),
             'TwoFactorPolicyStatusResponse' => self::listEnvelope('TwoFactorPolicyStatusEntry'),
 
+            // ── Native taxonomy/tagging (WC-621) ──────────────────────────────
+            // A tag group; `display_name` is the bilingual {ar?, en?} label.
+            'TagGroup' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'key' => self::str(),
+                'display_name' => ['type' => 'object', 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'key', 'display_name', 'created_at', 'updated_at']),
+            'TagGroupListResponse' => self::listEnvelope('TagGroup'),
+            'TagGroupDataResponse' => self::dataEnvelope(SchemaBuilder::ref('TagGroup')),
+            'TagGroupCreateRequest' => self::object([
+                'key' => self::str(),
+                'display_name' => ['type' => 'object', 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+            ], ['key']),
+            'TagGroupUpdateRequest' => self::object([
+                'key' => self::str(),
+                'display_name' => ['type' => 'object', 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+            ], []),
+            // A tag inside a group.
+            'Tag' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'group_id' => self::int(),
+                'name' => self::str(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'group_id', 'name', 'created_at', 'updated_at']),
+            'TagListResponse' => self::listEnvelope('Tag'),
+            'TagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Tag')),
+            'TagCreateRequest' => self::object([
+                'group_id' => self::int(),
+                'name' => self::str(),
+            ], ['group_id', 'name']),
+            'TagUpdateRequest' => self::object([
+                'name' => self::str(),
+            ], ['name']),
+            // A polymorphic tag<->entity association.
+            'EntityTagAssociation' => self::object([
+                'entity_type' => self::str(),
+                'entity_id' => self::int(),
+                'tag_id' => self::int(),
+            ], ['entity_type', 'entity_id', 'tag_id']),
+            'EntityTagAssociationRequest' => self::object([
+                'entity_type' => self::str(),
+                'entity_id' => self::int(),
+                'tag_id' => self::int(),
+            ], ['entity_type', 'entity_id', 'tag_id']),
+            'EntityTagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('EntityTagAssociation')),
+            // The GET /api/entity-tags shape is polymorphic: with entity_id it
+            // returns the entity's tags; with tag_id it returns the entities
+            // carrying the tag. Typed as a generic object list.
+            'EntityTagQueryResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+            ], ['data']),
+
             // ── Subscription plans (WC-plans, ADR 0010) ───────────────────────
             // A plan row (list shape — no entitlement bundle).
             'PlanSummary' => self::object([
@@ -2953,6 +3011,149 @@ final class CoreApiSchemas
                     204 => ['description' => 'Policy removed'],
                     400 => self::errorResponse('Tenant context is required'),
                     404 => self::errorResponse('Policy not found'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Native taxonomy/tagging routes (WC-621): tenant-scoped CRUD for tag groups
+     * + tags, and a polymorphic tag<->entity association surface. Reads gated on
+     * `tags:read`, writes on `tags:manage`.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tagRoutes(): array
+    {
+        return [
+            // Tag groups ────────────────────────────────────────────────────
+            self::permissionRoute('GET', '/api/tag-groups', 'tags:read', [
+                'summary' => 'List this tenant\'s tag groups',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    200 => self::jsonResponse('Every tag group for this tenant', 'TagGroupListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/tag-groups', 'tags:manage', [
+                'summary' => 'Create a tag group',
+                'tags' => ['taxonomy'],
+                'request' => 'TagGroupCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created tag group', 'TagGroupDataResponse'),
+                    409 => self::errorResponse('A tag group with this key already exists'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/tag-groups/{id:\d+}', 'tags:read', [
+                'summary' => 'Get a tag group',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    200 => self::jsonResponse('The tag group', 'TagGroupDataResponse'),
+                    404 => self::errorResponse('Tag group not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/tag-groups/{id:\d+}', 'tags:manage', [
+                'summary' => 'Update a tag group',
+                'tags' => ['taxonomy'],
+                'request' => 'TagGroupUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated tag group', 'TagGroupDataResponse'),
+                    404 => self::errorResponse('Tag group not found'),
+                    409 => self::errorResponse('A tag group with this key already exists'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/tag-groups/{id:\d+}', 'tags:manage', [
+                'summary' => 'Delete a tag group (its tags cascade)',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    204 => ['description' => 'Tag group removed'],
+                    404 => self::errorResponse('Tag group not found'),
+                ] + self::authErrors(),
+            ]),
+
+            // Tags ──────────────────────────────────────────────────────────
+            self::permissionRoute('GET', '/api/tags', 'tags:read', [
+                'summary' => 'List this tenant\'s tags, optionally within a group',
+                'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('group_id', 'integer', 'Only tags in this group'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Tags for this tenant', 'TagListResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/tags', 'tags:manage', [
+                'summary' => 'Create a tag in a group',
+                'tags' => ['taxonomy'],
+                'request' => 'TagCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created tag', 'TagDataResponse'),
+                    409 => self::errorResponse('A tag with this name already exists in this group'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/tags/{id:\d+}', 'tags:read', [
+                'summary' => 'Get a tag',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    200 => self::jsonResponse('The tag', 'TagDataResponse'),
+                    404 => self::errorResponse('Tag not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/tags/{id:\d+}', 'tags:manage', [
+                'summary' => 'Rename a tag',
+                'tags' => ['taxonomy'],
+                'request' => 'TagUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated tag', 'TagDataResponse'),
+                    404 => self::errorResponse('Tag not found'),
+                    409 => self::errorResponse('A tag with this name already exists in this group'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/tags/{id:\d+}', 'tags:manage', [
+                'summary' => 'Delete a tag (its associations cascade)',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    204 => ['description' => 'Tag removed'],
+                    404 => self::errorResponse('Tag not found'),
+                ] + self::authErrors(),
+            ]),
+
+            // Entity-tag associations ───────────────────────────────────────
+            self::permissionRoute('GET', '/api/entity-tags', 'tags:read', [
+                'summary' => 'An entity\'s tags (entity_type+entity_id) or entities carrying a tag (entity_type+tag_id)',
+                'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('entity_type', 'string', 'The opaque plugin-supplied entity type (required)'),
+                    self::queryParam('entity_id', 'integer', 'Return this entity\'s tags'),
+                    self::queryParam('tag_id', 'integer', 'Return entities of entity_type carrying this tag'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Tags of the entity, or entities carrying the tag', 'EntityTagQueryResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/entity-tags', 'tags:manage', [
+                'summary' => 'Attach a tag to an entity (idempotent)',
+                'tags' => ['taxonomy'],
+                'request' => 'EntityTagAssociationRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The association already existed', 'EntityTagDataResponse'),
+                    201 => self::jsonResponse('The tag was attached', 'EntityTagDataResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/entity-tags', 'tags:manage', [
+                'summary' => 'Detach a tag from an entity',
+                'tags' => ['taxonomy'],
+                'request' => 'EntityTagAssociationRequest',
+                'responses' => [
+                    204 => ['description' => 'Association removed'],
+                    404 => self::errorResponse('Association not found'),
+                    422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
         ];
