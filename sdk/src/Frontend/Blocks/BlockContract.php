@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -225,6 +225,11 @@ final class BlockContract
                 'columns'   => ['type' => 'dataColumnList', 'required' => true],
                 'pageSize'  => ['type' => 'int',            'required' => false],
                 'emptyText' => ['type' => 'string',         'required' => false],
+                // WC-532 A1: optional per-row affordances rendered in a trailing
+                // "Actions" column. Each is either an internal-nav `href` or a
+                // `{method, endpoint}` mutation, both templated with `{field}`
+                // placeholders from the row (see rowActionList validation).
+                'rowActions' => ['type' => 'rowActionList', 'required' => false],
             ]],
             'dataStat' => ['container' => false, 'props' => [
                 'source'     => ['type' => 'apiPath', 'required' => true],

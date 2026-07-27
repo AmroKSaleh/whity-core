@@ -219,7 +219,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -248,7 +248,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -380,6 +380,12 @@ final class BlockValidator
             case 'visibilityRule':
                 // WC-532 A3: a presentational `{field, equals|in}` predicate.
                 self::validateVisibilityRule($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'rowActionList':
+                // WC-532 A1: per-row dataTable actions.
+                self::validateRowActionList($value, $type, $prop, $path, $errors);
 
                 break;
         }
@@ -621,6 +627,93 @@ final class BlockValidator
         ) {
             $errors[] = "{$path}.endpoint: '{$type}.{$prop}.endpoint' must be a relative API path starting with '/api/' "
                 . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
+        }
+    }
+
+    /**
+     * `dataTable.rowActions` (WC-532 A1): a list of per-row affordances. Each
+     * entry is `{label: non-empty string}` PLUS exactly one of:
+     *   - `href`: an internal relative path (may carry `{field}` placeholders
+     *     the renderer substitutes from the row) — an internal-nav link, OR
+     *   - `endpoint` (apiPath, `{field}`-templatable) + `method` ∈
+     *     POST|PUT|DELETE — a mutation, with an optional `confirm` prompt.
+     *
+     * Placeholders are validated loosely (the path predicates already permit
+     * `{`/`}`); the renderer URL-encodes each substituted row value. A `{field}`
+     * endpoint that resolves to another plugin's route is a runtime concern the
+     * host's route dispatch still gates — this contract only fixes the shape.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateRowActionList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty list of row-action objects";
+
+            return;
+        }
+
+        foreach ($value as $i => $item) {
+            $at = "{$path}[{$i}]";
+            if (!\is_array($item)) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must be an object";
+
+                continue;
+            }
+
+            $label = $item['label'] ?? null;
+            if (!\is_string($label) || $label === '') {
+                $errors[] = "{$at}.label: each '{$type}.{$prop}' entry must carry a non-empty 'label'";
+            }
+
+            $hasHref     = \array_key_exists('href', $item);
+            $hasEndpoint = \array_key_exists('endpoint', $item);
+
+            if ($hasHref === $hasEndpoint) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must carry exactly one of 'href' or 'endpoint'";
+
+                continue;
+            }
+
+            if ($hasHref) {
+                $href = $item['href'];
+                if (!\is_string($href) || $href === '' || $href[0] !== '/' || str_starts_with($href, '//')) {
+                    $errors[] = "{$at}.href: '{$type}.{$prop}' href must be an internal path starting with '/' "
+                        . '(absolute and protocol-relative URLs are rejected), got ' . self::describeScalar($href);
+                }
+
+                continue;
+            }
+
+            // endpoint + method (+ optional confirm)
+            $endpoint = $item['endpoint'];
+            if (
+                !\is_string($endpoint)
+                || !str_starts_with($endpoint, '/api/')
+                || str_contains($endpoint, '//')
+                || str_contains($endpoint, '..')
+                || str_contains($endpoint, '\\')
+                || preg_match('/[\s\x00-\x1f\x7f]/', $endpoint) === 1
+            ) {
+                $errors[] = "{$at}.endpoint: '{$type}.{$prop}' endpoint must be a relative API path starting with '/api/' "
+                    . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
+            }
+
+            $method = $item['method'] ?? null;
+            if (!\is_string($method) || !\in_array($method, ['POST', 'PUT', 'DELETE'], true)) {
+                $errors[] = "{$at}.method: '{$type}.{$prop}' endpoint action must carry method POST, PUT, or DELETE, got "
+                    . self::describeScalar($method);
+            }
+
+            if (\array_key_exists('confirm', $item) && !\is_string($item['confirm'])) {
+                $errors[] = "{$at}.confirm: '{$type}.{$prop}' confirm must be a string";
+            }
         }
     }
 
