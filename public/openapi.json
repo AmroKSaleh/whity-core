@@ -17741,6 +17741,7 @@
                     },
                     "display_name": {
                         "type": "object",
+                        "x-whity-localized-text": true,
                         "properties": {
                             "ar": {
                                 "type": "string"
@@ -17774,6 +17775,7 @@
                     },
                     "display_name": {
                         "type": "object",
+                        "x-whity-localized-text": true,
                         "properties": {
                             "ar": {
                                 "type": "string"
@@ -17821,6 +17823,7 @@
                     },
                     "display_name": {
                         "type": "object",
+                        "x-whity-localized-text": true,
                         "properties": {
                             "ar": {
                                 "type": "string"

@@ -1911,7 +1911,7 @@ final class CoreApiSchemas
                 'id' => self::int(),
                 'tenant_id' => self::int(),
                 'key' => self::str(),
-                'display_name' => ['type' => 'object', 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'key', 'display_name', 'created_at', 'updated_at']),
@@ -1919,11 +1919,11 @@ final class CoreApiSchemas
             'TagGroupDataResponse' => self::dataEnvelope(SchemaBuilder::ref('TagGroup')),
             'TagGroupCreateRequest' => self::object([
                 'key' => self::str(),
-                'display_name' => ['type' => 'object', 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
             ], ['key']),
             'TagGroupUpdateRequest' => self::object([
                 'key' => self::str(),
-                'display_name' => ['type' => 'object', 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
             ], []),
             // A tag inside a group.
             'Tag' => self::object([
