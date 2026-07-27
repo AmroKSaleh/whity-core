@@ -1432,4 +1432,88 @@ final class BlockValidatorTest extends TestCase
         $this->assertStringContainsString("missing required prop 'valueField'", $joined);
         $this->assertStringContainsString("missing required prop 'labelField'", $joined);
     }
+
+    // ==================== WC-532 A1: dataTable rowActions ====================
+
+    public function testDataTableWithHrefAndEndpointRowActionsIsValid(): void
+    {
+        $tree = [[
+            'type'    => 'dataTable',
+            'source'  => '/api/uikit/demo/rows',
+            'columns' => [['key' => 'name', 'label' => 'Name']],
+            'rowActions' => [
+                ['label' => 'View', 'href' => '/plugins/uikit/{name}'],
+                ['label' => 'Archive', 'method' => 'POST', 'endpoint' => '/api/uikit/items/{name}/archive', 'confirm' => 'Archive this row?'],
+                ['label' => 'Delete', 'method' => 'DELETE', 'endpoint' => '/api/uikit/items/{name}'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testRowActionMissingLabelIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['href' => '/x/1']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('non-empty \'label\'', implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionWithBothHrefAndEndpointIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X', 'href' => '/x', 'endpoint' => '/api/x', 'method' => 'POST']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'href' or 'endpoint'", implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionWithNeitherHrefNorEndpointIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'href' or 'endpoint'", implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionEndpointWithBadMethodIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X', 'endpoint' => '/api/x/1', 'method' => 'GET']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('method POST, PUT, or DELETE', implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionEndpointMustBeApiPath(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X', 'endpoint' => 'https://evil.example/api/x', 'method' => 'POST']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a relative API path', implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionsMustBeNonEmptyList(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('non-empty list of row-action objects', implode(' | ', $result['errors']));
+    }
 }

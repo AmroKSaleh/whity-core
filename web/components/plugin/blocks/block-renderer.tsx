@@ -40,6 +40,7 @@ import type {
   LocalizedTextValue,
   NumberInputBlock,
   ReferenceSelectBlock,
+  RowAction,
   RowBlock,
   SectionBlock,
   SelectBlock,
@@ -601,14 +602,83 @@ function CodeRenderer({ block }: { block: CodeBlock }) {
  * static `table`. The plugin-facing schema (`block.columns`/`block.pageSize`)
  * is unchanged — only the rendering engine underneath it is.
  */
+// WC-532 A1: substitute `{field}` placeholders in a row-action href/endpoint
+// with the row's values, URL-encoded. A missing field becomes ''. Only the
+// {…} tokens are touched — the surrounding path (already shape-validated by the
+// SDK) is left intact.
+function applyRowTemplate(template: string, row: Record<string, string>): string {
+  return template.replace(/\{([^}]+)\}/g, (_m, key: string) =>
+    encodeURIComponent(row[key] ?? '')
+  );
+}
+
+// WC-532 A1: a single mutating row action (a `{method, endpoint}` RowAction),
+// with an optional confirm dialog. On success it toasts and asks the table to
+// refresh so the mutated row set reflects the change.
+function RowActionButton({
+  action,
+  row,
+  onMutated,
+}: {
+  action: Extract<RowAction, { endpoint: string }>;
+  row: Record<string, string>;
+  onMutated?: () => void;
+}) {
+  const { addToast } = useToast();
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+
+  const run = React.useCallback(() => {
+    setBusy(true);
+    void submitPluginAction(applyRowTemplate(action.endpoint, row), action.method, {}).then((result) => {
+      setBusy(false);
+      setOpen(false);
+      if (result.ok) {
+        addToast('Completed successfully', 'success');
+        onMutated?.();
+      } else {
+        addToast(result.error ?? 'Request failed', 'error');
+      }
+    });
+  }, [action, row, addToast, onMutated]);
+
+  if (typeof action.confirm === 'string' && action.confirm !== '') {
+    return (
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" disabled={busy}>{action.label}</Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{action.label}</AlertDialogTitle>
+            <AlertDialogDescription>{action.confirm}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); run(); }}>{action.label}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+
+  return (
+    <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={run}>{action.label}</Button>
+  );
+}
+
 function InteractiveDataTable({
   columns,
   rows,
   pageSize,
+  rowActions,
+  onMutated,
 }: {
   columns: { key: string; label: string; sortable?: boolean; filterable?: boolean }[];
   rows: Record<string, string>[];
   pageSize?: number;
+  rowActions?: RowAction[];
+  onMutated?: () => void;
 }) {
   const dataTableColumns: DataTableColumn<Record<string, string>>[] = columns.map((col) => ({
     id: col.key,
@@ -618,12 +688,30 @@ function InteractiveDataTable({
     enableColumnFilter: col.filterable === true,
   }));
 
+  const renderRowActions =
+    rowActions && rowActions.length > 0
+      ? (row: Record<string, string>) => (
+          <div className="flex flex-wrap gap-1">
+            {rowActions.map((action, i) =>
+              'href' in action ? (
+                <Button key={i} asChild variant="ghost" size="sm">
+                  <Link href={applyRowTemplate(action.href, row)}>{action.label}</Link>
+                </Button>
+              ) : (
+                <RowActionButton key={i} action={action} row={row} onMutated={onMutated} />
+              )
+            )}
+          </div>
+        )
+      : undefined;
+
   return (
     <SharedDataTable
       columns={dataTableColumns}
       data={rows}
       getRowId={(_row, index) => String(index)}
       pagination={pageSize !== undefined && pageSize > 0 ? { pageSize } : undefined}
+      rowActions={renderRowActions}
     />
   );
 }
@@ -708,7 +796,13 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
           <IconRefresh className="size-3.5" aria-hidden />
         </Button>
       </div>
-      <InteractiveDataTable columns={block.columns} rows={rows} pageSize={block.pageSize} />
+      <InteractiveDataTable
+        columns={block.columns}
+        rows={rows}
+        pageSize={block.pageSize}
+        rowActions={block.rowActions}
+        onMutated={state.refresh}
+      />
     </div>
   );
 }

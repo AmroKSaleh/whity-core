@@ -178,12 +178,22 @@ export interface CodeBlock {
  * from `source` — none of them trigger a second request or touch any other
  * route.
  */
+/**
+ * WC-532 A1: a per-row affordance in a dataTable's trailing Actions column.
+ * Either an internal-nav `href` or a `{method, endpoint}` mutation — both
+ * templated with `{field}` placeholders substituted from the row at render.
+ */
+export type RowAction =
+  | { label: string; href: string }
+  | { label: string; method: 'POST' | 'PUT' | 'DELETE'; endpoint: string; confirm?: string };
+
 export interface DataTableBlock {
   type: 'dataTable';
   source: string;
   columns: { key: string; label: string; sortable?: boolean; filterable?: boolean }[];
   pageSize?: number;
   emptyText?: string;
+  rowActions?: RowAction[];
 }
 
 /**
