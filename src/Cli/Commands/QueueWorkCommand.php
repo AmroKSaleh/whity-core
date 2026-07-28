@@ -132,7 +132,7 @@ final class QueueWorkCommand
             'once'       => in_array('--once', $argv, true),
             'maxJobs'    => self::intOpt($argv, 'max-jobs', 0),      // 0 = unlimited
             'maxRuntime' => self::intOpt($argv, 'max-runtime', 0),  // seconds; 0 = unlimited
-            'memory'     => self::intOpt($argv, 'memory', 128),     // MB ceiling; 0 = unlimited
+            'memory'     => self::intOpt($argv, 'memory', 256),     // MB RSS ceiling before a clean recycle; 0 = unlimited
             'sleep'      => self::intOpt($argv, 'sleep', 1),        // idle poll seconds
             'reclaim'    => self::intOpt($argv, 'reclaim', 60),     // reclaim sweep interval seconds
             'visibility' => self::intOpt($argv, 'visibility', 300), // reserved-lease seconds

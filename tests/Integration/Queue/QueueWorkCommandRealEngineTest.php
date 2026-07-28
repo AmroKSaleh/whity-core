@@ -55,7 +55,13 @@ final class QueueWorkCommandRealEngineTest extends TestCase
         $this->repo->enqueue(self::TENANT, 'count', ['n' => 2]);
         $this->repo->enqueue(self::TENANT, 'count', ['n' => 3]);
 
-        $exit = $this->command->execute(['--once']);
+        // `--memory=0` disables the recycle ceiling: these tests exercise the
+        // DRAIN/limit semantics of the loop, which must not depend on the host
+        // process's RSS. The default ceiling is a production leak-guard, and a
+        // coverage-instrumented PHPUnit process alone already exceeds a small
+        // ceiling — which would otherwise recycle the worker after one job. The
+        // ceiling itself is covered explicitly by testMemoryCeilingRecycles*.
+        $exit = $this->command->execute(['--once', '--memory=0']);
 
         self::assertSame(0, $exit);
         self::assertSame(3, $handler->runs, 'all three due jobs ran');
@@ -70,7 +76,7 @@ final class QueueWorkCommandRealEngineTest extends TestCase
         $this->repo->enqueue(self::TENANT, 'count', []);
         $this->repo->enqueue(self::TENANT, 'count', []);
 
-        $exit = $this->command->execute(['--max-jobs=2']);
+        $exit = $this->command->execute(['--max-jobs=2', '--memory=0']);
 
         self::assertSame(0, $exit);
         self::assertSame(2, $handler->runs, 'stopped after the max-jobs limit');
@@ -82,7 +88,7 @@ final class QueueWorkCommandRealEngineTest extends TestCase
         $handler = $this->countingHandler();
         $this->registry->register('count', $handler);
 
-        $exit = $this->command->execute(['--once']);
+        $exit = $this->command->execute(['--once', '--memory=0']);
 
         self::assertSame(0, $exit);
         self::assertSame(0, $handler->runs);
@@ -94,11 +100,33 @@ final class QueueWorkCommandRealEngineTest extends TestCase
         $this->registry->register('count', $handler);
         $this->repo->enqueue(self::TENANT, 'count', [], ['queue' => 'emails']);
 
-        $this->command->execute(['--once']); // default queue
+        $this->command->execute(['--once', '--memory=0']); // default queue
         self::assertSame(0, $handler->runs, 'a job on another queue is not processed');
 
-        $this->command->execute(['--once', '--queue=emails']);
+        $this->command->execute(['--once', '--queue=emails', '--memory=0']);
         self::assertSame(1, $handler->runs);
+    }
+
+    /**
+     * The memory ceiling is a production leak-guard: the loop recycles (clean
+     * exit at a job boundary) once RSS reaches the ceiling, so a supervisor
+     * respawns a fresh process. `--memory=1` (1 MB) is below any real PHP
+     * process's baseline allocation, so it trips after exactly one job — which
+     * both proves the guard and pins the mechanism behind the earlier CI-only
+     * failure (a coverage-instrumented harness exceeding the default ceiling).
+     */
+    public function testMemoryCeilingRecyclesAfterAJob(): void
+    {
+        $handler = $this->countingHandler();
+        $this->registry->register('count', $handler);
+        $this->repo->enqueue(self::TENANT, 'count', []);
+        $this->repo->enqueue(self::TENANT, 'count', []);
+
+        $exit = $this->command->execute(['--memory=1']);
+
+        self::assertSame(0, $exit, 'a memory recycle is a clean exit');
+        self::assertSame(1, $handler->runs, 'recycled after the first job');
+        self::assertSame(1, $this->countJobs(), 'the second job is left for the respawned worker');
     }
 
     /**
