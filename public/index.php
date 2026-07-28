@@ -286,8 +286,16 @@ $permissionRegistry = new PermissionRegistry();
 // the core catalogue available before the first request.
 $permissionRegistry->registerCorePermissions();
 
-// 4b. Initialize hook manager and register in service container
-$hookManager = new HookManager();
+// 4b. Initialize hook manager (durable event spine wired in) and register it.
+// dispatchAsync now PERSISTS each async event to domain_events + the relay
+// outbox (WC-154/#162) via the shared per-worker connection — replacing the
+// retired log-only Queue stub that dropped every event. Using the same $db
+// connection as the API handlers lets an event enlist in the caller's
+// transaction when one is open (transactional outbox).
+$hookManager = new HookManager(
+    new \Whity\Core\Events\DomainEventStore($db->getPdo()),
+    $logger
+);
 \Whity\register_service(HookManager::class, $hookManager); // @phpstan-ignore-line
 
 // 4b-bis. Durable async queue (WC-queue): the producer-side QueueService is

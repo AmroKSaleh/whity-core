@@ -2,8 +2,10 @@
 
 namespace Whity\Core\Hooks;
 
+use Psr\Log\LoggerInterface;
+use Whity\Core\Audit\AuditContext;
+use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Tenant\TenantContext;
-use Whity\Core\Queue\Queue;
 
 /**
  * HookManager implements a Mediator/Observer pattern for event handling
@@ -22,6 +24,23 @@ class HookManager
      * Structure: ['event_name' => [priority => [callback1, callback2, ...]]]
      */
     protected array $listeners = [];
+
+    /**
+     * Durable event spine (WC-154). When set (the request path, wired in
+     * index.php), dispatchAsync PERSISTS each event to domain_events + the
+     * relay outbox instead of the retired log-only Queue stub. Left null in
+     * contexts that only register listeners and never dispatch domain events
+     * (plugin loading, CLI), where dispatchAsync is a safe no-op.
+     */
+    private ?DomainEventStore $eventStore;
+
+    private ?LoggerInterface $logger;
+
+    public function __construct(?DomainEventStore $eventStore = null, ?LoggerInterface $logger = null)
+    {
+        $this->eventStore = $eventStore;
+        $this->logger = $logger;
+    }
 
     /**
      * Register a listener for an event
@@ -85,24 +104,45 @@ class HookManager
     }
 
     /**
-     * Dispatch an asynchronous event by queuing the payload
+     * Dispatch an asynchronous event by PERSISTING it to the durable event
+     * spine (WC-154/#162) — the immutable domain_events log plus a pending
+     * event_outbox row a relay worker later drains. This replaces the retired
+     * log-only Queue stub, which dropped every event.
      *
-     * Injects context into the payload and queues it for background processing.
+     * The tenant (from TenantContext) and actor (from AuditContext) are promoted
+     * to first-class columns; the aggregate is derived from the conventional
+     * dotted event name ('user.created.async' → 'user') and the payload's own id.
+     * Non-critical by contract: a failure to persist is logged server-side and
+     * never propagated — the caller's primary action (already committed, for the
+     * core callers) must not break because a side-effect event could not be
+     * recorded. With no store wired (plugin-loader / CLI) it is a safe no-op.
      *
      * @param string $eventName The event to dispatch
-     * @param array $payload The payload to queue
+     * @param array<string, mixed> $payload The event payload
      * @return void
      */
     public function dispatchAsync(string $eventName, array $payload): void
     {
-        // Inject context into payload
-        $payload['_context'] = [
-            'tenant_id' => TenantContext::getTenantId(),
-            'timestamp' => time(),
-        ];
+        if ($this->eventStore === null) {
+            return;
+        }
 
-        // Queue the payload for async processing
-        Queue::push('whity-core-async-hooks', $payload);
+        $tenantId = (int) (TenantContext::getTenantId() ?? 0);
+        $aggregateType = explode('.', $eventName, 2)[0];
+
+        try {
+            $this->eventStore->append($tenantId, $eventName, $payload, [
+                'aggregate_type' => $aggregateType !== '' ? $aggregateType : null,
+                'aggregate_id'   => isset($payload['id']) ? (string) $payload['id'] : null,
+                'actor_user_id'  => AuditContext::getActorUserId(),
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger?->error('dispatchAsync failed to persist domain event', [
+                'event'     => $eventName,
+                'tenant_id' => $tenantId,
+                'error'     => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

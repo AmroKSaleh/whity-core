@@ -5,7 +5,6 @@ namespace Tests\Unit\Core\Hooks;
 use PHPUnit\Framework\TestCase;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
-use Whity\Core\Queue\Queue;
 
 /**
  * Tests for HookManager class
@@ -101,29 +100,16 @@ class HookManagerTest extends TestCase
     }
 
     /**
-     * Test dispatchAsync() queues payload without throwing
+     * With no durable event store wired (the default here, and the case for
+     * plugin-loader / CLI HookManagers that only register listeners), the
+     * async dispatch is a safe no-op — it must not throw. Persistence behaviour
+     * is covered against a real store in HookIntegrationTest.
      */
-    public function testDispatchAsyncQueuesPayload(): void
+    public function testDispatchAsyncWithNoStoreIsSafeNoOp(): void
     {
         TenantContext::setTenantId(1);
 
-        // Mock the logger to verify async dispatch calls Queue::push
-        $logger = $this->createMock(\Psr\Log\LoggerInterface::class);
-        $logger->expects($this->once())
-            ->method('info')
-            ->with(
-                $this->equalTo('Async Job Queued on [whity-core-async-hooks]'),
-                $this->callback(function($context) {
-                    return isset($context['queue']) &&
-                           $context['queue'] === 'whity-core-async-hooks' &&
-                           isset($context['payload']) &&
-                           isset($context['payload']['_context']);
-                })
-            );
-
-        Queue::setLogger($logger);
-
-        // This should not throw and should queue the payload
+        $this->expectNotToPerformAssertions();
         $this->hookManager->dispatchAsync('test_event', ['key' => 'value']);
     }
 
