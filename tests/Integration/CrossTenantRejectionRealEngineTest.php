@@ -26,6 +26,7 @@ use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Deployment\DeploymentManager;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
+use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Relations\PersonRepository;
@@ -1836,6 +1837,41 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertSame('a.job', $nameByTenant[self::TENANT_A] ?? null, 'tenant A job kept tenant A');
         self::assertSame('b.job', $nameByTenant[self::TENANT_B] ?? null, 'tenant B job kept tenant B');
         self::assertCount(2, $nameByTenant, 'the two jobs belong to two distinct tenants');
+    }
+
+    // ============ domain_events / event_outbox (#154 event spine) ============
+    //
+    // Like `jobs`, the event spine is SYSTEM INFRA that relays ACROSS tenants:
+    // one relay claims every tenant's events, so DomainEventStore exposes NO
+    // tenant-scoped accessor to reject a foreign tenant through — reserve/mark/
+    // reclaim are by-id/system (annotated @tenant-guard-ignore). Isolation is
+    // enforced at RUNTIME: the relay restores each event's ORIGIN tenant (carried
+    // on event_outbox.tenant_id, denormalised from the event) before any
+    // tenant-scoped handler runs. So the invariant proven HERE is that an
+    // appended event is stamped with — and keeps — the exact tenant it was
+    // appended for: reserve() returns each claim's outbox tenant_id paired with
+    // its own domain_events content, never the other tenant's.
+
+    public function testDomainEventsAreStampedWithAndKeepTheirOriginTenant(): void
+    {
+        $store = new DomainEventStore($this->pdo);
+        $store->append(self::TENANT_A, 'a.event', ['owner' => 'A']);
+        $store->append(self::TENANT_B, 'b.event', ['owner' => 'B']);
+
+        // The system relay claims across tenants (deliberately not tenant-scoped);
+        // each reserved event carries the tenant it was appended for, never the other.
+        $first = $store->reserve();
+        $second = $store->reserve();
+        self::assertNotNull($first);
+        self::assertNotNull($second);
+
+        $nameByTenant = [];
+        foreach ([$first, $second] as $claim) {
+            $nameByTenant[$claim['tenant_id']] = $claim['event_name'];
+        }
+        self::assertSame('a.event', $nameByTenant[self::TENANT_A] ?? null, 'tenant A event kept tenant A');
+        self::assertSame('b.event', $nameByTenant[self::TENANT_B] ?? null, 'tenant B event kept tenant B');
+        self::assertCount(2, $nameByTenant, 'the two events belong to two distinct tenants');
     }
 
     /**

@@ -139,6 +139,17 @@ final class TenantOwnedTables
         // in JobRepository; the tenant_id column is what makes that restore, and
         // an eventual tenant-scoped jobs API, correct.
         'jobs' => '065_create_jobs.php',
+
+        // WC-event-spine (#154) — durable event spine (migration 066). Both
+        // tables carry tenant_id NOT NULL: `domain_events` is the append-only
+        // per-tenant log; `event_outbox` denormalises the event's tenant so the
+        // relay can scope/keep tenant on one row. The RELAY runs as system infra
+        // ACROSS tenants (reserve/mark/reclaim annotated @tenant-guard-ignore in
+        // DomainEventStore); append stamps tenant_id from the trusted caller, and
+        // each relayed event's origin tenant is restored into TenantContext
+        // before any tenant-scoped handler runs — the same model as `jobs`.
+        'domain_events' => '066_create_domain_events.php',
+        'event_outbox'  => '066_create_domain_events.php',
     ];
 
     /**
