@@ -416,11 +416,6 @@ parameters:
 			path: src/Core/Hooks/HookManager.php
 
 		-
-			message: "#^Method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:dispatchAsync\\(\\) has parameter \\$payload with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: src/Core/Hooks/HookManager.php
-
-		-
 			message: "#^Method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:getListeners\\(\\) return type has no value type specified in iterable type array\\.$#"
 			count: 1
 			path: src/Core/Hooks/HookManager.php
@@ -449,11 +444,6 @@ parameters:
 			message: "#^Right side of && is always true\\.$#"
 			count: 1
 			path: src/Core/PluginLoader.php
-
-		-
-			message: "#^Method Whity\\\\Core\\\\Queue\\\\Queue\\:\\:push\\(\\) has parameter \\$payload with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: src/Core/Queue/Queue.php
 
 		-
 			message: "#^Strict comparison using \\=\\=\\= between mixed and null will always evaluate to false\\.$#"
@@ -834,11 +824,6 @@ parameters:
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 47
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
-
-		-
-			message: "#^Call to an undefined method Psr\\\\Log\\\\LoggerInterface\\:\\:expects\\(\\)\\.$#"
-			count: 2
-			path: tests/Integration/HookIntegrationTest.php
 
 		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"

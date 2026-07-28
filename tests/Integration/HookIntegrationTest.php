@@ -2,11 +2,12 @@
 
 namespace Tests\Integration;
 
+use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
+use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Hooks\HookManager;
-use Whity\Core\Queue\Queue;
 use Whity\Core\Tenant\TenantContext;
-use Psr\Log\LoggerInterface;
 
 /**
  * Integration tests for the hook system
@@ -18,18 +19,19 @@ use Psr\Log\LoggerInterface;
 class HookIntegrationTest extends TestCase
 {
     private HookManager $hookManager;
-    private LoggerInterface $logger;
+    private PDO $pdo;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->hookManager = new HookManager();
 
-        // Create a mock logger to capture async queue calls
-        $this->logger = $this->createMock(LoggerInterface::class);
-        Queue::setLogger($this->logger);
+        // dispatchAsync now PERSISTS to the durable event spine, so the hook
+        // manager needs a real DomainEventStore backed by the full migration
+        // schema (in-memory SQLite). Seed the tenants the async tests use.
+        $this->pdo = SchemaFromMigrations::make(true);
+        $this->pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 't1'), (5, 't5'), (7, 't7')");
+        $this->hookManager = new HookManager(new DomainEventStore($this->pdo));
 
-        // Set a test tenant context
         TenantContext::reset();
         TenantContext::setTenantId(1);
     }
@@ -103,63 +105,37 @@ class HookIntegrationTest extends TestCase
     }
 
     /**
-     * Test 2: Async hook is queued with correct context
+     * Test 2: Async hook is PERSISTED to the durable event spine with context.
      *
-     * Verifies:
-     * - Async hooks are queued to the correct queue
-     * - Queue payload includes tenant_id and timestamp context
-     * - Queue push method is called exactly once
-     * - Payload contains expected data structure
+     * Verifies (replacing the old log-only Queue assertions):
+     * - dispatchAsync writes a domain_events row (event_name + payload)
+     * - tenant (from TenantContext) and aggregate (from the dotted event name +
+     *   payload id) are promoted to columns
+     * - a pending event_outbox row is written for the relay to drain
      */
-    public function testAsyncUserCreatedHookIsQueued(): void
+    public function testAsyncUserCreatedEventIsPersisted(): void
     {
-        // Setup: Expect Queue::push to be called with correct parameters
-        $queueCapture = null;
-        $payloadCapture = null;
-
-        $this->logger->expects($this->once())
-            ->method('info')
-            ->with(
-                $this->equalTo('Async Job Queued on [whity-core-async-hooks]'),
-                $this->callback(function($logContext) use (&$queueCapture, &$payloadCapture) {
-                    $queueCapture = $logContext['queue'] ?? null;
-                    $payloadCapture = $logContext['payload'] ?? null;
-                    return isset($logContext['queue']) &&
-                           $logContext['queue'] === 'whity-core-async-hooks' &&
-                           isset($logContext['payload']) &&
-                           isset($logContext['payload']['_context']);
-                })
-            );
-
-        // Simulate user creation that would trigger async hook
-        $userData = [
+        // Fire async hook (simulating what UsersApiHandler::create does post-commit).
+        $this->hookManager->dispatchAsync('user.created.async', [
             'id' => 123,
             'email' => 'newuser@example.com',
-        ];
+        ]);
 
-        // Fire async hook (simulating what UsersApiHandler::create does)
-        $this->hookManager->dispatchAsync('user.created.async', $userData);
+        $event = $this->fetchOne('SELECT * FROM domain_events WHERE tenant_id = 1');
+        $this->assertNotNull($event, 'the async event was persisted to domain_events');
+        $this->assertSame('user.created.async', $event['event_name']);
+        $this->assertSame('user', $event['aggregate_type'], 'aggregate type derived from the dotted event name');
+        $this->assertSame('123', (string) $event['aggregate_id'], 'aggregate id derived from the payload id');
+        $this->assertSame(
+            ['id' => 123, 'email' => 'newuser@example.com'],
+            json_decode((string) $event['payload'], true),
+            'the original payload round-trips (no _context wrapper — tenant/actor are columns now)'
+        );
 
-        // Assertions
-        $this->assertSame('whity-core-async-hooks', $queueCapture, 'Should queue to whity-core-async-hooks');
-
-        // Verify payload structure
-        $this->assertIsArray($payloadCapture);
-        $this->assertArrayHasKey('_context', $payloadCapture, 'Payload should include context');
-        $this->assertArrayHasKey('id', $payloadCapture, 'Payload should include user id');
-        $this->assertArrayHasKey('email', $payloadCapture, 'Payload should include user email');
-
-        // Verify context was injected correctly
-        $context = $payloadCapture['_context'];
-        $this->assertIsArray($context);
-        $this->assertArrayHasKey('tenant_id', $context);
-        $this->assertArrayHasKey('timestamp', $context);
-        $this->assertSame(1, $context['tenant_id'], 'Queued context should have correct tenant_id');
-        $this->assertIsInt($context['timestamp']);
-
-        // Verify original data is preserved in payload
-        $this->assertSame(123, $payloadCapture['id']);
-        $this->assertSame('newuser@example.com', $payloadCapture['email']);
+        $outbox = $this->fetchOne('SELECT * FROM event_outbox WHERE event_id = :id', [':id' => $event['id']]);
+        $this->assertNotNull($outbox, 'a pending relay row was written for the event');
+        $this->assertSame('pending', $outbox['status']);
+        $this->assertSame(1, (int) $outbox['tenant_id'], 'the outbox row carries the origin tenant');
     }
 
     /**
@@ -410,53 +386,46 @@ class HookIntegrationTest extends TestCase
     }
 
     /**
-     * Test: Async dispatch with multiple tenants maintains isolation
-     *
-     * Verifies:
-     * - Different tenant contexts are preserved in async queues
-     * - Each queued item has correct tenant_id
-     * - Async hook isolation is maintained
+     * Test: Async dispatch under different tenant contexts persists each event
+     * stamped with — and keeping — its own origin tenant (no cross-tenant bleed).
      */
-    public function testAsyncHookQueuesIsolateTenantContexts(): void
+    public function testAsyncEventsIsolateTenantContexts(): void
     {
-        // Setup: Set initial tenant
         TenantContext::reset();
         TenantContext::setTenantId(5);
+        $this->hookManager->dispatchAsync('user.created.async', ['id' => 100, 'email' => 'u1@t5.test']);
 
-        // Capture queued payloads
-        $capturedPayloads = [];
-
-        $this->logger->expects($this->exactly(2))
-            ->method('info')
-            ->willReturnCallback(function($message, $context) use (&$capturedPayloads) {
-                $capturedPayloads[] = $context;
-            });
-
-        // Queue first job for tenant 5
-        $this->hookManager->dispatchAsync('user.created.async', [
-            'user_id' => 100,
-            'email' => 'user1@tenant5.com',
-        ]);
-
-        // Simulate different request context - reset and set to tenant 7
+        // A fresh request context (as the persistent worker would reset between requests).
         TenantContext::reset();
         TenantContext::setTenantId(7);
+        $this->hookManager->dispatchAsync('user.created.async', ['id' => 200, 'email' => 'u2@t7.test']);
 
-        // Queue second job for tenant 7
-        $this->hookManager->dispatchAsync('user.created.async', [
-            'user_id' => 200,
-            'email' => 'user2@tenant7.com',
-        ]);
+        $t5 = $this->fetchOne('SELECT * FROM domain_events WHERE tenant_id = 5');
+        $t7 = $this->fetchOne('SELECT * FROM domain_events WHERE tenant_id = 7');
+        $this->assertNotNull($t5, 'tenant 5 event persisted');
+        $this->assertNotNull($t7, 'tenant 7 event persisted');
+        $this->assertSame('100', (string) $t5['aggregate_id'], 'tenant 5 event kept its own payload id');
+        $this->assertSame('200', (string) $t7['aggregate_id'], 'tenant 7 event kept its own payload id');
 
-        // Assertions
-        $this->assertCount(2, $capturedPayloads, 'Both jobs should be queued');
+        // Each outbox row carries the origin tenant of its event, never the other's.
+        $o5 = $this->fetchOne('SELECT tenant_id FROM event_outbox WHERE event_id = :id', [':id' => $t5['id']]);
+        $o7 = $this->fetchOne('SELECT tenant_id FROM event_outbox WHERE event_id = :id', [':id' => $t7['id']]);
+        $this->assertNotNull($o5);
+        $this->assertNotNull($o7);
+        $this->assertSame(5, (int) $o5['tenant_id']);
+        $this->assertSame(7, (int) $o7['tenant_id']);
+    }
 
-        // Verify first job has tenant 5 context
-        $this->assertSame(5, $capturedPayloads[0]['payload']['_context']['tenant_id']);
-        $this->assertSame(100, $capturedPayloads[0]['payload']['user_id']);
+    /**
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>|null
+     */
+    private function fetchOne(string $sql, array $params = []): ?array
+    {
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // Verify second job has tenant 7 context
-        $this->assertSame(7, $capturedPayloads[1]['payload']['_context']['tenant_id']);
-        $this->assertSame(200, $capturedPayloads[1]['payload']['user_id']);
+        return $row === false ? null : $row;
     }
 }

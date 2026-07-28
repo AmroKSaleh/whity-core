@@ -39,7 +39,7 @@ $data = $hookManager->dispatch('role.creating', [
 // Listeners may adjust $data before the role is written.
 ```
 
-**Asynchronous (`dispatchAsync`)** — injects context under `_context` and pushes the payload onto the `whity-core-async-hooks` queue (`Whity\Core\Queue\Queue::push(...)`), returning immediately. Use for slow or non-critical side effects; a queue worker (not `dispatchAsync` itself) is responsible for consuming the queue and performing any downstream work such as sending notifications or calling external endpoints.
+**Asynchronous (`dispatchAsync`)** — PERSISTS the event to the durable event spine (WC-154/#162): it writes an immutable `domain_events` row plus a `pending` `event_outbox` row via `DomainEventStore::append(...)`, then returns immediately. This replaces the retired log-only `Queue::push` stub, which dropped every event. The current tenant (`TenantContext`) and actor (`AuditContext`) are promoted to first-class columns, and the aggregate is derived from the dotted event name (`user.created.async` → `user`) plus the payload's own `id`; the raw payload is stored as JSON (no `_context` wrapper). Use for slow or non-critical side effects — a failure to persist is logged server-side and never propagated to the caller. A separate **relay worker** (not `dispatchAsync` itself) drains the outbox and performs downstream work such as sending notifications or calling external endpoints. A `HookManager` constructed without a store (plugin-loader / CLI contexts that only register listeners) treats `dispatchAsync` as a safe no-op.
 
 ```php
 $hookManager->dispatchAsync('role.created.async', ['id' => 12, 'tenant_id' => 7]);
@@ -59,7 +59,7 @@ Suggested convention: `0–5` core validators, `10` default, `20+` side effects 
 
 ## Context injection
 
-Every `dispatch`/`dispatchAsync` injects a context array built from the current request:
+The synchronous `dispatch()` passes a context array (built from the current request) as the second argument to each listener. `dispatchAsync()` instead records that same context as first-class `domain_events` columns (`tenant_id`, `actor_user_id`, `occurred_at`) rather than wrapping it into the payload. The shape of the sync context:
 
 ```php
 $context = [
