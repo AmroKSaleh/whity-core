@@ -131,6 +131,14 @@ final class TenantOwnedTables
         'tag_groups'  => '063_create_taxonomy_tables.php',
         'tags'        => '063_create_taxonomy_tables.php',
         'entity_tags' => '063_create_taxonomy_tables.php',
+
+        // WC-queue — durable async job queue (migration 065). Each job carries
+        // the tenant_id that enqueued it, restored into TenantContext before its
+        // handler runs. The QUEUE mechanics (reserve/complete/fail/reclaim) run
+        // as system infra across tenants and are annotated @tenant-guard-ignore
+        // in JobRepository; the tenant_id column is what makes that restore, and
+        // an eventual tenant-scoped jobs API, correct.
+        'jobs' => '065_create_jobs.php',
     ];
 
     /**

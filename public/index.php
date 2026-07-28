@@ -282,6 +282,16 @@ $permissionRegistry->registerCorePermissions();
 $hookManager = new HookManager();
 \Whity\register_service(HookManager::class, $hookManager); // @phpstan-ignore-line
 
+// 4b-bis. Durable async queue (WC-queue): the producer-side QueueService is
+// registered so core services, hooks, and plugins enqueue work into the durable
+// `jobs` table instead of the old log-only Queue stub. The consumer side
+// (JobRegistry + JobRunner) is driven by the `queue:work` worker process
+// (separate task); this bootstrap only needs the enqueue facade available.
+$queueService = new \Whity\Core\Queue\QueueService(
+    new \Whity\Core\Queue\JobRepository($db->getPdo())
+);
+\Whity\register_service(\Whity\Core\Queue\QueueService::class, $queueService); // @phpstan-ignore-line
+
 // 4c. Initialize the security audit-trail writer (WC-34) and subscribe it to the
 // core CRUD lifecycle hooks. This is the SINGLE writer for the audit_log table:
 // role/user/tenant/OU mutations are captured by subscribing to the hooks the
