@@ -81,11 +81,11 @@ final class SettingsApiRealEngineTest extends TestCase
         $data = $this->decode($response)['data'];
         self::assertSame('Whity', $data['effective']['site_name']);
         self::assertSame('UTC', $data['effective']['timezone']);
-        // 5 tenant-overridable text keys: site_name, timezone, locale,
-        // support_email, mcp.enabled. The two instance-governance flags
-        // (auth.self_registration_enabled, auth.registration_approval_required)
-        // are GLOBAL-ONLY (WC-696206d8) and excluded from the per-tenant surface.
-        self::assertCount(5, $data['registry']);
+        // 6 tenant-overridable text keys: site_name, timezone, locale,
+        // support_email, mcp.enabled, auth.desktop_login_max_hours. The
+        // instance-governance / storage / mail / billing keys are GLOBAL-ONLY
+        // (WC-696206d8) and excluded from the per-tenant surface.
+        self::assertCount(6, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

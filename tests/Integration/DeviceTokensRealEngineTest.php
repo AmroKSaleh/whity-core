@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
+use Firebase\JWT\JWT;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
@@ -13,6 +14,10 @@ use Whity\Auth\DeviceCredentialService;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Request;
+use Whity\Core\Settings\GlobalSettingsRepository;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
+use Whity\Core\Settings\TenantSettingsRepository;
 
 /**
  * Real-engine (in-memory SQLite) tests for device/client registration + the
@@ -245,7 +250,152 @@ final class DeviceTokensRealEngineTest extends TestCase
         self::assertNotNull($this->validator()->validateDeviceToken($credentialA));
     }
 
+    // ============ WC-desktop-ttl: configurable desktop-login TTL ============
+
+    public function testCredentialLifetimeIsCappedByTheTenantSetting(): void
+    {
+        $profileId = $this->seedProfile('owner@example.com');
+        $this->setTenantMaxHours(1, '1'); // 1 hour
+
+        $issued = $this->deviceServiceWithSettings()->issue($profileId, 1, 'owner@example.com', 'Dev', 'windows', null);
+        $claims = $this->jwtParser->parse($issued['token']);
+
+        self::assertNotNull($claims);
+        self::assertSame(3600, (int) $claims['exp'] - (int) $claims['iat'], 'lifetime capped to the 1h setting, not 90d');
+    }
+
+    public function testCredentialLifetimeDefaultsTo72hWhenSettingsWiredWithoutOverride(): void
+    {
+        $profileId = $this->seedProfile('owner@example.com');
+
+        $issued = $this->deviceServiceWithSettings()->issue($profileId, 1, 'owner@example.com', 'Dev', 'windows', null);
+        $claims = $this->jwtParser->parse($issued['token']);
+
+        self::assertNotNull($claims);
+        self::assertSame(72 * 3600, (int) $claims['exp'] - (int) $claims['iat'], 'falls back to the 72h registry default');
+    }
+
+    public function testCredentialLifetimeIs90dWhenNoSettingsServiceWired(): void
+    {
+        $profileId = $this->seedProfile('owner@example.com');
+
+        // The historical two-arg construction keeps the 90-day default untouched.
+        $issued = (new DeviceCredentialService($this->pdo, $this->jwtParser))
+            ->issue($profileId, 1, 'owner@example.com', 'Dev', 'windows', null);
+        $claims = $this->jwtParser->parse($issued['token']);
+
+        self::assertNotNull($claims);
+        self::assertSame(
+            DeviceCredentialService::CREDENTIAL_LIFETIME_SECONDS,
+            (int) $claims['exp'] - (int) $claims['iat']
+        );
+    }
+
+    public function testExchangeEchoesTheResolvedOfflineLockWindow(): void
+    {
+        $profileId = $this->seedProfile('owner@example.com');
+        $this->setTenantMaxHours(1, '5'); // 5 hours
+        $credential = $this->enroll($profileId);
+
+        $res = $this->authHandlerWithSettings()->handleDeviceTokenExchange(
+            new Request('POST', '/api/devices/token', ['Authorization' => 'Bearer ' . $credential])
+        );
+
+        self::assertSame(200, $res->getStatusCode());
+        $body = json_decode($res->getBody(), true);
+        self::assertSame(5 * 3600, $body['desktop_login_max_seconds']);
+        self::assertArrayHasKey('desktop_login_expires_at', $body);
+        self::assertNotFalse(strtotime((string) $body['desktop_login_expires_at']));
+    }
+
+    public function testExchangeRejectsCredentialOlderThanAReducedPolicy(): void
+    {
+        $profileId = $this->seedProfile('owner@example.com');
+        $this->setTenantMaxHours(1, '1'); // policy now 1 hour
+
+        // A credential issued 2h ago (baked exp far in the future) — its age
+        // exceeds the reduced 1h window, so the exchange must refuse it.
+        $stale = $this->mintBackdatedDeviceCredential($profileId, 1, time() - 7200);
+        $rejected = $this->authHandlerWithSettings()->handleDeviceTokenExchange(
+            new Request('POST', '/api/devices/token', ['Authorization' => 'Bearer ' . $stale])
+        );
+        self::assertSame(401, $rejected->getStatusCode());
+        self::assertStringContainsString('under current policy', $rejected->getBody());
+
+        // Control: a freshly-issued credential under the SAME 1h policy still
+        // exchanges — proving it's the age, not merely the policy, that rejects.
+        $fresh = $this->deviceServiceWithSettings()->issue($profileId, 1, 'owner@example.com', 'Fresh', 'windows', null);
+        $ok = $this->authHandlerWithSettings()->handleDeviceTokenExchange(
+            new Request('POST', '/api/devices/token', ['Authorization' => 'Bearer ' . $fresh['token']])
+        );
+        self::assertSame(200, $ok->getStatusCode());
+    }
+
     // ==================== helpers ====================
+
+    private function settingsService(): SettingsService
+    {
+        return new SettingsService(
+            new GlobalSettingsRepository($this->pdo),
+            new TenantSettingsRepository($this->pdo)
+        );
+    }
+
+    private function authHandlerWithSettings(): AuthHandler
+    {
+        return new AuthHandler(
+            $this->pdo,
+            $this->jwtParser,
+            $this->validator(),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            $this->settingsService()
+        );
+    }
+
+    private function deviceServiceWithSettings(): DeviceCredentialService
+    {
+        return new DeviceCredentialService($this->pdo, $this->jwtParser, $this->settingsService());
+    }
+
+    private function setTenantMaxHours(int $tenantId, string $hours): void
+    {
+        (new TenantSettingsRepository($this->pdo))
+            ->set($tenantId, SettingsRegistry::AUTH_DESKTOP_LOGIN_MAX_HOURS, $hours);
+    }
+
+    /**
+     * Mint a VALID device credential with a backdated `iat` — bypassing
+     * DeviceCredentialService (whose create() always stamps iat=now) and
+     * registering its jti — so the exchange's freshness re-check can be
+     * exercised deterministically.
+     */
+    private function mintBackdatedDeviceCredential(int $profileId, int $tenantId, int $issuedAt): string
+    {
+        $jti = bin2hex(random_bytes(16));
+        $token = JWT::encode([
+            'profile_id'       => $profileId,
+            'active_tenant_id' => $tenantId,
+            'aud'              => 'device',
+            'email'            => 'owner@example.com',
+            'token_epoch'      => 0,
+            'jti'              => $jti,
+            'type'             => 'device',
+            'iat'              => $issuedAt,
+            'exp'              => time() + 90 * 86400,
+        ], self::SECRET, 'HS256');
+
+        $this->pdo->prepare(
+            'INSERT INTO devices (jti, profile_id, tenant_id, name, platform, fingerprint, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$jti, $profileId, $tenantId, 'Backdated', 'windows', null, date('Y-m-d H:i:s', time() + 90 * 86400)]);
+
+        return $token;
+    }
 
     private function deviceHandler(): DeviceApiHandler
     {

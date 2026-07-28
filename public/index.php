@@ -654,7 +654,17 @@ $loginThrottle = new LoginThrottleService(
 // WC-525: admin-enforced 2FA policy resolver — checked at the session-issuing
 // chokepoint inside AuthHandler for every login-completion path.
 $twoFactorPolicyResolver = new TwoFactorPolicyResolver($db, $logger);
-$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle, $twoFactorPolicyResolver);
+// WC-desktop-ttl: the settings service is needed by AuthHandler (the device-token
+// exchange caps + echoes the per-tenant desktop-login TTL) and by
+// DeviceCredentialService below, so it is constructed here — ahead of $authHandler
+// (it depends only on $db). It is also reused by the payment wall / mailer /
+// settings handlers further down.
+$globalSettingsRepository = new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo());
+$settingsService = new \Whity\Core\Settings\SettingsService(
+    $globalSettingsRepository,
+    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
+);
+$authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle, $twoFactorPolicyResolver, $settingsService);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // WC-235: public self-service registration — provisions a new tenant + owner
 // (profile + primary email + active admin membership). Public + no required
@@ -665,18 +675,13 @@ $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // off to it only when EMAIL_VERIFICATION_ENFORCED=1; the resend/confirm endpoints
 // below share the same service. Binding a real provider here is harmless while
 // the flag is off (RegisterApiHandler only calls it when enforcement is on).
-// Global settings service (also reused by the settings/branding/mail handlers
-// below). RegisterApiHandler reads the instance-governance flags (self-registration
-// open? approval required?) from it — closed by default on a fresh instance.
-// Constructed here (ahead of the mailer) because the mail transport is now
-// settings-driven (WC-email). The global repo + shared secret store are held in
-// their own variables so the mail-settings handler can read the out-of-registry
-// encrypted SMTP password and decrypt it.
-$globalSettingsRepository = new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo());
-$settingsService = new \Whity\Core\Settings\SettingsService(
-    $globalSettingsRepository,
-    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
-);
+// $globalSettingsRepository + $settingsService are constructed ABOVE, ahead of
+// $authHandler (WC-desktop-ttl). They are reused by the settings/branding/mail
+// handlers and the payment wall below; RegisterApiHandler reads the
+// instance-governance flags (self-registration open? approval required?) from
+// $settingsService — closed by default on a fresh instance. $secretStore holds
+// the encryption key so the mail-settings handler can read + decrypt the
+// out-of-registry encrypted SMTP password.
 $secretStore = \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV);
 
 // Payment wall (WC-billing) — registered here (not up with the other middleware)
@@ -795,7 +800,7 @@ $tokenValidator = new TokenValidator($jwtParser, $db->getPdo());
 // OR Bearer access token) and scoped to the caller's own profile — NOT public. The
 // exchange endpoint IS public: it self-authenticates via the device credential
 // (like the MCP bearer surface) and is added to PUBLIC_ROUTES as /api/v1/devices/token.
-$deviceService = new \Whity\Auth\DeviceCredentialService($db->getPdo(), $jwtParser);
+$deviceService = new \Whity\Auth\DeviceCredentialService($db->getPdo(), $jwtParser, $settingsService);
 $deviceHandler = new \Whity\Api\DeviceApiHandler($tokenValidator, $deviceService);
 $router->register('POST',   '/api/devices',       [$deviceHandler, 'register'], null);
 $router->register('GET',    '/api/devices',       [$deviceHandler, 'list'], null);

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Auth;
 
 use PDO;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
 
 /**
  * Lifecycle for per-device credentials issued to non-browser clients (native /
@@ -41,6 +43,10 @@ final class DeviceCredentialService
     public function __construct(
         private readonly PDO $db,
         private readonly JwtParser $jwtParser,
+        // WC-desktop-ttl: when wired, the credential lifetime is capped down to the
+        // tenant's resolved auth.desktop_login_max_hours setting. Optional so the
+        // existing two-arg call sites (and tests) keep working with the 90-day default.
+        private readonly ?SettingsService $settings = null,
     ) {}
 
     /**
@@ -67,7 +73,7 @@ final class DeviceCredentialService
             'aud'              => 'device',
             'email'            => $email,
             'token_epoch'      => $this->currentProfileEpoch($profileId),
-        ], self::CREDENTIAL_LIFETIME_SECONDS, 'device');
+        ], $this->resolveCredentialLifetime($tenantId), 'device');
 
         $claims = $this->jwtParser->parse($token);
         if ($claims === null || !isset($claims['jti'], $claims['exp'])) {
@@ -160,6 +166,26 @@ final class DeviceCredentialService
         $ins->execute([(string) $row['jti'], (string) $row['expires_at']]);
 
         return true;
+    }
+
+    /**
+     * The device-credential lifetime in seconds: the 90-day {@see self::CREDENTIAL_LIFETIME_SECONDS}
+     * ceiling, capped DOWN to the tenant's resolved `auth.desktop_login_max_hours`
+     * setting when a {@see SettingsService} is wired (WC-desktop-ttl). Capping the
+     * credential itself — not just the exchanged session — means a shortened policy
+     * stops the client minting fresh sessions past the configured window, even
+     * though each exchange also re-checks the policy against the credential's age.
+     */
+    private function resolveCredentialLifetime(int $tenantId): int
+    {
+        if ($this->settings === null) {
+            return self::CREDENTIAL_LIFETIME_SECONDS;
+        }
+
+        $hours = (int) ($this->settings->effective($tenantId)[SettingsRegistry::AUTH_DESKTOP_LOGIN_MAX_HOURS]
+            ?? SettingsRegistry::defaultFor(SettingsRegistry::AUTH_DESKTOP_LOGIN_MAX_HOURS));
+
+        return min(self::CREDENTIAL_LIFETIME_SECONDS, max(1, $hours) * 3600);
     }
 
     /**
