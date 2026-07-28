@@ -82,6 +82,13 @@ if ($isCli && isset($argv[1])) {
         exit($updateCheckCommand->execute($argv));
     }
 
+    if ($command === 'queue:work') {
+        $queueWorkCommand = new \Whity\Cli\Commands\QueueWorkCommand();
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'queue:work' command
+        exit($queueWorkCommand->execute($argv));
+    }
+
     echo "Unknown command: {$command}\n";
     echo "Available commands:\n";
     echo "  generate:openapi           Generate OpenAPI 3.0 schema\n";
@@ -89,6 +96,7 @@ if ($isCli && isset($argv[1])) {
     echo "  seed                       Seed database with default data\n";
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
+    echo "  queue:work                 Run the durable async job worker loop\n";
     exit(1);
 }
 

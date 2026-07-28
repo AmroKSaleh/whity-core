@@ -121,6 +121,44 @@ services:
           sleep 86400;
         done
 
+  # Durable async job worker (WC-627). Runs the queue:work loop that reserves
+  # and processes jobs from the `jobs` table. The command loops internally and
+  # recycles (clean exit) on its memory ceiling / --max-runtime, so
+  # `restart: unless-stopped` respawns a fresh process — bounding memory in the
+  # persistent worker. Opt-in (like `cron`): `docker compose --profile queue up`.
+  # Scale with `--scale queue-worker=N` — each claims distinct jobs (Postgres
+  # FOR UPDATE SKIP LOCKED). Kept out of the DEFAULT stack for the same reason as
+  # cron (a long-running loop breaks `docker compose up --wait`). Staging/prod
+  # run the same command under their orchestrator (see docs/wiki/Cron-Operations.md).
+  queue-worker:
+    image: whity-core:dev
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    working_dir: /app
+    profiles:
+      - queue
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        echo "[queue-worker] durable job worker started";
+        php public/index.php queue:work --max-runtime=3600 || echo "[queue-worker] exited (code $$?); restarting";
+
   # Local SMTP sink for email testing (WC-email). Mailpit captures every message
   # the app sends so nothing leaves the machine — SMTP on :1025, a web inbox on
   # http://localhost:8025. Part of the default stack (with a healthcheck so
