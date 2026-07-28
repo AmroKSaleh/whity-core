@@ -27,6 +27,7 @@ use Whity\Core\Deployment\DeploymentManager;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Queue\JobRepository;
 use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Request;
@@ -1799,6 +1800,42 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertArrayHasKey('data', $decoded);
 
         return $decoded['data'];
+    }
+
+    // ==================== jobs (WC-627) ====================
+    //
+    // Unlike every other tenant-owned table here, the durable job queue is
+    // SYSTEM INFRA that operates ACROSS tenants by design: one worker reserves
+    // and runs jobs for every tenant. JobRepository therefore exposes NO
+    // tenant-scoped accessor to reject a foreign tenant through — its
+    // reserve/complete/fail/reclaim are by-id/system (annotated
+    // @tenant-guard-ignore). Isolation is enforced at RUNTIME instead: JobRunner
+    // restores each job's ORIGIN tenant into TenantContext before its handler
+    // (proven in JobRunnerRealEngineTest::testHandlerRunsUnderTheJobsTenant). So
+    // the invariant that matters HERE is that a job is stamped with — and keeps
+    // — the exact tenant it was enqueued for, giving the runtime restore the
+    // right tenant and making one tenant's job unmistakable for another's.
+
+    public function testJobsAreStampedWithAndKeepTheirOriginTenant(): void
+    {
+        $repo = new JobRepository($this->pdo);
+        $repo->enqueue(self::TENANT_A, 'a.job', ['owner' => 'A']);
+        $repo->enqueue(self::TENANT_B, 'b.job', ['owner' => 'B']);
+
+        // The system worker claims across tenants (deliberately not tenant-scoped);
+        // each reserved job carries the tenant it was enqueued for, never the other.
+        $first = $repo->reserve();
+        $second = $repo->reserve();
+        self::assertNotNull($first);
+        self::assertNotNull($second);
+
+        $nameByTenant = [];
+        foreach ([$first, $second] as $job) {
+            $nameByTenant[$job['tenant_id']] = $job['name'];
+        }
+        self::assertSame('a.job', $nameByTenant[self::TENANT_A] ?? null, 'tenant A job kept tenant A');
+        self::assertSame('b.job', $nameByTenant[self::TENANT_B] ?? null, 'tenant B job kept tenant B');
+        self::assertCount(2, $nameByTenant, 'the two jobs belong to two distinct tenants');
     }
 
     /**
