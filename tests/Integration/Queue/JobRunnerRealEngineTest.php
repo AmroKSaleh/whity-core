@@ -11,7 +11,6 @@ use Whity\Core\Queue\JobRegistry;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Queue\JobRunner;
 use Whity\Core\Tenant\TenantContext;
-use Whity\Database\Database;
 use Whity\Sdk\JobInterface;
 
 /**
@@ -35,7 +34,7 @@ final class JobRunnerRealEngineTest extends TestCase
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a'), (2, 'b', 'b')");
         $this->repo = new JobRepository($this->pdo);
         $this->registry = new JobRegistry();
-        $this->runner = new JobRunner($this->repo, $this->registry, $this->wrapSqlite($this->pdo));
+        $this->runner = new JobRunner($this->repo, $this->registry);
     }
 
     protected function tearDown(): void
@@ -115,16 +114,6 @@ final class JobRunnerRealEngineTest extends TestCase
                 ($this->fn)($payload);
             }
         };
-    }
-
-    private function wrapSqlite(PDO $pdo): Database
-    {
-        $db = Database::withFactory(static fn (): PDO => $pdo);
-        $db->setMaxLifetimeSeconds(86400);
-        $db->setPingIntervalSeconds(86400);
-        $db->forceConnect();
-
-        return $db;
     }
 
     private function makeDue(int $id): void

@@ -8,7 +8,6 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Whity\Core\Audit\AuditContext;
 use Whity\Core\Tenant\TenantContext;
-use Whity\Database\Database;
 
 /**
  * The consumer-side of the durable queue: reserve the next runnable job,
@@ -28,18 +27,15 @@ final class JobRunner
 {
     private JobRepository $repo;
     private JobRegistry $registry;
-    private Database $db;
     private LoggerInterface $logger;
 
     public function __construct(
         JobRepository $repo,
         JobRegistry $registry,
-        Database $db,
         ?LoggerInterface $logger = null
     ) {
         $this->repo = $repo;
         $this->registry = $registry;
-        $this->db = $db;
         $this->logger = $logger ?? new NullLogger();
     }
 
@@ -95,10 +91,13 @@ final class JobRunner
                 $this->repo->retry($id, self::backoffSeconds((int) $job['attempts']), $e->getMessage());
             }
         } finally {
-            // Never leak per-job state into the next job (persistent-worker rule).
+            // Never leak per-job IN-MEMORY state into the next job
+            // (persistent-worker rule). DB connection hygiene (dangling-
+            // transaction rollback / DISCARD ALL) is the worker loop's concern,
+            // not the per-job runner's — and rolling back here would undo the
+            // outcome write on a connection the caller manages transactionally.
             TenantContext::reset();
             AuditContext::reset();
-            $this->db->resetSessionState();
         }
     }
 
