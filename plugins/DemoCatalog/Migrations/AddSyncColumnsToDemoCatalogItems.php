@@ -56,9 +56,9 @@ final class AddSyncColumnsToDemoCatalogItems implements MigrationInterface
         }
 
         // Backfill a stable uuid for every pre-existing row before the unique index.
-        $ids = $pdo->query('SELECT id FROM demo_catalog_items WHERE client_uuid IS NULL')
-            ->fetchAll(\PDO::FETCH_COLUMN);
-        if (is_array($ids) && $ids !== []) {
+        $idStmt = $pdo->query('SELECT id FROM demo_catalog_items WHERE client_uuid IS NULL');
+        $ids = $idStmt === false ? [] : $idStmt->fetchAll(\PDO::FETCH_COLUMN);
+        if ($ids !== []) {
             $update = $pdo->prepare(
                 'UPDATE demo_catalog_items SET client_uuid = :uuid WHERE id = :id AND client_uuid IS NULL'
             );
@@ -78,7 +78,8 @@ final class AddSyncColumnsToDemoCatalogItems implements MigrationInterface
 
         // Global monotonic change-sequence counter (one row; holds no tenant data).
         $pdo->exec('CREATE TABLE IF NOT EXISTS demo_catalog_change_seq (seq BIGINT NOT NULL)');
-        $seeded = (int) $pdo->query('SELECT COUNT(*) FROM demo_catalog_change_seq')->fetchColumn();
+        $countStmt = $pdo->query('SELECT COUNT(*) FROM demo_catalog_change_seq');
+        $seeded = $countStmt === false ? 0 : (int) $countStmt->fetchColumn();
         if ($seeded === 0) {
             $pdo->exec('INSERT INTO demo_catalog_change_seq (seq) VALUES (0)');
         }
@@ -101,8 +102,9 @@ final class AddSyncColumnsToDemoCatalogItems implements MigrationInterface
     {
         $driver = (string) $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
         if ($driver === 'sqlite') {
-            $rows = $pdo->query('PRAGMA table_info(demo_catalog_items)')->fetchAll(\PDO::FETCH_ASSOC);
-            foreach (is_array($rows) ? $rows : [] as $row) {
+            $infoStmt = $pdo->query('PRAGMA table_info(demo_catalog_items)');
+            $rows = $infoStmt === false ? [] : $infoStmt->fetchAll(\PDO::FETCH_ASSOC);
+            foreach ($rows as $row) {
                 if (strcasecmp((string) ($row['name'] ?? ''), $column) === 0) {
                     return true;
                 }

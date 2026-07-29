@@ -407,10 +407,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the tenant's demo-catalog items (newest first) */
+        /** List the tenant's live items (newest first), or — with ?updatedSince=<cursor>&includeDeleted=1&limit=N — the incremental changes feed (rows incl. tombstones with change_seq > cursor) */
         get: operations["get_api_v1_demo_catalog_items"];
         put?: never;
-        /** Create a demo-catalog item in the caller's tenant */
+        /** Create an item in the caller's tenant (idempotent on clientUuid) */
         post: operations["post_api_v1_demo_catalog_items"];
         delete?: never;
         options?: never;
@@ -429,10 +429,11 @@ export interface paths {
         get: operations["get_api_v1_demo_catalog_items_id"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Soft-delete (tombstone) an item; If-Match/baseVersion guarded, idempotent */
+        delete: operations["delete_api_v1_demo_catalog_items_id"];
         options?: never;
         head?: never;
-        /** Update a demo-catalog item (tenant-scoped 404 semantics) */
+        /** Update an item; If-Match/baseVersion enables optimistic concurrency */
         patch: operations["patch_api_v1_demo_catalog_items_id"];
         trace?: never;
     };
@@ -1999,13 +2000,21 @@ export interface components {
             data: components["schemas"]["Delegation"][];
             pagination: components["schemas"]["Pagination"];
         };
+        DemoCatalogConflictResponse: {
+            error: string;
+            serverItem: components["schemas"]["DemoCatalogItem"];
+        };
         DemoCatalogItem: {
             id: number;
             tenantId: number;
+            clientUuid: string | null;
             name: string;
             description: string | null;
             /** @enum {string} */
             status: "active" | "archived";
+            version: number;
+            deletedAt: string | null;
+            updatedBy: number | null;
             createdAt: string | null;
             updatedAt: string | null;
         };
@@ -2014,6 +2023,8 @@ export interface components {
             description?: string | null;
             /** @enum {string} */
             status?: "active" | "archived";
+            clientUuid?: string;
+            baseVersion?: number;
         };
         DemoCatalogItemListResponse: {
             data: components["schemas"]["DemoCatalogItem"][];
@@ -5066,6 +5077,15 @@ export interface operations {
         };
         responses: {
             /** @description DemoCatalogItemResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoCatalogItemResponse"];
+                };
+            };
+            /** @description DemoCatalogItemResponse */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5090,7 +5110,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Missing demo_catalog:manage or unresolved tenant context */
+            /** @description Missing demo_catalog:manage or unresolved/system tenant context */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5189,6 +5209,78 @@ export interface operations {
             };
         };
     };
+    delete_api_v1_demo_catalog_items_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DemoCatalogItemResponse */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoCatalogItemResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing demo_catalog:manage or unresolved tenant context */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Item not found in the caller's tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description DemoCatalogConflictResponse */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoCatalogConflictResponse"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     patch_api_v1_demo_catalog_items_id: {
         parameters: {
             query?: never;
@@ -5250,6 +5342,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description DemoCatalogConflictResponse */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DemoCatalogConflictResponse"];
                 };
             };
             /** @description Internal server error */

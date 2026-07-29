@@ -166,6 +166,8 @@ final class DemoCatalogApiHandler
     /**
      * GET /api/demo-catalog/items/{id} — one item in the caller's tenant
      * (including a tombstone, so a sync client can observe a server-side delete).
+     *
+     * @param array<string, string> $params Router path captures (the `{id}`).
      */
     public function get(Request $request, array $params = []): Response
     {
@@ -245,6 +247,8 @@ final class DemoCatalogApiHandler
      * body `baseVersion`), a version mismatch (or a tombstoned row) returns 409
      * with the current `serverItem`. Absent, the update is a blind-but-versioned
      * write (preserves the plain web CRUD flow).
+     *
+     * @param array<string, string> $params Router path captures (the `{id}`).
      */
     public function update(Request $request, array $params = []): Response
     {
@@ -328,6 +332,8 @@ final class DemoCatalogApiHandler
      * DELETE /api/demo-catalog/items/{id} — soft-delete (tombstone) in the
      * caller's tenant. If-Match/`baseVersion` guarded (409 on mismatch);
      * idempotent (deleting an already-deleted row returns its tombstone).
+     *
+     * @param array<string, string> $params Router path captures (the `{id}`).
      */
     public function delete(Request $request, array $params = []): Response
     {
@@ -411,12 +417,16 @@ final class DemoCatalogApiHandler
         if ($driver === 'pgsql') {
             // demo_catalog_change_seq is a sanctioned GLOBAL counter (no tenant_id).
             $stmt = $this->db->query('UPDATE demo_catalog_change_seq SET seq = seq + 1 RETURNING seq');
-            return (int) $stmt->fetchColumn();
+            return $stmt === false ? 0 : (int) $stmt->fetchColumn();
         }
         $this->db->exec('UPDATE demo_catalog_change_seq SET seq = seq + 1');
-        return (int) $this->db->query('SELECT seq FROM demo_catalog_change_seq')->fetchColumn();
+        $stmt = $this->db->query('SELECT seq FROM demo_catalog_change_seq');
+        return $stmt === false ? 0 : (int) $stmt->fetchColumn();
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
     private function findScoped(int $id, int $tenantId): ?array
     {
         if ($tenantId === self::SYSTEM_TENANT_ID) {
@@ -434,6 +444,9 @@ final class DemoCatalogApiHandler
         return is_array($row) ? $row : null;
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
     private function findByClientUuid(string $clientUuid, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
@@ -544,7 +557,7 @@ final class DemoCatalogApiHandler
      */
     private function queryParams(Request $request): array
     {
-        $params = is_array($_GET) ? $_GET : [];
+        $params = $_GET;
         $query = parse_url($request->getPath(), PHP_URL_QUERY);
         if (is_string($query) && $query !== '') {
             parse_str($query, $fromPath);
