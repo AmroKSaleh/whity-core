@@ -41,6 +41,11 @@ pub struct ExchangedSession {
 pub fn build_client() -> Result<Client, String> {
     Client::builder()
         .user_agent("whity-tauri-desktop-template")
+        // Bounded waits so an unreachable/slow backend fails the sync cycle
+        // quickly (surfacing the offline/"Sync now" banner) instead of freezing
+        // the UI on a hung request. The engine's per-row backoff then retries.
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))
 }
