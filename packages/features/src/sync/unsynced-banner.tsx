@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { Alert, AlertAction, AlertDescription } from "@amroksaleh/ui/alert"
+import { Alert, AlertDescription } from "@amroksaleh/ui/alert"
 import { Button } from "@amroksaleh/ui/button"
 import { Spinner } from "@amroksaleh/ui/spinner"
 
@@ -47,6 +47,11 @@ export function UnsyncedBanner({
   let message = t("sync.banner.synced")
   let action: React.ReactNode = null
 
+  // A tonal action button: transparent so the alert's tint shows through, with a
+  // border + hover that follow the current tone (via `currentColor`) instead of
+  // the default neutral grey — which clashed on the tinted strip.
+  const actionClass = "border-current/40 bg-transparent hover:bg-current/10 dark:bg-transparent"
+
   if (locked) {
     variant = "destructive"
     message = t("sync.banner.locked")
@@ -55,7 +60,7 @@ export function UnsyncedBanner({
     message = `${conflicts.length} ${t("sync.banner.conflicts")}`
     if (onReviewConflicts) {
       action = (
-        <Button variant="outline" onClick={onReviewConflicts}>
+        <Button variant="outline" size="sm" className={actionClass} onClick={onReviewConflicts}>
           {t("sync.banner.reviewConflicts")}
         </Button>
       )
@@ -71,7 +76,7 @@ export function UnsyncedBanner({
     message = `${unsyncedCount} ${t("sync.banner.unsynced")}`
     if (onSyncNow) {
       action = (
-        <Button variant="outline" onClick={onSyncNow}>
+        <Button variant="outline" size="sm" className={actionClass} onClick={onSyncNow}>
           {t("sync.banner.syncNow")}
         </Button>
       )
@@ -79,10 +84,21 @@ export function UnsyncedBanner({
   }
 
   return (
-    <Alert variant={variant} className={className} data-slot="unsynced-banner">
-      {syncing ? <Spinner /> : null}
-      <AlertDescription>{message}</AlertDescription>
-      {action ? <AlertAction>{action}</AlertAction> : null}
+    <Alert
+      variant={variant}
+      // Render as a single-line strip: a vertically-centered flex row (overriding
+      // Alert's default icon/title/description grid), so the message, spinner, and
+      // action sit on one baseline instead of the action pinning to the top-right.
+      className={`flex items-center gap-2.5 ${className ?? ""}`}
+      data-slot="unsynced-banner"
+    >
+      {syncing ? <Spinner size="sm" className="shrink-0" /> : null}
+      <AlertDescription className="flex-1 text-foreground">{message}</AlertDescription>
+      {action ? (
+        <div data-slot="unsynced-banner-action" className="shrink-0">
+          {action}
+        </div>
+      ) : null}
     </Alert>
   )
 }
