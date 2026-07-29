@@ -16,6 +16,8 @@
 //!   session bookkeeping (the secret credential lives in the OS keychain).
 //! - v5: the sync engine's pull-cursor store (`sync_state_kv`) and field-level
 //!   conflict snapshot store (`item_conflicts`).
+//! - v6: per-row push-retry bookkeeping (`push_attempts` / `next_attempt_at` /
+//!   `last_push_error`) so a flaky push backs off.
 //!
 //! `run()` applies each pending step then stamps its version, so a partially
 //! migrated DB always resumes correctly. Add later steps as another
@@ -46,6 +48,11 @@ pub fn run(conn: &Connection) -> rusqlite::Result<()> {
     if version < 5 {
         migrate_to_v5(conn)?;
         conn.pragma_update(None, "user_version", 5)?;
+        version = 5;
+    }
+    if version < 6 {
+        migrate_to_v6(conn)?;
+        conn.pragma_update(None, "user_version", 6)?;
     }
     Ok(())
 }
@@ -196,6 +203,21 @@ fn migrate_to_v5(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// v6 (push resilience): per-row retry bookkeeping so a flaky push backs off
+/// instead of hammering the server or aborting the whole sync cycle.
+/// `push_attempts` counts consecutive failures, `next_attempt_at` is the earliest
+/// RFC3339 time to retry (NULL = due now), `last_push_error` surfaces a permanent
+/// (non-retryable) failure to the UI.
+const V6_PUSH_RETRY: &str = "
+    ALTER TABLE demo_catalog_items ADD COLUMN push_attempts INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE demo_catalog_items ADD COLUMN next_attempt_at TEXT;
+    ALTER TABLE demo_catalog_items ADD COLUMN last_push_error TEXT;";
+
+fn migrate_to_v6(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V6_PUSH_RETRY)?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -252,7 +274,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 5);
+        assert_eq!(ver, 6);
 
         let (id, uuid, sync_state, dirty, deleted): (i64, String, String, i64, i64) = conn
             .query_row(
@@ -284,12 +306,13 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 5);
+        assert_eq!(ver, 6);
         assert!(column_exists(&conn, "demo_catalog_items", "client_uuid").unwrap());
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
         assert!(table_exists(&conn, "sync_state_kv").unwrap());
         assert!(table_exists(&conn, "item_conflicts").unwrap());
+        assert!(column_exists(&conn, "demo_catalog_items", "next_attempt_at").unwrap());
 
         // The auth_state singleton exists and starts un-enrolled.
         let (id, enrolled): (i64, i64) = conn
@@ -328,7 +351,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 5);
+        assert_eq!(ver, 6);
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
     }
@@ -337,8 +360,8 @@ mod tests {
     fn run_is_idempotent() {
         let conn = v1_conn();
         run(&conn).unwrap();
-        run(&conn).unwrap(); // version already 5 → no-op
+        run(&conn).unwrap(); // version already 6 → no-op
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 5);
+        assert_eq!(ver, 6);
     }
 }

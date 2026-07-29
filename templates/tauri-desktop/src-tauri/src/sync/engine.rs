@@ -43,6 +43,27 @@ struct PendingRow {
     sync_state: String,
 }
 
+enum RowOutcome {
+    Pushed,
+    Conflicted,
+}
+
+/// A push step failed either at the HTTP layer (classified) or the local DB.
+enum StepError {
+    Http(http::HttpError),
+    Db(rusqlite::Error),
+}
+impl From<http::HttpError> for StepError {
+    fn from(e: http::HttpError) -> Self {
+        StepError::Http(e)
+    }
+}
+impl From<rusqlite::Error> for StepError {
+    fn from(e: rusqlite::Error) -> Self {
+        StepError::Db(e)
+    }
+}
+
 fn push_pending(
     conn: &Connection,
     client: &Client,
@@ -54,83 +75,145 @@ fn push_pending(
     let mut conflicts = 0;
 
     for row in rows {
-        if row.sync_state == "deleted_pending" {
-            match row.server_id {
-                // Never synced → nothing to delete server-side; drop it locally.
-                None => {
-                    conn.execute("DELETE FROM demo_catalog_items WHERE id = ?1", params![row.id])
-                        .map_err(db_err)?;
-                    pushed += 1;
-                }
-                Some(server_id) => {
-                    match http::delete(client, api_base, token, server_id, row.base_version)
-                        .map_err(|e| e.to_string())?
-                    {
-                        WriteOutcome::Applied(_) | WriteOutcome::NotFound => {
-                            conn.execute(
-                                "UPDATE demo_catalog_items SET dirty = 0, sync_state = 'synced', deleted = 1 WHERE id = ?1",
-                                params![row.id],
-                            ).map_err(db_err)?;
-                            pushed += 1;
-                        }
-                        WriteOutcome::Conflict(server) => {
-                            park_conflict(conn, &row.client_uuid, &row.name, row.description.as_deref(), &row.status, true, row.base_version, &server).map_err(db_err)?;
-                            conflicts += 1;
-                        }
-                    }
-                }
+        match push_row(conn, client, api_base, token, &row) {
+            Ok(RowOutcome::Pushed) => pushed += 1,
+            Ok(RowOutcome::Conflicted) => conflicts += 1,
+            // A dead session aborts the whole cycle — the caller re-authenticates.
+            Err(StepError::Http(http::HttpError::Unauthorized)) => {
+                return Err("unauthorized (session expired); re-authenticate".to_string());
             }
-            continue;
-        }
-
-        // pending create / update
-        match row.server_id {
-            None => {
-                let item = http::create(
-                    client, api_base, token,
-                    &row.client_uuid, &row.name, row.description.as_deref(), &row.status,
-                ).map_err(|e| e.to_string())?;
-                conn.execute(
-                    "UPDATE demo_catalog_items
-                     SET server_id = ?1, base_version = ?2, dirty = 0, sync_state = 'synced',
-                         updated_at = ?3, updated_by = ?4
-                     WHERE id = ?5",
-                    params![item.id, item.version, item.updated_at, item.updated_by, row.id],
-                ).map_err(db_err)?;
-                pushed += 1;
+            // Per-row transient/permanent failures back the ROW off but never abort
+            // the cycle — one flaky or invalid row can't block the rest.
+            Err(StepError::Http(http::HttpError::Retryable(msg))) => {
+                record_push_failure(conn, row.id, false, &msg).map_err(db_err)?;
             }
-            Some(server_id) => {
-                match http::update(
-                    client, api_base, token, server_id, row.base_version,
-                    &row.name, row.description.as_deref(), &row.status,
-                ).map_err(|e| e.to_string())? {
-                    WriteOutcome::Applied(item) => {
-                        conn.execute(
-                            "UPDATE demo_catalog_items
-                             SET base_version = ?1, dirty = 0, sync_state = 'synced',
-                                 updated_at = ?2, updated_by = ?3
-                             WHERE id = ?4",
-                            params![item.version, item.updated_at, item.updated_by, row.id],
-                        ).map_err(db_err)?;
-                        pushed += 1;
-                    }
-                    WriteOutcome::Conflict(server) => {
-                        park_conflict(conn, &row.client_uuid, &row.name, row.description.as_deref(), &row.status, false, row.base_version, &server).map_err(db_err)?;
-                        conflicts += 1;
-                    }
-                    // Server row vanished → forget the server id so it re-creates next push.
-                    WriteOutcome::NotFound => {
-                        conn.execute(
-                            "UPDATE demo_catalog_items SET server_id = NULL WHERE id = ?1",
-                            params![row.id],
-                        ).map_err(db_err)?;
-                    }
-                }
+            Err(StepError::Http(http::HttpError::Permanent(msg))) => {
+                record_push_failure(conn, row.id, true, &msg).map_err(db_err)?;
             }
+            // A local DB failure is not recoverable here.
+            Err(StepError::Db(e)) => return Err(db_err(e)),
         }
     }
 
     Ok((pushed, conflicts))
+}
+
+/// Push one pending row. On HTTP success it applies the server result locally
+/// (resetting the retry counters); a 409 parks a conflict; HTTP/DB failures
+/// propagate as `StepError` for the caller to classify.
+fn push_row(
+    conn: &Connection,
+    client: &Client,
+    api_base: &str,
+    token: &str,
+    row: &PendingRow,
+) -> Result<RowOutcome, StepError> {
+    if row.sync_state == "deleted_pending" {
+        return match row.server_id {
+            // Never synced → nothing to delete server-side; drop it locally.
+            None => {
+                conn.execute("DELETE FROM demo_catalog_items WHERE id = ?1", params![row.id])?;
+                Ok(RowOutcome::Pushed)
+            }
+            Some(server_id) => match http::delete(client, api_base, token, server_id, row.base_version)? {
+                WriteOutcome::Applied(_) | WriteOutcome::NotFound => {
+                    conn.execute(
+                        "UPDATE demo_catalog_items
+                         SET dirty = 0, sync_state = 'synced', deleted = 1,
+                             push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
+                         WHERE id = ?1",
+                        params![row.id],
+                    )?;
+                    Ok(RowOutcome::Pushed)
+                }
+                WriteOutcome::Conflict(server) => {
+                    park_conflict(conn, &row.client_uuid, &row.name, row.description.as_deref(), &row.status, true, row.base_version, &server)?;
+                    Ok(RowOutcome::Conflicted)
+                }
+            },
+        };
+    }
+
+    match row.server_id {
+        None => {
+            let item = http::create(
+                client, api_base, token,
+                &row.client_uuid, &row.name, row.description.as_deref(), &row.status,
+            )?;
+            conn.execute(
+                "UPDATE demo_catalog_items
+                 SET server_id = ?1, base_version = ?2, dirty = 0, sync_state = 'synced',
+                     updated_at = ?3, updated_by = ?4,
+                     push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
+                 WHERE id = ?5",
+                params![item.id, item.version, item.updated_at, item.updated_by, row.id],
+            )?;
+            Ok(RowOutcome::Pushed)
+        }
+        Some(server_id) => match http::update(
+            client, api_base, token, server_id, row.base_version,
+            &row.name, row.description.as_deref(), &row.status,
+        )? {
+            WriteOutcome::Applied(item) => {
+                conn.execute(
+                    "UPDATE demo_catalog_items
+                     SET base_version = ?1, dirty = 0, sync_state = 'synced',
+                         updated_at = ?2, updated_by = ?3,
+                         push_attempts = 0, next_attempt_at = NULL, last_push_error = NULL
+                     WHERE id = ?4",
+                    params![item.version, item.updated_at, item.updated_by, row.id],
+                )?;
+                Ok(RowOutcome::Pushed)
+            }
+            WriteOutcome::Conflict(server) => {
+                park_conflict(conn, &row.client_uuid, &row.name, row.description.as_deref(), &row.status, false, row.base_version, &server)?;
+                Ok(RowOutcome::Conflicted)
+            }
+            // Server row vanished → forget the server id so it re-creates next push.
+            WriteOutcome::NotFound => {
+                conn.execute(
+                    "UPDATE demo_catalog_items SET server_id = NULL WHERE id = ?1",
+                    params![row.id],
+                )?;
+                Ok(RowOutcome::Pushed)
+            }
+        },
+    }
+}
+
+/// Record a failed push: bump the attempt count and schedule the next retry
+/// (exponential backoff; a permanent error is parked ~a day out so it stops
+/// hammering the server but stays visible via `last_push_error`).
+fn record_push_failure(
+    conn: &Connection,
+    id: i64,
+    permanent: bool,
+    message: &str,
+) -> rusqlite::Result<()> {
+    let attempts: i64 = conn
+        .query_row(
+            "SELECT push_attempts FROM demo_catalog_items WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+        + 1;
+    let delay = if permanent { 24 * 3600 } else { next_backoff(attempts) };
+    conn.execute(
+        "UPDATE demo_catalog_items
+         SET push_attempts = ?1, last_push_error = ?2,
+             next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || ?3 || ' seconds')
+         WHERE id = ?4",
+        params![attempts, message, delay, id],
+    )?;
+    Ok(())
+}
+
+/// Exponential backoff (seconds) for the Nth consecutive push failure:
+/// 10, 20, 40, 80, 160, then capped at 300 (5 min).
+fn next_backoff(attempts: i64) -> i64 {
+    let shift = attempts.clamp(1, 6) as u32;
+    (5_i64 << shift).min(300)
 }
 
 fn select_pending(conn: &Connection) -> rusqlite::Result<Vec<PendingRow>> {
@@ -138,6 +221,7 @@ fn select_pending(conn: &Connection) -> rusqlite::Result<Vec<PendingRow>> {
         "SELECT id, client_uuid, server_id, name, description, status, base_version, sync_state
          FROM demo_catalog_items
          WHERE sync_state IN ('pending', 'deleted_pending')
+           AND (next_attempt_at IS NULL OR next_attempt_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now'))
          ORDER BY updated_at_local ASC, id ASC",
     )?;
     let rows = stmt
@@ -400,6 +484,100 @@ pub fn unsynced_count(conn: &Connection) -> Result<usize, String> {
 
 fn db_err<E: std::fmt::Display>(e: E) -> String {
     format!("local database error: {e}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrations;
+    use rusqlite::Connection;
+
+    fn migrated() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrations::run(&conn).unwrap();
+        conn
+    }
+
+    fn insert_pending(conn: &Connection, uuid: &str) {
+        conn.execute(
+            "INSERT INTO demo_catalog_items (client_uuid, name, status, dirty, sync_state, created_at, updated_at_local)
+             VALUES (?1, 'n', 'active', 1, 'pending', strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+            params![uuid],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn backoff_is_monotonic_and_capped() {
+        let mut prev = 0;
+        for n in 1..=6 {
+            let b = next_backoff(n);
+            assert!(b >= prev, "non-decreasing across attempts");
+            prev = b;
+        }
+        assert_eq!(next_backoff(1), 10);
+        assert_eq!(next_backoff(6), 300);
+        assert_eq!(next_backoff(999), 300, "capped at 5 min");
+    }
+
+    #[test]
+    fn select_pending_skips_rows_not_yet_due() {
+        let conn = migrated();
+        insert_pending(&conn, "due-null");
+        insert_pending(&conn, "due-past");
+        insert_pending(&conn, "not-due");
+        conn.execute(
+            "UPDATE demo_catalog_items SET next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-60 seconds') WHERE client_uuid = 'due-past'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE demo_catalog_items SET next_attempt_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','+3600 seconds') WHERE client_uuid = 'not-due'",
+            [],
+        )
+        .unwrap();
+
+        let uuids: Vec<String> = select_pending(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.client_uuid)
+            .collect();
+        assert!(uuids.contains(&"due-null".to_string()));
+        assert!(uuids.contains(&"due-past".to_string()));
+        assert!(!uuids.contains(&"not-due".to_string()), "a future next_attempt_at is skipped");
+    }
+
+    #[test]
+    fn push_backs_off_on_network_failure_without_aborting_the_cycle() {
+        let conn = migrated();
+        insert_pending(&conn, "a");
+        insert_pending(&conn, "b");
+        // A closed local port → connection refused → a Retryable network error.
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap();
+
+        let (pushed, conflicts) =
+            push_pending(&conn, &client, "http://127.0.0.1:1/api/v1", "tok").unwrap();
+        assert_eq!(pushed, 0);
+        assert_eq!(conflicts, 0);
+
+        for uuid in ["a", "b"] {
+            let (attempts, next, err, state): (i64, Option<String>, Option<String>, String) = conn
+                .query_row(
+                    "SELECT push_attempts, next_attempt_at, last_push_error, sync_state
+                     FROM demo_catalog_items WHERE client_uuid = ?1",
+                    [uuid],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(attempts, 1, "one failed attempt recorded for {uuid}");
+            assert!(next.is_some(), "a retry is scheduled for {uuid}");
+            assert!(err.is_some(), "the error is surfaced for {uuid}");
+            assert_eq!(state, "pending", "the row is preserved (not lost) for {uuid}");
+        }
+    }
 }
 
 #[cfg(test)]

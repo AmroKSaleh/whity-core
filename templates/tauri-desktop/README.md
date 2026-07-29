@@ -241,9 +241,10 @@ The frontend was verified with `tsc --noEmit` and a real `vite build`.
   conflict → resolve) — is a follow-up that needs the app running.
 - **Deferred sync-engine enhancements.** Sync currently runs on an explicit
   `sync_now` (a frontend interval + online-listener drives it). A Rust background
-  scheduler with connectivity detection + per-row retry/backoff, and generalizing
-  the engine behind a `SyncableResource` trait for multi-entity reuse, are scoped
-  follow-ups.
+  scheduler with connectivity detection, and generalizing the engine behind a
+  `SyncableResource` trait for multi-entity reuse, are scoped follow-ups.
+  (Per-row retry/backoff — a flaky/invalid push backs off and never aborts the
+  cycle — is implemented.)
 - **Packaging size / startup time.** Not measured on any platform — depends
   on the platform builds above existing first. Once a real `tauri build`
   output exists (Windows installer, macOS `.app`/`.dmg`, or the Linux

@@ -9,20 +9,34 @@ use serde::Deserialize;
 
 use super::ServerItem;
 
-/// A distinguishable HTTP failure: `Unauthorized` triggers a token refresh +
-/// retry by the caller; everything else is surfaced as-is.
+/// A classified HTTP failure so the engine can react: `Unauthorized` aborts the
+/// cycle (needs re-auth), `Retryable` (network / 5xx / 429) backs the row off and
+/// retries later, `Permanent` (other 4xx — e.g. validation) is surfaced and not
+/// retried on a short cycle.
 #[derive(Debug)]
 pub enum HttpError {
     Unauthorized,
-    Other(String),
+    Retryable(String),
+    Permanent(String),
 }
 
 impl std::fmt::Display for HttpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HttpError::Unauthorized => write!(f, "unauthorized"),
-            HttpError::Other(m) => write!(f, "{m}"),
+            HttpError::Retryable(m) | HttpError::Permanent(m) => write!(f, "{m}"),
         }
+    }
+}
+
+/// Classify a non-success response: server errors + rate-limits are transient;
+/// other 4xx are permanent (retrying won't help).
+fn classify(ctx: &str, status: StatusCode, text: &str) -> HttpError {
+    let msg = format!("{ctx} failed ({}): {}", status.as_u16(), truncate(text));
+    if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+        HttpError::Retryable(msg)
+    } else {
+        HttpError::Permanent(msg)
     }
 }
 
@@ -88,10 +102,10 @@ pub fn fetch_changes(
     }
     let text = body_text(resp)?;
     if !status.is_success() {
-        return Err(HttpError::Other(format!("changes feed failed ({}): {}", status.as_u16(), truncate(&text))));
+        return Err(classify("changes feed", status, &text));
     }
     let env: ChangesEnvelope = serde_json::from_str(&text)
-        .map_err(|e| HttpError::Other(format!("invalid changes response: {e}")))?;
+        .map_err(|e| HttpError::Permanent(format!("invalid changes response: {e}")))?;
 
     Ok(ChangesPage { items: env.data, cursor: env.cursor, has_more: env.has_more })
 }
@@ -126,10 +140,10 @@ pub fn create(
     }
     let text = body_text(resp)?;
     if !status_code.is_success() {
-        return Err(HttpError::Other(format!("create failed ({}): {}", status_code.as_u16(), truncate(&text))));
+        return Err(classify("create", status_code, &text));
     }
     let env: DataEnvelope = serde_json::from_str(&text)
-        .map_err(|e| HttpError::Other(format!("invalid create response: {e}")))?;
+        .map_err(|e| HttpError::Permanent(format!("invalid create response: {e}")))?;
 
     Ok(env.data)
 }
@@ -192,24 +206,26 @@ fn write_outcome(resp: reqwest::blocking::Response, ctx: &str) -> Result<WriteOu
     let text = body_text(resp)?;
     if status == StatusCode::CONFLICT {
         let env: ConflictEnvelope = serde_json::from_str(&text)
-            .map_err(|e| HttpError::Other(format!("invalid {ctx} conflict response: {e}")))?;
+            .map_err(|e| HttpError::Permanent(format!("invalid {ctx} conflict response: {e}")))?;
         return Ok(WriteOutcome::Conflict(env.server_item));
     }
     if !status.is_success() {
-        return Err(HttpError::Other(format!("{ctx} failed ({}): {}", status.as_u16(), truncate(&text))));
+        return Err(classify(ctx, status, &text));
     }
     let env: DataEnvelope = serde_json::from_str(&text)
-        .map_err(|e| HttpError::Other(format!("invalid {ctx} response: {e}")))?;
+        .map_err(|e| HttpError::Permanent(format!("invalid {ctx} response: {e}")))?;
 
     Ok(WriteOutcome::Applied(env.data))
 }
 
 fn net_err(e: reqwest::Error) -> HttpError {
-    HttpError::Other(format!("network error: {e}"))
+    // A failed send (DNS/connect/timeout) is transient → retry with backoff.
+    HttpError::Retryable(format!("network error reaching the server: {e}"))
 }
 
 fn body_text(resp: reqwest::blocking::Response) -> Result<String, HttpError> {
-    resp.text().map_err(|e| HttpError::Other(format!("failed reading response: {e}")))
+    resp.text()
+        .map_err(|e| HttpError::Retryable(format!("failed reading response: {e}")))
 }
 
 fn truncate(s: &str) -> String {
