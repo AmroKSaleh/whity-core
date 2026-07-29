@@ -28,6 +28,11 @@ serde_json = "1"
 # works out of the box" bar this boilerplate is for.
 rusqlite = { version = "0.31", features = ["bundled"] }
 
+# Stable client-side identity for offline-first sync (WC-desktop-sync): each row
+# gets a UUID at creation so an offline-created record has a durable id that can
+# be reconciled with the server's integer id once it syncs.
+uuid = { version = "1", features = ["v4"] }
+
 # The worked "add a crate for custom functionality" example (see
 # src/commands/printer.rs): cross-platform printer discovery + printing,
 # demonstrating the extension pattern with a real capability the web can't do.

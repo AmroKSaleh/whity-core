@@ -1,7 +1,7 @@
 mod commands;
 mod db;
 
-use commands::items::Db;
+use db::Db;
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -10,7 +10,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let connection = db::init_db(app.handle())?;
+            let connection = db::open(app.handle())?;
             app.manage(Db(Mutex::new(connection)));
             Ok(())
         })
