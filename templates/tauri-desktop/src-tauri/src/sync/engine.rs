@@ -510,5 +510,29 @@ mod integration {
             .unwrap();
         assert!(mine.contains("Local edit"), "mine snapshot: {mine}");
         assert!(theirs.contains("Server edit"), "theirs snapshot: {theirs}");
+
+        // --- RESOLVE: apply a merge, re-sync; the merged result reaches the server ---
+        assert!(
+            crate::db::conflicts_repo::resolve(&db1, &uuid, "Merged name", None, "active").unwrap()
+        );
+        let _ = sync_cycle(&db1, &client, &api_base, &tok).unwrap();
+        let (rstate, rname, rbase): (String, String, i64) = db1
+            .query_row(
+                "SELECT sync_state, name, base_version FROM demo_catalog_items WHERE client_uuid = ?1",
+                [&uuid],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(rstate, "synced");
+        assert_eq!(rname, "Merged name");
+        assert!(rbase >= 3, "version advanced past the server's v2 after pushing the merge");
+        let conflicts_left: i64 = db1
+            .query_row(
+                "SELECT COUNT(*) FROM item_conflicts WHERE client_uuid = ?1",
+                [&uuid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(conflicts_left, 0, "the conflict is cleared after resolve + sync");
     }
 }

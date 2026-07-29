@@ -30,8 +30,11 @@ pub fn run() {
             commands::auth::auth_login,
             commands::auth::auth_logout,
             commands::auth::auth_status,
+            commands::auth::auth_lock_state,
             commands::sync::sync_now,
             commands::sync::get_sync_status,
+            commands::sync::list_conflicts,
+            commands::sync::resolve_conflict,
             commands::printer::print_text,
         ])
         .run(tauri::generate_context!())

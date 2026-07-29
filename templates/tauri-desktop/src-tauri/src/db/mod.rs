@@ -12,6 +12,7 @@
 
 pub(crate) mod migrations;
 pub mod auth_repo;
+pub mod conflicts_repo;
 pub mod drafts_repo;
 pub mod items_repo;
 

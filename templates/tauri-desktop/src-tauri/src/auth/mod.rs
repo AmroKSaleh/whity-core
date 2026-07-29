@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod credential_store;
+pub mod lock;
 
 use std::sync::Mutex;
 

@@ -14,6 +14,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::auth::api::{self, LoginOutcome};
+use crate::auth::lock::{self, LockState};
 use crate::auth::{credential_store, AuthManager};
 use crate::db::auth_repo::{self, AuthStatus};
 use crate::db::Db;
@@ -116,6 +117,16 @@ pub fn auth_logout(db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<()
 pub fn auth_status(db: State<'_, Db>) -> Result<AuthStatus, String> {
     let conn = db.0.lock().map_err(lock_err)?;
     auth_repo::status(&conn).map_err(|e| e.to_string())
+}
+
+/// The offline-lock state derived from the stored auth state (see auth::lock).
+/// Pure read — it does NOT reach the network; the frontend calls `auth_login`
+/// (an exchange) to reset the clock when it detects connectivity.
+#[tauri::command]
+pub fn auth_lock_state(db: State<'_, Db>) -> Result<LockState, String> {
+    let conn = db.0.lock().map_err(lock_err)?;
+    let status = auth_repo::status(&conn).map_err(|e| e.to_string())?;
+    Ok(lock::evaluate(&status, now_epoch()))
 }
 
 fn now_epoch() -> i64 {
