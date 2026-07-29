@@ -150,6 +150,13 @@ final class TenantOwnedTables
         // before any tenant-scoped handler runs — the same model as `jobs`.
         'domain_events' => '066_create_domain_events.php',
         'event_outbox'  => '066_create_domain_events.php',
+
+        // WC-scheduler (#a934420e) — the cron-tick scheduled_jobs registry
+        // (migration 069). Tenant-scoped CRUD binds tenant_id; the schedule:run
+        // tick claims due rows ACROSS tenants (system infra, @tenant-guard-ignore
+        // in ScheduledJobRepository) and stamps each enqueue with the row's
+        // origin tenant — the same model as `jobs`.
+        'scheduled_jobs' => '069_create_scheduled_jobs.php',
     ];
 
     /**
