@@ -18,6 +18,10 @@ pub fn run() {
             commands::items::list_items,
             commands::items::get_item,
             commands::items::save_item,
+            commands::items::delete_item,
+            commands::drafts::save_draft,
+            commands::drafts::get_draft,
+            commands::drafts::discard_draft,
             commands::printer::print_text,
         ])
         .run(tauri::generate_context!())

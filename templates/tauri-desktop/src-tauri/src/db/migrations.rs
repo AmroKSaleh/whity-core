@@ -10,13 +10,31 @@
 //!   `updated_at_local`, `updated_by`. Existing v1 rows are rebuilt with a
 //!   generated `client_uuid` and left `pending`/`dirty` so they push as creates
 //!   on the first sync.
+//! - v3: the mid-edit DRAFT store (`item_drafts`) — cheap autosave rows distinct
+//!   from committed records; never synced.
 //!
-//! Add later steps as `if version < 3 { migrate_to_v3(conn)? }` etc.
+//! `run()` applies each pending step then stamps its version, so a partially
+//! migrated DB always resumes correctly. Add later steps as another
+//! `if version < N { migrate_to_vN(conn)?; stamp(N)? }` block.
 
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 2;
+/// Apply any pending migrations, stamping `user_version` after each step.
+/// Idempotent.
+pub fn run(conn: &Connection) -> rusqlite::Result<()> {
+    let mut version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version < 2 {
+        migrate_to_v2(conn)?;
+        conn.pragma_update(None, "user_version", 2)?;
+        version = 2;
+    }
+    if version < 3 {
+        migrate_to_v3(conn)?;
+        conn.pragma_update(None, "user_version", 3)?;
+    }
+    Ok(())
+}
 
 /// The v2 shape of `demo_catalog_items`. The frontend contract
 /// (`DemoCatalogItem`) still sees only id/name/description/status/created_at/
@@ -39,14 +57,19 @@ const V2_ITEMS: &str = "
         updated_by        TEXT
     )";
 
-/// Apply any pending migrations. Idempotent.
-pub fn run(conn: &Connection) -> rusqlite::Result<()> {
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version < 2 {
-        migrate_to_v2(conn)?;
-    }
-    Ok(())
-}
+/// The mid-edit draft store: cheap autosave rows keyed by the item's
+/// `client_uuid` (or a fresh uuid for a brand-new item), with `base_local_id`
+/// pointing at the committed row being edited (NULL for a new-item draft).
+/// Never synced; discarded on commit.
+const V3_DRAFTS: &str = "
+    CREATE TABLE item_drafts (
+        client_uuid   TEXT PRIMARY KEY,
+        base_local_id INTEGER,
+        name          TEXT,
+        description   TEXT,
+        status        TEXT,
+        updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )";
 
 fn migrate_to_v2(conn: &Connection) -> rusqlite::Result<()> {
     let has_table = table_exists(conn, "demo_catalog_items")?;
@@ -97,7 +120,7 @@ fn migrate_to_v2(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute_batch(V2_ITEMS)?;
     }
     // else: table already v2-shaped (has client_uuid) though user_version was
-    // < 2 — nothing structural to do; just create indexes + stamp the version.
+    // < 2 — nothing structural to do; just create the indexes below.
 
     conn.execute_batch(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_demo_catalog_items_server_id
@@ -105,8 +128,11 @@ fn migrate_to_v2(conn: &Connection) -> rusqlite::Result<()> {
          CREATE INDEX IF NOT EXISTS idx_demo_catalog_items_pending
              ON demo_catalog_items(sync_state) WHERE sync_state <> 'synced';",
     )?;
+    Ok(())
+}
 
-    conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+fn migrate_to_v3(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V3_DRAFTS)?;
     Ok(())
 }
 
@@ -166,7 +192,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 2);
+        assert_eq!(ver, 3);
 
         let (id, uuid, sync_state, dirty, deleted): (i64, String, String, i64, i64) = conn
             .query_row(
@@ -193,13 +219,14 @@ mod tests {
     }
 
     #[test]
-    fn fresh_install_creates_v2() {
+    fn fresh_install_creates_latest_schema() {
         let conn = Connection::open_in_memory().unwrap();
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 2);
+        assert_eq!(ver, 3);
         assert!(column_exists(&conn, "demo_catalog_items", "client_uuid").unwrap());
+        assert!(table_exists(&conn, "item_drafts").unwrap());
 
         conn.execute(
             "INSERT INTO demo_catalog_items (client_uuid, name) VALUES ('u1','X')",
@@ -218,11 +245,26 @@ mod tests {
     }
 
     #[test]
+    fn upgrades_a_v2_db_to_v3_drafts() {
+        // Simulate a DB already at v2 (items present, no drafts table).
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(V2_ITEMS).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        assert!(!table_exists(&conn, "item_drafts").unwrap());
+
+        run(&conn).unwrap();
+
+        let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(ver, 3);
+        assert!(table_exists(&conn, "item_drafts").unwrap());
+    }
+
+    #[test]
     fn run_is_idempotent() {
         let conn = v1_conn();
         run(&conn).unwrap();
-        run(&conn).unwrap(); // version already 2 → no-op
+        run(&conn).unwrap(); // version already 3 → no-op
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 2);
+        assert_eq!(ver, 3);
     }
 }

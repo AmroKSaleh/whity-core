@@ -11,6 +11,8 @@
 //! on this metadata.
 
 mod migrations;
+pub mod drafts_repo;
+pub mod items_repo;
 
 use rusqlite::Connection;
 use std::fs;

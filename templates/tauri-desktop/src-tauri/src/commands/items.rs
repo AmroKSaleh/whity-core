@@ -148,3 +148,17 @@ pub fn save_item(db: State<'_, Db>, input: DemoCatalogItemInput) -> Result<DemoC
     )
     .map_err(|e| e.to_string())
 }
+
+/// Soft-delete an item (WC-desktop-sync): it vanishes from the UI immediately
+/// and is staged for the sync engine to propagate as a server tombstone. Not
+/// part of the shared `DemoCatalogAdapter` contract (which is list/get/save) —
+/// a template-local capability the desktop UI/sync layer wire up.
+#[tauri::command]
+pub fn delete_item(db: State<'_, Db>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let existed = crate::db::items_repo::soft_delete(&conn, id).map_err(|e| e.to_string())?;
+    if !existed {
+        return Err("item not found".to_string());
+    }
+    Ok(())
+}
