@@ -1,28 +1,27 @@
 //! Tauri commands backing the DemoCatalog pilot feature's `DemoCatalogAdapter`
-//! (see whity-core's packages/features/src/demo-catalog/types.ts). The
-//! frontend adapter (src/demo-catalog-tauri-adapter.ts) calls these three
-//! commands 1:1 — `list`/`get`/`save` on the TS side, `list_items`/
-//! `get_item`/`save_item` here.
+//! (see whity-core's packages/features/src/demo-catalog/types.ts). The frontend
+//! adapter (src/demo-catalog-tauri-adapter.ts) calls these commands 1:1 —
+//! `list`/`get`/`save` on the TS side, `list_items`/`get_item`/`save_item` here.
+//!
+//! Local-first (WC-desktop-sync): every write lands in local SQLite immediately
+//! and is marked `dirty`/`pending`, and each row carries a stable `client_uuid`.
+//! The frontend contract (`DemoCatalogItem`) is unchanged — the sync bookkeeping
+//! columns (client_uuid/server_id/base_version/sync_state/dirty/deleted) stay
+//! internal and never cross the IPC boundary. A later PR adds the sync engine
+//! that pushes `dirty` rows and reconciles server changes; until then this is a
+//! purely local store (no network) — but now with the metadata sync needs.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use crate::db::Db;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
 use tauri::State;
-
-/// Shared, mutex-guarded connection handle managed by Tauri (see lib.rs's
-/// `.manage(...)` call) and injected into every command via `State<'_, Db>`.
-///
-/// SCALING NOTE: a single `Mutex<Connection>` serializes every read AND write
-/// through one lock — fine at this demo's scale, but the first thing to
-/// revisit if your app's local dataset grows past "a few tables, occasional
-/// writes": switch the connection to WAL mode
-/// (`PRAGMA journal_mode=WAL`) and move to a small connection pool (e.g.
-/// `r2d2_sqlite`) so readers stop blocking on writers.
-pub struct Db(pub Mutex<Connection>);
+use uuid::Uuid;
 
 /// Mirrors `DemoCatalogItem` in packages/features/src/demo-catalog/types.ts
 /// field-for-field (camelCase over the wire — Tauri's IPC serializes this
-/// exactly as the frontend expects, no manual mapping needed).
+/// exactly as the frontend expects). `updated_at` is the server timestamp once
+/// known, falling back to the local edit clock so the UI always shows a time
+/// (see the COALESCE in the queries).
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DemoCatalogItem {
@@ -36,12 +35,6 @@ pub struct DemoCatalogItem {
 
 /// Mirrors `DemoCatalogItemInput` — what `save()` sends: `id` present means
 /// "update this row", absent means "create".
-///
-/// NO RECONCILIATION/VERSIONING STORY: `save_item` last-writer-wins with no
-/// version/etag check against `updated_at`. Fine for this single-device demo
-/// (nothing else can be writing to this local SQLite file concurrently), but
-/// if you build this into a real MULTI-DEVICE offline-sync feature, you must
-/// design conflict resolution yourself — this pattern does not provide it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DemoCatalogItemInput {
@@ -50,6 +43,11 @@ pub struct DemoCatalogItemInput {
     pub description: Option<String>,
     pub status: Option<String>,
 }
+
+/// Column list projecting a row to the frontend shape. `updated_at` coalesces
+/// the (nullable) server timestamp onto the always-present local clock.
+const SELECT_COLS: &str = "id, name, description, status, created_at,
+    COALESCE(updated_at, updated_at_local) AS updated_at";
 
 fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<DemoCatalogItem> {
     Ok(DemoCatalogItem {
@@ -66,11 +64,12 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<DemoCatalogItem> {
 pub fn list_items(db: State<'_, Db>) -> Result<Vec<DemoCatalogItem>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(
-            "SELECT id, name, description, status, created_at, updated_at
+        .prepare(&format!(
+            "SELECT {SELECT_COLS}
              FROM demo_catalog_items
-             ORDER BY created_at DESC, id DESC",
-        )
+             WHERE deleted = 0
+             ORDER BY created_at DESC, id DESC"
+        ))
         .map_err(|e| e.to_string())?;
 
     let items = stmt
@@ -86,8 +85,7 @@ pub fn list_items(db: State<'_, Db>) -> Result<Vec<DemoCatalogItem>, String> {
 pub fn get_item(db: State<'_, Db>, id: i64) -> Result<Option<DemoCatalogItem>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT id, name, description, status, created_at, updated_at
-         FROM demo_catalog_items WHERE id = ?1",
+        &format!("SELECT {SELECT_COLS} FROM demo_catalog_items WHERE id = ?1 AND deleted = 0"),
         params![id],
         row_to_item,
     )
@@ -96,10 +94,7 @@ pub fn get_item(db: State<'_, Db>, id: i64) -> Result<Option<DemoCatalogItem>, S
 }
 
 #[tauri::command]
-pub fn save_item(
-    db: State<'_, Db>,
-    input: DemoCatalogItemInput,
-) -> Result<DemoCatalogItem, String> {
+pub fn save_item(db: State<'_, Db>, input: DemoCatalogItemInput) -> Result<DemoCatalogItem, String> {
     if input.name.trim().is_empty() {
         return Err("name must not be empty".to_string());
     }
@@ -109,25 +104,37 @@ pub fn save_item(
     let now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
     let id = match input.id {
+        // UPDATE: bump the local edit clock and re-mark the row dirty. A row that
+        // was already 'synced' becomes 'pending' again so the sync engine repushes
+        // it; a row still 'pending'/'conflict' keeps that state.
         Some(existing_id) => {
-            conn.execute(
-                &format!(
-                    "UPDATE demo_catalog_items
-                     SET name = ?1, description = ?2, status = ?3, updated_at = {now}
-                     WHERE id = ?4"
-                ),
-                params![input.name, input.description, status, existing_id],
-            )
-            .map_err(|e| e.to_string())?;
+            let changed = conn
+                .execute(
+                    &format!(
+                        "UPDATE demo_catalog_items
+                         SET name = ?1, description = ?2, status = ?3,
+                             updated_at_local = {now}, dirty = 1,
+                             sync_state = CASE WHEN sync_state = 'synced' THEN 'pending' ELSE sync_state END
+                         WHERE id = ?4 AND deleted = 0"
+                    ),
+                    params![input.name, input.description, status, existing_id],
+                )
+                .map_err(|e| e.to_string())?;
+            if changed == 0 {
+                return Err("item not found".to_string());
+            }
             existing_id
         }
+        // CREATE: mint a stable client_uuid; the row starts dirty/pending with no
+        // server_id until its first successful sync.
         None => {
             conn.execute(
                 &format!(
-                    "INSERT INTO demo_catalog_items (name, description, status, created_at, updated_at)
-                     VALUES (?1, ?2, ?3, {now}, {now})"
+                    "INSERT INTO demo_catalog_items
+                       (client_uuid, name, description, status, created_at, updated_at_local, dirty, sync_state)
+                     VALUES (?1, ?2, ?3, ?4, {now}, {now}, 1, 'pending')"
                 ),
-                params![input.name, input.description, status],
+                params![Uuid::new_v4().to_string(), input.name, input.description, status],
             )
             .map_err(|e| e.to_string())?;
             conn.last_insert_rowid()
@@ -135,10 +142,23 @@ pub fn save_item(
     };
 
     conn.query_row(
-        "SELECT id, name, description, status, created_at, updated_at
-         FROM demo_catalog_items WHERE id = ?1",
+        &format!("SELECT {SELECT_COLS} FROM demo_catalog_items WHERE id = ?1"),
         params![id],
         row_to_item,
     )
     .map_err(|e| e.to_string())
+}
+
+/// Soft-delete an item (WC-desktop-sync): it vanishes from the UI immediately
+/// and is staged for the sync engine to propagate as a server tombstone. Not
+/// part of the shared `DemoCatalogAdapter` contract (which is list/get/save) —
+/// a template-local capability the desktop UI/sync layer wire up.
+#[tauri::command]
+pub fn delete_item(db: State<'_, Db>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let existed = crate::db::items_repo::soft_delete(&conn, id).map_err(|e| e.to_string())?;
+    if !existed {
+        return Err("item not found".to_string());
+    }
+    Ok(())
 }

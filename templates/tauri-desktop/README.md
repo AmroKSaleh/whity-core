@@ -72,11 +72,11 @@ themselves. When you build your own feature, follow this same shape: define
 a small adapter interface, implement the presentational components against
 it, and give each client (web/desktop/mobile) its own implementation.
 
-**No reconciliation/versioning story**: `save_item` is last-writer-wins with
-no version check — fine for this single-device demo, but if you're building
-a real multi-device offline-sync feature you need to design conflict
-resolution yourself (see the note on `DemoCatalogItemInput` in
-`src-tauri/src/commands/items.rs`).
+**Offline-first sync (WC-desktop-sync)**: the template now implements the real
+multi-device sync this note used to defer — a cached device login, a versioned
+two-way sync against the server, and field-level conflict resolution. Reads still
+hit local SQLite (instant, offline); the sync engine reconciles in the
+background. See [Offline-first sync](#offline-first-sync) below.
 
 **Alternative to hand-rolled commands**: this template writes one Rust
 command per operation (`list_items`/`get_item`/`save_item`) for compile-time
@@ -87,6 +87,50 @@ official community SQL plugin) lets the frontend execute SQL directly against
 a managed connection without a dedicated command per query. Either is valid —
 if you're already using `tauri-plugin-sql` elsewhere, there's no need to
 migrate to match this template.
+
+## Offline-first sync
+
+The DemoCatalog pilot is wired end-to-end as an **offline-first, syncing** desktop
+app (WC-desktop-sync). Everything is local-first — every read and write hits local
+SQLite immediately, online or not — and a sync engine reconciles with the server.
+
+**Backend URL.** Set `WHITY_BACKEND_URL` (default `http://localhost:8000`) to point
+a build at dev / staging / a customer instance — the one knob, read in `config.rs`.
+
+**Auth — cached device login (`src-tauri/src/auth/`).** The app enrolls once
+(interactive login → `POST /api/v1/devices`) and stores the long-lived device
+credential in the **OS keychain** (`keyring`: Windows Credential Manager / macOS
+Keychain / Linux Secret Service). The short-lived access token stays in memory. On
+start/reconnect it exchanges the credential for a fresh session
+(`POST /api/v1/devices/token`).
+
+**Offline lock (`auth/lock.rs`).** The server setting `auth.desktop_login_max_hours`
+(per-tenant, default 72h) is echoed on every exchange. If more than that elapses
+since the last successful online auth, the app **locks even offline** and requires
+re-authenticating online — `auth_lock_state` reports it; the UI shows a
+`LockedScreen`.
+
+**Local store (`src-tauri/src/db/`).** Schema is versioned via `PRAGMA user_version`
+(migrations v1→v5). Each row carries sync metadata (`client_uuid`, `server_id`,
+`version`/`base_version`, `sync_state`, `dirty`, `deleted` tombstone). Mid-edit
+**drafts** autosave to `item_drafts` (never synced).
+
+**Sync engine (`src-tauri/src/sync/`).** `sync_now` runs a cycle:
+- **push** dirty rows — create (idempotent on `client_uuid`), update (optimistic
+  `baseVersion` → `409` on a stale edit), soft-delete;
+- **pull** the server changes feed by an opaque cursor, applying non-conflicting
+  changes and propagating tombstones;
+- **conflicts** (a push 409, or a pull that finds the server ahead of a dirty row)
+  are parked in `item_conflicts` as mine/theirs snapshots and surfaced via
+  `list_conflicts`; the user resolves each field (mine/theirs/custom) in the shared
+  `ConflictResolver`, and `resolve_conflict` rebases + re-queues the merge.
+
+The server side lives in whity-core: the configurable TTL setting and the
+DemoCatalog sync API (version, idempotent create, soft-delete, changes feed).
+
+**Reusability.** The sync-metadata column set + the engine are the pattern to copy
+for your own entities — DemoCatalog is the worked example, exactly like the printer
+command is the worked native-crate example.
 
 ## Adding your own native capability (the printer recipe)
 
@@ -157,6 +201,20 @@ system dependencies installed (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
 `libsqlite3-dev`, `libcups2-dev`, `pkg-config`) — not just written by hand.
 The frontend was verified with `tsc --noEmit` and a real `vite build`.
 
+### Offline-sync stack — verified
+
+- Rust unit tests cover the schema migrations (v1→v5), the offline-lock logic,
+  the drafts + soft-delete repos, and the conflict-resolution repo.
+- A live integration test drives the sync engine against a real backend end to
+  end: device enroll → push → pull on a fresh client → concurrent-edit `409` →
+  conflict parked → resolve → re-sync. The shared sync UI (`UnsyncedBanner` /
+  `ConflictResolver` / `LockedScreen`) is jest-tested (incl. Arabic-bidi content).
+- `npm run tauri build` on **Windows 11 (x86_64-pc-windows-msvc)** compiled the
+  full stack — including the added `reqwest` (rustls) and `keyring` crates —
+  clean, and produced both Windows installers: **MSI ~5.4 MB**, **NSIS setup
+  ~4.0 MB** (release `.exe` ~13.6 MB — up from the printer-only ~10.5 MB baseline
+  for the sync / HTTP / keychain crates).
+
 ### Known gaps — not yet verified
 
 - **Windows.** Not yet built/run natively. Printing especially is the most
@@ -172,6 +230,21 @@ The frontend was verified with `tsc --noEmit` and a real `vite build`.
   (or "Microsoft Print to PDF").
 - **macOS.** Deliberately deferred, not attempted at all yet — a distinct
   follow-up stage, not scheduled as part of this pass.
+- **Linux keychain build dep.** The `keyring` Linux backend talks to the Secret
+  Service over D-Bus, so a Linux build/run needs `libdbus-1-dev` (add it to the
+  Tauri Linux system deps above). Windows/macOS use their native keystores with
+  no extra dep.
+- **Sync UI wiring + its interactive verification.** The sync *logic* is verified
+  (unit + live integration against the server), but mounting the shared
+  `UnsyncedBanner` / `ConflictResolver` / `LockedScreen` into the running window —
+  and confirming the on-screen UX (enroll → offline-past-TTL lock → two-client
+  conflict → resolve) — is a follow-up that needs the app running.
+- **Deferred sync-engine enhancements.** Sync currently runs on an explicit
+  `sync_now` (a frontend interval + online-listener drives it). A Rust background
+  scheduler with connectivity detection, and generalizing the engine behind a
+  `SyncableResource` trait for multi-entity reuse, are scoped follow-ups.
+  (Per-row retry/backoff — a flaky/invalid push backs off and never aborts the
+  cycle — is implemented.)
 - **Packaging size / startup time.** Not measured on any platform — depends
   on the platform builds above existing first. Once a real `tauri build`
   output exists (Windows installer, macOS `.app`/`.dmg`, or the Linux
