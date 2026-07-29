@@ -29,7 +29,7 @@ function makeFakeController(initial: SyncStatus): {
     },
     push: (next) => {
       status = next;
-      listeners.forEach((l) => l());
+      listeners.forEach((l) => l(status));
     },
   };
 }
