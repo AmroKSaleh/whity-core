@@ -81,8 +81,8 @@ final class JobRunner
         // Restore the job's origin tenant so the handler's queries are scoped.
         TenantContext::setTenantId((int) $job['tenant_id']);
         try {
-            $handler->handle($payload);
-            $this->repo->markCompleted($id);
+            $result = $handler->handle($payload);
+            $this->repo->markCompleted($id, $result);
         } catch (\Throwable $e) {
             $this->logger->error('Job failed', ['job' => $name, 'id' => $id, 'error' => $e->getMessage()]);
             if ((int) $job['attempts'] >= (int) $job['max_attempts']) {

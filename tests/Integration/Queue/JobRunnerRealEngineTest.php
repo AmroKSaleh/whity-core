@@ -96,6 +96,24 @@ final class JobRunnerRealEngineTest extends TestCase
         self::assertSame('dead', $this->row($id)['status']);
     }
 
+    public function testRetainedJobIsKeptAsCompletedWithTheHandlerResult(): void
+    {
+        // A job enqueued with retain_result keeps its row as 'completed' + result,
+        // so the status API can return it (a fire-and-forget job is deleted).
+        $this->registry->register('produce', $this->handler(
+            static fn (array $payload): array => ['doubled' => (int) ($payload['n'] ?? 0) * 2]
+        ));
+        $id = (int) $this->repo->enqueue(self::TENANT, 'produce', ['n' => 21], ['retain_result' => true]);
+
+        self::assertTrue($this->runner->processNext());
+
+        $row = $this->row($id);
+        self::assertSame('completed', $row['status'], 'a retained job is kept, not deleted');
+        self::assertSame(100, (int) $row['progress']);
+        self::assertSame(['doubled' => 42], json_decode((string) $row['result'], true), 'the handler result is persisted');
+        self::assertSame(1, $this->countJobs(), 'the retained completed job remains in the table');
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private function handler(callable $fn): JobInterface
@@ -109,9 +127,11 @@ final class JobRunnerRealEngineTest extends TestCase
                 $this->fn = $fn;
             }
 
-            public function handle(array $payload): void
+            public function handle(array $payload): array
             {
-                ($this->fn)($payload);
+                $result = ($this->fn)($payload);
+
+                return is_array($result) ? $result : [];
             }
         };
     }

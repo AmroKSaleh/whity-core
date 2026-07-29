@@ -1803,19 +1803,17 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         return $decoded['data'];
     }
 
-    // ==================== jobs (WC-627) ====================
+    // ==================== jobs (WC-627 / WC-jobs-api) ====================
     //
-    // Unlike every other tenant-owned table here, the durable job queue is
-    // SYSTEM INFRA that operates ACROSS tenants by design: one worker reserves
-    // and runs jobs for every tenant. JobRepository therefore exposes NO
-    // tenant-scoped accessor to reject a foreign tenant through — its
-    // reserve/complete/fail/reclaim are by-id/system (annotated
-    // @tenant-guard-ignore). Isolation is enforced at RUNTIME instead: JobRunner
-    // restores each job's ORIGIN tenant into TenantContext before its handler
-    // (proven in JobRunnerRealEngineTest::testHandlerRunsUnderTheJobsTenant). So
-    // the invariant that matters HERE is that a job is stamped with — and keeps
-    // — the exact tenant it was enqueued for, giving the runtime restore the
-    // right tenant and making one tenant's job unmistakable for another's.
+    // The durable job queue has TWO faces. The WORKER/RELAY side is SYSTEM INFRA
+    // that operates ACROSS tenants by design (reserve/complete/fail/reclaim are
+    // by-id/system, annotated @tenant-guard-ignore); runtime isolation comes from
+    // JobRunner restoring each job's ORIGIN tenant into TenantContext before its
+    // handler (proven in JobRunnerRealEngineTest). The API/READ side (WC-jobs-api)
+    // added TENANT-SCOPED accessors — find()/findByIdempotencyKey()/listForTenant()
+    // — which MUST reject a foreign tenant. So this proves both: (a) a job is
+    // stamped with, and keeps, the exact tenant it was enqueued for, and (b) the
+    // tenant-scoped read accessors never surface another tenant's job.
 
     public function testJobsAreStampedWithAndKeepTheirOriginTenant(): void
     {
@@ -1837,6 +1835,19 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertSame('a.job', $nameByTenant[self::TENANT_A] ?? null, 'tenant A job kept tenant A');
         self::assertSame('b.job', $nameByTenant[self::TENANT_B] ?? null, 'tenant B job kept tenant B');
         self::assertCount(2, $nameByTenant, 'the two jobs belong to two distinct tenants');
+    }
+
+    public function testTenantScopedJobReadAccessorsRejectAForeignTenant(): void
+    {
+        $repo = new JobRepository($this->pdo);
+        $idA = (int) $repo->enqueue(self::TENANT_A, 'a.job', ['owner' => 'A'], ['idempotency_key' => 'ka', 'retain_result' => true]);
+
+        // Tenant A sees its own job; tenant B must not — by id or by key.
+        self::assertNotNull($repo->find(self::TENANT_A, $idA));
+        self::assertNull($repo->find(self::TENANT_B, $idA), "tenant B must not read tenant A's job by id");
+        self::assertNull($repo->findByIdempotencyKey(self::TENANT_B, 'ka'), "tenant B must not resolve tenant A's idempotency key");
+        self::assertCount(1, $repo->listForTenant(self::TENANT_A, null, null, 50, 0));
+        self::assertCount(0, $repo->listForTenant(self::TENANT_B, null, null, 50, 0), "tenant B's job list excludes tenant A");
     }
 
     // ============ domain_events / event_outbox (#154 event spine) ============

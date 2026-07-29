@@ -139,9 +139,11 @@ final class QueueWorkCommandRealEngineTest extends TestCase
         return new class implements JobInterface {
             public int $runs = 0;
 
-            public function handle(array $payload): void
+            public function handle(array $payload): array
             {
                 $this->runs++;
+
+                return [];
             }
         };
     }

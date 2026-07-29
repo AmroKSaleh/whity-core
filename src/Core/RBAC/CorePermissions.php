@@ -162,6 +162,12 @@ final class CorePermissions
     public const TAGS_READ = 'tags:read';
     public const TAGS_MANAGE = 'tags:manage';
 
+    // Generic async-job API (WC-jobs-api). Tenant-scoped submission + status.
+    // submit = POST /api/jobs (enqueue an allow-listed job name for this tenant)
+    // and read its own jobs; read = GET /api/jobs/{id} status/progress/result.
+    public const JOBS_SUBMIT = 'jobs:submit';
+    public const JOBS_READ = 'jobs:read';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -212,6 +218,8 @@ final class CorePermissions
             self::SECURITY_MANAGE,
             self::TAGS_READ,
             self::TAGS_MANAGE,
+            self::JOBS_SUBMIT,
+            self::JOBS_READ,
         ];
     }
 }

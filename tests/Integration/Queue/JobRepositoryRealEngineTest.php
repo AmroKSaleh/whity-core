@@ -94,12 +94,96 @@ final class JobRepositoryRealEngineTest extends TestCase
         self::assertNotNull($this->repo->reserve('emails'));
     }
 
-    public function testMarkCompletedRemovesTheJob(): void
+    public function testMarkCompletedRemovesATransientJob(): void
     {
         $id = (int) $this->repo->enqueue(self::TENANT_A, 'x', []);
         $this->repo->reserve();
         $this->repo->markCompleted($id);
-        self::assertSame(0, $this->countJobs());
+        self::assertSame(0, $this->countJobs(), 'a fire-and-forget job leaves no row');
+    }
+
+    public function testMarkCompletedRetainsAResultJobAsCompleted(): void
+    {
+        $id = (int) $this->repo->enqueue(self::TENANT_A, 'x', [], ['retain_result' => true]);
+        $this->repo->reserve();
+        $this->repo->markCompleted($id, ['answer' => 42]);
+
+        $job = $this->repo->find(self::TENANT_A, $id);
+        self::assertNotNull($job, 'a retained job is kept, not deleted');
+        self::assertSame('completed', $job['status']);
+        self::assertSame(100, $job['progress']);
+        self::assertSame(['answer' => 42], $job['result']);
+        self::assertNotNull($job['completed_at']);
+        self::assertNull($this->repo->reserve(), 'a completed job is not re-claimable');
+    }
+
+    public function testFindIsTenantScopedAndDoesNotLeakAcrossTenants(): void
+    {
+        $id = (int) $this->repo->enqueue(self::TENANT_A, 'x', ['a' => 1], ['retain_result' => true]);
+
+        $own = $this->repo->find(self::TENANT_A, $id);
+        self::assertNotNull($own);
+        self::assertSame(['a' => 1], $own['payload']);
+
+        self::assertNull($this->repo->find(self::TENANT_B, $id), "another tenant's job is invisible (no cross-tenant leak)");
+        self::assertNull($this->repo->find(self::TENANT_A, 999999), 'a missing id is null');
+    }
+
+    public function testFindByIdempotencyKeyIsTenantScoped(): void
+    {
+        $this->repo->enqueue(self::TENANT_A, 'x', [], ['idempotency_key' => 'k-1', 'retain_result' => true]);
+
+        $found = $this->repo->findByIdempotencyKey(self::TENANT_A, 'k-1');
+        self::assertNotNull($found);
+
+        self::assertNull($this->repo->findByIdempotencyKey(self::TENANT_B, 'k-1'), 'key lookup is tenant-scoped');
+        self::assertNull($this->repo->findByIdempotencyKey(self::TENANT_A, 'nope'));
+    }
+
+    public function testListAndCountAreTenantScopedAndFilterAndPaginate(): void
+    {
+        for ($i = 0; $i < 5; $i++) {
+            $this->repo->enqueue(self::TENANT_A, 'x', ['i' => $i], ['queue' => 'emails']);
+        }
+        $this->repo->enqueue(self::TENANT_A, 'x', [], ['queue' => 'default']);
+        $this->repo->enqueue(self::TENANT_B, 'x', []); // another tenant — must never appear
+
+        self::assertSame(6, $this->repo->countForTenant(self::TENANT_A, null, null));
+        self::assertSame(5, $this->repo->countForTenant(self::TENANT_A, 'emails', null));
+        self::assertSame(6, $this->repo->countForTenant(self::TENANT_A, null, 'pending'));
+
+        // Newest first (id DESC), page size 2.
+        $page1 = $this->repo->listForTenant(self::TENANT_A, null, null, 2, 0);
+        self::assertCount(2, $page1);
+        self::assertGreaterThan($page1[1]['id'], $page1[0]['id'], 'ordered newest-first');
+
+        $page2 = $this->repo->listForTenant(self::TENANT_A, null, null, 2, 2);
+        self::assertCount(2, $page2);
+        self::assertLessThan($page1[1]['id'], $page2[0]['id']);
+
+        // Tenant B sees only its own.
+        self::assertSame(1, $this->repo->countForTenant(self::TENANT_B, null, null));
+    }
+
+    public function testPruneCompletedRemovesOnlyOldCompletedJobs(): void
+    {
+        $old = (int) $this->repo->enqueue(self::TENANT_A, 'x', [], ['retain_result' => true]);
+        $this->repo->reserve();
+        $this->repo->markCompleted($old, []);
+        // Age the completion well past the retention window.
+        $this->pdo->prepare('UPDATE jobs SET completed_at = :old WHERE id = :id')
+            ->execute([':old' => date('Y-m-d H:i:s', time() - 7200), ':id' => $old]);
+
+        $fresh = (int) $this->repo->enqueue(self::TENANT_A, 'x', [], ['retain_result' => true]);
+        $this->repo->reserve();
+        $this->repo->markCompleted($fresh, []); // completed just now
+
+        $pending = (int) $this->repo->enqueue(self::TENANT_A, 'x', []); // still pending
+
+        self::assertSame(1, $this->repo->pruneCompleted(3600), 'only the old completed job is pruned');
+        self::assertNull($this->repo->find(self::TENANT_A, $old), 'the aged completed job is gone');
+        self::assertNotNull($this->repo->find(self::TENANT_A, $fresh), 'a recently completed job is kept');
+        self::assertNotNull($this->repo->find(self::TENANT_A, $pending), 'a pending job is never pruned');
     }
 
     public function testRetryReschedulesPendingWithBackoffAndError(): void
