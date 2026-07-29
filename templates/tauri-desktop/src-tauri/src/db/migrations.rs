@@ -14,6 +14,8 @@
 //!   from committed records; never synced.
 //! - v4: the singleton `auth_state` row — non-secret device-enrollment +
 //!   session bookkeeping (the secret credential lives in the OS keychain).
+//! - v5: the sync engine's pull-cursor store (`sync_state_kv`) and field-level
+//!   conflict snapshot store (`item_conflicts`).
 //!
 //! `run()` applies each pending step then stamps its version, so a partially
 //! migrated DB always resumes correctly. Add later steps as another
@@ -39,6 +41,11 @@ pub fn run(conn: &Connection) -> rusqlite::Result<()> {
     if version < 4 {
         migrate_to_v4(conn)?;
         conn.pragma_update(None, "user_version", 4)?;
+        version = 4;
+    }
+    if version < 5 {
+        migrate_to_v5(conn)?;
+        conn.pragma_update(None, "user_version", 5)?;
     }
     Ok(())
 }
@@ -164,6 +171,31 @@ fn migrate_to_v4(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// v5 (the sync engine): the per-resource pull CURSOR store, and the field-level
+/// CONFLICT snapshot store. `item_conflicts` captures the diverging local ('mine')
+/// and server ('theirs') snapshots when a push 409s or a pull detects concurrent
+/// edits, keyed by the item's client_uuid; the resolver (a later PR) reads these.
+const V5_SYNC_STATE: &str = "
+    CREATE TABLE sync_state_kv (
+        resource     TEXT PRIMARY KEY,
+        cursor       TEXT,
+        last_pull_at TEXT,
+        last_push_at TEXT
+    );
+    CREATE TABLE item_conflicts (
+        client_uuid    TEXT PRIMARY KEY,
+        base_version   INTEGER NOT NULL,
+        server_version INTEGER NOT NULL,
+        mine_json      TEXT NOT NULL,
+        theirs_json    TEXT NOT NULL,
+        detected_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )";
+
+fn migrate_to_v5(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V5_SYNC_STATE)?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -220,7 +252,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 5);
 
         let (id, uuid, sync_state, dirty, deleted): (i64, String, String, i64, i64) = conn
             .query_row(
@@ -252,10 +284,12 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 5);
         assert!(column_exists(&conn, "demo_catalog_items", "client_uuid").unwrap());
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
+        assert!(table_exists(&conn, "sync_state_kv").unwrap());
+        assert!(table_exists(&conn, "item_conflicts").unwrap());
 
         // The auth_state singleton exists and starts un-enrolled.
         let (id, enrolled): (i64, i64) = conn
@@ -294,7 +328,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 5);
         assert!(table_exists(&conn, "item_drafts").unwrap());
         assert!(table_exists(&conn, "auth_state").unwrap());
     }
@@ -303,8 +337,8 @@ mod tests {
     fn run_is_idempotent() {
         let conn = v1_conn();
         run(&conn).unwrap();
-        run(&conn).unwrap(); // version already 4 → no-op
+        run(&conn).unwrap(); // version already 5 → no-op
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 4);
+        assert_eq!(ver, 5);
     }
 }

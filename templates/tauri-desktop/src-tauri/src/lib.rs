@@ -2,6 +2,7 @@ mod auth;
 mod commands;
 mod config;
 mod db;
+mod sync;
 
 use db::Db;
 use std::sync::Mutex;
@@ -29,6 +30,8 @@ pub fn run() {
             commands::auth::auth_login,
             commands::auth::auth_logout,
             commands::auth::auth_status,
+            commands::sync::sync_now,
+            commands::sync::get_sync_status,
             commands::printer::print_text,
         ])
         .run(tauri::generate_context!())

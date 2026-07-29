@@ -42,4 +42,15 @@ impl AuthManager {
     pub fn take_access(&self) -> Option<String> {
         self.access.lock().expect("auth access mutex poisoned").take()
     }
+
+    /// Load the stored device credential and exchange it for a fresh access
+    /// session, caching the access token. Used by the sync engine (and startup
+    /// reconnect) to obtain a bearer token. Errors if the device isn't enrolled.
+    pub fn exchange_session(&self) -> Result<api::ExchangedSession, String> {
+        let credential = credential_store::load()?
+            .ok_or_else(|| "not enrolled — enroll a device first".to_string())?;
+        let session = api::exchange(&self.client, &self.cfg, &credential)?;
+        self.set_access(session.access_token.clone());
+        Ok(session)
+    }
 }

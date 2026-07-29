@@ -10,7 +10,7 @@
 //! nothing here reaches the network — a later PR adds the sync engine that acts
 //! on this metadata.
 
-mod migrations;
+pub(crate) mod migrations;
 pub mod auth_repo;
 pub mod drafts_repo;
 pub mod items_repo;
