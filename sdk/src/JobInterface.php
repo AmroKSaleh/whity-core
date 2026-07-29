@@ -26,7 +26,11 @@ namespace Whity\Sdk;
  *    run is safe (upsert/dedupe/conditional writes), and use an enqueue-time
  *    idempotency key to avoid duplicate enqueues.
  *  - **Signal failure by THROWING.** A thrown exception marks the attempt failed
- *    (→ retry or dead-letter). Returning normally marks the job complete.
+ *    (→ retry or dead-letter). Returning normally marks the job complete; the
+ *    RETURNED ARRAY is the job's result — persisted and readable via the job
+ *    status API when the job opted into result retention (an API-submitted job),
+ *    and ignored for transient fire-and-forget jobs. Return [] when there is no
+ *    meaningful result.
  *  - **Do NOT manage TenantContext or transactions for queue bookkeeping** — the
  *    host owns the tenant restore, the retry policy, and the completion write.
  *
@@ -38,6 +42,7 @@ interface JobInterface
      * Run the job.
      *
      * @param array<string, mixed> $payload The enqueued payload.
+     * @return array<string, mixed> The job result (persisted for retained jobs); [] if none.
      */
-    public function handle(array $payload): void;
+    public function handle(array $payload): array;
 }

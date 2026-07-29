@@ -1171,6 +1171,24 @@ $router->register('GET',    '/api/entity-tags', [$entityTagsHandler, 'list'],   
 $router->register('POST',   '/api/entity-tags', [$entityTagsHandler, 'attach'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], null, null, CorePermissions::TAGS_MANAGE);
 
+// 13b-quater. Generic async-job submission + status API (WC-jobs-api). Wraps the
+// durable queue: POST enqueues an ALLOW-LISTED job for the caller's tenant (with
+// result retention so it can be polled), GET reads status/progress/result. The
+// JobRegistry (seeded with the core submittable jobs) fail-closes submission to
+// handlers that explicitly opted in — the same registry the queue:work worker
+// runs. Submit requires jobs:submit; reads require jobs:read; every query binds
+// tenant_id and a foreign-tenant id is 404.
+$jobsRegistry = new \Whity\Core\Queue\JobRegistry();
+\Whity\Core\Queue\CoreJobs::register($jobsRegistry);
+$jobsHandler = new \Whity\Api\JobsApiHandler(
+    new \Whity\Core\Queue\JobRepository($db->getPdo()),
+    $jobsRegistry,
+    $roleChecker
+);
+$router->register('POST', '/api/jobs',          [$jobsHandler, 'create'], null, null, CorePermissions::JOBS_SUBMIT);
+$router->register('GET',  '/api/jobs',          [$jobsHandler, 'list'],   null, null, CorePermissions::JOBS_READ);
+$router->register('GET',  '/api/jobs/{id:\d+}', [$jobsHandler, 'show'],   null, null, CorePermissions::JOBS_READ);
+
 // 13b-bis. Email settings API (WC-email): the operator-only mail surface. The
 // plaintext mail.* config is edited via /api/settings/global above; these add the
 // write-only SMTP password (encrypted at rest, never returned) and a live "send

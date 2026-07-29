@@ -6,6 +6,7 @@ namespace Whity\Cli\Commands;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use Whity\Core\Queue\CoreJobs;
 use Whity\Core\Queue\JobRegistry;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Queue\JobRunner;
@@ -34,8 +35,9 @@ use Whity\Database\Database;
  *
  * No-arg constructable (Database::connect) so CliRunner + public/index.php can
  * dispatch it; deps are injectable for tests. Registered handlers come from the
- * JobRegistry — until producers/handlers are wired (later tasks) the registry
- * is empty and any enqueued job is dead-lettered as "no handler".
+ * JobRegistry: the default (no-arg) worker registers the core jobs via
+ * {@see CoreJobs::register()} so it can run them; a job whose name has no
+ * registered handler is dead-lettered as "no handler".
  */
 final class QueueWorkCommand
 {
@@ -58,7 +60,9 @@ final class QueueWorkCommand
         if ($repo === null || $runner === null) {
             $pdo = Database::connect()->getPdo();
             $repo ??= new JobRepository($pdo);
-            $runner ??= new JobRunner($repo, new JobRegistry(), $this->logger);
+            $registry = new JobRegistry();
+            CoreJobs::register($registry);
+            $runner ??= new JobRunner($repo, $registry, $this->logger);
         }
         $this->repo = $repo;
         $this->runner = $runner;

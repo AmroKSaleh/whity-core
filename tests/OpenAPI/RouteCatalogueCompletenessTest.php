@@ -86,6 +86,12 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'GET /api/settings/mail/status',
         'PUT /api/settings/mail/smtp-password',
         'POST /api/settings/mail/test',
+        // WC-jobs-api: generic async-job submission + status API. OpenAPI schema
+        // (JobCreateRequest / JobResponse / JobListResponse components) to follow
+        // in a dedicated documentation task, per the KNOWN_UNDOCUMENTED-first path.
+        'POST /api/jobs',
+        'GET /api/jobs',
+        'GET /api/jobs/{id}',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void
