@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./nav": "./src/nav/index.ts",
-    "./demo-catalog": "./src/demo-catalog/index.ts"
+    "./demo-catalog": "./src/demo-catalog/index.ts",
+    "./sync": "./src/sync/index.ts"
   },
   "files": [
     "src"
