@@ -89,6 +89,13 @@ if ($isCli && isset($argv[1])) {
         exit($queueWorkCommand->execute($argv));
     }
 
+    if ($command === 'schedule:run') {
+        $scheduleRunCommand = new \Whity\Cli\Commands\ScheduleRunCommand();
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'schedule:run' command
+        exit($scheduleRunCommand->execute($argv));
+    }
+
     echo "Unknown command: {$command}\n";
     echo "Available commands:\n";
     echo "  generate:openapi           Generate OpenAPI 3.0 schema\n";
@@ -97,6 +104,7 @@ if ($isCli && isset($argv[1])) {
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
+    echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
     exit(1);
 }
 

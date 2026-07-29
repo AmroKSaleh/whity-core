@@ -159,6 +159,43 @@ services:
         echo "[queue-worker] durable job worker started";
         php public/index.php queue:work --max-runtime=3600 || echo "[queue-worker] exited (code $$?); restarting";
 
+  # Cron-tick scheduler (WC-scheduler). Runs the schedule:run loop that, once per
+  # minute, enqueues every DUE scheduled_jobs row onto the queue and prunes
+  # retained completed jobs. Exactly-once-per-minute ACROSS workers via the
+  # shared-store tick lock, so running MULTIPLE replicas (or one alongside
+  # staging/prod) never double-fires. Opt-in (like `cron`/`queue`):
+  # `docker compose --profile scheduler up`. Recycles on --max-runtime so
+  # `restart: unless-stopped` respawns a fresh process. Kept out of the DEFAULT
+  # stack (a long-running loop breaks `docker compose up --wait`).
+  scheduler:
+    image: whity-core:dev
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    working_dir: /app
+    profiles:
+      - scheduler
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        echo "[scheduler] cron-tick scheduler started";
+        php public/index.php schedule:run --max-runtime=3600 || echo "[scheduler] exited (code $$?); restarting";
+
   # Local SMTP sink for email testing (WC-email). Mailpit captures every message
   # the app sends so nothing leaves the machine — SMTP on :1025, a web inbox on
   # http://localhost:8025. Part of the default stack (with a healthcheck so

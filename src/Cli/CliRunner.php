@@ -18,6 +18,7 @@ class CliRunner
         'tenant'     => 'Whity\Cli\Commands\TenantsCommand',
         'totp'       => 'Whity\Cli\Commands\TotpCommand',
         'queue:work' => 'Whity\Cli\Commands\QueueWorkCommand',
+        'schedule:run' => 'Whity\Cli\Commands\ScheduleRunCommand',
     ];
 
     /**
@@ -74,7 +75,8 @@ class CliRunner
         echo "  plugin     Manage plugins (list, enable, disable, reload)\n";
         echo "  tenant     Manage tenants (list, create, update, delete)\n";
         echo "  totp       TOTP secret maintenance (reencrypt legacy secrets)\n";
-        echo "  queue:work Run the durable async job worker loop\n\n";
+        echo "  queue:work Run the durable async job worker loop\n";
+        echo "  schedule:run Run the cron-tick scheduler (exactly-once per minute across workers)\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }

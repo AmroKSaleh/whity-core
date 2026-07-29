@@ -1850,6 +1850,27 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertCount(0, $repo->listForTenant(self::TENANT_B, null, null, 50, 0), "tenant B's job list excludes tenant A");
     }
 
+    // ==================== scheduled_jobs (WC-scheduler) ====================
+    //
+    // The scheduler's TICK claims due schedules ACROSS tenants (system infra),
+    // but its CRUD is TENANT-SCOPED: find/list/setEnabled/delete must never
+    // surface or mutate another tenant's schedule. Registration stamps the
+    // caller's tenant, so the tick's enqueue runs under the right origin tenant.
+
+    public function testTenantScopedScheduleAccessorsRejectAForeignTenant(): void
+    {
+        $repo = new \Whity\Core\Scheduler\ScheduledJobRepository($this->pdo);
+        $idA = $repo->register(self::TENANT_A, 'nightly', '0 0 * * *', ['owner' => 'A']);
+
+        self::assertNotNull($repo->find(self::TENANT_A, $idA));
+        self::assertNull($repo->find(self::TENANT_B, $idA), "tenant B must not read tenant A's schedule");
+        self::assertCount(1, $repo->listForTenant(self::TENANT_A));
+        self::assertCount(0, $repo->listForTenant(self::TENANT_B), "tenant B's schedule list excludes tenant A");
+        self::assertFalse($repo->setEnabled(self::TENANT_B, $idA, false), "tenant B cannot disable tenant A's schedule");
+        self::assertFalse($repo->delete(self::TENANT_B, $idA), "tenant B cannot delete tenant A's schedule");
+        self::assertNotNull($repo->find(self::TENANT_A, $idA), "tenant A's schedule survived the cross-tenant attempts");
+    }
+
     // ============ domain_events / event_outbox (#154 event spine) ============
     //
     // Like `jobs`, the event spine is SYSTEM INFRA that relays ACROSS tenants:
