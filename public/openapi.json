@@ -2337,7 +2337,7 @@
         "/api/v1/demo-catalog/items": {
             "get": {
                 "operationId": "get_api_v1_demo_catalog_items",
-                "summary": "List the tenant's demo-catalog items (newest first)",
+                "summary": "List the tenant's live items (newest first), or \u2014 with ?updatedSince=<cursor>&includeDeleted=1&limit=N \u2014 the incremental changes feed (rows incl. tombstones with change_seq > cursor)",
                 "tags": [
                     "demo-catalog"
                 ],
@@ -2404,7 +2404,7 @@
             },
             "post": {
                 "operationId": "post_api_v1_demo_catalog_items",
-                "summary": "Create a demo-catalog item in the caller's tenant",
+                "summary": "Create an item in the caller's tenant (idempotent on clientUuid)",
                 "tags": [
                     "demo-catalog"
                 ],
@@ -2419,6 +2419,16 @@
                     }
                 },
                 "responses": {
+                    "200": {
+                        "description": "DemoCatalogItemResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DemoCatalogItemResponse"
+                                }
+                            }
+                        }
+                    },
                     "201": {
                         "description": "DemoCatalogItemResponse",
                         "content": {
@@ -2443,7 +2453,7 @@
                         }
                     },
                     "403": {
-                        "description": "Missing demo_catalog:manage or unresolved tenant context"
+                        "description": "Missing demo_catalog:manage or unresolved/system tenant context"
                     },
                     "404": {
                         "description": "Not found",
@@ -2484,6 +2494,86 @@
             }
         },
         "/api/v1/demo-catalog/items/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_demo_catalog_items_id",
+                "summary": "Soft-delete (tombstone) an item; If-Match/baseVersion guarded, idempotent",
+                "tags": [
+                    "demo-catalog"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "DemoCatalogItemResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DemoCatalogItemResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Missing demo_catalog:manage or unresolved tenant context"
+                    },
+                    "404": {
+                        "description": "Item not found in the caller's tenant"
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "DemoCatalogConflictResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DemoCatalogConflictResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
             "get": {
                 "operationId": "get_api_v1_demo_catalog_items_id",
                 "summary": "Fetch one demo-catalog item (tenant-scoped 404 semantics)",
@@ -2556,7 +2646,7 @@
             },
             "patch": {
                 "operationId": "patch_api_v1_demo_catalog_items_id",
-                "summary": "Update a demo-catalog item (tenant-scoped 404 semantics)",
+                "summary": "Update an item; If-Match/baseVersion enables optimistic concurrency",
                 "tags": [
                     "demo-catalog"
                 ],
@@ -2616,6 +2706,16 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "DemoCatalogConflictResponse",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DemoCatalogConflictResponse"
                                 }
                             }
                         }
@@ -14542,14 +14642,33 @@
                     "pagination"
                 ]
             },
+            "DemoCatalogConflictResponse": {
+                "type": "object",
+                "required": [
+                    "error",
+                    "serverItem"
+                ],
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "serverItem": {
+                        "$ref": "#/components/schemas/DemoCatalogItem"
+                    }
+                }
+            },
             "DemoCatalogItem": {
                 "type": "object",
                 "required": [
                     "id",
                     "tenantId",
+                    "clientUuid",
                     "name",
                     "description",
                     "status",
+                    "version",
+                    "deletedAt",
+                    "updatedBy",
                     "createdAt",
                     "updatedAt"
                 ],
@@ -14559,6 +14678,10 @@
                     },
                     "tenantId": {
                         "type": "integer"
+                    },
+                    "clientUuid": {
+                        "type": "string",
+                        "nullable": true
                     },
                     "name": {
                         "type": "string"
@@ -14573,6 +14696,17 @@
                             "active",
                             "archived"
                         ]
+                    },
+                    "version": {
+                        "type": "integer"
+                    },
+                    "deletedAt": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "updatedBy": {
+                        "type": "integer",
+                        "nullable": true
                     },
                     "createdAt": {
                         "type": "string",
@@ -14606,6 +14740,13 @@
                             "active",
                             "archived"
                         ]
+                    },
+                    "clientUuid": {
+                        "type": "string",
+                        "maxLength": 36
+                    },
+                    "baseVersion": {
+                        "type": "integer"
                     }
                 }
             },

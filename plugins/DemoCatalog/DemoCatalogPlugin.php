@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DemoCatalog;
 
 use DemoCatalog\Api\DemoCatalogApiHandler;
+use DemoCatalog\Migrations\AddSyncColumnsToDemoCatalogItems;
 use DemoCatalog\Migrations\CreateDemoCatalogItemsTable;
 use DemoCatalog\Migrations\GrantDemoCatalogPermissionsToAdmin;
 use Whity\Sdk\Http\Request;
@@ -32,12 +33,12 @@ use Whity\Sdk\PluginRequirementsInterface;
  *         -> wired into a minimal Vite SPA harness via an in-memory adapter
  *            implementation, proving the same components render outside Next.
  *
- * It contributes a tenant-scoped CRUD resource (list/get/create/update) over
- * its own `demo_catalog_items` table, gated on `demo_catalog:view` (reads) /
- * `demo_catalog:manage` (writes), and declares `screen: 'custom'` so the host
- * application supplies the bespoke UI (see PluginFrontendInterface) rather
- * than the generic schema-driven CRUD screen — the pilot's whole point is a
- * hand-built, multi-client-reusable UI, not the generic renderer.
+ * It contributes a tenant-scoped, SYNC-CAPABLE resource (list/get/create/update/
+ * delete + a changes feed) over its own `demo_catalog_items` table, gated on
+ * `demo_catalog:view` (reads) / `demo_catalog:manage` (writes), and declares
+ * `screen: 'custom'` so the host application supplies the bespoke UI (see
+ * PluginFrontendInterface) rather than the generic schema-driven CRUD screen —
+ * the pilot's whole point is a hand-built, multi-client-reusable UI.
  *
  * It lives in its own directory (`plugins/DemoCatalog/`) so the PluginLoader
  * resolves it under the `DemoCatalog` namespace prefix (directory name) and
@@ -58,7 +59,7 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
      */
     public function getVersion(): string
     {
-        return '1.0.0';
+        return '1.1.0';
     }
 
     /**
@@ -103,7 +104,9 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
                 'requiredRole' => null,
                 'requiredPermission' => 'demo_catalog:view',
                 'schema' => [
-                    'summary' => 'List the tenant\'s demo-catalog items (newest first)',
+                    'summary' => 'List the tenant\'s live items (newest first), or — with '
+                        . '?updatedSince=<cursor>&includeDeleted=1&limit=N — the incremental '
+                        . 'changes feed (rows incl. tombstones with change_seq > cursor)',
                     'tags' => ['demo-catalog'],
                     'responses' => [
                         200 => 'DemoCatalogItemListResponse',
@@ -136,13 +139,14 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
                 'requiredRole' => null,
                 'requiredPermission' => 'demo_catalog:manage',
                 'schema' => [
-                    'summary' => 'Create a demo-catalog item in the caller\'s tenant',
+                    'summary' => 'Create an item in the caller\'s tenant (idempotent on clientUuid)',
                     'tags' => ['demo-catalog'],
                     'request' => 'DemoCatalogItemInput',
                     'responses' => [
                         201 => 'DemoCatalogItemResponse',
+                        200 => 'DemoCatalogItemResponse',
                         400 => ['description' => 'Invalid name, description, or status'],
-                        403 => ['description' => 'Missing demo_catalog:manage or unresolved tenant context'],
+                        403 => ['description' => 'Missing demo_catalog:manage or unresolved/system tenant context'],
                     ],
                     'components' => self::itemComponents(),
                 ],
@@ -154,7 +158,7 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
                 'requiredRole' => null,
                 'requiredPermission' => 'demo_catalog:manage',
                 'schema' => [
-                    'summary' => 'Update a demo-catalog item (tenant-scoped 404 semantics)',
+                    'summary' => 'Update an item; If-Match/baseVersion enables optimistic concurrency',
                     'tags' => ['demo-catalog'],
                     'request' => 'DemoCatalogItemInput',
                     'responses' => [
@@ -162,6 +166,25 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
                         400 => ['description' => 'Invalid name, description, or status'],
                         403 => ['description' => 'Missing demo_catalog:manage or unresolved tenant context'],
                         404 => ['description' => 'Item not found in the caller\'s tenant'],
+                        409 => 'DemoCatalogConflictResponse',
+                    ],
+                    'components' => self::itemComponents(),
+                ],
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/demo-catalog/items/{id:\d+}',
+                'handler' => [$this, 'deleteItem'],
+                'requiredRole' => null,
+                'requiredPermission' => 'demo_catalog:manage',
+                'schema' => [
+                    'summary' => 'Soft-delete (tombstone) an item; If-Match/baseVersion guarded, idempotent',
+                    'tags' => ['demo-catalog'],
+                    'responses' => [
+                        200 => 'DemoCatalogItemResponse',
+                        403 => ['description' => 'Missing demo_catalog:manage or unresolved tenant context'],
+                        404 => ['description' => 'Item not found in the caller\'s tenant'],
+                        409 => 'DemoCatalogConflictResponse',
                     ],
                     'components' => self::itemComponents(),
                 ],
@@ -179,13 +202,20 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
         return [
             'DemoCatalogItem' => [
                 'type' => 'object',
-                'required' => ['id', 'tenantId', 'name', 'description', 'status', 'createdAt', 'updatedAt'],
+                'required' => [
+                    'id', 'tenantId', 'clientUuid', 'name', 'description', 'status',
+                    'version', 'deletedAt', 'updatedBy', 'createdAt', 'updatedAt',
+                ],
                 'properties' => [
                     'id' => ['type' => 'integer'],
                     'tenantId' => ['type' => 'integer'],
+                    'clientUuid' => ['type' => 'string', 'nullable' => true],
                     'name' => ['type' => 'string'],
                     'description' => ['type' => 'string', 'nullable' => true],
                     'status' => ['type' => 'string', 'enum' => ['active', 'archived']],
+                    'version' => ['type' => 'integer'],
+                    'deletedAt' => ['type' => 'string', 'nullable' => true],
+                    'updatedBy' => ['type' => 'integer', 'nullable' => true],
                     'createdAt' => ['type' => 'string', 'nullable' => true],
                     'updatedAt' => ['type' => 'string', 'nullable' => true],
                 ],
@@ -207,6 +237,14 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
                     'data' => ['$ref' => '#/components/schemas/DemoCatalogItem'],
                 ],
             ],
+            'DemoCatalogConflictResponse' => [
+                'type' => 'object',
+                'required' => ['error', 'serverItem'],
+                'properties' => [
+                    'error' => ['type' => 'string'],
+                    'serverItem' => ['$ref' => '#/components/schemas/DemoCatalogItem'],
+                ],
+            ],
             'DemoCatalogItemInput' => [
                 'type' => 'object',
                 'required' => ['name'],
@@ -214,6 +252,8 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
                     'name' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 255],
                     'description' => ['type' => 'string', 'maxLength' => 2000, 'nullable' => true],
                     'status' => ['type' => 'string', 'enum' => ['active', 'archived']],
+                    'clientUuid' => ['type' => 'string', 'maxLength' => 36],
+                    'baseVersion' => ['type' => 'integer'],
                 ],
             ],
         ];
@@ -268,6 +308,7 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
     {
         return [
             CreateDemoCatalogItemsTable::class,
+            AddSyncColumnsToDemoCatalogItems::class,
             GrantDemoCatalogPermissionsToAdmin::class,
         ];
     }
@@ -277,7 +318,7 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
      *
      * @param Request $request The incoming HTTP request.
      * @param array<string, string> $params Captured path parameters.
-     * @return Response The tenant-scoped item list.
+     * @return Response The tenant-scoped item list or changes feed.
      */
     public function listItems(Request $request, array $params = []): Response
     {
@@ -301,7 +342,7 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
      *
      * @param Request $request The incoming HTTP request.
      * @param array<string, string> $params Captured path parameters.
-     * @return Response The created item (201) or a validation error.
+     * @return Response The created (201) or idempotently-replayed (200) item.
      */
     public function createItem(Request $request, array $params = []): Response
     {
@@ -313,11 +354,23 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
      *
      * @param Request $request The incoming HTTP request.
      * @param array<string, string> $params Captured path parameters ('id').
-     * @return Response The updated item or a tenant-scoped 404.
+     * @return Response The updated item, a tenant-scoped 404, or a 409 conflict.
      */
     public function updateItem(Request $request, array $params = []): Response
     {
         return $this->handler()->update($request, $params);
+    }
+
+    /**
+     * Handle DELETE /api/demo-catalog/items/{id} (requires demo_catalog:manage).
+     *
+     * @param Request $request The incoming HTTP request.
+     * @param array<string, string> $params Captured path parameters ('id').
+     * @return Response The tombstone (200), a tenant-scoped 404, or a 409 conflict.
+     */
+    public function deleteItem(Request $request, array $params = []): Response
+    {
+        return $this->handler()->delete($request, $params);
     }
 
     /**
