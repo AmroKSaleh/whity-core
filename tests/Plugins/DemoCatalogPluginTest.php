@@ -34,14 +34,14 @@ final class DemoCatalogPluginTest extends TestCase
 
         $this->assertInstanceOf(PluginInterface::class, $plugin);
         $this->assertSame('DemoCatalog', $plugin->getName());
-        $this->assertSame('1.0.0', $plugin->getVersion());
+        $this->assertSame('1.1.0', $plugin->getVersion());
     }
 
     public function testDeclaresTheItemsCrudRoutes(): void
     {
         $routes = (new DemoCatalogPlugin())->getRoutes();
 
-        $this->assertCount(4, $routes);
+        $this->assertCount(5, $routes);
 
         $byKey = [];
         foreach ($routes as $route) {
@@ -54,6 +54,7 @@ final class DemoCatalogPluginTest extends TestCase
         $this->assertSame('demo_catalog:view', $byKey['GET /api/demo-catalog/items/{id:\d+}']['requiredPermission'] ?? null);
         $this->assertSame('demo_catalog:manage', $byKey['POST /api/demo-catalog/items']['requiredPermission'] ?? null);
         $this->assertSame('demo_catalog:manage', $byKey['PATCH /api/demo-catalog/items/{id:\d+}']['requiredPermission'] ?? null);
+        $this->assertSame('demo_catalog:manage', $byKey['DELETE /api/demo-catalog/items/{id:\d+}']['requiredPermission'] ?? null);
 
         foreach ($byKey as $key => $route) {
             $this->assertIsCallable($route['handler'], "{$key} must have a callable handler");

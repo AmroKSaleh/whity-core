@@ -354,6 +354,9 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
         $pdo->setAttribute(PDO::ATTR_STRINGIFY_FETCHES, true);
         $pdo->sqliteCreateFunction('NOW', static fn (): string => date('Y-m-d H:i:s'), 0);
 
+        // Post-sync schema (base + AddSyncColumnsToDemoCatalogItems) — the handler
+        // now reads/writes the sync columns, and every write bumps change_seq via
+        // the global counter table.
         $pdo->exec('
             CREATE TABLE demo_catalog_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -361,10 +364,20 @@ final class DemoCatalogItemsRealEngineTest extends TestCase
                 name TEXT NOT NULL,
                 description TEXT,
                 status TEXT NOT NULL DEFAULT \'active\',
+                version INTEGER NOT NULL DEFAULT 1,
+                client_uuid VARCHAR(36),
+                deleted_at TIMESTAMP NULL,
+                updated_by INTEGER,
+                change_seq BIGINT NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         ');
+        $pdo->exec(
+            'CREATE UNIQUE INDEX idx_demo_catalog_items_tenant_uuid ON demo_catalog_items(tenant_id, client_uuid)'
+        );
+        $pdo->exec('CREATE TABLE demo_catalog_change_seq (seq BIGINT NOT NULL)');
+        $pdo->exec('INSERT INTO demo_catalog_change_seq (seq) VALUES (0)');
 
         return $pdo;
     }

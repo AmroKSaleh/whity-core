@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Plugins;
 
+use DemoCatalog\Migrations\AddSyncColumnsToDemoCatalogItems;
 use DemoCatalog\Migrations\CreateDemoCatalogItemsTable;
 use Whity\Core\Tenant\CoreTenantTableRegistry;
 use Whity\Sdk\MigrationInterface;
@@ -11,6 +12,7 @@ use Whity\Sdk\Tenant\TenantTableRegistry;
 use Whity\Sdk\Testing\TenantIsolationConformanceTestCase;
 
 require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Migrations/CreateDemoCatalogItemsTable.php';
+require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Migrations/AddSyncColumnsToDemoCatalogItems.php';
 
 /**
  * Conformance fixture (mirrors HelloWorldTenantConformanceTest, WC-194): proves
@@ -40,7 +42,10 @@ final class DemoCatalogTenantConformanceTest extends TenantIsolationConformanceT
     {
         return TenantTableRegistry::for([
             'demo_catalog_items' => 'DemoCatalog items; carries tenant_id (CreateDemoCatalogItemsTable).',
-        ])->merge(CoreTenantTableRegistry::build());
+        ])->withGlobal(
+            'demo_catalog_change_seq',
+            'Global monotonic change-sequence counter for the sync changes-feed cursor; holds no tenant data (AddSyncColumnsToDemoCatalogItems).'
+        )->merge(CoreTenantTableRegistry::build());
     }
 
     protected function migrationsDirectory(): string
@@ -61,7 +66,7 @@ final class DemoCatalogTenantConformanceTest extends TenantIsolationConformanceT
      */
     protected function schemaMigrations(): array
     {
-        return [new CreateDemoCatalogItemsTable()];
+        return [new CreateDemoCatalogItemsTable(), new AddSyncColumnsToDemoCatalogItems()];
     }
 
     /**
