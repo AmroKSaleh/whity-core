@@ -23,7 +23,7 @@ final class SettingsRegistryTest extends TestCase
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'mcp.enabled',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
-             'auth.sso_enabled',
+             'auth.sso_enabled', 'auth.desktop_login_max_hours',
              'storage.driver', 'storage.s3.endpoint', 'storage.s3.region', 'storage.s3.bucket',
              'storage.s3.access_key', 'storage.s3.path_style', 'storage.s3.public_base_url',
              'mail.transport', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.encryption',
@@ -58,9 +58,15 @@ final class SettingsRegistryTest extends TestCase
         self::assertTrue(SettingsRegistry::isGlobalOnly('storage.driver'));
         self::assertNotContains('storage.driver', SettingsRegistry::tenantTextKeys());
         // Only the genuinely tenant-overridable text keys remain: site_name,
-        // timezone, locale, support_email, mcp.enabled.
+        // timezone, locale, support_email, mcp.enabled, and the desktop login TTL.
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
-        self::assertCount(5, SettingsRegistry::tenantTextKeys());
+        self::assertCount(6, SettingsRegistry::tenantTextKeys());
+
+        // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
+        // plain numeric string key.
+        self::assertFalse(SettingsRegistry::isGlobalOnly('auth.desktop_login_max_hours'));
+        self::assertContains('auth.desktop_login_max_hours', SettingsRegistry::tenantTextKeys());
+        self::assertSame('string', SettingsRegistry::typeFor('auth.desktop_login_max_hours'));
 
         // Boolean flags report type 'bool' (clients render a toggle).
         self::assertSame('bool', SettingsRegistry::typeFor('auth.sso_enabled'));
@@ -177,7 +183,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(35, $describe);
+        self::assertCount(36, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

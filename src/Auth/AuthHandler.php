@@ -9,6 +9,8 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\RateLimit\ClientIp;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
 use Whity\Http\JsonBody;
 use PDO;
 use PDOStatement;
@@ -103,6 +105,15 @@ class AuthHandler
     private ?TwoFactorPolicyResolver $twoFactorPolicyResolver;
 
     /**
+     * Optional settings service (WC-desktop-ttl). When set, the device-token
+     * exchange ({@see self::handleDeviceTokenExchange()}) resolves and enforces
+     * the tenant's `auth.desktop_login_max_hours` and echoes the resolved
+     * offline-lock window back to the native client. Null disables that
+     * enforcement/echo (keeps existing tests and call sites untouched).
+     */
+    private ?SettingsService $settingsService;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
@@ -132,7 +143,8 @@ class AuthHandler
         ?LoggerInterface $logger = null,
         ?AuditLogger $auditLogger = null,
         ?LoginThrottleService $loginThrottle = null,
-        ?TwoFactorPolicyResolver $twoFactorPolicyResolver = null
+        ?TwoFactorPolicyResolver $twoFactorPolicyResolver = null,
+        ?SettingsService $settingsService = null
     ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
@@ -143,6 +155,7 @@ class AuthHandler
         $this->auditLogger = $auditLogger;
         $this->loginThrottle = $loginThrottle;
         $this->twoFactorPolicyResolver = $twoFactorPolicyResolver;
+        $this->settingsService = $settingsService;
     }
 
     /**
@@ -726,6 +739,10 @@ class AuthHandler
      *                                               switches are not indistinguishable from logins
      *                                               in the audit trail (WC-f8164c87).
      * @param array<string, mixed> $auditMetadata   Extra audit metadata to attach to the event.
+     * @param array<string, mixed> $extraTokenBody  Extra fields merged into the token-mode JSON
+     *                                               body (e.g. the WC-desktop-ttl offline-lock
+     *                                               window on a device-token exchange). Ignored in
+     *                                               cookie mode.
      */
     private function issueSessionForProfile(
         int $profileId,
@@ -737,7 +754,8 @@ class AuthHandler
         string $auditAction = 'auth.login.success',
         array $auditMetadata = [],
         bool $recordNewSession = false,
-        ?string $rotateSessionFromJti = null
+        ?string $rotateSessionFromJti = null,
+        array $extraTokenBody = []
     ): Response
     {
         // Resolve role from the active membership (post-cutover: no legacy users row).
@@ -838,7 +856,7 @@ class AuthHandler
                 'token_type'    => 'Bearer',
                 'expires_in'    => 900,
                 'user'          => $userShape,
-            ] + $enrollmentNag, 200);
+            ] + $enrollmentNag + $extraTokenBody, 200);
         }
 
         return Response::json(['user' => $userShape] + $enrollmentNag, 200);
@@ -1942,7 +1960,27 @@ class AuthHandler
         // (same rationale as handleRefresh, WC-185).
         $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
 
-        // Native clients always want body tokens — force token mode.
+        // WC-desktop-ttl: resolve + enforce the tenant's desktop-login TTL. The
+        // credential's baked exp already reflects the policy at issue time
+        // (DeviceCredentialService caps it), but re-checking against the
+        // credential's age here makes a LATER reduction bite an already-issued,
+        // longer-lived credential immediately — the exchange 401s once the age
+        // exceeds the current window.
+        $maxSeconds = DeviceCredentialService::CREDENTIAL_LIFETIME_SECONDS;
+        if ($this->settingsService !== null) {
+            $hours = (int) ($this->settingsService->effective($activeTenantId)[SettingsRegistry::AUTH_DESKTOP_LOGIN_MAX_HOURS]
+                ?? SettingsRegistry::defaultFor(SettingsRegistry::AUTH_DESKTOP_LOGIN_MAX_HOURS));
+            $maxSeconds = min($maxSeconds, max(1, $hours) * 3600);
+        }
+        $issuedAt = (isset($claims['iat']) && is_int($claims['iat'])) ? $claims['iat'] : time();
+        if ((time() - $issuedAt) > $maxSeconds) {
+            $this->loginThrottle?->recordFailure(null, $ip);
+            return Response::error('Device credential expired under current policy', 401);
+        }
+
+        // Native clients always want body tokens — force token mode. Echo the
+        // resolved offline-lock window so the client can enforce it locally
+        // without needing settings:read.
         return $this->issueSessionForProfile(
             $profileId,
             $activeTenantId,
@@ -1950,7 +1988,14 @@ class AuthHandler
             $tokenEpoch,
             $request,
             true,
-            'auth.device.exchange'
+            'auth.device.exchange',
+            [],    // auditMetadata
+            false, // recordNewSession
+            null,  // rotateSessionFromJti
+            [
+                'desktop_login_max_seconds' => $maxSeconds,
+                'desktop_login_expires_at'  => date('c', $issuedAt + $maxSeconds),
+            ]
         );
     }
 

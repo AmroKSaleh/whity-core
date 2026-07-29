@@ -60,6 +60,17 @@ final class SettingsRegistry
     // Default 'true' — SSO is available where a provider is configured.
     public const SSO_ENABLED = 'auth.sso_enabled';
 
+    // Desktop-client login TTL (WC-desktop-ttl). The maximum wall-clock a
+    // native/desktop client's cached login (its device credential) stays valid
+    // before the app must re-authenticate ONLINE — even offline, the client
+    // hard-locks once this elapses since its last successful online auth. A whole
+    // number of HOURS; per-tenant overridable (NOT global-only), capped at 2160h
+    // (= 90 days, the device-credential ceiling in DeviceCredentialService), so it
+    // can only ever SHORTEN that lifetime. Enforced server-side by capping the
+    // issued credential + exchanged session, and echoed on the device-token
+    // exchange so the client learns its offline window without needing settings:read.
+    public const AUTH_DESKTOP_LOGIN_MAX_HOURS = 'auth.desktop_login_max_hours';
+
     // Storage backend selection + S3-compatible config (WC-b8c5a271 / WC-28fb2e19).
     // Global/operator-level. `storage.driver` selects local (default) or s3; the
     // s3.* keys configure the bucket. The S3 SECRET KEY is NOT a setting — it is
@@ -222,6 +233,9 @@ final class SettingsRegistry
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
         self::SSO_ENABLED => 'true',
+        // 72 hours (3 days). A native client offline longer than this must
+        // re-authenticate online before it will work again.
+        self::AUTH_DESKTOP_LOGIN_MAX_HOURS => '72',
         self::STORAGE_DRIVER => 'local',
         self::STORAGE_S3_ENDPOINT => '',
         self::STORAGE_S3_REGION => '',
@@ -475,6 +489,7 @@ final class SettingsRegistry
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
             self::SSO_ENABLED => self::validateBoolean($value, self::SSO_ENABLED),
+            self::AUTH_DESKTOP_LOGIN_MAX_HOURS => self::validateDesktopLoginMaxHours($value),
             self::STORAGE_DRIVER => self::validateStorageDriver($value),
             self::STORAGE_S3_PATH_STYLE => self::validateBoolean($value, self::STORAGE_S3_PATH_STYLE),
             self::STORAGE_S3_ENDPOINT,
@@ -551,6 +566,28 @@ final class SettingsRegistry
         }
         if ((int) $value > 3650) {
             return 'billing.grace_days must be 3650 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate the desktop-client login TTL: a whole number of HOURS, at least 1,
+     * capped at 2160 (= 90 days, the DeviceCredentialService credential ceiling).
+     * The setting can only shorten that lifetime, never extend it, so a value
+     * above the ceiling is rejected rather than silently clamped.
+     */
+    private static function validateDesktopLoginMaxHours(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'auth.desktop_login_max_hours must be a whole number of hours.';
+        }
+        $hours = (int) $value;
+        if ($hours < 1) {
+            return 'auth.desktop_login_max_hours must be at least 1 hour.';
+        }
+        if ($hours > 2160) {
+            return 'auth.desktop_login_max_hours must be 2160 (90 days) or fewer.';
         }
 
         return null;
