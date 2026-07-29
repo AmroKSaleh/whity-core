@@ -33,6 +33,13 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # be reconciled with the server's integer id once it syncs.
 uuid = { version = "1", features = ["v4"] }
 
+# HTTP to the Whity backend for device auth + (later) sync. Done in RUST, not the
+# webview, so the device credential + access token never enter JS. `blocking`
+# keeps the auth commands simple (no async runtime yet — the background sync
+# engine adds tokio later); `rustls-tls` avoids a system OpenSSL/native-tls
+# dependency so the template still "just builds" everywhere.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
 # The worked "add a crate for custom functionality" example (see
 # src/commands/printer.rs): cross-platform printer discovery + printing,
 # demonstrating the extension pattern with a real capability the web can't do.
@@ -44,3 +51,17 @@ uuid = { version = "1", features = ["v4"] }
 # constraint would let a future `cargo update` reintroduce a similar break
 # silently.
 printers = "~2.3"
+
+# OS-native secure storage for the long-lived (90-day) device credential
+# (WC-desktop-sync) — the short-lived access token stays in memory only. Each
+# platform gets its native backend: Windows Credential Manager / macOS Keychain /
+# Linux Secret Service. The Linux backend talks to the Secret Service over D-Bus,
+# so a Linux build/run needs libdbus-1 present (see README "Known gaps").
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service"] }

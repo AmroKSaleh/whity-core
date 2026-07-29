@@ -11,6 +11,7 @@
 //! on this metadata.
 
 mod migrations;
+pub mod auth_repo;
 pub mod drafts_repo;
 pub mod items_repo;
 

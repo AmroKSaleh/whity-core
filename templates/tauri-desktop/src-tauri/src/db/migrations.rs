@@ -12,10 +12,12 @@
 //!   on the first sync.
 //! - v3: the mid-edit DRAFT store (`item_drafts`) — cheap autosave rows distinct
 //!   from committed records; never synced.
+//! - v4: the singleton `auth_state` row — non-secret device-enrollment +
+//!   session bookkeeping (the secret credential lives in the OS keychain).
 //!
 //! `run()` applies each pending step then stamps its version, so a partially
 //! migrated DB always resumes correctly. Add later steps as another
-//! `if version < N { migrate_to_vN(conn)?; stamp(N)? }` block.
+//! `if version < N { migrate_to_vN(conn)?; stamp(N) }` block.
 
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -32,6 +34,11 @@ pub fn run(conn: &Connection) -> rusqlite::Result<()> {
     if version < 3 {
         migrate_to_v3(conn)?;
         conn.pragma_update(None, "user_version", 3)?;
+        version = 3;
+    }
+    if version < 4 {
+        migrate_to_v4(conn)?;
+        conn.pragma_update(None, "user_version", 4)?;
     }
     Ok(())
 }
@@ -69,6 +76,21 @@ const V3_DRAFTS: &str = "
         description   TEXT,
         status        TEXT,
         updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    )";
+
+/// The singleton auth/enrollment row. NON-secret: the device credential itself
+/// lives in the OS keychain, never here. `last_online_auth_at` (epoch seconds)
+/// + `max_login_seconds` (the server-echoed TTL) drive the offline lock.
+const V4_AUTH_STATE: &str = "
+    CREATE TABLE auth_state (
+        id                    INTEGER PRIMARY KEY CHECK (id = 1),
+        enrolled              INTEGER NOT NULL DEFAULT 0,
+        device_id             INTEGER,
+        email                 TEXT,
+        active_tenant_id      INTEGER,
+        credential_expires_at TEXT,
+        last_online_auth_at   INTEGER,
+        max_login_seconds     INTEGER
     )";
 
 fn migrate_to_v2(conn: &Connection) -> rusqlite::Result<()> {
@@ -136,6 +158,12 @@ fn migrate_to_v3(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+fn migrate_to_v4(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(V4_AUTH_STATE)?;
+    conn.execute("INSERT INTO auth_state (id, enrolled) VALUES (1, 0)", [])?;
+    Ok(())
+}
+
 fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -192,7 +220,7 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 3);
+        assert_eq!(ver, 4);
 
         let (id, uuid, sync_state, dirty, deleted): (i64, String, String, i64, i64) = conn
             .query_row(
@@ -224,9 +252,19 @@ mod tests {
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 3);
+        assert_eq!(ver, 4);
         assert!(column_exists(&conn, "demo_catalog_items", "client_uuid").unwrap());
         assert!(table_exists(&conn, "item_drafts").unwrap());
+        assert!(table_exists(&conn, "auth_state").unwrap());
+
+        // The auth_state singleton exists and starts un-enrolled.
+        let (id, enrolled): (i64, i64) = conn
+            .query_row("SELECT id, enrolled FROM auth_state", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(enrolled, 0);
 
         conn.execute(
             "INSERT INTO demo_catalog_items (client_uuid, name) VALUES ('u1','X')",
@@ -245,26 +283,28 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_a_v2_db_to_v3_drafts() {
-        // Simulate a DB already at v2 (items present, no drafts table).
+    fn upgrades_a_v2_db_to_latest() {
+        // Simulate a DB already at v2 (items present, no drafts/auth tables).
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(V2_ITEMS).unwrap();
         conn.pragma_update(None, "user_version", 2).unwrap();
         assert!(!table_exists(&conn, "item_drafts").unwrap());
+        assert!(!table_exists(&conn, "auth_state").unwrap());
 
         run(&conn).unwrap();
 
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 3);
+        assert_eq!(ver, 4);
         assert!(table_exists(&conn, "item_drafts").unwrap());
+        assert!(table_exists(&conn, "auth_state").unwrap());
     }
 
     #[test]
     fn run_is_idempotent() {
         let conn = v1_conn();
         run(&conn).unwrap();
-        run(&conn).unwrap(); // version already 3 → no-op
+        run(&conn).unwrap(); // version already 4 → no-op
         let ver: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(ver, 3);
+        assert_eq!(ver, 4);
     }
 }

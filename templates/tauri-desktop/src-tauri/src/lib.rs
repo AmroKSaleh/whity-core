@@ -1,4 +1,6 @@
+mod auth;
 mod commands;
+mod config;
 mod db;
 
 use db::Db;
@@ -12,6 +14,7 @@ pub fn run() {
         .setup(|app| {
             let connection = db::open(app.handle())?;
             app.manage(Db(Mutex::new(connection)));
+            app.manage(auth::AuthManager::new(config::Config::from_env())?);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -22,6 +25,10 @@ pub fn run() {
             commands::drafts::save_draft,
             commands::drafts::get_draft,
             commands::drafts::discard_draft,
+            commands::auth::auth_enroll,
+            commands::auth::auth_login,
+            commands::auth::auth_logout,
+            commands::auth::auth_status,
             commands::printer::print_text,
         ])
         .run(tauri::generate_context!())
