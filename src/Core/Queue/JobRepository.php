@@ -196,9 +196,12 @@ final class JobRepository
      */
     public function listForTenant(int $tenantId, ?string $queue, ?string $status, int $limit, int $offset): array
     {
-        [$where, $params] = self::tenantFilter($tenantId, $queue, $status);
+        [$filterSql, $params] = self::tenantFilter($tenantId, $queue, $status);
+        // tenant_id lives in the SQL LITERAL (not a builder var) so the static
+        // ci-tenant-predicate-guard scanner can see the tenant scope; optional
+        // filters are appended after it.
         $stmt = $this->pdo->prepare(
-            'SELECT * FROM jobs WHERE ' . implode(' AND ', $where) . ' ORDER BY id DESC LIMIT :limit OFFSET :offset'
+            'SELECT * FROM jobs WHERE tenant_id = :tenant_id' . $filterSql . ' ORDER BY id DESC LIMIT :limit OFFSET :offset'
         );
         foreach ($params as $k => $v) {
             $stmt->bindValue($k, $v);
@@ -217,8 +220,8 @@ final class JobRepository
      */
     public function countForTenant(int $tenantId, ?string $queue, ?string $status): int
     {
-        [$where, $params] = self::tenantFilter($tenantId, $queue, $status);
-        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM jobs WHERE ' . implode(' AND ', $where));
+        [$filterSql, $params] = self::tenantFilter($tenantId, $queue, $status);
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM jobs WHERE tenant_id = :tenant_id' . $filterSql);
         $stmt->execute($params);
         $count = $stmt->fetchColumn();
 
@@ -243,24 +246,28 @@ final class JobRepository
     }
 
     /**
-     * Build the shared tenant-scoped WHERE fragments + params for list/count.
+     * Build the OPTIONAL filter SQL — appended AFTER the caller's literal
+     * `WHERE tenant_id = :tenant_id` — plus the bound params for list/count. The
+     * tenant_id predicate itself stays in the caller's SQL literal so the static
+     * tenant-guard scanner (scripts/ci-tenant-predicate-guard.php) can see the
+     * tenant scope; keeping it here in a builder array hid it from the scanner.
      *
-     * @return array{0: list<string>, 1: array<string, string|int>}
+     * @return array{0: string, 1: array<string, string|int>}
      */
     private static function tenantFilter(int $tenantId, ?string $queue, ?string $status): array
     {
-        $where = ['tenant_id = :tenant_id'];
+        $sql = '';
         $params = [':tenant_id' => $tenantId];
         if ($queue !== null && $queue !== '') {
-            $where[] = 'queue = :queue';
+            $sql .= ' AND queue = :queue';
             $params[':queue'] = $queue;
         }
         if ($status !== null && $status !== '') {
-            $where[] = 'status = :status';
+            $sql .= ' AND status = :status';
             $params[':status'] = $status;
         }
 
-        return [$where, $params];
+        return [$sql, $params];
     }
 
     /**
