@@ -1207,7 +1207,9 @@ $notificationDispatcher = new \Whity\Core\Notification\NotificationDispatcher(
     $notificationRepository,
     $transportRegistry,
     new \Whity\Core\Queue\QueueService(new \Whity\Core\Queue\JobRepository($db->getPdo())),
-    new \Whity\Core\Notification\PassthroughRenderer(),
+    new \Whity\Core\Notification\DatabaseNotificationRenderer(
+        new \Whity\Core\Notification\NotificationTemplateRepository($db->getPdo())
+    ),
     $logger,
     $notificationPreferenceResolver
 );

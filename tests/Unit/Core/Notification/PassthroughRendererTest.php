@@ -16,7 +16,7 @@ final class PassthroughRendererTest extends TestCase
 {
     public function testInterpolatesKnownTokensFromData(): void
     {
-        $rendered = (new PassthroughRenderer())->render('user.invited', 'email', null, [
+        $rendered = (new PassthroughRenderer())->render(1, 'user.invited', 'email', null, [
             'subject' => 'Welcome, {{name}}',
             'body'    => 'Your code is {{ code }}.',
             'data'    => ['name' => 'Alice', 'code' => 42],
@@ -29,7 +29,7 @@ final class PassthroughRendererTest extends TestCase
 
     public function testLeavesUnknownTokensUntouched(): void
     {
-        $rendered = (new PassthroughRenderer())->render('t', 'email', null, [
+        $rendered = (new PassthroughRenderer())->render(1, 't', 'email', null, [
             'subject' => 'Hi {{missing}}',
             'body'    => '',
             'data'    => [],
@@ -40,7 +40,7 @@ final class PassthroughRendererTest extends TestCase
 
     public function testRendersBodyHtmlWhenProvided(): void
     {
-        $rendered = (new PassthroughRenderer())->render('t', 'email', 'en-US', [
+        $rendered = (new PassthroughRenderer())->render(1, 't', 'email', 'en-US', [
             'subject'  => 's',
             'body'     => 'plain {{x}}',
             'bodyHtml' => '<b>{{x}}</b>',
@@ -52,7 +52,7 @@ final class PassthroughRendererTest extends TestCase
 
     public function testEmptyAndTokenlessStringsPassThroughUnchanged(): void
     {
-        $rendered = (new PassthroughRenderer())->render('t', 'in_app', null, [
+        $rendered = (new PassthroughRenderer())->render(1, 't', 'in_app', null, [
             'subject' => '',
             'body'    => 'no tokens here',
             'data'    => ['x' => 'unused'],
@@ -64,7 +64,7 @@ final class PassthroughRendererTest extends TestCase
 
     public function testNonScalarDataValueIsNotInterpolated(): void
     {
-        $rendered = (new PassthroughRenderer())->render('t', 'email', null, [
+        $rendered = (new PassthroughRenderer())->render(1, 't', 'email', null, [
             'subject' => 'x {{obj}}',
             'body'    => '',
             'data'    => ['obj' => ['nested' => true]],

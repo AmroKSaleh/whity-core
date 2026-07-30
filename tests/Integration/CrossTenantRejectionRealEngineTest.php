@@ -30,6 +30,7 @@ use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Notification\NotificationPreferenceRepository;
 use Whity\Core\Notification\NotificationRepository;
+use Whity\Core\Notification\NotificationTemplateRepository;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
@@ -1953,6 +1954,31 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertTrue($repo->delete(self::TENANT_A, 101, '*', 'email'));
         self::assertCount(0, $repo->listForProfile(self::TENANT_A, 101));
         self::assertCount(1, $repo->listForProfile(self::TENANT_B, 101), "tenant B's toggle survives tenant A's delete");
+    }
+
+    public function testTenantScopedNotificationTemplatesRejectAForeignTenant(): void
+    {
+        $repo = new NotificationTemplateRepository($this->pdo);
+        // A global default both tenants inherit, plus a per-tenant override each.
+        $repo->upsert(0, 'welcome', 'email', '', ['subject' => 'Global']);
+        $repo->upsert(self::TENANT_A, 'welcome', 'email', '', ['subject' => 'A override']);
+        $repo->upsert(self::TENANT_B, 'welcome', 'email', '', ['subject' => 'B override']);
+
+        // Each tenant resolves ITS OWN override (never the other's), above the global.
+        $a = $repo->resolve(self::TENANT_A, 'welcome', 'email', null);
+        $b = $repo->resolve(self::TENANT_B, 'welcome', 'email', null);
+        self::assertNotNull($a);
+        self::assertNotNull($b);
+        self::assertSame('A override', $a['subject']);
+        self::assertSame('B override', $b['subject']);
+        // listForTenant returns only the caller's own override, never the other's or the global.
+        self::assertSame(['A override'], array_column($repo->listForTenant(self::TENANT_A), 'subject'));
+
+        // A tenant-A delete cannot remove tenant B's override.
+        $repo->delete(self::TENANT_A, 'welcome', 'email', '');
+        $bAfter = $repo->resolve(self::TENANT_B, 'welcome', 'email', null);
+        self::assertNotNull($bAfter);
+        self::assertSame('B override', $bAfter['subject']);
     }
 
     /**
