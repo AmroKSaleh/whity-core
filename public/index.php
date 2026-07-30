@@ -1234,6 +1234,20 @@ $notificationPreferencesHandler = new \Whity\Api\NotificationPreferencesApiHandl
 $router->register('GET', '/api/me/notification-preferences', [$notificationPreferencesHandler, 'list'],   null);
 $router->register('PUT', '/api/me/notification-preferences', [$notificationPreferencesHandler, 'update'], null);
 
+// Per-tenant notification SENDER configuration (WC-notifications, d70c6083). A
+// tenant admin manages their OWN tenant's per-channel sender (from/reply-to,
+// transport, encrypted creds). settings:manage gated; creds are write-only.
+$tenantNotificationSettingsHandler = new \Whity\Api\TenantNotificationSettingsApiHandler(
+    $roleChecker,
+    new \Whity\Core\Notification\TenantNotificationSettingsRepository($db->getPdo()),
+    $secretStore,
+    $logger
+);
+$router->register('GET',    '/api/notification-settings',                       [$tenantNotificationSettingsHandler, 'list'],          null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('PUT',    '/api/notification-settings/{channel}',             [$tenantNotificationSettingsHandler, 'updateChannel'], null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('PUT',    '/api/notification-settings/{channel}/credentials', [$tenantNotificationSettingsHandler, 'setCredentials'], null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('DELETE', '/api/notification-settings/{channel}',             [$tenantNotificationSettingsHandler, 'deleteChannel'], null, null, CorePermissions::SETTINGS_MANAGE);
+
 $jobsRegistry = new \Whity\Core\Queue\JobRegistry();
 // Share the transport registry so the (internal, non-submittable) delivery job is
 // registered here too — the same handler the queue:work worker runs.

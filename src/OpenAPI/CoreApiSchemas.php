@@ -89,6 +89,7 @@ final class CoreApiSchemas
             self::frontendFeatureRoutes(),
             self::meRoutes(),
             self::meNotificationRoutes(),
+            self::tenantNotificationSettingsRoutes(),
             self::platformOpsRoutes(),
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
@@ -948,6 +949,53 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+        ];
+    }
+
+    /**
+     * Per-tenant notification SENDER configuration (WC-notifications, d70c6083).
+     * All routes are settings:manage-gated and tenant-scoped; provider
+     * credentials are write-only (never returned).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tenantNotificationSettingsRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/notification-settings', 'settings:manage', [
+                'summary' => 'List the tenant\'s per-channel sender config (credentials redacted)',
+                'tags' => ['notifications'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s sender config per channel', 'TenantNotificationSettingsListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/notification-settings/{channel}', 'settings:manage', [
+                'summary' => 'Upsert a channel\'s sender config (from/reply-to, transport, provider config)',
+                'tags' => ['notifications'],
+                'request' => 'TenantNotificationSettingsUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated channel sender config', 'TenantNotificationSettingsResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/notification-settings/{channel}/credentials', 'settings:manage', [
+                'summary' => 'Set or clear a channel\'s provider credentials (write-only, encrypted at rest)',
+                'tags' => ['notifications'],
+                'request' => 'NotificationCredentialsRequest',
+                'responses' => [
+                    204 => ['description' => 'Credentials stored or cleared'],
+                    400 => self::errorResponse('Missing credentials field'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/notification-settings/{channel}', 'settings:manage', [
+                'summary' => 'Remove a channel\'s sender config',
+                'tags' => ['notifications'],
+                'responses' => [
+                    204 => ['description' => 'Channel configuration removed'],
+                    404 => self::errorResponse('Channel configuration not found'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -2449,6 +2497,33 @@ final class CoreApiSchemas
             'NotificationPreferencesUpdateRequest' => self::object([
                 'preferences' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationPreferenceEntry')],
             ], ['preferences']),
+            'TenantNotificationSettingsEntry' => self::object([
+                'channel' => self::str(),
+                'transport' => self::str(true),
+                'from_address' => self::str(true),
+                'from_name' => self::str(true),
+                'reply_to' => self::str(true),
+                'config' => ['type' => 'object', 'additionalProperties' => true],
+                'has_credentials' => self::bool(),
+                'enabled' => self::bool(),
+            ], ['channel', 'config', 'has_credentials', 'enabled']),
+            'TenantNotificationSettingsListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('TenantNotificationSettingsEntry')],
+            ], ['data']),
+            'TenantNotificationSettingsResponse' => self::object([
+                'data' => SchemaBuilder::ref('TenantNotificationSettingsEntry'),
+            ], ['data']),
+            'TenantNotificationSettingsUpdateRequest' => self::object([
+                'transport' => self::str(true),
+                'from_address' => self::str(true),
+                'from_name' => self::str(true),
+                'reply_to' => self::str(true),
+                'config' => ['type' => 'object', 'additionalProperties' => true],
+                'enabled' => self::bool(),
+            ], []),
+            'NotificationCredentialsRequest' => self::object([
+                'credentials' => self::str(true),
+            ], ['credentials']),
 
             // ---- Platform-ops schemas (WC-62133b3f) ----
 
