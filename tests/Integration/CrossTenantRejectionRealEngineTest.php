@@ -28,6 +28,7 @@ use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Notification\NotificationRepository;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
@@ -1904,6 +1905,37 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertSame('a.event', $nameByTenant[self::TENANT_A] ?? null, 'tenant A event kept tenant A');
         self::assertSame('b.event', $nameByTenant[self::TENANT_B] ?? null, 'tenant B event kept tenant B');
         self::assertCount(2, $nameByTenant, 'the two events belong to two distinct tenants');
+    }
+
+    // ========= notifications / notification_deliveries (WC-notifications) =========
+    //
+    // The notification spine is TENANT-SCOPED end to end: a notification and its
+    // per-channel delivery rows carry the enqueuing tenant, and the persistence
+    // primitives bind tenant_id so one tenant can never read another's message or
+    // its delivery history. (The eventual relay sweep runs as system infra ACROSS
+    // tenants in its own slice; here we prove the tenant-scoped read path.)
+
+    public function testTenantScopedNotificationReadRejectsAForeignTenant(): void
+    {
+        $repo = new NotificationRepository($this->pdo);
+        $idA = $repo->create(self::TENANT_A, 101, 'a.notice', ['subject' => 'A only']);
+
+        self::assertNotNull($repo->find(self::TENANT_A, $idA), 'tenant A reads its own notification');
+        self::assertNull($repo->find(self::TENANT_B, $idA), "tenant B must not read tenant A's notification");
+    }
+
+    public function testTenantScopedDeliveryListRejectsAForeignTenant(): void
+    {
+        $repo = new NotificationRepository($this->pdo);
+        $notificationId = $repo->create(self::TENANT_A, 101, 'a.notice');
+        $repo->recordDelivery(self::TENANT_A, $notificationId, 'email');
+
+        self::assertCount(1, $repo->listDeliveries(self::TENANT_A, $notificationId), 'tenant A sees its delivery history');
+        self::assertCount(
+            0,
+            $repo->listDeliveries(self::TENANT_B, $notificationId),
+            "tenant B's scoped delivery list must exclude tenant A's rows"
+        );
     }
 
     /**
