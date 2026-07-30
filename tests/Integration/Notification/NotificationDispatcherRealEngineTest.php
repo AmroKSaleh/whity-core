@@ -10,6 +10,8 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Notification\CoreTransports;
 use Whity\Core\Notification\LogTransport;
 use Whity\Core\Notification\NotificationDispatcher;
+use Whity\Core\Notification\NotificationPreferenceRepository;
+use Whity\Core\Notification\NotificationPreferenceResolver;
 use Whity\Core\Notification\NotificationRepository;
 use Whity\Core\Notification\TransportRegistry;
 use Whity\Core\Queue\JobRepository;
@@ -136,5 +138,51 @@ final class NotificationDispatcherRealEngineTest extends TestCase
         $keyStmt = $this->pdo->query("SELECT idempotency_key FROM jobs WHERE name = 'core.notifications.deliver'");
         self::assertNotFalse($keyStmt);
         self::assertSame('notif-delivery:' . $deliveryId, $keyStmt->fetchColumn());
+    }
+
+    // ---- preference filtering (c56a6455) ----
+
+    /** A dispatcher wired with a preference resolver over the same schema. */
+    private function dispatcherWithPreferences(): NotificationDispatcher
+    {
+        $prefRepo = new NotificationPreferenceRepository($this->pdo);
+
+        return new NotificationDispatcher(
+            $this->repo,
+            CoreTransports::make(),
+            new QueueService(new JobRepository($this->pdo)),
+            null,
+            null,
+            new NotificationPreferenceResolver($prefRepo)
+        );
+    }
+
+    public function testPreferenceOptOutSkipsThatChannelButKeepsTheNotificationRow(): void
+    {
+        // The recipient disabled email for everything.
+        (new NotificationPreferenceRepository($this->pdo))->set(self::TENANT_A, 101, '*', 'email', false);
+
+        $id = $this->dispatcherWithPreferences()->dispatch(self::TENANT_A, 101, 'marketing.digest', [
+            'channels' => ['in_app', 'email'],
+        ]);
+
+        // The notification row still exists (the inbox stays the complete record).
+        self::assertNotNull($this->repo->find(self::TENANT_A, $id));
+        // Only the un-opted-out channel got a delivery.
+        $channels = array_column($this->repo->listDeliveries(self::TENANT_A, $id), 'channel');
+        self::assertSame(['in_app'], $channels, 'the opted-out email channel produced no delivery');
+    }
+
+    public function testTransactionalTypeIgnoresOptOut(): void
+    {
+        (new NotificationPreferenceRepository($this->pdo))->set(self::TENANT_A, 101, '*', 'email', false);
+
+        $id = $this->dispatcherWithPreferences()->dispatch(self::TENANT_A, 101, 'security.login_alert', [
+            'channels' => ['in_app', 'email'],
+        ]);
+
+        $channels = array_column($this->repo->listDeliveries(self::TENANT_A, $id), 'channel');
+        sort($channels);
+        self::assertSame(['email', 'in_app'], $channels, 'a transactional type delivers on every channel despite the opt-out');
     }
 }

@@ -920,6 +920,34 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+            [
+                'method' => 'GET',
+                'path' => '/api/me/notification-preferences',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'The caller\'s notification preferences + which types are transactional (locked)',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s per-(type, channel) toggles', 'NotificationPreferencesResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'PUT',
+                'path' => '/api/me/notification-preferences',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Upsert a batch of the caller\'s notification toggles (transactional types cannot be disabled)',
+                    'tags' => ['notifications'],
+                    'request' => 'NotificationPreferencesUpdateRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s updated preferences', 'NotificationPreferencesResponse'),
+                        422 => self::errorResponse('Invalid preferences, or an attempt to disable a transactional type'),
+                    ] + self::authErrors(),
+                ],
+            ],
         ];
     }
 
@@ -2409,6 +2437,18 @@ final class CoreApiSchemas
             'MarkAllReadResponse' => self::object([
                 'marked' => self::int(),
             ], ['marked']),
+            'NotificationPreferenceEntry' => self::object([
+                'type' => self::str(),
+                'channel' => self::str(),
+                'enabled' => self::bool(),
+            ], ['type', 'channel', 'enabled']),
+            'NotificationPreferencesResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationPreferenceEntry')],
+                'transactional_prefixes' => ['type' => 'array', 'items' => self::str()],
+            ], ['data', 'transactional_prefixes']),
+            'NotificationPreferencesUpdateRequest' => self::object([
+                'preferences' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationPreferenceEntry')],
+            ], ['preferences']),
 
             // ---- Platform-ops schemas (WC-62133b3f) ----
 

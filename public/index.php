@@ -1199,12 +1199,17 @@ $router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], 
 // core or a plugin) dispatches a notification (hook-subscriber mode).
 $transportRegistry = \Whity\Core\Notification\CoreTransports::make($logger);
 $notificationRepository = new \Whity\Core\Notification\NotificationRepository($db->getPdo());
+// Per-user preference resolver — the dispatcher consults it to filter a
+// recipient's channels (transactional types always bypass; #c56a6455).
+$notificationPreferenceRepository = new \Whity\Core\Notification\NotificationPreferenceRepository($db->getPdo());
+$notificationPreferenceResolver = new \Whity\Core\Notification\NotificationPreferenceResolver($notificationPreferenceRepository);
 $notificationDispatcher = new \Whity\Core\Notification\NotificationDispatcher(
     $notificationRepository,
     $transportRegistry,
     new \Whity\Core\Queue\QueueService(new \Whity\Core\Queue\JobRepository($db->getPdo())),
     new \Whity\Core\Notification\PassthroughRenderer(),
-    $logger
+    $logger,
+    $notificationPreferenceResolver
 );
 $notificationDispatcher->subscribe($hookManager);
 
@@ -1216,6 +1221,16 @@ $router->register('GET',  '/api/me/notifications',                [$inboxHandler
 $router->register('GET',  '/api/me/notifications/unread-count',   [$inboxHandler, 'unreadCount'],  null);
 $router->register('POST', '/api/me/notifications/read-all',       [$inboxHandler, 'markAllRead'],  null);
 $router->register('POST', '/api/me/notifications/{id:\d+}/read',  [$inboxHandler, 'markRead'],     null);
+
+// Per-user notification PREFERENCES (WC-notifications, c56a6455). Self-scoped,
+// session-gated, no RBAC permission. Transactional types cannot be disabled.
+$notificationPreferencesHandler = new \Whity\Api\NotificationPreferencesApiHandler(
+    $tokenValidator,
+    $notificationPreferenceRepository,
+    $notificationPreferenceResolver
+);
+$router->register('GET', '/api/me/notification-preferences', [$notificationPreferencesHandler, 'list'],   null);
+$router->register('PUT', '/api/me/notification-preferences', [$notificationPreferencesHandler, 'update'], null);
 
 $jobsRegistry = new \Whity\Core\Queue\JobRegistry();
 // Share the transport registry so the (internal, non-submittable) delivery job is

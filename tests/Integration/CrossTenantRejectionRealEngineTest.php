@@ -28,6 +28,7 @@ use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Notification\NotificationPreferenceRepository;
 use Whity\Core\Notification\NotificationRepository;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Relations\PersonRepository;
@@ -1936,6 +1937,22 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
             $repo->listDeliveries(self::TENANT_B, $notificationId),
             "tenant B's scoped delivery list must exclude tenant A's rows"
         );
+    }
+
+    public function testTenantScopedNotificationPreferencesRejectAForeignTenant(): void
+    {
+        $repo = new NotificationPreferenceRepository($this->pdo);
+        // The SAME (profile, type, channel) toggle owned independently by each tenant.
+        $repo->set(self::TENANT_A, 101, '*', 'email', false);
+        $repo->set(self::TENANT_B, 101, '*', 'email', true);
+
+        self::assertFalse($repo->listForProfile(self::TENANT_A, 101)[0]['enabled'], 'tenant A reads its own toggle');
+        self::assertTrue($repo->listForProfile(self::TENANT_B, 101)[0]['enabled'], "tenant B's toggle is independent");
+
+        // A tenant-A-scoped delete removes only tenant A's row; tenant B's survives.
+        self::assertTrue($repo->delete(self::TENANT_A, 101, '*', 'email'));
+        self::assertCount(0, $repo->listForProfile(self::TENANT_A, 101));
+        self::assertCount(1, $repo->listForProfile(self::TENANT_B, 101), "tenant B's toggle survives tenant A's delete");
     }
 
     /**
