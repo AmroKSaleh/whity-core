@@ -204,11 +204,21 @@ The frontend was verified with `tsc --noEmit` and a real `vite build`.
 ### Offline-sync stack — verified
 
 - Rust unit tests cover the schema migrations (v1→v6), the offline-lock logic,
-  the drafts + soft-delete repos, the conflict-resolution repo, and the push
-  retry/backoff.
+  the drafts + soft-delete repos, the conflict-resolution repo, the push
+  retry/backoff, and the scheduler's connectivity classification + status reads.
 - A live integration test drives the sync engine against a real backend end to
   end: device enroll → push → pull on a fresh client → concurrent-edit `409` →
   conflict parked → resolve → re-sync.
+- Sync runs in a Rust BACKGROUND LOOP (`sync/scheduler.rs`) on its OWN WAL
+  connection, so a cycle's network I/O never blocks the UI connection's reads. It
+  reconciles at startup, on an interval (45 s; 15 s while offline), on a debounced
+  local write, and on a manual `sync_now`; owns connectivity from the
+  credential-exchange outcome; and emits `sync:status` events the UI subscribes to
+  instead of polling. A successful background exchange also resets the offline-lock
+  clock, so a reachable app auto-recovers from a TTL lock. Verified live on Windows
+  against a local backend: creating an item pushed it to the server on its own —
+  no manual sync — with the server row, the local `synced` state, the advanced
+  pull cursor, and the refreshed offline-auth clock all confirmed.
 - The shared sync UI (`UnsyncedBanner` / `ConflictResolver` / `LockedScreen`) is
   jest-tested (incl. Arabic-bidi content) **and mounted in the running app**
   (`sync-controller-tauri.ts` + `app-state-provider.tsx`). The on-screen flow was
@@ -234,12 +244,11 @@ The frontend was verified with `tsc --noEmit` and a real `vite build`.
   Service over D-Bus, so a Linux build/run needs `libdbus-1-dev` (add it to the
   Tauri Linux system deps above). Windows/macOS use their native keystores with
   no extra dep.
-- **Deferred sync-engine enhancements.** Sync currently runs on an explicit
-  `sync_now` (a frontend interval + online-listener drives it). A Rust background
-  scheduler with connectivity detection, and generalizing the engine behind a
-  `SyncableResource` trait for multi-entity reuse, are scoped follow-ups.
-  (Per-row retry/backoff — a flaky/invalid push backs off and never aborts the
-  cycle — is implemented.)
+- **Generalizing the engine (`SyncableResource`).** The sync engine is currently
+  DemoCatalog-specific; extracting a `SyncableResource` trait — so a new synced
+  entity is just a new table with the standard sync columns + a trait impl — is a
+  scoped follow-up. (The Rust background sync loop, connectivity detection, and
+  per-row retry/backoff are implemented — see the sync stack above.)
 - **Packaging size / startup on macOS + Linux.** Windows is measured above
   (installer sizes; ~0.5 s first-run / ~60 ms warm launch on Windows 11). The
   macOS `.app`/`.dmg` and Linux AppImage/deb sizes + cold-start remain

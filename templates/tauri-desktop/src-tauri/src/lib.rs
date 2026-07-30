@@ -13,9 +13,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let cfg = config::Config::from_env();
             let connection = db::open(app.handle())?;
             app.manage(Db(Mutex::new(connection)));
-            app.manage(auth::AuthManager::new(config::Config::from_env())?);
+            app.manage(auth::AuthManager::new(cfg.clone())?);
+
+            // Background sync loop on its OWN WAL connection so a cycle's network
+            // I/O never blocks the UI connection's reads (see sync::scheduler).
+            let sync_conn = db::open_sync_connection(app.handle())?;
+            let sync_handle = sync::scheduler::spawn(app.handle().clone(), cfg, sync_conn)?;
+            app.manage(sync_handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import type {
   Conflict,
   FieldConflict,
@@ -13,19 +14,31 @@ import type {
  * consumes, deliberately separate from `demoCatalogAdapter` (list/get/save) —
  * an online-only client just omits it and the banner/resolver render nothing.
  *
- * The Rust engine currently exposes no push events, so this controller derives
- * its {@link SyncStatus} by POLLING three cheap local-only reads
- * (`get_sync_status`, `list_conflicts`, `auth_lock_state`) plus the webview's
- * connectivity, and drives an explicit `sync_now` on a debounced interval / on
- * reconnect. (A Rust-side event emitter is the documented follow-up; swapping it
- * in only changes how `refresh()` is triggered, not this contract.)
+ * Sync runs in a Rust BACKGROUND LOOP (`src-tauri/src/sync/scheduler.rs`) that
+ * owns the interval, connectivity, and auto-push. This controller is a thin
+ * projection of that loop: it SUBSCRIBES to `sync:status` events for its
+ * {@link SyncStatus}, fires `sync_now` (a non-blocking trigger) on demand, and
+ * keeps only a slow backstop poll for a missed event. It no longer owns the
+ * sync cadence or connectivity — the loop does.
  *
  * Referential-stability contract (see SyncController): {@link getStatus} returns
  * a cached object whose identity only changes when something actually changed —
  * required by `useSyncExternalStore`, which compares snapshots by identity.
  */
 
-/** Raw `sync::SyncStatusView` over the wire. */
+/** The Rust `sync:status` event payload (see `scheduler::SyncStatusEvent`). */
+interface SyncStatusEvent {
+  online: boolean
+  syncing: boolean
+  locked: boolean
+  unsyncedCount: number
+  conflictCount: number
+  lastPullAt: string | null
+  lastPushAt: string | null
+  lastError: string | null
+}
+
+/** Raw `sync::SyncStatusView` over the wire (the `get_sync_status` backstop). */
 interface SyncStatusView {
   unsyncedCount: number
   conflictCount: number
@@ -46,7 +59,7 @@ interface ConflictView {
   fields: FieldDiff[]
 }
 
-/** Raw `auth::lock::LockState` over the wire. */
+/** Raw `auth::lock::LockState` over the wire (the backstop lock read). */
 interface LockState {
   locked: boolean
   reason: string | null
@@ -61,30 +74,26 @@ interface LocalItem {
 }
 
 export interface TauriSyncController extends SyncController {
-  /** Begin polling + reconnect/interval-driven sync; returns a disposer. */
+  /** Subscribe to the Rust loop's events + a backstop poll; returns a disposer. */
   start(): () => void
-  /** Force an immediate status refresh (local reads only, no network). */
+  /** Force an immediate local-read refresh (backstop; no network). */
   refresh(): Promise<void>
 }
 
 export interface TauriSyncControllerOptions {
-  /** How often to re-read local sync state (ms). */
-  pollMs?: number
-  /** How often to auto-push pending changes while online + unlocked (ms). */
-  autoSyncMs?: number
+  /** Backstop local-read interval (ms) in case a `sync:status` event is missed. */
+  backstopMs?: number
 }
 
 export function createTauriSyncController(
   options: TauriSyncControllerOptions = {},
 ): TauriSyncController {
-  const pollMs = options.pollMs ?? 4000
-  const autoSyncMs = options.autoSyncMs ?? 30000
+  const backstopMs = options.backstopMs ?? 30000
 
   const listeners = new Set<(status: SyncStatus) => void>()
   // conflict id -> client_uuid, so resolveConflict can key back into Rust.
   const uuidById = new Map<number, string>()
 
-  let syncing = false
   let snapshot: SyncStatus = {
     online: isOnline(),
     syncing: false,
@@ -110,14 +119,9 @@ export function createTauriSyncController(
     return () => listeners.delete(listener)
   }
 
-  function buildStatus(
-    view: SyncStatusView,
-    conflicts: ConflictView[],
-    lock: LockState,
-    online: boolean,
-  ): SyncStatus {
+  function mapConflicts(views: ConflictView[]): Conflict[] {
     uuidById.clear()
-    const mapped: Conflict[] = conflicts.map((c) => {
+    return views.map((c) => {
       uuidById.set(c.id, c.clientUuid)
       return {
         id: c.id,
@@ -131,38 +135,56 @@ export function createTauriSyncController(
         })),
       }
     })
-    return {
-      online,
-      syncing,
-      unsyncedCount: view.unsyncedCount,
-      lastSyncedAt: laterIso(view.lastPullAt, view.lastPushAt),
-      conflicts: mapped,
-      locked: lock.locked,
-    }
   }
 
+  /** Apply a Rust `sync:status` event; fetch the conflict LIST only when there
+   *  are conflicts (the event carries counts, not the list). */
+  async function applyEvent(ev: SyncStatusEvent): Promise<void> {
+    let conflicts: Conflict[] = []
+    if (ev.conflictCount > 0) {
+      try {
+        conflicts = mapConflicts(await invoke<ConflictView[]>("list_conflicts"))
+      } catch (err) {
+        console.warn("list_conflicts failed:", err)
+      }
+    } else {
+      uuidById.clear()
+    }
+    if (ev.lastError) console.warn("sync error:", ev.lastError)
+    emit({
+      online: ev.online,
+      syncing: ev.syncing,
+      unsyncedCount: ev.unsyncedCount,
+      lastSyncedAt: laterIso(ev.lastPullAt, ev.lastPushAt),
+      conflicts,
+      locked: ev.locked,
+    })
+  }
+
+  /** Backstop: local reads only. Preserves the loop-owned `online`/`syncing`. */
   async function refresh(): Promise<void> {
-    const [view, conflicts, lock] = await Promise.all([
+    const [view, conflictViews, lock] = await Promise.all([
       invoke<SyncStatusView>("get_sync_status"),
       invoke<ConflictView[]>("list_conflicts"),
       invoke<LockState>("auth_lock_state"),
     ])
-    emit(buildStatus(view, conflicts, lock, isOnline()))
+    emit({
+      online: snapshot.online,
+      syncing: snapshot.syncing,
+      unsyncedCount: view.unsyncedCount,
+      lastSyncedAt: laterIso(view.lastPullAt, view.lastPushAt),
+      conflicts: mapConflicts(conflictViews),
+      locked: lock.locked,
+    })
   }
 
   async function syncNow(): Promise<void> {
-    if (syncing) return
-    syncing = true
+    // Optimistic spinner; the loop's events confirm/clear it.
     emit({ ...snapshot, syncing: true })
     try {
-      await invoke("sync_now")
+      await invoke("sync_now") // fires a Manual trigger; returns immediately
     } catch (err) {
-      // A network/auth failure just leaves rows pending — the banner keeps
-      // showing the unsynced count and the next cycle retries (Rust backoff).
-      console.warn("sync_now failed:", err)
-    } finally {
-      syncing = false
-      await refresh()
+      console.warn("sync_now trigger failed:", err)
     }
   }
 
@@ -190,38 +212,33 @@ export function createTauriSyncController(
       else if (field.field === "status") status = value === "archived" ? "archived" : "active"
     }
 
+    // Rust's resolve_conflict rebases + fires a LocalWrite trigger, so the loop
+    // pushes the merged result and emits the cleared status. Refresh locally for
+    // an immediate UI update (the conflict is already gone from the local read).
     await invoke("resolve_conflict", { clientUuid, name, description, status })
     await refresh()
-    // Push the merged result straight away when we can.
-    if (snapshot.online && !snapshot.locked) void syncNow()
   }
 
   function start(): () => void {
-    let disposed = false
-    void refresh()
+    void refresh() // immediate local snapshot before the first event lands
 
-    const pollTimer = setInterval(() => void refresh(), pollMs)
-    const autoSyncTimer = setInterval(() => {
-      if (disposed) return
-      if (snapshot.online && !snapshot.locked && snapshot.unsyncedCount > 0) void syncNow()
-    }, autoSyncMs)
+    let unlistenStatus: (() => void) | undefined
+    void listen<SyncStatusEvent>("sync:status", (event) => void applyEvent(event.payload)).then(
+      (un) => {
+        unlistenStatus = un
+      },
+    )
 
-    const onOnline = () => {
-      void (async () => {
-        await refresh()
-        if (!snapshot.locked) void syncNow()
-      })()
-    }
-    const onOffline = () => emit({ ...snapshot, online: false })
+    // Backstop poll for a missed event, and nudge the loop on a browser reconnect
+    // hint (the loop owns the authoritative connectivity via its exchange probe).
+    const backstop = setInterval(() => void refresh(), backstopMs)
+    const onOnline = () => void syncNow()
     window.addEventListener("online", onOnline)
-    window.addEventListener("offline", onOffline)
 
     return () => {
-      disposed = true
-      clearInterval(pollTimer)
-      clearInterval(autoSyncTimer)
+      clearInterval(backstop)
       window.removeEventListener("online", onOnline)
-      window.removeEventListener("offline", onOffline)
+      unlistenStatus?.()
     }
   }
 

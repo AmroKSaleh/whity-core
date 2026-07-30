@@ -1,29 +1,26 @@
-//! Sync commands (WC-desktop-sync). `sync_now` runs one push+pull cycle against
-//! the server; `get_sync_status` reports local counts for the UI.
-//!
-//! NOTE: `sync_now` holds the DB mutex for the whole cycle (network included).
-//! Fine for an explicit, user-triggered sync; the background scheduler (a later
-//! hardening PR) will read a batch, release the lock across network I/O, then
-//! re-lock to apply — so UI reads never block on a long sync.
+//! Sync commands (WC-desktop-sync). Sync itself runs in the background loop
+//! (`sync::scheduler`); these commands just nudge it and read local state for
+//! the UI. `sync_now` fires a trigger and returns immediately — the cycle's
+//! outcome arrives via `sync:status` events, not this call's return value.
 
 use rusqlite::OptionalExtension;
 use tauri::State;
 
-use crate::auth::AuthManager;
 use crate::db::conflicts_repo::{self, ConflictView};
 use crate::db::Db;
-use crate::sync::{engine, SyncStatusView, SyncSummary, DEMO_CATALOG_RESOURCE};
+use crate::sync::scheduler::{SyncHandle, Trigger};
+use crate::sync::{SyncStatusView, DEMO_CATALOG_RESOURCE};
 
+/// Ask the background loop to run a cycle now (non-blocking). The result is
+/// emitted as a `sync:status` event; the loop, not this call, does the work.
 #[tauri::command]
-pub fn sync_now(db: State<'_, Db>, auth: State<'_, AuthManager>) -> Result<SyncSummary, String> {
-    // A fresh access token (this also re-stamps the offline-auth clock).
-    let session = auth.exchange_session()?;
-    let api_base = auth.cfg.api_base();
-
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    engine::sync_cycle(&conn, auth.client(), &api_base, &session.access_token)
+pub fn sync_now(scheduler: State<'_, SyncHandle>) -> Result<(), String> {
+    scheduler.trigger(Trigger::Manual);
+    Ok(())
 }
 
+/// A point-in-time read of local sync state for the initial snapshot / a
+/// backstop poll (the `sync:status` event carries the same fields live).
 #[tauri::command]
 pub fn get_sync_status(db: State<'_, Db>) -> Result<SyncStatusView, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -69,20 +66,25 @@ pub fn list_conflicts(db: State<'_, Db>) -> Result<Vec<ConflictView>, String> {
 
 /// Apply a resolver decision: the frontend sends the resolved concrete values
 /// (per-field mine/theirs/custom already collapsed), which rebase the row onto
-/// the server version, re-queue it to push, and clear the conflict.
+/// the server version and re-queue it. Nudges the loop to push the merged result.
 #[tauri::command]
 pub fn resolve_conflict(
     db: State<'_, Db>,
+    scheduler: State<'_, SyncHandle>,
     client_uuid: String,
     name: String,
     description: Option<String>,
     status: String,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let resolved = conflicts_repo::resolve(&conn, &client_uuid, &name, description.as_deref(), &status)
-        .map_err(|e| e.to_string())?;
-    if !resolved {
-        return Err("conflict not found".to_string());
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let resolved =
+            conflicts_repo::resolve(&conn, &client_uuid, &name, description.as_deref(), &status)
+                .map_err(|e| e.to_string())?;
+        if !resolved {
+            return Err("conflict not found".to_string());
+        }
     }
+    scheduler.trigger(Trigger::LocalWrite);
     Ok(())
 }

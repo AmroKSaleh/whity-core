@@ -34,24 +34,41 @@ pub struct Db(pub Mutex<Connection>);
 /// directory, set pragmas, and apply schema migrations. Idempotent: safe to
 /// call on every launch.
 pub fn open(app_handle: &AppHandle) -> rusqlite::Result<Connection> {
+    let conn = open_at(&db_path(app_handle))?;
+    migrations::run(&conn)?;
+    Ok(conn)
+}
+
+/// Open a SECOND connection to the same database for the background sync loop
+/// (`sync::scheduler`). WAL mode (set below) lets this connection write while the
+/// UI's `Db` connection keeps serving reads without blocking — so a background
+/// sync cycle never freezes the UI, which is exactly why the engine can keep
+/// holding its own connection across network I/O. Migrations are NOT re-run here:
+/// the primary `open()` already applied them at startup.
+pub fn open_sync_connection(app_handle: &AppHandle) -> rusqlite::Result<Connection> {
+    open_at(&db_path(app_handle))
+}
+
+/// Resolve (creating the parent dir) the database file path in the OS app-data dir.
+fn db_path(app_handle: &AppHandle) -> std::path::PathBuf {
     let app_dir = app_handle
         .path()
         .app_data_dir()
         .expect("failed to resolve the app data directory");
     fs::create_dir_all(&app_dir).expect("failed to create the app data directory");
+    app_dir.join("whity-desktop.sqlite")
+}
 
-    let db_path = app_dir.join("whity-desktop.sqlite");
-    let conn = Connection::open(db_path)?;
-
-    // WAL + busy timeout so the UI connection and the (future) background sync
-    // connection don't trip over each other; foreign keys on for the aux tables
-    // later sync PRs add. execute_batch tolerates the row `journal_mode` returns.
+/// Open a connection with the shared pragmas (no migrations).
+fn open_at(path: &std::path::Path) -> rusqlite::Result<Connection> {
+    let conn = Connection::open(path)?;
+    // WAL + busy timeout so the UI connection and the background sync connection
+    // don't trip over each other; foreign keys on for the aux sync tables.
+    // execute_batch tolerates the row `journal_mode` returns.
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA busy_timeout=5000;
          PRAGMA foreign_keys=ON;",
     )?;
-
-    migrations::run(&conn)?;
     Ok(conn)
 }
