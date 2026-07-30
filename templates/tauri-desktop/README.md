@@ -203,50 +203,46 @@ The frontend was verified with `tsc --noEmit` and a real `vite build`.
 
 ### Offline-sync stack — verified
 
-- Rust unit tests cover the schema migrations (v1→v5), the offline-lock logic,
-  the drafts + soft-delete repos, and the conflict-resolution repo.
+- Rust unit tests cover the schema migrations (v1→v6), the offline-lock logic,
+  the drafts + soft-delete repos, the conflict-resolution repo, and the push
+  retry/backoff.
 - A live integration test drives the sync engine against a real backend end to
   end: device enroll → push → pull on a fresh client → concurrent-edit `409` →
-  conflict parked → resolve → re-sync. The shared sync UI (`UnsyncedBanner` /
-  `ConflictResolver` / `LockedScreen`) is jest-tested (incl. Arabic-bidi content).
+  conflict parked → resolve → re-sync.
+- The shared sync UI (`UnsyncedBanner` / `ConflictResolver` / `LockedScreen`) is
+  jest-tested (incl. Arabic-bidi content) **and mounted in the running app**
+  (`sync-controller-tauri.ts` + `app-state-provider.tsx`). The on-screen flow was
+  verified live on Windows: enroll → local-first save + auto-push → offline banner
+  → reconnect drain → a real two-writer `409` through the field-level resolver →
+  offline-TTL lock → credential re-login.
 - `npm run tauri build` on **Windows 11 (x86_64-pc-windows-msvc)** compiled the
   full stack — including the added `reqwest` (rustls) and `keyring` crates —
   clean, and produced both Windows installers: **MSI ~5.4 MB**, **NSIS setup
   ~4.0 MB** (release `.exe` ~13.6 MB — up from the printer-only ~10.5 MB baseline
-  for the sync / HTTP / keychain crates).
+  for the sync / HTTP / keychain crates). The app also runs natively: the window
+  launches, the first-run SQLite DB is created under
+  `%APPDATA%\com.whity.tauri-desktop-template\`, and printing was exercised
+  against the live Windows Print Spooler (a real job — 10 printers enumerated,
+  default resolved, `print_text` returned `Ok`), not just compiled.
 
 ### Known gaps — not yet verified
 
-- **Windows.** Not yet built/run natively. Printing especially is the most
-  OS-divergent capability here (Print Spooler vs. CUPS vs. Core Graphics) —
-  don't assume the Linux verification above generalizes. Building natively
-  requires the MSVC C++ build tools (`Microsoft.VisualStudio.2022.BuildTools`
-  with the `Microsoft.VisualStudio.Workload.VCTools` component), which need
-  an elevated (Administrator) install — that blocked an attempt to verify
-  this from an unattended session. Whoever picks this up next: install Rust
-  (`rustup`) + the VS Build Tools workload above, then
-  `cd templates/tauri-desktop && npm install && npm run tauri build`, and
-  specifically exercise the printer command against a real Windows printer
-  (or "Microsoft Print to PDF").
 - **macOS.** Deliberately deferred, not attempted at all yet — a distinct
-  follow-up stage, not scheduled as part of this pass.
+  follow-up stage, not scheduled as part of this pass. (Windows and Linux are
+  verified above; macOS is the one untried platform.)
 - **Linux keychain build dep.** The `keyring` Linux backend talks to the Secret
   Service over D-Bus, so a Linux build/run needs `libdbus-1-dev` (add it to the
   Tauri Linux system deps above). Windows/macOS use their native keystores with
   no extra dep.
-- **Sync UI wiring + its interactive verification.** The sync *logic* is verified
-  (unit + live integration against the server), but mounting the shared
-  `UnsyncedBanner` / `ConflictResolver` / `LockedScreen` into the running window —
-  and confirming the on-screen UX (enroll → offline-past-TTL lock → two-client
-  conflict → resolve) — is a follow-up that needs the app running.
 - **Deferred sync-engine enhancements.** Sync currently runs on an explicit
   `sync_now` (a frontend interval + online-listener drives it). A Rust background
   scheduler with connectivity detection, and generalizing the engine behind a
   `SyncableResource` trait for multi-entity reuse, are scoped follow-ups.
   (Per-row retry/backoff — a flaky/invalid push backs off and never aborts the
   cycle — is implemented.)
-- **Packaging size / startup time.** Not measured on any platform — depends
-  on the platform builds above existing first. Once a real `tauri build`
-  output exists (Windows installer, macOS `.app`/`.dmg`, or the Linux
-  AppImage/deb), report actual installer size and cold-start time here rather
-  than leaving each downstream consumer to measure it independently.
+- **Packaging size / startup on macOS + Linux.** Windows is measured above
+  (installer sizes; ~0.5 s first-run / ~60 ms warm launch on Windows 11). The
+  macOS `.app`/`.dmg` and Linux AppImage/deb sizes + cold-start remain
+  unmeasured — they depend on those platform builds existing first; report the
+  actual numbers here once they do, rather than leaving each downstream consumer
+  to measure independently.
