@@ -157,6 +157,17 @@ final class TenantOwnedTables
         // in ScheduledJobRepository) and stamps each enqueue with the row's
         // origin tenant — the same model as `jobs`.
         'scheduled_jobs' => '069_create_scheduled_jobs.php',
+
+        // WC-notifications (#d89dcc2c) — the notification persistence spine
+        // (migration 070). `notifications` is the tenant-scoped message/inbox row;
+        // `notification_deliveries` is its per-channel attempt log, with the
+        // tenant DENORMALISED from the parent notification so the sweep index and
+        // predicate guard sit on one row (the same pattern as `event_outbox` /
+        // `entity_tags`). Tenant-scoped reads/writes bind tenant_id in
+        // NotificationRepository; the eventual relay sweep runs as system infra
+        // across tenants (annotated @tenant-guard-ignore in its own slice).
+        'notifications'           => '070_create_notifications.php',
+        'notification_deliveries' => '070_create_notifications.php',
     ];
 
     /**
