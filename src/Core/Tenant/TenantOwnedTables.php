@@ -168,6 +168,13 @@ final class TenantOwnedTables
         // across tenants (annotated @tenant-guard-ignore in its own slice).
         'notifications'           => '070_create_notifications.php',
         'notification_deliveries' => '070_create_notifications.php',
+
+        // WC-notifications (#c56a6455) — per-user notification preferences
+        // (migration 071). One (tenant, profile, type, channel) toggle; every
+        // read/write binds tenant_id (+ profile_id for self-scoping). The
+        // dispatcher's NotificationPreferenceResolver consults it to filter a
+        // recipient's channels (transactional types always bypass).
+        'user_notification_preferences' => '071_create_user_notification_preferences.php',
     ];
 
     /**

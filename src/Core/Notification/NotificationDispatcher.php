@@ -45,19 +45,22 @@ final class NotificationDispatcher
     private QueueService $queue;
     private NotificationRenderer $renderer;
     private ?LoggerInterface $logger;
+    private ?NotificationPreferenceResolver $preferences;
 
     public function __construct(
         NotificationRepository $repo,
         TransportRegistry $transports,
         QueueService $queue,
         ?NotificationRenderer $renderer = null,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        ?NotificationPreferenceResolver $preferences = null
     ) {
         $this->repo = $repo;
         $this->transports = $transports;
         $this->queue = $queue;
         $this->renderer = $renderer ?? new PassthroughRenderer();
         $this->logger = $logger;
+        $this->preferences = $preferences;
     }
 
     /**
@@ -81,6 +84,13 @@ final class NotificationDispatcher
         $channels = self::resolveChannels($options['channels'] ?? null);
         $data = $options['data'] ?? [];
         $locale = isset($options['locale']) ? (string) $options['locale'] : null;
+
+        // Filter to the channels the recipient has not opted out of (transactional
+        // types + a null recipient bypass this). The notification row is still
+        // persisted below regardless, so the in-app inbox stays the complete record.
+        if ($this->preferences !== null) {
+            $channels = $this->preferences->filterChannels($tenantId, $recipientProfileId, $type, $channels);
+        }
 
         // Persist the logical notification (also the in-app inbox row). The
         // caller-supplied subject/body are stored raw; per-channel rendering
