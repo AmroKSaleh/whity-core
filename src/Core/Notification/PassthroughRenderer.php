@@ -17,9 +17,11 @@ namespace Whity\Core\Notification;
 final class PassthroughRenderer implements NotificationRenderer
 {
     /**
+     * The passthrough renderer ignores $tenantId (it has no per-tenant storage).
+     *
      * @param array{subject?: string, body?: string, bodyHtml?: string|null, data?: array<string, mixed>} $context
      */
-    public function render(string $type, string $channel, ?string $locale, array $context): RenderedNotification
+    public function render(int $tenantId, string $type, string $channel, ?string $locale, array $context): RenderedNotification
     {
         $data = $context['data'] ?? [];
         $bodyHtml = $context['bodyHtml'] ?? null;

@@ -175,6 +175,13 @@ final class TenantOwnedTables
         // dispatcher's NotificationPreferenceResolver consults it to filter a
         // recipient's channels (transactional types always bypass).
         'user_notification_preferences' => '071_create_user_notification_preferences.php',
+
+        // WC-notifications (#2aa3411a) — notification templates (migration 072).
+        // tenant_id 0 = the global default core set; > 0 = a tenant override.
+        // Resolution binds tenant_id (a caller reads its own overrides + the
+        // global 0 set); a regular tenant writes only its own rows — the same
+        // global-vs-tenant asymmetry as base roles.
+        'notification_templates' => '072_create_notification_templates.php',
     ];
 
     /**

@@ -172,7 +172,7 @@ final class NotificationDispatcher
             return;
         }
 
-        $rendered = $this->renderer->render($type, $channel, $locale, [
+        $rendered = $this->renderer->render($tenantId, $type, $channel, $locale, [
             'subject'  => (string) ($options['subject'] ?? ''),
             'body'     => (string) ($options['body'] ?? ''),
             'bodyHtml' => isset($options['bodyHtml']) ? (string) $options['bodyHtml'] : null,

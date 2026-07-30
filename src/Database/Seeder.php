@@ -213,6 +213,10 @@ class Seeder
                 ]
             );
         }
+
+        // ── Global default notification templates (WC-notifications #2aa3411a) ──
+        // The operator-managed baseline every tenant inherits (idempotent).
+        \Whity\Core\Notification\NotificationTemplateSeeder::seed($pdo);
     }
 
     /** Returns the local-part (before @) of an email address for display_name. */
