@@ -88,6 +88,7 @@ final class CoreApiSchemas
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
             self::meRoutes(),
+            self::meNotificationRoutes(),
             self::platformOpsRoutes(),
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
@@ -842,6 +843,80 @@ final class CoreApiSchemas
                     ],
                     'responses' => [
                         200 => self::jsonResponse('The caller\'s own audit entries with pagination', 'AuditLogListResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * In-app notification inbox surface (WC-notifications, 6e10d9ea). All routes
+     * are self-scoped to the caller's (tenant, profile) and session-gated with NO
+     * RBAC permission (any authenticated caller reads/mutates only their OWN
+     * inbox), so they carry no requiredRole/requiredPermission — matching the
+     * other /api/me self-service surfaces.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function meNotificationRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/me/notifications',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the caller\'s in-app notifications (newest first, paginated) + unread count',
+                    'tags' => ['notifications'],
+                    'parameters' => [
+                        self::queryParam('unread', 'boolean', 'Restrict to unread notifications when truthy'),
+                        self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                        self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    ],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s inbox with pagination and unread count', 'NotificationListResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/me/notifications/unread-count',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'The caller\'s unread-notification count (inbox badge)',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        200 => self::jsonResponse('The unread count', 'UnreadCountResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/notifications/read-all',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Mark all the caller\'s unread notifications read',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        200 => self::jsonResponse('How many notifications were marked read', 'MarkAllReadResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/notifications/{id:\d+}/read',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Mark one of the caller\'s notifications read (idempotent)',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        204 => ['description' => 'Marked read'],
+                        422 => self::errorResponse('A valid notification id is required'),
+                        404 => self::errorResponse('Notification not found or not owned by the caller'),
                     ] + self::authErrors(),
                 ],
             ],
@@ -2310,6 +2385,30 @@ final class CoreApiSchemas
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('AuditLogEntry')],
                 'pagination' => SchemaBuilder::ref('Pagination'),
             ], ['data', 'pagination']),
+
+            // ---- In-app notification inbox schemas (WC-notifications, 6e10d9ea) ----
+
+            'NotificationEntry' => self::object([
+                'id' => self::int(),
+                'type' => self::str(),
+                'subject' => self::str(),
+                'body' => self::str(),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'read' => self::bool(),
+                'read_at' => self::str(true),
+                'created_at' => self::str(true),
+            ], ['id', 'type', 'subject', 'body', 'data', 'read', 'read_at', 'created_at']),
+            'NotificationListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationEntry')],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+                'unread_count' => self::int(),
+            ], ['data', 'pagination', 'unread_count']),
+            'UnreadCountResponse' => self::object([
+                'unread_count' => self::int(),
+            ], ['unread_count']),
+            'MarkAllReadResponse' => self::object([
+                'marked' => self::int(),
+            ], ['marked']),
 
             // ---- Platform-ops schemas (WC-62133b3f) ----
 

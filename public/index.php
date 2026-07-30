@@ -1208,6 +1208,15 @@ $notificationDispatcher = new \Whity\Core\Notification\NotificationDispatcher(
 );
 $notificationDispatcher->subscribe($hookManager);
 
+// In-app notification INBOX (WC-notifications, 6e10d9ea). Self-scoped to the
+// caller's (tenant, profile) — session-gated, no RBAC permission (like
+// /api/me/sessions). Reads the notifications the dispatcher persisted.
+$inboxHandler = new \Whity\Api\InboxApiHandler($tokenValidator, $notificationRepository);
+$router->register('GET',  '/api/me/notifications',                [$inboxHandler, 'list'],         null);
+$router->register('GET',  '/api/me/notifications/unread-count',   [$inboxHandler, 'unreadCount'],  null);
+$router->register('POST', '/api/me/notifications/read-all',       [$inboxHandler, 'markAllRead'],  null);
+$router->register('POST', '/api/me/notifications/{id:\d+}/read',  [$inboxHandler, 'markRead'],     null);
+
 $jobsRegistry = new \Whity\Core\Queue\JobRegistry();
 // Share the transport registry so the (internal, non-submittable) delivery job is
 // registered here too — the same handler the queue:work worker runs.

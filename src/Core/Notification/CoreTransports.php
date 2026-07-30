@@ -32,7 +32,14 @@ final class CoreTransports
 
     public static function register(TransportRegistry $registry, ?LoggerInterface $logger = null): void
     {
+        // `in_app` is served by the built-in inbox transport (the notification row
+        // IS the delivery). Every OTHER core channel gets the log transport by
+        // default until a real provider registers for it (last-registration-wins).
+        $registry->register(new InAppTransport());
         foreach (self::DEFAULT_CHANNELS as $channel) {
+            if ($channel === InAppTransport::CHANNEL) {
+                continue;
+            }
             $registry->register(new LogTransport($channel, $logger));
         }
     }

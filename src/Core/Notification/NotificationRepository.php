@@ -71,6 +71,87 @@ final class NotificationRepository
     }
 
     /**
+     * List a recipient's inbox for a tenant, newest first, optionally unread-only,
+     * with limit/offset paging. Doubly scoped (tenant + recipient) so a caller
+     * only ever sees their OWN notifications; the tenant_id predicate lives in the
+     * SQL literal (guard-visible) and the fixed unread filter is appended.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listForRecipient(int $tenantId, int $recipientProfileId, bool $unreadOnly, int $limit, int $offset): array
+    {
+        $filter = $unreadOnly ? ' AND read_at IS NULL' : '';
+        $stmt = $this->pdo->prepare(
+            'SELECT * FROM notifications WHERE tenant_id = :tenant_id AND recipient_profile_id = :recipient' . $filter
+            . ' ORDER BY id DESC LIMIT :limit OFFSET :offset'
+        );
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $stmt->bindValue(':recipient', $recipientProfileId, PDO::PARAM_INT);
+        $stmt->bindValue(':limit', max(0, $limit), PDO::PARAM_INT);
+        $stmt->bindValue(':offset', max(0, $offset), PDO::PARAM_INT);
+        $stmt->execute();
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_values(array_map(static fn (array $r): array => self::mapNotification($r), $rows));
+    }
+
+    /**
+     * Count a recipient's inbox rows (pagination total), optionally unread-only.
+     */
+    public function countForRecipient(int $tenantId, int $recipientProfileId, bool $unreadOnly): int
+    {
+        $filter = $unreadOnly ? ' AND read_at IS NULL' : '';
+        $stmt = $this->pdo->prepare(
+            'SELECT COUNT(*) FROM notifications WHERE tenant_id = :tenant_id AND recipient_profile_id = :recipient' . $filter
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':recipient' => $recipientProfileId]);
+        $count = $stmt->fetchColumn();
+
+        return $count === false ? 0 : (int) $count;
+    }
+
+    /**
+     * The recipient's unread-notification count (the inbox badge).
+     */
+    public function unreadCount(int $tenantId, int $recipientProfileId): int
+    {
+        return $this->countForRecipient($tenantId, $recipientProfileId, true);
+    }
+
+    /**
+     * Mark ONE of the recipient's notifications read (idempotent — an already-read
+     * row keeps its original read_at). Returns false when the id is missing or not
+     * owned by this (tenant, recipient), so the caller can 404 without leaking
+     * cross-tenant/cross-user existence.
+     */
+    public function markRead(int $tenantId, int $recipientProfileId, int $id): bool
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE notifications SET read_at = COALESCE(read_at, NOW()), updated_at = NOW()
+              WHERE id = :id AND tenant_id = :tenant_id AND recipient_profile_id = :recipient'
+        );
+        $stmt->execute([':id' => $id, ':tenant_id' => $tenantId, ':recipient' => $recipientProfileId]);
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Mark ALL of the recipient's still-unread notifications read. Returns how
+     * many were flipped.
+     */
+    public function markAllRead(int $tenantId, int $recipientProfileId): int
+    {
+        $stmt = $this->pdo->prepare(
+            'UPDATE notifications SET read_at = NOW(), updated_at = NOW()
+              WHERE tenant_id = :tenant_id AND recipient_profile_id = :recipient AND read_at IS NULL'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':recipient' => $recipientProfileId]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
      * Record a per-channel delivery attempt row for a notification, stamped with
      * the (trusted) owning tenant, and return its id. Starts `queued` with zero
      * attempts; the relay slice walks it to sent/failed/bounced.
