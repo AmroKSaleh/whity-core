@@ -12,6 +12,7 @@
 //! purely local store (no network) — but now with the metadata sync needs.
 
 use crate::db::Db;
+use crate::sync::scheduler::{SyncHandle, Trigger};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -94,7 +95,11 @@ pub fn get_item(db: State<'_, Db>, id: i64) -> Result<Option<DemoCatalogItem>, S
 }
 
 #[tauri::command]
-pub fn save_item(db: State<'_, Db>, input: DemoCatalogItemInput) -> Result<DemoCatalogItem, String> {
+pub fn save_item(
+    db: State<'_, Db>,
+    scheduler: State<'_, SyncHandle>,
+    input: DemoCatalogItemInput,
+) -> Result<DemoCatalogItem, String> {
     if input.name.trim().is_empty() {
         return Err("name must not be empty".to_string());
     }
@@ -141,12 +146,18 @@ pub fn save_item(db: State<'_, Db>, input: DemoCatalogItemInput) -> Result<DemoC
         }
     };
 
-    conn.query_row(
-        &format!("SELECT {SELECT_COLS} FROM demo_catalog_items WHERE id = ?1"),
-        params![id],
-        row_to_item,
-    )
-    .map_err(|e| e.to_string())
+    let item = conn
+        .query_row(
+            &format!("SELECT {SELECT_COLS} FROM demo_catalog_items WHERE id = ?1"),
+            params![id],
+            row_to_item,
+        )
+        .map_err(|e| e.to_string())?;
+    drop(conn);
+
+    // Nudge the background loop to push this write (debounced; no-op if offline).
+    scheduler.trigger(Trigger::LocalWrite);
+    Ok(item)
 }
 
 /// Soft-delete an item (WC-desktop-sync): it vanishes from the UI immediately
@@ -154,11 +165,19 @@ pub fn save_item(db: State<'_, Db>, input: DemoCatalogItemInput) -> Result<DemoC
 /// part of the shared `DemoCatalogAdapter` contract (which is list/get/save) —
 /// a template-local capability the desktop UI/sync layer wire up.
 #[tauri::command]
-pub fn delete_item(db: State<'_, Db>, id: i64) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let existed = crate::db::items_repo::soft_delete(&conn, id).map_err(|e| e.to_string())?;
-    if !existed {
-        return Err("item not found".to_string());
+pub fn delete_item(
+    db: State<'_, Db>,
+    scheduler: State<'_, SyncHandle>,
+    id: i64,
+) -> Result<(), String> {
+    {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let existed = crate::db::items_repo::soft_delete(&conn, id).map_err(|e| e.to_string())?;
+        if !existed {
+            return Err("item not found".to_string());
+        }
     }
+    // Nudge the background loop to propagate the tombstone (debounced).
+    scheduler.trigger(Trigger::LocalWrite);
     Ok(())
 }

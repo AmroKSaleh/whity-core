@@ -16,6 +16,7 @@
 
 pub mod engine;
 pub mod http;
+pub mod scheduler;
 
 use serde::{Deserialize, Serialize};
 
