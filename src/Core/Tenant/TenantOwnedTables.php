@@ -182,6 +182,12 @@ final class TenantOwnedTables
         // global 0 set); a regular tenant writes only its own rows — the same
         // global-vs-tenant asymmetry as base roles.
         'notification_templates' => '072_create_notification_templates.php',
+
+        // WC-notifications (#d70c6083) — per-tenant sender configuration
+        // (migration 073). from/reply-to, transport selection, non-secret config,
+        // and the ENCRYPTED provider credentials (write-only over the API). Every
+        // read/write binds tenant_id so a tenant only sees/edits its own sender.
+        'tenant_notification_settings' => '073_create_tenant_notification_settings.php',
     ];
 
     /**

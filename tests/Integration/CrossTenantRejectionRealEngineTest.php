@@ -31,6 +31,7 @@ use Whity\Core\Hooks\HookManager;
 use Whity\Core\Notification\NotificationPreferenceRepository;
 use Whity\Core\Notification\NotificationRepository;
 use Whity\Core\Notification\NotificationTemplateRepository;
+use Whity\Core\Notification\TenantNotificationSettingsRepository;
 use Whity\Core\Queue\JobRepository;
 use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
@@ -1979,6 +1980,29 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $bAfter = $repo->resolve(self::TENANT_B, 'welcome', 'email', null);
         self::assertNotNull($bAfter);
         self::assertSame('B override', $bAfter['subject']);
+    }
+
+    public function testTenantScopedSenderSettingsRejectAForeignTenant(): void
+    {
+        $repo = new TenantNotificationSettingsRepository($this->pdo);
+        $repo->upsertConfig(self::TENANT_A, 'email', ['from_address' => 'a@a.test']);
+        $repo->setCredentials(self::TENANT_A, 'email', 'A-BLOB');
+        $repo->upsertConfig(self::TENANT_B, 'email', ['from_address' => 'b@b.test']);
+
+        // Each tenant lists only its own channel config.
+        self::assertSame(['a@a.test'], array_column($repo->listForTenant(self::TENANT_A), 'from_address'));
+        self::assertSame(['b@b.test'], array_column($repo->listForTenant(self::TENANT_B), 'from_address'));
+
+        // Tenant B's channel carries its own (empty) credentials — never tenant A's blob.
+        $bRow = $repo->findWithCredentials(self::TENANT_B, 'email');
+        self::assertNotNull($bRow);
+        self::assertNull($bRow['credentials_encrypted'], "tenant B never sees tenant A's credentials");
+
+        // A tenant-B delete cannot remove tenant A's config or credentials.
+        $repo->delete(self::TENANT_B, 'email');
+        $aCreds = $repo->findWithCredentials(self::TENANT_A, 'email');
+        self::assertNotNull($aCreds, "tenant A's config survives tenant B's delete");
+        self::assertSame('A-BLOB', $aCreds['credentials_encrypted'], "tenant A's credentials survive");
     }
 
     /**

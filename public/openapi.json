@@ -7079,6 +7079,384 @@
                 }
             }
         },
+        "/api/v1/notification-settings": {
+            "get": {
+                "operationId": "get_api_v1_notification_settings",
+                "summary": "List the tenant's per-channel sender config (credentials redacted)",
+                "tags": [
+                    "notifications"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The tenant's sender config per channel",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TenantNotificationSettingsListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/notification-settings/{channel}": {
+            "delete": {
+                "operationId": "delete_api_v1_notification_settings_channel",
+                "summary": "Remove a channel's sender config",
+                "tags": [
+                    "notifications"
+                ],
+                "parameters": [
+                    {
+                        "name": "channel",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Channel configuration removed"
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Channel configuration not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "operationId": "put_api_v1_notification_settings_channel",
+                "summary": "Upsert a channel's sender config (from/reply-to, transport, provider config)",
+                "tags": [
+                    "notifications"
+                ],
+                "parameters": [
+                    {
+                        "name": "channel",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TenantNotificationSettingsUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The updated channel sender config",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TenantNotificationSettingsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/notification-settings/{channel}/credentials": {
+            "put": {
+                "operationId": "put_api_v1_notification_settings_channel_credentials",
+                "summary": "Set or clear a channel's provider credentials (write-only, encrypted at rest)",
+                "tags": [
+                    "notifications"
+                ],
+                "parameters": [
+                    {
+                        "name": "channel",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/NotificationCredentialsRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "Credentials stored or cleared"
+                    },
+                    "400": {
+                        "description": "Missing credentials field",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/ous": {
             "get": {
                 "operationId": "get_api_v1_ous",
@@ -16536,6 +16914,18 @@
                     "data"
                 ]
             },
+            "NotificationCredentialsRequest": {
+                "type": "object",
+                "properties": {
+                    "credentials": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "credentials"
+                ]
+            },
             "NotificationEntry": {
                 "type": "object",
                 "properties": {
@@ -18886,6 +19276,99 @@
                     "data",
                     "pagination"
                 ]
+            },
+            "TenantNotificationSettingsEntry": {
+                "type": "object",
+                "properties": {
+                    "channel": {
+                        "type": "string"
+                    },
+                    "transport": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "from_address": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "from_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "reply_to": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "config": {
+                        "type": "object",
+                        "additionalProperties": true
+                    },
+                    "has_credentials": {
+                        "type": "boolean"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "channel",
+                    "config",
+                    "has_credentials",
+                    "enabled"
+                ]
+            },
+            "TenantNotificationSettingsListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TenantNotificationSettingsEntry"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "TenantNotificationSettingsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/TenantNotificationSettingsEntry"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "TenantNotificationSettingsUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "transport": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "from_address": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "from_name": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "reply_to": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "config": {
+                        "type": "object",
+                        "additionalProperties": true
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    }
+                }
             },
             "TenantPlan": {
                 "type": "object",
