@@ -117,11 +117,64 @@ final class NotificationRepository
     }
 
     /**
+     * Read one delivery scoped to a tenant. Returns null for a missing id OR
+     * another tenant's delivery.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findDelivery(int $tenantId, int $id): ?array
+    {
+        $stmt = $this->pdo->prepare('SELECT * FROM notification_deliveries WHERE id = :id AND tenant_id = :tenant_id');
+        $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : self::mapDelivery($row);
+    }
+
+    /**
+     * Mark a delivery SENT (clearing any prior error) and store the provider's
+     * message id. `attempts` is incremented so the row records how many send
+     * attempts occurred.
+     */
+    public function markDeliverySent(int $id, ?string $providerId): void
+    {
+        // @tenant-guard-ignore: the delivery worker marks a delivery sent BY ID (system infra); the job's origin tenant is restored into TenantContext by JobRunner before the handler runs.
+        $stmt = $this->pdo->prepare(
+            "UPDATE notification_deliveries
+                SET status = 'sent', provider_id = :provider_id, error = NULL, attempts = attempts + 1, sent_at = NOW(), updated_at = NOW()
+              WHERE id = :id"
+        );
+        $stmt->execute([':provider_id' => $providerId, ':id' => $id]);
+    }
+
+    /**
+     * Mark a delivery FAILED (default) or BOUNCED with the last error, bumping
+     * `attempts`. An unrecognised status is coerced to 'failed' so the row can
+     * never violate the CHECK constraint.
+     */
+    public function markDeliveryFailed(int $id, string $error, string $status = 'failed'): void
+    {
+        $status = in_array($status, ['failed', 'bounced'], true) ? $status : 'failed';
+        // @tenant-guard-ignore: the delivery worker marks a delivery failed/bounced BY ID (system infra); the job's origin tenant is restored into TenantContext by JobRunner before the handler runs.
+        $stmt = $this->pdo->prepare(
+            "UPDATE notification_deliveries
+                SET status = :status, error = :error, attempts = attempts + 1, updated_at = NOW()
+              WHERE id = :id"
+        );
+        $stmt->execute([':status' => $status, ':error' => self::clampError($error), ':id' => $id]);
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     private static function encode(array $data): string
     {
         return json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
+    }
+
+    private static function clampError(string $error): string
+    {
+        return mb_substr($error, 0, 2000);
     }
 
     /**

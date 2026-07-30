@@ -1191,8 +1191,27 @@ $router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], 
 // handlers that explicitly opted in — the same registry the queue:work worker
 // runs. Submit requires jobs:submit; reads require jobs:read; every query binds
 // tenant_id and a foreign-tenant id is 404.
+// 13b-quinquies. Notification subsystem wiring (WC-notifications). A shared
+// TransportRegistry (built-in log transports by default; real transports override
+// per channel in their own slices) + the dispatcher that persists a notification,
+// records a per-channel delivery, and enqueues the durable send job. Also
+// subscribed on the HookManager, so firing the `notification.dispatch` hook (from
+// core or a plugin) dispatches a notification (hook-subscriber mode).
+$transportRegistry = \Whity\Core\Notification\CoreTransports::make($logger);
+$notificationRepository = new \Whity\Core\Notification\NotificationRepository($db->getPdo());
+$notificationDispatcher = new \Whity\Core\Notification\NotificationDispatcher(
+    $notificationRepository,
+    $transportRegistry,
+    new \Whity\Core\Queue\QueueService(new \Whity\Core\Queue\JobRepository($db->getPdo())),
+    new \Whity\Core\Notification\PassthroughRenderer(),
+    $logger
+);
+$notificationDispatcher->subscribe($hookManager);
+
 $jobsRegistry = new \Whity\Core\Queue\JobRegistry();
-\Whity\Core\Queue\CoreJobs::register($jobsRegistry);
+// Share the transport registry so the (internal, non-submittable) delivery job is
+// registered here too — the same handler the queue:work worker runs.
+\Whity\Core\Queue\CoreJobs::register($jobsRegistry, $db->getPdo(), $transportRegistry, $logger);
 $jobsHandler = new \Whity\Api\JobsApiHandler(
     new \Whity\Core\Queue\JobRepository($db->getPdo()),
     $jobsRegistry,

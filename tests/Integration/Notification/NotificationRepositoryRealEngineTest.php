@@ -107,4 +107,59 @@ final class NotificationRepositoryRealEngineTest extends TestCase
         $this->expectException(PDOException::class);
         $this->repo->recordDelivery(self::TENANT_A, $notificationId, 'email', ['status' => 'not-a-status']);
     }
+
+    public function testMarkDeliverySentRecordsProviderAndBumpsAttempts(): void
+    {
+        $notificationId = $this->repo->create(self::TENANT_A, 101, 'user.invited');
+        $deliveryId = $this->repo->recordDelivery(self::TENANT_A, $notificationId, 'email');
+
+        $this->repo->markDeliverySent($deliveryId, 'prov-xyz');
+
+        $delivery = $this->repo->findDelivery(self::TENANT_A, $deliveryId);
+        self::assertNotNull($delivery);
+        self::assertSame('sent', $delivery['status']);
+        self::assertSame('prov-xyz', $delivery['provider_id']);
+        self::assertSame(1, $delivery['attempts']);
+        self::assertNotNull($delivery['sent_at']);
+    }
+
+    public function testMarkDeliveryFailedRecordsErrorAndBumpsAttempts(): void
+    {
+        $notificationId = $this->repo->create(self::TENANT_A, 101, 'user.invited');
+        $deliveryId = $this->repo->recordDelivery(self::TENANT_A, $notificationId, 'email');
+
+        $this->repo->markDeliveryFailed($deliveryId, 'provider down');
+
+        $delivery = $this->repo->findDelivery(self::TENANT_A, $deliveryId);
+        self::assertNotNull($delivery);
+        self::assertSame('failed', $delivery['status']);
+        self::assertSame('provider down', $delivery['error']);
+        self::assertSame(1, $delivery['attempts']);
+    }
+
+    public function testMarkDeliveryFailedAcceptsBouncedAndCoercesUnknownToFailed(): void
+    {
+        $notificationId = $this->repo->create(self::TENANT_A, 101, 'user.invited');
+        $bounced = $this->repo->recordDelivery(self::TENANT_A, $notificationId, 'email');
+        $coerced = $this->repo->recordDelivery(self::TENANT_A, $notificationId, 'sms');
+
+        $this->repo->markDeliveryFailed($bounced, 'hard bounce', 'bounced');
+        $this->repo->markDeliveryFailed($coerced, 'weird', 'not-a-real-status');
+
+        $byId = [];
+        foreach ($this->repo->listDeliveries(self::TENANT_A, $notificationId) as $d) {
+            $byId[$d['id']] = $d['status'];
+        }
+        self::assertSame('bounced', $byId[$bounced]);
+        self::assertSame('failed', $byId[$coerced], 'an unrecognised status is coerced to failed (never violates the CHECK)');
+    }
+
+    public function testFindDeliveryIsTenantScoped(): void
+    {
+        $notificationId = $this->repo->create(self::TENANT_A, 101, 'user.invited');
+        $deliveryId = $this->repo->recordDelivery(self::TENANT_A, $notificationId, 'email');
+
+        self::assertNotNull($this->repo->findDelivery(self::TENANT_A, $deliveryId));
+        self::assertNull($this->repo->findDelivery(2, $deliveryId), "another tenant must not read this tenant's delivery");
+    }
 }

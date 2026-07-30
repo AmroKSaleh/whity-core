@@ -61,7 +61,9 @@ final class QueueWorkCommand
             $pdo = Database::connect()->getPdo();
             $repo ??= new JobRepository($pdo);
             $registry = new JobRegistry();
-            CoreJobs::register($registry);
+            // Pass the PDO so the internal notification-delivery job (+ its default
+            // log transports) is registered and thus RUNNABLE by the worker.
+            CoreJobs::register($registry, $pdo, null, $this->logger);
             $runner ??= new JobRunner($repo, $registry, $this->logger);
         }
         $this->repo = $repo;
