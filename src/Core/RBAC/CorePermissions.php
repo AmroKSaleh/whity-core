@@ -168,6 +168,16 @@ final class CorePermissions
     public const JOBS_SUBMIT = 'jobs:submit';
     public const JOBS_READ = 'jobs:read';
 
+    // Notification administration (WC-notifications, #4b87abf0). The self-service
+    // inbox + preferences are user-scoped and need NO permission; these gate the
+    // ADMIN surfaces. notification_settings:manage governs a tenant's sender
+    // configuration (from/reply-to, transport, encrypted creds — see
+    // TenantNotificationSettingsApiHandler). notifications:manage governs
+    // managing notifications themselves (e.g. templates administration / broadcast
+    // surfaces as they land).
+    public const NOTIFICATIONS_MANAGE = 'notifications:manage';
+    public const NOTIFICATION_SETTINGS_MANAGE = 'notification_settings:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -220,6 +230,8 @@ final class CorePermissions
             self::TAGS_MANAGE,
             self::JOBS_SUBMIT,
             self::JOBS_READ,
+            self::NOTIFICATIONS_MANAGE,
+            self::NOTIFICATION_SETTINGS_MANAGE,
         ];
     }
 }

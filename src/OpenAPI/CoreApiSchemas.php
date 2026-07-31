@@ -962,14 +962,14 @@ final class CoreApiSchemas
     private static function tenantNotificationSettingsRoutes(): array
     {
         return [
-            self::permissionRoute('GET', '/api/notification-settings', 'settings:manage', [
+            self::permissionRoute('GET', '/api/notification-settings', 'notification_settings:manage', [
                 'summary' => 'List the tenant\'s per-channel sender config (credentials redacted)',
                 'tags' => ['notifications'],
                 'responses' => [
                     200 => self::jsonResponse('The tenant\'s sender config per channel', 'TenantNotificationSettingsListResponse'),
                 ] + self::authErrors(),
             ]),
-            self::permissionRoute('PUT', '/api/notification-settings/{channel}', 'settings:manage', [
+            self::permissionRoute('PUT', '/api/notification-settings/{channel}', 'notification_settings:manage', [
                 'summary' => 'Upsert a channel\'s sender config (from/reply-to, transport, provider config)',
                 'tags' => ['notifications'],
                 'request' => 'TenantNotificationSettingsUpdateRequest',
@@ -978,7 +978,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
-            self::permissionRoute('PUT', '/api/notification-settings/{channel}/credentials', 'settings:manage', [
+            self::permissionRoute('PUT', '/api/notification-settings/{channel}/credentials', 'notification_settings:manage', [
                 'summary' => 'Set or clear a channel\'s provider credentials (write-only, encrypted at rest)',
                 'tags' => ['notifications'],
                 'request' => 'NotificationCredentialsRequest',
@@ -988,7 +988,7 @@ final class CoreApiSchemas
                     422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
-            self::permissionRoute('DELETE', '/api/notification-settings/{channel}', 'settings:manage', [
+            self::permissionRoute('DELETE', '/api/notification-settings/{channel}', 'notification_settings:manage', [
                 'summary' => 'Remove a channel\'s sender config',
                 'tags' => ['notifications'],
                 'responses' => [
