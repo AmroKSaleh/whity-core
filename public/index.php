@@ -1248,6 +1248,15 @@ $router->register('PUT',    '/api/notification-settings/{channel}',             
 $router->register('PUT',    '/api/notification-settings/{channel}/credentials', [$tenantNotificationSettingsHandler, 'setCredentials'], null, null, CorePermissions::NOTIFICATION_SETTINGS_MANAGE);
 $router->register('DELETE', '/api/notification-settings/{channel}',             [$tenantNotificationSettingsHandler, 'deleteChannel'], null, null, CorePermissions::NOTIFICATION_SETTINGS_MANAGE);
 
+// Notification delivery METRICS (WC-notifications, 4d40cc1c). Read-only admin
+// observability — per-status counts, failure rate, queue depth, avg latency —
+// aggregated from notification_deliveries, tenant-scoped, notifications:manage.
+$notificationMetricsHandler = new \Whity\Api\NotificationMetricsApiHandler(
+    $roleChecker,
+    new \Whity\Core\Notification\NotificationMetricsRepository($db->getPdo())
+);
+$router->register('GET', '/api/notification-metrics', [$notificationMetricsHandler, 'show'], null, null, CorePermissions::NOTIFICATIONS_MANAGE);
+
 $jobsRegistry = new \Whity\Core\Queue\JobRegistry();
 // Share the transport registry so the (internal, non-submittable) delivery job is
 // registered here too — the same handler the queue:work worker runs.

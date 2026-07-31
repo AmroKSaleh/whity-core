@@ -7079,6 +7079,82 @@
                 }
             }
         },
+        "/api/v1/notification-metrics": {
+            "get": {
+                "operationId": "get_api_v1_notification_metrics",
+                "summary": "Notification delivery metrics (counts, failure rate, queue depth, latency)",
+                "tags": [
+                    "notifications"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The tenant's notification delivery metrics",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/NotificationMetricsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/notification-settings": {
             "get": {
                 "operationId": "get_api_v1_notification_settings",
@@ -16988,6 +17064,50 @@
                     "data",
                     "pagination",
                     "unread_count"
+                ]
+            },
+            "NotificationMetrics": {
+                "type": "object",
+                "properties": {
+                    "total": {
+                        "type": "integer"
+                    },
+                    "by_status": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "integer"
+                        }
+                    },
+                    "queue_depth": {
+                        "type": "integer"
+                    },
+                    "failure_rate": {
+                        "type": "number",
+                        "format": "float"
+                    },
+                    "avg_latency_seconds": {
+                        "type": "number",
+                        "format": "float",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "total",
+                    "by_status",
+                    "queue_depth",
+                    "failure_rate",
+                    "avg_latency_seconds"
+                ]
+            },
+            "NotificationMetricsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/NotificationMetrics"
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "NotificationPreferenceEntry": {

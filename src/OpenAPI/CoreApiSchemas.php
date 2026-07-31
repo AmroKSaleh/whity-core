@@ -996,6 +996,13 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Channel configuration not found'),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('GET', '/api/notification-metrics', 'notifications:manage', [
+                'summary' => 'Notification delivery metrics (counts, failure rate, queue depth, latency)',
+                'tags' => ['notifications'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s notification delivery metrics', 'NotificationMetricsResponse'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -2524,6 +2531,16 @@ final class CoreApiSchemas
             'NotificationCredentialsRequest' => self::object([
                 'credentials' => self::str(true),
             ], ['credentials']),
+            'NotificationMetrics' => self::object([
+                'total' => self::int(),
+                'by_status' => ['type' => 'object', 'additionalProperties' => ['type' => 'integer']],
+                'queue_depth' => self::int(),
+                'failure_rate' => ['type' => 'number', 'format' => 'float'],
+                'avg_latency_seconds' => ['type' => 'number', 'format' => 'float', 'nullable' => true],
+            ], ['total', 'by_status', 'queue_depth', 'failure_rate', 'avg_latency_seconds']),
+            'NotificationMetricsResponse' => self::object([
+                'data' => SchemaBuilder::ref('NotificationMetrics'),
+            ], ['data']),
 
             // ---- Platform-ops schemas (WC-62133b3f) ----
 

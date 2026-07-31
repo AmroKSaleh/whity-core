@@ -6,6 +6,7 @@ namespace Whity\Core\Notification\Jobs;
 
 use Psr\Log\LoggerInterface;
 use RuntimeException;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Notification\NotificationRepository;
 use Whity\Core\Notification\TransportRegistry;
 use Whity\Sdk\JobInterface;
@@ -37,15 +38,18 @@ final class SendNotificationDeliveryJob implements JobInterface
     private NotificationRepository $repo;
     private TransportRegistry $transports;
     private ?LoggerInterface $logger;
+    private ?AuditLoggerInterface $audit;
 
     public function __construct(
         NotificationRepository $repo,
         TransportRegistry $transports,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        ?AuditLoggerInterface $audit = null
     ) {
         $this->repo = $repo;
         $this->transports = $transports;
         $this->logger = $logger;
+        $this->audit = $audit;
     }
 
     /**
@@ -62,6 +66,7 @@ final class SendNotificationDeliveryJob implements JobInterface
         if ($transport === null) {
             // Terminal: a retry will not produce a transport. Record + stop.
             $this->repo->markDeliveryFailed($deliveryId, 'no transport for channel: ' . $channel);
+            $this->auditOutcome('failed', $tenantId, $deliveryId, $payload, ['reason' => 'no_transport']);
 
             return ['status' => 'failed', 'reason' => 'no_transport', 'channel' => $channel];
         }
@@ -83,12 +88,16 @@ final class SendNotificationDeliveryJob implements JobInterface
 
         if ($result->success) {
             $this->repo->markDeliverySent($deliveryId, $result->providerId);
+            $this->auditOutcome('sent', $tenantId, $deliveryId, $payload, ['provider_id' => $result->providerId]);
 
             return ['status' => 'sent', 'provider_id' => $result->providerId, 'channel' => $channel];
         }
 
         $error = $result->error ?? 'send failed';
         $this->repo->markDeliveryFailed($deliveryId, $error);
+        // Audit the outcome with a COARSE reason only — never the raw transport
+        // error, which may embed a recipient address or other PII.
+        $this->auditOutcome('failed', $tenantId, $deliveryId, $payload, ['reason' => 'send_failed']);
         $this->logger?->warning('[notifications] delivery failed', [
             'delivery_id' => $deliveryId,
             'tenant_id'   => $tenantId,
@@ -97,5 +106,28 @@ final class SendNotificationDeliveryJob implements JobInterface
 
         // Throw so the durable queue retries with backoff (and eventually dead-letters).
         throw new RuntimeException('notification delivery failed on channel ' . $channel . ': ' . $error);
+    }
+
+    /**
+     * Record a NON-PII audit entry for a delivery outcome. Only routing metadata
+     * (notification id, channel, type) + a coarse reason/provider id — NEVER the
+     * recipient, subject, body, data, or the raw transport error, any of which
+     * may hold PII. Fail-soft (AuditLogger swallows its own errors).
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $extra
+     */
+    private function auditOutcome(string $status, int $tenantId, int $deliveryId, array $payload, array $extra = []): void
+    {
+        $this->audit?->record('notification.delivery.' . $status, [
+            'tenant_id'   => $tenantId,
+            'target_type' => 'notification_delivery',
+            'target_id'   => $deliveryId,
+            'metadata'    => array_merge([
+                'notification_id' => (int) ($payload['notification_id'] ?? 0),
+                'channel'         => (string) ($payload['channel'] ?? ''),
+                'type'            => (string) ($payload['type'] ?? ''),
+            ], $extra),
+        ]);
     }
 }
