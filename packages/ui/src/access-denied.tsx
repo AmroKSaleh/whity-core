@@ -2,7 +2,7 @@ import * as React from "react"
 import {
   IconAlertCircle,
   IconAlertTriangle,
-  IconCheckCircle,
+  IconCircleCheck,
   IconLock,
   IconSearch,
   IconWrench,
@@ -79,7 +79,7 @@ const VARIANT_CONFIGS: Record<
   },
   success: {
     title: "Action Complete",
-    defaultIcon: <IconCheckCircle />,
+    defaultIcon: <IconCircleCheck />,
     iconWrapper:
       "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20 shadow-2xs",
     buttonVariant: "success-solid",
