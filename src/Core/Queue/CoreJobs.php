@@ -47,7 +47,13 @@ final class CoreJobs
             $transports ??= CoreTransports::make($logger);
             $registry->register(
                 SendNotificationDeliveryJob::NAME,
-                new SendNotificationDeliveryJob(new NotificationRepository($pdo), $transports, $logger),
+                new SendNotificationDeliveryJob(
+                    new NotificationRepository($pdo),
+                    $transports,
+                    $logger,
+                    // Non-PII lifecycle audit of each delivery outcome (WC-notifications #4d40cc1c).
+                    new \Whity\Core\Audit\AuditLogger($pdo, $logger)
+                ),
                 false
             );
         }

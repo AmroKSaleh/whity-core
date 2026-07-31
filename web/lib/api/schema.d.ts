@@ -1096,6 +1096,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notification-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Notification delivery metrics (counts, failure rate, queue depth, latency) */
+        get: operations["get_api_v1_notification_metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notification-settings": {
         parameters: {
             query?: never;
@@ -2527,6 +2544,20 @@ export interface components {
             data: components["schemas"]["NotificationEntry"][];
             pagination: components["schemas"]["Pagination"];
             unread_count: number;
+        };
+        NotificationMetrics: {
+            total: number;
+            by_status: {
+                [key: string]: number;
+            };
+            queue_depth: number;
+            /** Format: float */
+            failure_rate: number;
+            /** Format: float */
+            avg_latency_seconds: number | null;
+        };
+        NotificationMetricsResponse: {
+            data: components["schemas"]["NotificationMetrics"];
         };
         NotificationPreferenceEntry: {
             type: string;
@@ -9243,6 +9274,71 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_notification_metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's notification delivery metrics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationMetricsResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;

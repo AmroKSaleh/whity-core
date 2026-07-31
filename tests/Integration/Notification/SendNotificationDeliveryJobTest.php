@@ -8,6 +8,7 @@ use PDO;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Notification\Jobs\SendNotificationDeliveryJob;
 use Whity\Core\Notification\LogTransport;
 use Whity\Core\Notification\NotificationRepository;
@@ -125,6 +126,80 @@ final class SendNotificationDeliveryJobTest extends TestCase
         self::assertNotNull($delivery);
         self::assertSame('sent', $delivery['status']);
         self::assertSame('log:email', $delivery['provider_id']);
+    }
+
+    /**
+     * Capture every AuditLogger::record() call.
+     *
+     * @param list<array{action: string, options: array<string, mixed>}> $sink
+     */
+    private function capturingAudit(array &$sink): AuditLoggerInterface
+    {
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->method('record')->willReturnCallback(
+            function (string $action, array $options = []) use (&$sink): void {
+                $sink[] = ['action' => $action, 'options' => $options];
+            }
+        );
+
+        return $audit;
+    }
+
+    public function testAuditsSentOutcomeWithoutPii(): void
+    {
+        $deliveryId = $this->seedDelivery('email');
+        $transports = new TransportRegistry();
+        $transports->register($this->fakeTransport('email', SendResult::sent('prov-9')));
+        $payload = $this->payload($deliveryId, 'email', [
+            'recipient' => 'pii@secret.example',
+            'subject'   => 'SECRET_SUBJECT',
+            'body'      => 'SECRET_BODY',
+        ]);
+
+        /** @var list<array{action: string, options: array<string, mixed>}> $sink */
+        $sink = [];
+        (new SendNotificationDeliveryJob($this->repo, $transports, null, $this->capturingAudit($sink)))->handle($payload);
+
+        self::assertCount(1, $sink);
+        self::assertSame('notification.delivery.sent', $sink[0]['action']);
+        $meta = $sink[0]['options']['metadata'] ?? [];
+        self::assertIsArray($meta);
+        self::assertSame('user.invited', $meta['type']);
+        self::assertSame('email', $meta['channel']);
+
+        // NON-PII: recipient / subject / body must NEVER appear anywhere in the entry.
+        $flat = (string) json_encode($sink[0]['options']);
+        self::assertStringNotContainsString('pii@secret.example', $flat, 'the recipient must not be audited');
+        self::assertStringNotContainsString('SECRET_SUBJECT', $flat, 'the subject must not be audited');
+        self::assertStringNotContainsString('SECRET_BODY', $flat, 'the body must not be audited');
+    }
+
+    public function testAuditsFailedOutcomeWithCoarseReasonNotTheRawError(): void
+    {
+        $deliveryId = $this->seedDelivery('email');
+        $transports = new TransportRegistry();
+        // An adversarial transport error that embeds a recipient address.
+        $transports->register($this->fakeTransport('email', SendResult::failed('550 mailbox unavailable: pii@secret.example')));
+
+        /** @var list<array{action: string, options: array<string, mixed>}> $sink */
+        $sink = [];
+        try {
+            (new SendNotificationDeliveryJob($this->repo, $transports, null, $this->capturingAudit($sink)))
+                ->handle($this->payload($deliveryId, 'email'));
+            self::fail('a failed send must throw');
+        } catch (RuntimeException) {
+            // expected — the job throws so the queue retries.
+        }
+
+        self::assertCount(1, $sink);
+        self::assertSame('notification.delivery.failed', $sink[0]['action']);
+        $meta = $sink[0]['options']['metadata'] ?? [];
+        self::assertIsArray($meta);
+        self::assertSame('send_failed', $meta['reason'] ?? null);
+        // The raw transport error (with the embedded email) must NOT be audited.
+        $flat = (string) json_encode($sink[0]['options']);
+        self::assertStringNotContainsString('pii@secret.example', $flat);
+        self::assertStringNotContainsString('mailbox unavailable', $flat);
     }
 
     private function fakeTransport(string $channel, SendResult $result): NotificationTransport
