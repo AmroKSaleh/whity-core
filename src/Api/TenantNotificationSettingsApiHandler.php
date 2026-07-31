@@ -182,9 +182,9 @@ final class TenantNotificationSettingsApiHandler
             : null;
 
         if ($userId === null
-            || !$this->roleChecker->hasPermissionForProfile($userId, CorePermissions::SETTINGS_MANAGE, $tenantId)
+            || !$this->roleChecker->hasPermissionForProfile($userId, CorePermissions::NOTIFICATION_SETTINGS_MANAGE, $tenantId)
         ) {
-            return Response::error('Insufficient permissions', 403, ['required' => CorePermissions::SETTINGS_MANAGE]);
+            return Response::error('Insufficient permissions', 403, ['required' => CorePermissions::NOTIFICATION_SETTINGS_MANAGE]);
         }
 
         return ['tenantId' => $tenantId, 'userId' => $userId];

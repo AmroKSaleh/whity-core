@@ -1243,10 +1243,10 @@ $tenantNotificationSettingsHandler = new \Whity\Api\TenantNotificationSettingsAp
     $secretStore,
     $logger
 );
-$router->register('GET',    '/api/notification-settings',                       [$tenantNotificationSettingsHandler, 'list'],          null, null, CorePermissions::SETTINGS_MANAGE);
-$router->register('PUT',    '/api/notification-settings/{channel}',             [$tenantNotificationSettingsHandler, 'updateChannel'], null, null, CorePermissions::SETTINGS_MANAGE);
-$router->register('PUT',    '/api/notification-settings/{channel}/credentials', [$tenantNotificationSettingsHandler, 'setCredentials'], null, null, CorePermissions::SETTINGS_MANAGE);
-$router->register('DELETE', '/api/notification-settings/{channel}',             [$tenantNotificationSettingsHandler, 'deleteChannel'], null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('GET',    '/api/notification-settings',                       [$tenantNotificationSettingsHandler, 'list'],          null, null, CorePermissions::NOTIFICATION_SETTINGS_MANAGE);
+$router->register('PUT',    '/api/notification-settings/{channel}',             [$tenantNotificationSettingsHandler, 'updateChannel'], null, null, CorePermissions::NOTIFICATION_SETTINGS_MANAGE);
+$router->register('PUT',    '/api/notification-settings/{channel}/credentials', [$tenantNotificationSettingsHandler, 'setCredentials'], null, null, CorePermissions::NOTIFICATION_SETTINGS_MANAGE);
+$router->register('DELETE', '/api/notification-settings/{channel}',             [$tenantNotificationSettingsHandler, 'deleteChannel'], null, null, CorePermissions::NOTIFICATION_SETTINGS_MANAGE);
 
 $jobsRegistry = new \Whity\Core\Queue\JobRegistry();
 // Share the transport registry so the (internal, non-submittable) delivery job is

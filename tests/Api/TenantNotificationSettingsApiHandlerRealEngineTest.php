@@ -63,6 +63,11 @@ final class TenantNotificationSettingsApiHandlerRealEngineTest extends TestCase
     {
         $response = $this->handler(false)->list($this->req('GET', '/api/notification-settings'));
         self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString(
+            'notification_settings:manage',
+            $response->getBody(),
+            'the 403 must advertise the dedicated notification_settings:manage permission (not settings:manage)'
+        );
     }
 
     public function testMissingActorIs403(): void
