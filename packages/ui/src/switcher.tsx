@@ -70,14 +70,14 @@ function Switcher({
           data-slot="switcher"
           title={displayName}
           aria-label={`Current ${switchLabel.toLowerCase()}: ${displayName}`}
-          className={cn("flex justify-center rounded-lg bg-background px-2 py-2", className)}
+          className={cn("flex justify-center rounded-lg border border-border bg-card p-2 shadow-2xs", className)}
         >
           <span className="shrink-0 text-muted-foreground [&_svg]:size-5">{icon}</span>
         </div>
       )
     }
     return (
-      <div data-slot="switcher" className={cn("flex items-center gap-2 rounded-lg bg-background px-2 py-2", className)}>
+      <div data-slot="switcher" className={cn("flex items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-2xs", className)}>
         <span className="shrink-0 text-muted-foreground [&_svg]:size-5">{icon}</span>
         <span className="min-w-0">
           <span className="block text-xs text-muted-foreground">{switchLabel}</span>
@@ -97,7 +97,7 @@ function Switcher({
           aria-label={`Switch ${switchLabel.toLowerCase()}, current: ${displayName}`}
           data-slot="switcher"
           className={cn(
-            "flex w-full items-center gap-2 rounded-lg bg-background px-2 py-2 text-start transition-colors outline-none hover:bg-background/70 focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50",
+            "flex w-full items-center gap-2 rounded-lg border border-border bg-card p-2 text-start shadow-2xs transition-colors outline-none hover:bg-muted/50 hover:border-border/80 focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50",
             collapsed && "justify-center",
             className
           )}

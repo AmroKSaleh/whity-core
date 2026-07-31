@@ -62,6 +62,15 @@
       "files": [{ "path": "../packages/ui/src/date-picker.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "top-nav",
+      "type": "registry:ui",
+      "title": "Top Navigation",
+      "description": "Sticky top navigation bar with command palette search trigger, notifications, theme/language toggles, and user profile menu.",
+      "dependencies": ["@tabler/icons-react"],
+      "registryDependencies": ["@whity/dropdown-menu", "@whity/tooltip"],
+      "files": [{ "path": "../packages/ui/src/top-nav.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "color-picker",
       "type": "registry:ui",
       "title": "Color Picker",

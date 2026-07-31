@@ -49,6 +49,7 @@
     "./tag-input": "./src/tag-input.tsx",
     "./textarea": "./src/textarea.tsx",
     "./time-picker": "./src/time-picker.tsx",
+    "./top-nav": "./src/top-nav.tsx",
     "./theme-mode": "./src/theme-mode.ts",
     "./tooltip": "./src/tooltip.tsx",
     "./utils": "./src/utils.ts",

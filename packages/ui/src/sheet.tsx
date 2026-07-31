@@ -3,7 +3,7 @@
 import * as React from "react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
-import { cn } from "./utils"
+import { cn, useIsDarkMode } from "./utils"
 import { Button } from "./button"
 import { IconX } from "@tabler/icons-react"
 
@@ -11,7 +11,7 @@ import { IconX } from "@tabler/icons-react"
  * A side drawer ("sheet") built on the Radix Dialog primitive — the same
  * accessibility model as {@link ./dialog} (focus trap, Esc to close, scroll
  * lock, labelled by title) but anchored to an edge of the viewport. Used by the
- * OU Management Hub's detail drawer.
+ * OU Management Hub'header detail drawer.
  */
 function Sheet({
   ...props
@@ -65,13 +65,16 @@ function SheetContent({
   side?: SheetSide
   showCloseButton?: boolean
 }) {
+  const isDark = useIsDarkMode()
+
   return (
     <SheetPrimitive.Portal>
       <SheetOverlay />
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "fixed z-50 flex flex-col gap-4 overflow-y-auto bg-popover p-5 text-xs/relaxed text-popover-foreground ring-1 ring-foreground/10 duration-150 outline-none data-open:animate-in data-closed:animate-out",
+          isDark && "dark",
+          "fixed z-50 flex flex-col gap-4 overflow-y-auto bg-popover p-5 text-xs/relaxed text-popover-foreground shadow-lg duration-150 outline-none data-open:animate-in data-closed:animate-out",
           side === "right" &&
             "inset-y-0 end-0 h-full w-full max-w-md border-s border-border data-open:slide-in-from-right data-closed:slide-out-to-right",
           side === "left" &&
@@ -98,11 +101,27 @@ function SheetContent({
   )
 }
 
-function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
+function SheetHeader({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="sheet-header"
-      className={cn("flex flex-col gap-1 pe-8", className)}
+      className={cn("flex flex-col gap-1 text-start", className)}
+      {...props}
+    />
+  )
+}
+
+function SheetFooter({
+  className,
+  ...props
+}: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="sheet-footer"
+      className={cn("mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
       {...props}
     />
   )
@@ -115,7 +134,7 @@ function SheetTitle({
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("font-heading text-sm font-medium", className)}
+      className={cn("font-heading text-sm font-medium text-foreground", className)}
       {...props}
     />
   )
@@ -128,7 +147,7 @@ function SheetDescription({
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-xs/relaxed text-muted-foreground", className)}
+      className={cn("text-xs text-muted-foreground", className)}
       {...props}
     />
   )
@@ -138,9 +157,9 @@ export {
   Sheet,
   SheetTrigger,
   SheetClose,
-  SheetOverlay,
   SheetContent,
   SheetHeader,
+  SheetFooter,
   SheetTitle,
   SheetDescription,
 }

@@ -205,7 +205,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
             </div>
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-64 p-3 shadow-lg border border-border bg-popover rounded-xl">
+        <PopoverContent align="start" className="w-64 p-3 shadow-lg border border-border bg-popover text-popover-foreground rounded-xl">
           {/* Header Month / Year Nav */}
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-border/50">
             <button

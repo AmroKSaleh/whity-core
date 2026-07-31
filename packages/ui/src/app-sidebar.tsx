@@ -160,9 +160,9 @@ export function AppSidebar({
         data-slot="app-sidebar"
         data-collapsed={collapsed || undefined}
         className={cn(
-          "fixed inset-y-0 start-0 z-50 flex w-64 -translate-x-full flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform rtl:translate-x-full",
+          "fixed inset-y-0 start-0 z-50 flex h-screen w-64 -translate-x-full flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 rtl:translate-x-full",
           mobileOpen && "translate-x-0 rtl:translate-x-0",
-          "md:static md:z-auto md:translate-x-0 rtl:md:translate-x-0",
+          "md:sticky md:top-0 md:z-auto md:h-screen md:shrink-0 md:translate-x-0 rtl:md:translate-x-0",
           collapsed && "md:w-16",
           className
         )}
@@ -171,17 +171,20 @@ export function AppSidebar({
           type="button"
           aria-label="Close navigation"
           onClick={() => setMobileOpen(false)}
-          className="absolute end-2 top-2 flex size-7 items-center justify-center rounded-md text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30 md:hidden"
+          className="absolute end-2 top-2.5 z-20 flex size-7 items-center justify-center rounded-md text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30 md:hidden"
         >
           <IconX className="size-4" />
         </button>
 
-        {header && <div className="px-3 py-4">{header}</div>}
-
-        {(tenantSwitcher || teamSwitcher) && (
-          <div className="space-y-1.5 px-2 pb-2">
-            {tenantSwitcher}
-            {teamSwitcher}
+        {(header || tenantSwitcher || teamSwitcher) && (
+          <div className="flex flex-col gap-2.5 px-2.5 pt-3 pe-10 md:pe-2.5">
+            {header && <div className="px-1 py-1">{header}</div>}
+            {(tenantSwitcher || teamSwitcher) && (
+              <div className="flex flex-col gap-1.5">
+                {tenantSwitcher}
+                {teamSwitcher}
+              </div>
+            )}
           </div>
         )}
 
