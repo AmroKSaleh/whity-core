@@ -5,11 +5,19 @@ import { cn } from "./utils"
 
 /**
  * PRESENTATIONAL app-shell sidebar only — a controlled, data-driven nav
- * chrome. Fetching nav items (RBAC/tenant-filtered), branding, tenant
+ * chrome. Fetching nav items (RBAC/tenant-filtered), branding, tenant/team
  * switching, and theme/direction toggles belong to the app-specific
  * composed wrapper (e.g. web/components/sidebar.tsx's `Sidebar`), which
  * renders this component and passes it `groups` + slot content — the same
  * split Breadcrumb already draws between itself and route-derived crumbs.
+ *
+ * Multi-tenant + multi-team: `tenantSwitcher` and `teamSwitcher` are
+ * independent optional slots (see each prop's doc below) built from the
+ * shared `Switcher` primitive — a user might have many tenants and no
+ * teams, one tenant and many teams, both, or neither; which nav `groups`
+ * to pass is entirely the composed caller's decision (e.g. re-fetch/swap
+ * `groups` when the active team changes), this component has no concept
+ * of "tenant" or "team" itself.
  *
  * PLATFORM NOTE: `groups`/`items` are plain data (label + href + optional
  * icon) — the same shape a Flutter or Tauri-native nav rail would consume;
@@ -33,10 +41,27 @@ export interface AppSidebarNavGroup {
 }
 
 export interface AppSidebarProps {
-  /** Branding/logo slot, rendered above the nav. */
+  /** Branding/logo slot, rendered above the switchers/nav. */
   header?: React.ReactNode
+  /**
+   * Optional tenant-switcher slot (e.g. built from the shared `Switcher`
+   * primitive). A multi-tenant client renders one here; a single-tenant
+   * client omits it entirely — this component has no opinion on tenants.
+   * If provided, keep it in sync with `collapsed` (pass this same prop's
+   * value to the `Switcher`/custom control you render here) so it matches
+   * the sidebar's icon-only state.
+   */
+  tenantSwitcher?: React.ReactNode
+  /**
+   * Optional team-switcher slot, independent of `tenantSwitcher` — a user
+   * may have many teams and one tenant (show only this), many tenants and
+   * no teams (show only that), both, or neither. Whether to render either
+   * slot at all is entirely the composed caller's call; this component
+   * just reserves the layout position and stacks whatever it's given.
+   */
+  teamSwitcher?: React.ReactNode
   groups: AppSidebarNavGroup[]
-  /** User menu / tenant switcher / theme toggle slot, rendered below the nav. */
+  /** User menu / theme toggle slot, rendered below the nav. */
   footer?: React.ReactNode
   /** Controlled collapsed (icon-only) state. Uncontrolled if omitted. */
   collapsed?: boolean
@@ -52,6 +77,8 @@ export interface AppSidebarProps {
 
 export function AppSidebar({
   header,
+  tenantSwitcher,
+  teamSwitcher,
   groups,
   footer,
   collapsed: collapsedProp,
@@ -150,6 +177,13 @@ export function AppSidebar({
         </button>
 
         {header && <div className="px-3 py-4">{header}</div>}
+
+        {(tenantSwitcher || teamSwitcher) && (
+          <div className="space-y-1.5 px-2 pb-2">
+            {tenantSwitcher}
+            {teamSwitcher}
+          </div>
+        )}
 
         {nav}
 

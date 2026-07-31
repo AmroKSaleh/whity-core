@@ -220,6 +220,15 @@
       "files": [{ "path": "../packages/ui/src/switch.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "switcher",
+      "type": "registry:ui",
+      "title": "Switcher",
+      "description": "Generic scope switcher (dropdown or static label) shared by tenant/team switching and similar 'act as X' controls.",
+      "dependencies": ["@tabler/icons-react"],
+      "registryDependencies": ["@whity/dropdown-menu"],
+      "files": [{ "path": "../packages/ui/src/switcher.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "table",
       "type": "registry:ui",
       "title": "Table",
@@ -321,7 +330,7 @@
       "name": "app-sidebar",
       "type": "registry:ui",
       "title": "App Sidebar",
-      "description": "Presentational app-shell sidebar: collapsible desktop rail + mobile slide-over, driven by a plain nav-groups data prop (no data fetching, no hardcoded items).",
+      "description": "Presentational app-shell sidebar: collapsible desktop rail + mobile slide-over, driven by a plain nav-groups data prop, with independent optional tenant/team switcher slots (no data fetching, no hardcoded items).",
       "dependencies": ["@tabler/icons-react"],
       "files": [{ "path": "../packages/ui/src/app-sidebar.tsx", "type": "registry:ui" }]
     },

@@ -40,6 +40,7 @@
     "./skeleton": "./src/skeleton.tsx",
     "./spinner": "./src/spinner.tsx",
     "./switch": "./src/switch.tsx",
+    "./switcher": "./src/switcher.tsx",
     "./table": "./src/table.tsx",
     "./tabs": "./src/tabs.tsx",
     "./tag-input": "./src/tag-input.tsx",
