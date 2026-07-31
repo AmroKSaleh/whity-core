@@ -1,5 +1,26 @@
 # @amroksaleh/features
 
+## 0.2.0
+
+### Minor Changes
+
+- 783fba4: Add the offline-first sync contract at `@amroksaleh/features/sync`: the
+  `SyncStatus` / `Conflict` / `FieldConflict` / `Resolution` / `SyncController`
+  types, the `useSyncStatus` hook (over `useSyncExternalStore`, with the
+  referential-stability contract documented), and `createAlwaysSyncedController`
+  for online-only clients (web, the SPA harness) so shared sync UI degrades to a
+  no-op without client special-casing. Additive — existing exports unchanged.
+- 7c8dac5: Add the shared sync UI to `@amroksaleh/features/sync`: `UnsyncedBanner` (an
+  app-wide status strip composing `Alert` that self-hides when fully synced) and
+  `ConflictResolver` (a field-level mine/theirs/custom picker with a live merged
+  preview, bidi-safe via `dir="auto"` on user content). Presentational, driven by
+  the injected `SyncStatus` / `Conflict` — online-only clients render nothing.
+
+### Patch Changes
+
+- Updated dependencies [b8ed390]
+  - @amroksaleh/ui@0.4.0
+
 ## 0.1.0
 
 ### Minor Changes
