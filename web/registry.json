@@ -4,6 +4,14 @@
   "homepage": "https://github.com/AmroKSaleh/whity-core",
   "items": [
     {
+      "name": "access-denied",
+      "type": "registry:ui",
+      "title": "Access Denied",
+      "description": "Full-bleed permission-denied placeholder with icon, title and description.",
+      "dependencies": ["@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/access-denied.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "alert",
       "type": "registry:ui",
       "title": "Alert",
@@ -12,12 +20,29 @@
       "files": [{ "path": "../packages/ui/src/alert.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "alert-dialog",
+      "type": "registry:ui",
+      "title": "Alert Dialog",
+      "description": "Interruptive confirmation dialog (e.g. destructive-action confirm).",
+      "dependencies": ["radix-ui"],
+      "registryDependencies": ["@whity/button"],
+      "files": [{ "path": "../packages/ui/src/alert-dialog.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "badge",
       "type": "registry:ui",
       "title": "Badge",
       "description": "Small status descriptor with variant styles.",
       "dependencies": ["class-variance-authority", "radix-ui"],
       "files": [{ "path": "../packages/ui/src/badge.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "bilingual-input",
+      "type": "registry:ui",
+      "title": "Bilingual Input",
+      "description": "Paired Arabic/English text input rendering both fields as one composite value.",
+      "registryDependencies": ["@whity/input", "@whity/badge"],
+      "files": [{ "path": "../packages/ui/src/bilingual-input.tsx", "type": "registry:ui" }]
     },
     {
       "name": "breadcrumb",
@@ -57,6 +82,14 @@
       "description": "Tri-state (checked/unchecked/indeterminate) checkbox.",
       "dependencies": ["radix-ui", "@tabler/icons-react"],
       "files": [{ "path": "../packages/ui/src/checkbox.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "collapsible",
+      "type": "registry:ui",
+      "title": "Collapsible",
+      "description": "Accessible expand/collapse primitive (Root/Trigger/Content), unstyled.",
+      "dependencies": ["radix-ui"],
+      "files": [{ "path": "../packages/ui/src/collapsible.tsx", "type": "registry:ui" }]
     },
     {
       "name": "dialog",
@@ -99,6 +132,22 @@
       "files": [{ "path": "../packages/ui/src/input.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "locked-screen",
+      "type": "registry:ui",
+      "title": "Locked Screen",
+      "description": "Full-bleed lock placeholder (e.g. plan/entitlement gate) with icon, title and description.",
+      "dependencies": ["@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/locked-screen.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "math-text",
+      "type": "registry:ui",
+      "title": "Math Text",
+      "description": "Renders inline/block KaTeX math from a string containing $...$/$$...$$ segments.",
+      "dependencies": ["katex"],
+      "files": [{ "path": "../packages/ui/src/math-text.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "pagination",
       "type": "registry:ui",
       "title": "Pagination",
@@ -107,12 +156,36 @@
       "files": [{ "path": "../packages/ui/src/pagination.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "popover",
+      "type": "registry:ui",
+      "title": "Popover",
+      "description": "Generic floating panel anchored to a trigger (Root/Trigger/Content/Anchor).",
+      "dependencies": ["radix-ui"],
+      "files": [{ "path": "../packages/ui/src/popover.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "radio-group",
+      "type": "registry:ui",
+      "title": "Radio Group",
+      "description": "Accessible radio-button group.",
+      "dependencies": ["radix-ui", "@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/radio-group.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "select",
       "type": "registry:ui",
       "title": "Select",
       "description": "Listbox-style select with keyboard navigation.",
       "dependencies": ["radix-ui", "@tabler/icons-react"],
       "files": [{ "path": "../packages/ui/src/select.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "separator",
+      "type": "registry:ui",
+      "title": "Separator",
+      "description": "Horizontal/vertical divider line.",
+      "dependencies": ["radix-ui"],
+      "files": [{ "path": "../packages/ui/src/separator.tsx", "type": "registry:ui" }]
     },
     {
       "name": "sheet",
@@ -139,12 +212,36 @@
       "files": [{ "path": "../packages/ui/src/spinner.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "switch",
+      "type": "registry:ui",
+      "title": "Switch",
+      "description": "Accessible on/off toggle switch.",
+      "dependencies": ["radix-ui"],
+      "files": [{ "path": "../packages/ui/src/switch.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "table",
+      "type": "registry:ui",
+      "title": "Table",
+      "description": "Plain presentational table primitives (Table/Header/Body/Row/Head/Cell/Caption).",
+      "files": [{ "path": "../packages/ui/src/table.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "tabs",
       "type": "registry:ui",
       "title": "Tabs",
       "description": "Tabbed sections with variant styles.",
       "dependencies": ["class-variance-authority", "radix-ui"],
       "files": [{ "path": "../packages/ui/src/tabs.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "tag-input",
+      "type": "registry:ui",
+      "title": "Tag Input",
+      "description": "Multi-value tag picker built on Select + Badge.",
+      "dependencies": ["@tabler/icons-react"],
+      "registryDependencies": ["@whity/select", "@whity/badge"],
+      "files": [{ "path": "../packages/ui/src/tag-input.tsx", "type": "registry:ui" }]
     },
     {
       "name": "textarea",

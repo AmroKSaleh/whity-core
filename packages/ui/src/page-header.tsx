@@ -1,5 +1,7 @@
 import * as React from "react"
 
+import { cn } from "./utils"
+
 /**
  * PRESENTATIONAL page header only — title/description/breadcrumb/action
  * slots, no data fetching. A generalized, registry-published version of
@@ -16,7 +18,7 @@ export interface PageHeaderProps {
 
 export function PageHeader({ title, description, action, breadcrumb, className }: PageHeaderProps) {
   return (
-    <div className={className ? `mb-8 border-b border-border pb-6 ${className}` : "mb-8 border-b border-border pb-6"}>
+    <div className={cn("mb-8 border-b border-border pb-6", className)}>
       {breadcrumb && <div className="mb-2 text-sm text-muted-foreground">{breadcrumb}</div>}
       <div className="flex items-center justify-between">
         <div className="flex-1">

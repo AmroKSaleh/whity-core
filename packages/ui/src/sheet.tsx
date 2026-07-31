@@ -39,7 +39,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/80 duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 z-50 bg-overlay duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
@@ -47,6 +47,12 @@ function SheetOverlay({
   )
 }
 
+/**
+ * "left"/"right" are logical (start/end), not fixed screen sides — the
+ * implementation below maps them to `start-`/`end-` + `border-e`/`border-s`,
+ * so `side="right"` renders on the inline-end edge and flips with `dir="rtl"`
+ * like every other directional value in this kit, not a fixed physical side.
+ */
 type SheetSide = "top" | "right" | "bottom" | "left"
 
 function SheetContent({

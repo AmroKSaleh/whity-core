@@ -42,6 +42,7 @@ function AccessDenied({
     >
       <div
         data-slot="access-denied-icon"
+        aria-hidden="true"
         className="mb-4 rounded-full bg-destructive/10 p-4 text-destructive [&>svg]:size-12"
       >
         {icon ?? <IconAlertCircle />}

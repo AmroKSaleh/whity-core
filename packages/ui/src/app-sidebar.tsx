@@ -116,7 +116,7 @@ export function AppSidebar({
         type="button"
         aria-label="Open navigation"
         onClick={() => setMobileOpen(true)}
-        className="fixed start-3 top-3 z-40 flex size-8 items-center justify-center rounded-md border border-border bg-card md:hidden"
+        className="fixed start-3 top-3 z-40 flex size-8 items-center justify-center rounded-md border border-border bg-card outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 md:hidden"
       >
         <IconMenu2 className="size-4" />
       </button>
@@ -144,7 +144,7 @@ export function AppSidebar({
           type="button"
           aria-label="Close navigation"
           onClick={() => setMobileOpen(false)}
-          className="absolute end-2 top-2 flex size-7 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent md:hidden"
+          className="absolute end-2 top-2 flex size-7 items-center justify-center rounded-md text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30 md:hidden"
         >
           <IconX className="size-4" />
         </button>
@@ -157,7 +157,7 @@ export function AppSidebar({
           type="button"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           onClick={() => setCollapsed(!collapsed)}
-          className="hidden items-center justify-center gap-1.5 border-t border-sidebar-border px-3 py-2 text-xs/relaxed text-sidebar-foreground/70 hover:bg-sidebar-accent md:flex"
+          className="hidden items-center justify-center gap-1.5 border-t border-sidebar-border px-3 py-2 text-xs/relaxed text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30 md:flex"
         >
           {collapsed ? (
             <IconChevronRight className="size-3.5 rtl:rotate-180" />
