@@ -28,7 +28,7 @@ const meta = {
   args: { groups },
   decorators: [
     (Story) => (
-      <div className="relative h-96 overflow-hidden rounded-lg border border-border">
+      <div className="relative h-96 overflow-hidden rounded-lg bg-background">
         <Story />
       </div>
     ),

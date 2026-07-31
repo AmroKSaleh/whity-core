@@ -212,7 +212,7 @@ export function Sidebar() {
           transition-all duration-300 ease-in-out
           ${isMobile
             ? `fixed top-0 inset-s-0 h-screen ${sidebarWidth} bg-sidebar text-sidebar-foreground border-e border-sidebar-border flex flex-col z-40 ${
-                isOpen ? 'translate-x-0' : 'ltr:-translate-x-[calc(100%+1px)] rtl:translate-x-[calc(100%+1px)]'
+                isOpen ? 'translate-x-0' : 'ltr:-translate-x-full rtl:translate-x-full'
               }`
             : `relative h-screen ${sidebarWidth} bg-sidebar text-sidebar-foreground border-e border-sidebar-border flex flex-col`
           }

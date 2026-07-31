@@ -45,6 +45,32 @@
       "files": [{ "path": "../packages/ui/src/bilingual-input.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "data-table",
+      "type": "registry:ui",
+      "title": "Data Table",
+      "description": "Controlled, presentational data table (TanStack Table) with sorting, filtering, selection, and pagination.",
+      "dependencies": ["@tanstack/react-table", "@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/data-table.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "date-picker",
+      "type": "registry:ui",
+      "title": "Date Picker",
+      "description": "Custom interactive month/year calendar popover date picker primitive.",
+      "dependencies": ["@tabler/icons-react"],
+      "registryDependencies": ["@whity/popover"],
+      "files": [{ "path": "../packages/ui/src/date-picker.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "color-picker",
+      "type": "registry:ui",
+      "title": "Color Picker",
+      "description": "Custom interactive color picker with preset swatches, hex input, and spectrum picker.",
+      "dependencies": ["@tabler/icons-react"],
+      "registryDependencies": ["@whity/popover"],
+      "files": [{ "path": "../packages/ui/src/color-picker.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "breadcrumb",
       "type": "registry:ui",
       "title": "Breadcrumb",
@@ -204,6 +230,14 @@
       "files": [{ "path": "../packages/ui/src/skeleton.tsx", "type": "registry:ui" }]
     },
     {
+      "name": "slider",
+      "type": "registry:ui",
+      "title": "Slider",
+      "description": "Accessible range/slider primitive with value badge, labels and tooltips.",
+      "dependencies": ["radix-ui", "@tabler/icons-react"],
+      "files": [{ "path": "../packages/ui/src/slider.tsx", "type": "registry:ui" }]
+    },
+    {
       "name": "spinner",
       "type": "registry:ui",
       "title": "Spinner",
@@ -258,6 +292,15 @@
       "title": "Textarea",
       "description": "Styled multi-line text input.",
       "files": [{ "path": "../packages/ui/src/textarea.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "time-picker",
+      "type": "registry:ui",
+      "title": "Time Picker",
+      "description": "Custom interactive hour/minute scroll column time picker primitive with 12h/24h support.",
+      "dependencies": ["@tabler/icons-react"],
+      "registryDependencies": ["@whity/popover"],
+      "files": [{ "path": "../packages/ui/src/time-picker.tsx", "type": "registry:ui" }]
     },
     {
       "name": "toast",

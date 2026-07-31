@@ -160,7 +160,7 @@ export function AppSidebar({
         data-slot="app-sidebar"
         data-collapsed={collapsed || undefined}
         className={cn(
-          "fixed inset-y-0 start-0 z-50 flex w-64 -translate-x-[calc(100%+1px)] flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform rtl:translate-x-[calc(100%+1px)]",
+          "fixed inset-y-0 start-0 z-50 flex w-64 -translate-x-full flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground transition-transform rtl:translate-x-full",
           mobileOpen && "translate-x-0 rtl:translate-x-0",
           "md:static md:z-auto md:translate-x-0 rtl:md:translate-x-0",
           collapsed && "md:w-16",
