@@ -1,9 +1,10 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import type { DocElement, TextStyle } from '@/lib/documents/types';
+import type { DocElement, TextRun, TextStyle } from '@/lib/documents/types';
 import { interpolate, resolveBound } from '@/lib/documents/storage';
 import { BarcodeSvg } from './barcode-svg';
+import { MathText } from '@amroksaleh/ui/math-text';
 
 /**
  * Renders the visual CONTENT of one element, filling its (already positioned)
@@ -23,9 +24,25 @@ export function ElementContent({
 }) {
   switch (el.type) {
     case 'text':
-      return <TextBox style={el.style}>{el.text}</TextBox>;
-    case 'dynamicText':
-      return <TextBox style={el.style}>{preview ? interpolate(el.template, data) : el.template}</TextBox>;
+      return (
+        <TextBox style={el.style}>
+          <RichText plain={el.text} runs={el.runs} />
+        </TextBox>
+      );
+    case 'dynamicText': {
+      const runs = el.runs && (preview ? el.runs.map((r) => ({ ...r, text: interpolate(r.text, data) })) : el.runs);
+      return (
+        <TextBox style={el.style}>
+          <RichText plain={preview ? interpolate(el.template, data) : el.template} runs={runs || undefined} />
+        </TextBox>
+      );
+    }
+    case 'math':
+      return (
+        <div className="flex h-full w-full items-center justify-center overflow-hidden">
+          <MathText expression={el.expression} block={el.block} />
+        </div>
+      );
     case 'image': {
       // Only render absolute http(s) image URLs — parse-and-check the protocol so
       // javascript:/data: (incl. script-carrying SVG data-URIs) can't reach the
@@ -117,5 +134,31 @@ function TextBox({ style, children }: { style: TextStyle; children: React.ReactN
     <div dir={dir} data-testid="doc-textbox" style={css}>
       {children}
     </div>
+  );
+}
+
+/**
+ * Renders text content for a `TextBox`: either the plain string (legacy — the
+ * whole text takes the `TextBox`'s own fontWeight/fontStyle from `TextStyle`),
+ * or, when `runs` are present, one span per run with its own bold/italic
+ * override (`undefined` on a run inherits the container's style, matching the
+ * legacy look for any run that never got explicitly formatted).
+ */
+function RichText({ plain, runs }: { plain: string; runs?: TextRun[] }) {
+  if (!runs || runs.length === 0) return <>{plain}</>;
+  return (
+    <>
+      {runs.map((r, i) => (
+        <span
+          key={i}
+          style={{
+            fontWeight: r.bold === undefined ? undefined : r.bold ? 'bold' : 'normal',
+            fontStyle: r.italic === undefined ? undefined : r.italic ? 'italic' : 'normal',
+          }}
+        >
+          {r.text}
+        </span>
+      ))}
+    </>
   );
 }

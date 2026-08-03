@@ -13,10 +13,27 @@
 import type { SheetSpec } from './sheet';
 import type { SequenceConfig } from './batch';
 
-export type ElementType = 'text' | 'dynamicText' | 'image' | 'barcode' | 'qr' | 'rect' | 'line';
+export type ElementType = 'text' | 'dynamicText' | 'image' | 'barcode' | 'qr' | 'rect' | 'line' | 'math';
 
 /** CSS renders 1mm at 96dpi → this many px. Used to convert pointer deltas. */
 export const PX_PER_MM = 96 / 25.4;
+
+/**
+ * One formatted run within a text element's rich content: a slice of the text
+ * with its own bold/italic override. `bold`/`italic` undefined means "inherit
+ * the whole-element `TextStyle`" (`fontWeight`/`fontStyle`); `true`/`false`
+ * explicitly overrides it for this run. Concatenating `run.text` in document
+ * order must reconstruct the element's plain `text`/`template` field exactly —
+ * that invariant is what keeps every plain-text consumer (interpolation, the
+ * layers-panel label, CSV/batch data) working unchanged whether or not runs are
+ * present. See `lib/documents/rich-text.ts` for the pure helpers that build and
+ * edit these arrays.
+ */
+export interface TextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+}
 
 export interface TextStyle {
   /** Font size in points. */
@@ -60,6 +77,13 @@ export interface TextElement extends ElementCommon {
   type: 'text';
   text: string;
   style: TextStyle;
+  /**
+   * Optional inline bold/italic spans over `text` (see `TextRun`). Absent =
+   * legacy behaviour: the whole text uses `style.fontWeight`/`style.fontStyle`.
+   * Existing saved templates never have this field and keep rendering exactly
+   * as before.
+   */
+  runs?: TextRun[];
 }
 
 /** Text with `{{placeholder}}` tokens substituted from the bound data at render. */
@@ -67,6 +91,9 @@ export interface DynamicTextElement extends ElementCommon {
   type: 'dynamicText';
   template: string;
   style: TextStyle;
+  /** Optional inline bold/italic spans over `template` (see `TextRun`). Each run's
+   * `text` may itself contain `{{tokens}}`, interpolated per-run at render. */
+  runs?: TextRun[];
 }
 
 export interface ImageElement extends ElementCommon {
@@ -109,6 +136,15 @@ export interface LineElement extends ElementCommon {
   strokeWidth: number;
 }
 
+/** A LaTeX math expression, rendered via KaTeX (`@amroksaleh/ui/math-text`). */
+export interface MathElement extends ElementCommon {
+  type: 'math';
+  /** LaTeX source, without surrounding $ delimiters (passed straight to KaTeX). */
+  expression: string;
+  /** Display (block) math vs. inline; matches `MathText`'s `block` prop. */
+  block?: boolean;
+}
+
 /**
  * A reference (pointer) to a reusable block. The document stores only the
  * blockId + placement; the block's actual elements live once in the block store
@@ -128,6 +164,7 @@ export type DocElement =
   | QrElement
   | RectElement
   | LineElement
+  | MathElement
   | BlockInstanceElement;
 
 export interface Placeholder {
