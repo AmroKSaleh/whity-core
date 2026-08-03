@@ -399,6 +399,66 @@
       "title": "Page Shell",
       "description": "Presentational application-frame layout: sidebar + optional top bar + scrollable content region.",
       "files": [{ "path": "../packages/ui/src/page-shell.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "documents-types",
+      "type": "registry:lib",
+      "title": "Document Designer Types",
+      "description": "Framework-agnostic model (elements, pages, templates) for the document/label designer.",
+      "files": [{ "path": "../packages/ui/src/documents/types.ts", "type": "registry:lib" }]
+    },
+    {
+      "name": "documents-blocks",
+      "type": "registry:lib",
+      "title": "Document Designer Blocks",
+      "description": "Pure reusable-block model + resolution helpers (DocBlock, instance resolution) for the document/label designer.",
+      "registryDependencies": ["@whity/documents-types"],
+      "files": [{ "path": "../packages/ui/src/documents/blocks.ts", "type": "registry:lib" }]
+    },
+    {
+      "name": "documents-sheet",
+      "type": "registry:lib",
+      "title": "Document Designer Sheet Layout",
+      "description": "Pure N-up label-sheet grid/cell math for the document/label designer.",
+      "files": [{ "path": "../packages/ui/src/documents/sheet.ts", "type": "registry:lib" }]
+    },
+    {
+      "name": "documents-geometry",
+      "type": "registry:lib",
+      "title": "Document Designer Geometry",
+      "description": "Pure drag/alignment snapping helpers for the document designer canvas.",
+      "files": [{ "path": "../packages/ui/src/documents/geometry.ts", "type": "registry:lib" }]
+    },
+    {
+      "name": "documents-interpolation",
+      "type": "registry:lib",
+      "title": "Document Designer Interpolation",
+      "description": "Pure {{placeholder}} token interpolation + bound-value resolution helpers for the document/label designer.",
+      "files": [{ "path": "../packages/ui/src/documents/interpolation.ts", "type": "registry:lib" }]
+    },
+    {
+      "name": "barcode-svg",
+      "type": "registry:ui",
+      "title": "Barcode SVG",
+      "description": "Renders a barcode or QR/matrix code as crisp SVG via bwip-js, scaled to fill its container.",
+      "dependencies": ["bwip-js"],
+      "files": [{ "path": "../packages/ui/src/documents/barcode-svg.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "element-content",
+      "type": "registry:ui",
+      "title": "Element Content",
+      "description": "Renders the visual content of one document/label-designer element: text (with optional rich-text bold/italic runs), math (KaTeX), image, barcode, QR, rect or line.",
+      "registryDependencies": ["@whity/math-text", "@whity/barcode-svg", "@whity/documents-types", "@whity/documents-interpolation"],
+      "files": [{ "path": "../packages/ui/src/documents/element-content.tsx", "type": "registry:ui" }]
+    },
+    {
+      "name": "element-layer",
+      "type": "registry:ui",
+      "title": "Element Layer",
+      "description": "Renders a positioned, z-ordered list of document/label-designer elements, resolving block-instance references to their block's elements.",
+      "registryDependencies": ["@whity/element-content", "@whity/documents-types", "@whity/documents-blocks"],
+      "files": [{ "path": "../packages/ui/src/documents/element-layer.tsx", "type": "registry:ui" }]
     }
   ]
 }

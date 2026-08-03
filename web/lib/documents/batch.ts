@@ -7,21 +7,14 @@
  * `rowsFromValues`. Pure and deterministic — unit-tested without a DOM.
  */
 
-/** Configuration for the serial/sequence generator. */
-export interface SequenceConfig {
-  /** Placeholder key the generated value is written to (e.g. "sku", "serial"). */
-  key: string;
-  prefix: string;
-  /** First numeric value. */
-  start: number;
-  /** How many rows to generate. */
-  count: number;
-  /** Increment between rows (may be negative). */
-  step: number;
-  /** Zero-pad the numeric part to this width (0 = no padding). */
-  padding: number;
-  suffix: string;
-}
+/**
+ * Configuration for the serial/sequence generator. The type itself lives in
+ * `@amroksaleh/ui/documents/types` (it's just a data shape referenced by the
+ * portable `DocTemplate.sequence` field, WC doc-designer-ui-extraction); this
+ * module keeps owning the generator logic + defaults below.
+ */
+import type { SequenceConfig } from '@amroksaleh/ui/documents/types';
+export type { SequenceConfig };
 
 /** Hard cap on generated rows — a runaway-input backstop, not a product limit. */
 export const MAX_BATCH_ROWS = 100000;

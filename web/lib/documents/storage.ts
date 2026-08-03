@@ -24,22 +24,12 @@ function uid(): string {
     : `id-${Math.random().toString(36).slice(2)}`;
 }
 
-/** Substitute `{{key}}` tokens from `data` (missing keys → empty string). */
-export function interpolate(text: string, data: Record<string, string>): string {
-  return text.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m, key: string) => data[key] ?? '');
-}
-
-/** The effective value for a bindable element: bound placeholder wins, else fallback. */
-export function resolveBound(
-  binding: string | undefined,
-  fallback: string,
-  data: Record<string, string>
-): string {
-  if (binding && data[binding] !== undefined && data[binding] !== '') {
-    return data[binding];
-  }
-  return fallback;
-}
+// `interpolate`/`resolveBound` were pure (no localStorage) and moved to
+// `@amroksaleh/ui/documents/interpolation` (WC doc-designer-ui-extraction) so
+// the relocated `element-content.tsx` renderer can use them without pulling in
+// this module's localStorage-backed persistence. Re-exported here for
+// backward compatibility since this module used to own them.
+export { interpolate, resolveBound } from '@amroksaleh/ui/documents/interpolation';
 
 /** Build the sample-data map from a template's placeholders. */
 export function sampleDataOf(template: DocTemplate): Record<string, string> {
