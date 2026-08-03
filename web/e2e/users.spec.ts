@@ -58,7 +58,7 @@ test.describe('Users (admin)', () => {
     // role) — name is server-derived from the email and tenant comes from the
     // caller's tenant context.
     await createDialog.getByLabel('Email').fill(createdEmail);
-    await createDialog.getByLabel('Password').fill('e2e-password-123');
+    await createDialog.getByLabel('Password', { exact: true }).fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
     await createDialog.getByRole('button', { name: 'Create User' }).click();
@@ -120,7 +120,7 @@ test.describe('Users (admin)', () => {
     await page.getByRole('button', { name: 'Create User' }).click();
     const createDialog = page.getByRole('dialog');
     await createDialog.getByLabel('Email').fill(createdEmail);
-    await createDialog.getByLabel('Password').fill('e2e-password-123');
+    await createDialog.getByLabel('Password', { exact: true }).fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
     await createDialog.getByRole('button', { name: 'Create User' }).click();
@@ -175,7 +175,7 @@ test.describe('Users (admin)', () => {
     await expect(createDialog.getByText('Create New User')).toBeVisible();
 
     await createDialog.getByLabel('Email').fill(createdEmail);
-    await createDialog.getByLabel('Password').fill('e2e-password-123');
+    await createDialog.getByLabel('Password', { exact: true }).fill('e2e-password-123');
     // Pick the non-default `admin` role at creation time.
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'Admin' }).click();
@@ -232,7 +232,7 @@ test.describe('Edit User pre-fill (WC-100)', () => {
     await page.getByRole('button', { name: 'Create User' }).click();
     const createDialog = page.getByRole('dialog');
     await createDialog.getByLabel('Email').fill(createdEmail);
-    await createDialog.getByLabel('Password').fill('e2e-password-123');
+    await createDialog.getByLabel('Password', { exact: true }).fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
     await createDialog.getByRole('button', { name: 'Create User' }).click();
@@ -290,7 +290,7 @@ test.describe('Create User validation + dialog (admin)', () => {
     // Invalid email + too-short password keep their field errors after another
     // submit attempt.
     await dialog.getByLabel('Email').fill('not-an-email');
-    await dialog.getByLabel('Password').fill('short');
+    await dialog.getByLabel('Password', { exact: true }).fill('short');
     await dialog.getByRole('button', { name: 'Create User' }).click();
     await expect(dialog.getByText('Invalid email address')).toBeVisible();
     await expect(dialog.getByText('Password must be at least 8 characters')).toBeVisible();
@@ -368,7 +368,7 @@ test.describe('Users role dropdown is driven from real roles (WC-121)', () => {
     await page.getByRole('button', { name: 'Create User' }).click();
     const createDialog = page.getByRole('dialog');
     await createDialog.getByLabel('Email').fill(probeEmail);
-    await createDialog.getByLabel('Password').fill('e2e-password-123');
+    await createDialog.getByLabel('Password', { exact: true }).fill('e2e-password-123');
     await createDialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'User' }).click();
     await createDialog.getByRole('button', { name: 'Create User' }).click();

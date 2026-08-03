@@ -406,6 +406,7 @@ export interface ColorInputBlock {
 export interface LocalizedTextValue {
   ar?: string;
   en?: string;
+  [key: string]: string | undefined;
 }
 
 /**

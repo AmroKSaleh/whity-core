@@ -12,41 +12,53 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Empty: Story = {
-  render: () => {
-    const [value, setValue] = React.useState<BilingualValue>({})
-    return <BilingualInput id="sb-bilingual-empty" value={value} onChange={setValue} />
-  },
-}
-
-export const BothSet: Story = {
+export const WithTitleAndBadges: Story = {
   render: () => {
     const [value, setValue] = React.useState<BilingualValue>({
-      ar: "مرحبا",
-      en: "Hello",
+      ar: "مدير النظام",
+      en: "System Administrator",
     })
-    return <BilingualInput id="sb-bilingual-both" value={value} onChange={setValue} />
+    return (
+      <BilingualInput
+        id="sb-bilingual-title"
+        label="Role Title"
+        description="Provide the official role title in both primary languages."
+        value={value}
+        onChange={setValue}
+        required
+      />
+    )
   },
 }
 
-export const PartiallyTranslated: Story = {
-  render: () => {
-    const [value, setValue] = React.useState<BilingualValue>({ en: "Untranslated stem" })
-    return <BilingualInput id="sb-bilingual-partial" value={value} onChange={setValue} />
-  },
-}
-
-export const CustomLabels: Story = {
+export const Empty: Story = {
   render: () => {
     const [value, setValue] = React.useState<BilingualValue>({})
     return (
       <BilingualInput
-        id="sb-bilingual-custom"
+        id="sb-bilingual-empty"
+        label="Department Name"
         value={value}
         onChange={setValue}
-        arLabel="السؤال (عربي)"
-        enLabel="Question (English)"
-        required
+      />
+    )
+  },
+}
+
+export const CustomLanguagePair: Story = {
+  render: () => {
+    const [value, setValue] = React.useState<BilingualValue>({
+      fr: "Directeur Général",
+      de: "Geschäftsführer",
+    })
+    return (
+      <BilingualInput
+        id="sb-bilingual-custom-langs"
+        label="Job Title (Europe)"
+        primaryLang={{ code: "fr", label: "French", badge: "FR" }}
+        secondaryLang={{ code: "de", label: "German", badge: "DE" }}
+        value={value}
+        onChange={setValue}
       />
     )
   },
@@ -56,6 +68,7 @@ export const Disabled: Story = {
   render: () => (
     <BilingualInput
       id="sb-bilingual-disabled"
+      label="Organization Name"
       value={{ ar: "معطل", en: "Disabled" }}
       onChange={() => {}}
       disabled

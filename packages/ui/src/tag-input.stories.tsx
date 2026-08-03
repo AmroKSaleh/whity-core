@@ -4,11 +4,11 @@ import * as React from "react"
 import { TagInput, type TagOption } from "./tag-input"
 
 const OPTIONS: TagOption[] = [
-  { value: "clo-1", label: "CLO 1 — Recall" },
-  { value: "clo-2", label: "CLO 2 — Apply" },
-  { value: "clo-3", label: "CLO 3 — Analyze" },
-  { value: "clo-4", label: "CLO 4 — Evaluate" },
-  { value: "clo-5", label: "CLO 5 — Create" },
+  { value: "react", label: "React" },
+  { value: "typescript", label: "TypeScript" },
+  { value: "nextjs", label: "Next.js" },
+  { value: "tailwind", label: "Tailwind CSS" },
+  { value: "storybook", label: "Storybook" },
 ]
 
 const meta = {
@@ -29,7 +29,7 @@ export const Empty: Story = {
 
 export const SomeSelected: Story = {
   render: () => {
-    const [value, setValue] = React.useState<string[]>(["clo-2", "clo-4"])
+    const [value, setValue] = React.useState<string[]>(["typescript", "tailwind"])
     return <TagInput id="sb-tags-some" options={OPTIONS} value={value} onChange={setValue} />
   },
 }
@@ -43,6 +43,6 @@ export const AllSelected: Story = {
 
 export const Disabled: Story = {
   render: () => (
-    <TagInput id="sb-tags-disabled" options={OPTIONS} value={["clo-1", "clo-3"]} onChange={() => {}} disabled />
+    <TagInput id="sb-tags-disabled" options={OPTIONS} value={["react", "nextjs"]} onChange={() => {}} disabled />
   ),
 }
