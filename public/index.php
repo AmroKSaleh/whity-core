@@ -1211,7 +1211,8 @@ $notificationDispatcher = new \Whity\Core\Notification\NotificationDispatcher(
         new \Whity\Core\Notification\NotificationTemplateRepository($db->getPdo())
     ),
     $logger,
-    $notificationPreferenceResolver
+    $notificationPreferenceResolver,
+    $auditLogger
 );
 $notificationDispatcher->subscribe($hookManager);
 

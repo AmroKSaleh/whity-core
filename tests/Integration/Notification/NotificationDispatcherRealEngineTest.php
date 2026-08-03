@@ -7,6 +7,7 @@ namespace Tests\Integration\Notification;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Notification\CoreTransports;
 use Whity\Core\Notification\LogTransport;
 use Whity\Core\Notification\NotificationDispatcher;
@@ -184,5 +185,90 @@ final class NotificationDispatcherRealEngineTest extends TestCase
         $channels = array_column($this->repo->listDeliveries(self::TENANT_A, $id), 'channel');
         sort($channels);
         self::assertSame(['email', 'in_app'], $channels, 'a transactional type delivers on every channel despite the opt-out');
+    }
+
+    // ---- dispatch-time audit (4d40cc1c follow-up: the 'queued' lifecycle state) ----
+
+    /**
+     * Capture every AuditLogger::record() call.
+     *
+     * @param list<array{action: string, options: array<string, mixed>}> $sink
+     */
+    private function capturingAudit(array &$sink): AuditLoggerInterface
+    {
+        $audit = $this->createMock(AuditLoggerInterface::class);
+        $audit->method('record')->willReturnCallback(
+            function (string $action, array $options = []) use (&$sink): void {
+                $sink[] = ['action' => $action, 'options' => $options];
+            }
+        );
+
+        return $audit;
+    }
+
+    public function testDispatchAuditsQueuedForEachChannelWithATransportWithoutPii(): void
+    {
+        /** @var list<array{action: string, options: array<string, mixed>}> $sink */
+        $sink = [];
+        $dispatcher = new NotificationDispatcher(
+            $this->repo,
+            CoreTransports::make(),
+            new QueueService(new JobRepository($this->pdo)),
+            null,
+            null,
+            null,
+            $this->capturingAudit($sink)
+        );
+
+        $dispatcher->dispatch(self::TENANT_A, 101, 'user.invited', [
+            'channels' => ['in_app', 'email'],
+            'to'       => 'pii-marker@example.com',
+            'subject'  => 'SECRET_SUBJECT',
+        ]);
+
+        $queuedEntries = array_values(array_filter($sink, static fn (array $e): bool => $e['action'] === 'notification.delivery.queued'));
+        self::assertCount(2, $queuedEntries, 'one queued audit entry per channel with a transport');
+        foreach ($queuedEntries as $entry) {
+            $meta = $entry['options']['metadata'] ?? [];
+            self::assertIsArray($meta);
+            self::assertSame('user.invited', $meta['type']);
+            self::assertContains($meta['channel'], ['in_app', 'email']);
+        }
+
+        // NON-PII: the recipient address / subject must never appear anywhere in the audit entries.
+        $flat = (string) json_encode($sink);
+        self::assertStringNotContainsString('pii-marker@example.com', $flat);
+        self::assertStringNotContainsString('SECRET_SUBJECT', $flat);
+    }
+
+    public function testDispatchAuditsFailedForAChannelWithNoTransportAtDispatchTime(): void
+    {
+        /** @var list<array{action: string, options: array<string, mixed>}> $sink */
+        $sink = [];
+        $dispatcher = new NotificationDispatcher(
+            $this->repo,
+            CoreTransports::make(), // no 'push' transport registered
+            new QueueService(new JobRepository($this->pdo)),
+            null,
+            null,
+            null,
+            $this->capturingAudit($sink)
+        );
+
+        $dispatcher->dispatch(self::TENANT_A, 101, 'user.invited', ['channels' => ['push']]);
+
+        self::assertCount(1, $sink);
+        self::assertSame('notification.delivery.failed', $sink[0]['action']);
+        $meta = $sink[0]['options']['metadata'] ?? [];
+        self::assertIsArray($meta);
+        self::assertSame('no_transport_at_dispatch', $meta['reason'] ?? null);
+        self::assertSame('push', $meta['channel']);
+    }
+
+    public function testDispatchWorksWithNoAuditLoggerInjected(): void
+    {
+        // Back-compat: the audit param is optional; dispatch must still succeed.
+        $id = $this->dispatcher->dispatch(self::TENANT_A, 101, 'user.invited', ['channels' => ['in_app']]);
+        self::assertNotNull($this->repo->find(self::TENANT_A, $id));
     }
 }
