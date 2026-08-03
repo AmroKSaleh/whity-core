@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import * as React from "react"
-import { IconArrowLeft, IconHome, IconRefresh } from "@tabler/icons-react"
+import { IconArrowLeft, IconBuilding, IconHome, IconRefresh, IconSettings, IconUsers } from "@tabler/icons-react"
 
 import { Button } from "./button"
-import { AccessDenied } from "./access-denied"
+import { AccessDenied, type SearchResultItem } from "./access-denied"
 
 const meta = {
   title: "Primitives/AccessDenied",
@@ -15,11 +15,100 @@ const meta = {
       control: "select",
       options: ["forbidden", "unauthorized", "not-found", "error", "success", "maintenance"],
     },
+    showSearch: { control: "boolean" },
   },
 } satisfies Meta<typeof AccessDenied>
 
 export default meta
 type Story = StoryObj<typeof meta>
+
+const SAMPLE_RESULTS: SearchResultItem[] = [
+  {
+    id: "1",
+    title: "Organization Unit Settings",
+    description: "Manage OU hierarchy, permissions, and tenant scope.",
+    href: "/settings/ou",
+    category: "Settings",
+    icon: <IconBuilding />,
+  },
+  {
+    id: "2",
+    title: "User Management & Governance",
+    description: "Invite users, assign roles, and review approval requests.",
+    href: "/admin/users",
+    category: "Admin",
+    icon: <IconUsers />,
+  },
+  {
+    id: "3",
+    title: "General Preferences",
+    description: "Configure workspace theme, default language, and branding.",
+    href: "/settings/general",
+    category: "Preferences",
+    icon: <IconSettings />,
+  },
+]
+
+export const NotFoundWithSiteSearch: Story = {
+  args: {
+    variant: "not-found",
+    title: "Page Not Found",
+    description: "The page or resource you requested could not be found. Try searching our site or head back to the dashboard.",
+    showSearch: true,
+    searchPlaceholder: "Search documentation, resources, or settings...",
+    onSearch: (query) => alert(`Searching for: ${query}`),
+    primaryAction: {
+      label: "Back to Home",
+      icon: <IconHome />,
+      href: "/",
+    },
+  },
+}
+
+export const NotFoundWithSearchResults: Story = {
+  args: {
+    variant: "not-found",
+    title: "Page Not Found",
+    description: "The page you requested could not be found. Here are relevant resources matching your site search:",
+    showSearch: true,
+    searchResults: SAMPLE_RESULTS,
+    primaryAction: {
+      label: "Back to Home",
+      icon: <IconHome />,
+      href: "/",
+    },
+  },
+}
+
+export const NotFoundInteractiveSearch: Story = {
+  render: () => {
+    const [query, setQuery] = React.useState("")
+    const filtered = query.trim()
+      ? SAMPLE_RESULTS.filter(
+          (item) =>
+            item.title.toLowerCase().includes(query.toLowerCase()) ||
+            item.description?.toLowerCase().includes(query.toLowerCase())
+        )
+      : []
+
+    return (
+      <AccessDenied
+        variant="not-found"
+        title="Page Not Found"
+        description="Try searching for settings, users, or general options:"
+        showSearch
+        searchPlaceholder="Type 'users' or 'settings'..."
+        onSearch={setQuery}
+        searchResults={filtered}
+        primaryAction={{
+          label: "Back to Home",
+          icon: <IconHome />,
+          href: "/",
+        }}
+      />
+    )
+  },
+}
 
 export const ForbiddenWithActions: Story = {
   args: {
@@ -51,19 +140,6 @@ export const Unauthorized: Story = {
     primaryAction: {
       label: "Sign In Again",
       href: "/login",
-    },
-  },
-}
-
-export const NotFound: Story = {
-  args: {
-    variant: "not-found",
-    title: "Page Not Found",
-    description: "The resource or page you requested could not be found. It may have been moved or deleted.",
-    primaryAction: {
-      label: "Back to Home",
-      icon: <IconHome />,
-      href: "/",
     },
   },
 }
@@ -103,16 +179,5 @@ export const MaintenanceState: Story = {
       label: "Check Status",
       onClick: () => {},
     },
-  },
-}
-
-export const LegacyActionSlot: Story = {
-  args: {
-    description: "Access to this page is restricted.",
-    action: (
-      <Button variant="outline" size="lg" onClick={() => window.history.back()}>
-        Go Back
-      </Button>
-    ),
   },
 }
