@@ -68,6 +68,8 @@ export function newElement(type: ElementType, els: DocElement[]): DocElement {
       return { ...base, type, w: 40, h: 20, fill: '#eef2ff', stroke: '#4f46e5', strokeWidth: 0.3, radius: 1 };
     case 'line':
       return { ...base, type, w: 50, h: 0.5, stroke: '#111111', strokeWidth: 0.5 };
+    case 'math':
+      return { ...base, type, w: 40, h: 14, expression: 'x^2 + y^2 = z^2', block: true };
     default: {
       const _exhaustive: never = type;
       throw new Error(`Unknown element type: ${String(_exhaustive)}`);

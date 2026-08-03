@@ -1,5 +1,5 @@
 import type { DocTemplate } from '@/lib/documents/types';
-import { isDocTemplate, migrateTemplate } from '@/lib/documents/storage';
+import { isDocTemplate, migrateTemplate, newElement } from '@/lib/documents/storage';
 
 const PAGE = { widthMm: 100, heightMm: 100, marginMm: 0, background: '#ffffff' };
 
@@ -58,5 +58,23 @@ describe('template validation + migration', () => {
     expect(m.version).toBe(2);
     expect(m.pages).toHaveLength(2);
     expect(m.pages[1].id).toBe('p2');
+  });
+});
+
+describe('newElement — factory defaults', () => {
+  it('gives a new math element a non-empty default expression and a sensible size', () => {
+    const el = newElement('math', []);
+    expect(el.type).toBe('math');
+    if (el.type !== 'math') throw new Error('unreachable');
+    expect(el.expression.length).toBeGreaterThan(0);
+    expect(el.w).toBeGreaterThan(0);
+    expect(el.h).toBeGreaterThan(0);
+    expect(el.block).toBe(true);
+  });
+
+  it('stacks a new element above the current highest z', () => {
+    const existing = [{ ...newElement('rect', []), z: 5 }];
+    const el = newElement('math', existing);
+    expect(el.z).toBeGreaterThan(5);
   });
 });
