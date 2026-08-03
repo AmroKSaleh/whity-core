@@ -138,4 +138,92 @@ final class DocumentTemplateRepository
 
         return $stmt->rowCount();
     }
+
+    /**
+     * The block delete-guard (WC-521): whether ANY template in the tenant still
+     * holds a live `blockInstance` pointer ({type:'blockInstance', blockId}) at
+     * $blockId, anywhere in its `data` JSON (any page/element, at any depth —
+     * this deliberately does not assume the exact pages/elements shape, so it
+     * stays correct across template-schema changes). Callers use this to REFUSE
+     * deleting a referenced block rather than silently orphaning the pointer.
+     *
+     * Two engines, one answer:
+     *  - Postgres: a `jsonb_path_exists` recursive-descent (`.**`) scan done
+     *    entirely in the database — efficient, no need to fetch template bodies.
+     *  - SQLite (the default unit-test engine): the `data` column is plain TEXT
+     *    (see SchemaFromMigrations' JSONB->TEXT translation) and SQLite's JSON
+     *    functions differ from Postgres's jsonpath, so rows are fetched and the
+     *    decoded tree is walked in PHP instead. Same semantics, same answer.
+     */
+    public function referencesBlock(int $blockId, int $tenantId): bool
+    {
+        if ($this->driver() === 'pgsql') {
+            // The parameter is cast explicitly (::text) because it is only ever
+            // consumed inside jsonb_build_object()'s variadic "any" signature —
+            // Postgres cannot infer a bound parameter's type from a polymorphic
+            // argument position and raises "indeterminate datatype" (42P18)
+            // without the cast.
+            $stmt = $this->db->prepare(
+                "SELECT EXISTS (
+                     SELECT 1 FROM document_templates
+                      WHERE tenant_id = :tenant_id
+                        AND jsonb_path_exists(
+                            data,
+                            '\$.** ? (@.type == \"blockInstance\" && @.blockId == \$bid)',
+                            jsonb_build_object('bid', :block_id::text)
+                        )
+                 ) AS referenced"
+            );
+            $stmt->execute([':tenant_id' => $tenantId, ':block_id' => (string) $blockId]);
+
+            return (bool) $stmt->fetchColumn();
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT data FROM document_templates WHERE tenant_id = :tenant_id'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        $needle = (string) $blockId;
+        while (($raw = $stmt->fetchColumn()) !== false) {
+            $decoded = json_decode((string) $raw, true);
+            if (is_array($decoded) && self::treeReferencesBlock($decoded, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Recursively walk a decoded template JSON tree for a blockInstance element
+     * pointing at $needle (the block id, as a string — the client's blockId
+     * field is a string, {@see web/lib/documents/types.ts}).
+     *
+     * @param array<int|string, mixed> $node
+     */
+    private static function treeReferencesBlock(array $node, string $needle): bool
+    {
+        if (
+            ($node['type'] ?? null) === 'blockInstance'
+            && array_key_exists('blockId', $node)
+            && (string) $node['blockId'] === $needle
+        ) {
+            return true;
+        }
+        foreach ($node as $value) {
+            if (is_array($value) && self::treeReferencesBlock($value, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function driver(): string
+    {
+        $name = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
+
+        return is_string($name) ? $name : '';
+    }
 }

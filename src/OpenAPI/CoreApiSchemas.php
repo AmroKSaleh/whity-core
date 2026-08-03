@@ -103,6 +103,7 @@ final class CoreApiSchemas
             self::planRoutes(),
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
+            self::documentBlockRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
             self::tagRoutes()
@@ -2251,6 +2252,39 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
             ], []),
 
+            // ── Document/label designer blocks (WC-521) ───────────────────────
+            // `data` is the verbatim client DocElement[] fragment (freeform array);
+            // documents reference a block by POINTER (a `blockInstance` element
+            // carrying this block's id), never an inline copy.
+            'DocumentBlock' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+                'is_system' => self::bool(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
+            'DocumentBlockListResponse' => self::listEnvelope('DocumentBlock'),
+            'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
+            // scope/required_permission are optional; setting a shared scope or a
+            // permission tag requires documents:publish (403 otherwise).
+            'DocumentBlockCreateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], ['name', 'data']),
+            'DocumentBlockUpdateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], []),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -3574,6 +3608,66 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Template deleted'],
                     404 => self::errorResponse('Template not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Document/label designer block routes (WC-521). Tenant-scoped, RBAC-gated
+     * CRUD; list/get are additionally row-filtered server-side by scope +
+     * required_permission, publishing needs documents:publish, and delete is
+     * refused (409) while a template still holds a live blockInstance pointer
+     * at the block (reference-integrity guard).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentBlockRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/document-blocks', 'documents:read', [
+                'summary' => 'List document/label blocks visible to the caller',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The blocks the caller may see (RBAC-filtered)', 'DocumentBlockListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-blocks', 'documents:write', [
+                'summary' => 'Create a document/label block',
+                'tags' => ['documents'],
+                'request' => 'DocumentBlockCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created block', 'DocumentBlockResponse'),
+                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-blocks/{id:\d+}', 'documents:read', [
+                'summary' => 'Get a document/label block',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The block', 'DocumentBlockResponse'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-blocks/{id:\d+}', 'documents:write', [
+                'summary' => 'Update a document/label block',
+                'tags' => ['documents'],
+                'request' => 'DocumentBlockUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated block', 'DocumentBlockResponse'),
+                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-blocks/{id:\d+}', 'documents:write', [
+                'summary' => 'Delete a document/label block',
+                'tags' => ['documents'],
+                'responses' => [
+                    204 => ['description' => 'Block deleted'],
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                    409 => self::errorResponse('Cannot delete a block that is still referenced by a template'),
                 ] + self::authErrors(),
             ]),
         ];

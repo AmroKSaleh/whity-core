@@ -1145,9 +1145,11 @@ $router->register('GET', '/api/subscription',                  [$subscriptionHan
 // documents:write on writes) is the baseline; the handler ADDITIONALLY row-
 // filters list/get by scope + required_permission (server-side, so a caller only
 // receives templates it may see) and gates publishing on documents:publish.
+$documentTemplateRepository = new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo());
+$documentAccessPolicy = new \Whity\Core\Document\DocumentAccessPolicy();
 $documentTemplatesHandler = new \Whity\Api\DocumentTemplatesApiHandler(
-    new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo()),
-    new \Whity\Core\Document\DocumentAccessPolicy(),
+    $documentTemplateRepository,
+    $documentAccessPolicy,
     $roleChecker
 );
 $router->register('GET',    '/api/document-templates',          [$documentTemplatesHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
@@ -1155,6 +1157,24 @@ $router->register('POST',   '/api/document-templates',          [$documentTempla
 $router->register('GET',    '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PATCH',  '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
+
+// 13a-septies. Document/label designer BLOCKS API (WC-521) — mirrors the
+// templates handler above exactly. The one thing beyond CRUD is the reference-
+// integrity delete guard: a block is pointer-referenced by templates via a
+// `blockInstance` element, so delete() 409s when DocumentTemplateRepository::
+// referencesBlock() finds a live reference anywhere in the tenant's templates
+// (never silently orphans the pointer).
+$documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
+    new \Whity\Core\Document\DocumentBlockRepository($db->getPdo()),
+    $documentTemplateRepository,
+    $documentAccessPolicy,
+    $roleChecker
+);
+$router->register('GET',    '/api/document-blocks',          [$documentBlocksHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-blocks',          [$documentBlocksHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
 
 // 13b-ter. Native taxonomy/tagging API (WC-621): a domain-neutral tagging
 // primitive. Tenant-scoped, RBAC-gated CRUD for tag groups + tags, plus a
