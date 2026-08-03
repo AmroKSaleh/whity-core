@@ -481,6 +481,20 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_READ,
     ];
     $items[] = [
+        'id' => 'documents',
+        'label' => 'Document Designer',
+        'href' => '/admin/documents',
+        'icon' => 'file-text',
+        'group' => 'admin',
+        'order' => 9.2,
+        // WC-docdesigner: the document/label template designer. Mirrors GET
+        // /api/document-templates (DocumentTemplatesApiHandler), gated on
+        // documents:read. The nav item carries the requirement so a
+        // permission-aware client hides it; the page/API also enforce it
+        // server-side (write/publish/render are separately gated).
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
+    ];
+    $items[] = [
         'id' => 'pending-registrations',
         'label' => 'Pending Registrations',
         'href' => '/admin/registrations',
