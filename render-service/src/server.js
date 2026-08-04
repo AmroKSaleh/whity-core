@@ -20,6 +20,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 
 const { renderToPdf, shutdown } = require('./renderer');
 const { validatePayload } = require('./limits');
@@ -31,29 +32,19 @@ const HARNESS_DIR = path.join(__dirname, '..', 'dist', 'harness');
 // Rate limiting for POST /render: each call drives a full headless-Chromium
 // page load, so even a trusted-but-misbehaving caller (a retry storm, a bug
 // in the core PHP client) can exhaust CPU/memory with unbounded concurrent
-// renders. A simple in-memory sliding window is adequate for this service's
-// actual deployment shape (a single instance behind the shared-secret gate,
-// never exposed publicly, never horizontally scaled today) — env-overridable
-// so an operator can tune it without a code change; add a real shared store
-// (e.g. Redis) if this service is ever run as multiple replicas.
-const RATE_LIMIT_MAX = Number(process.env.RENDER_RATE_LIMIT_MAX || 30);
-const RATE_LIMIT_WINDOW_MS = Number(process.env.RENDER_RATE_LIMIT_WINDOW_MS || 60_000);
-/** @type {number[]} Timestamps (ms) of recent /render requests, oldest first. */
-const renderRequestTimestamps = [];
-
-/** True (and records the call) when under the limit; false when it should be rejected. */
-function allowRenderRequest() {
-  const now = Date.now();
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
-  while (renderRequestTimestamps.length > 0 && renderRequestTimestamps[0] < cutoff) {
-    renderRequestTimestamps.shift();
-  }
-  if (renderRequestTimestamps.length >= RATE_LIMIT_MAX) {
-    return false;
-  }
-  renderRequestTimestamps.push(now);
-  return true;
-}
+// renders. A single-process in-memory store (express-rate-limit's default) is
+// adequate for this service's actual deployment shape (a single instance
+// behind the shared-secret gate, never exposed publicly, never horizontally
+// scaled today) — the limit/window are env-overridable so an operator can
+// tune them without a code change; swap in a shared store (e.g. Redis) if
+// this service is ever run as multiple replicas.
+const renderRateLimiter = rateLimit({
+  windowMs: Number(process.env.RENDER_RATE_LIMIT_WINDOW_MS || 60_000),
+  limit: Number(process.env.RENDER_RATE_LIMIT_MAX || 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many render requests; try again shortly' },
+});
 
 if (SHARED_SECRET.length < 32) {
   // Not fatal — /health must still work so `docker compose` healthchecks and
@@ -90,15 +81,9 @@ function isAuthorized(req) {
   return crypto.timingSafeEqual(a, b);
 }
 
-app.post('/render', async (req, res) => {
+app.post('/render', renderRateLimiter, async (req, res) => {
   if (!isAuthorized(req)) {
     res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
-  if (!allowRenderRequest()) {
-    res.set('Retry-After', String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)));
-    res.status(429).json({ error: 'Too many render requests; try again shortly' });
     return;
   }
 
