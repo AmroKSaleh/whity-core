@@ -223,7 +223,27 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
 
         $tabs = $this->tabIds($this->handler->tabs($this->requestAs($profileId, 0)));
 
-        $this->assertSame(['general', 'branding', 'signup', 'email', 'storage'], $tabs);
+        $this->assertSame(['general', 'branding', 'signup', 'email', 'storage', 'feature-flags'], $tabs);
+    }
+
+    public function testFeatureFlagsTabIsHiddenForSettingsManageInARegularTenant(): void
+    {
+        // settings:manage in a REGULAR tenant must not reveal Feature flags —
+        // it is a system-tenant resource, exactly like Sign-up/Email/Storage.
+        $regularTenantProfile = $this->seedProfileWithPermissions(
+            $this->tenantId,
+            [CorePermissions::SETTINGS_MANAGE]
+        );
+        $regularTabs = $this->tabIds($this->handler->tabs($this->requestAs($regularTenantProfile, $this->tenantId)));
+        $this->assertNotContains('feature-flags', $regularTabs);
+    }
+
+    public function testFeatureFlagsTabIsVisibleForSettingsManageInTheSystemTenant(): void
+    {
+        // settings:manage in the SYSTEM tenant (0) does unlock it.
+        $systemProfile = $this->seedProfileWithPermissions(0, [CorePermissions::SETTINGS_MANAGE]);
+        $systemTabs = $this->tabIds($this->handler->tabs($this->requestAs($systemProfile, 0)));
+        $this->assertContains('feature-flags', $systemTabs);
     }
 
     public function testSecurityManageShowsOnlySecurityTab(): void

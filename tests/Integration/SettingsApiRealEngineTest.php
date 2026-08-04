@@ -213,6 +213,35 @@ final class SettingsApiRealEngineTest extends TestCase
         );
     }
 
+    /**
+     * WC-feature-flags-settings-page: the GLOBAL registry surface marks each
+     * curated feature-flag key with `isFlag: true`, and omits the field for
+     * every other key (including other booleans) — the frontend's Feature
+     * Flags tab filters on exactly this field rather than a hardcoded list.
+     */
+    public function testGetGlobalRegistryMarksFeatureFlagKeysWithIsFlag(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->handler->getGlobal(
+            $this->req('GET', '/api/settings/global', null, self::USER_FULL, self::SYSTEM_TENANT)
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $byKey = [];
+        foreach ($this->decode($response)['data']['registry'] as $entry) {
+            $byKey[$entry['key']] = $entry;
+        }
+
+        self::assertTrue($byKey['mcp.enabled']['isFlag'] ?? false);
+        self::assertTrue($byKey['auth.sso_enabled']['isFlag'] ?? false);
+        self::assertTrue($byKey['auth.self_registration_enabled']['isFlag'] ?? false);
+        self::assertTrue($byKey['auth.registration_approval_required']['isFlag'] ?? false);
+
+        // A non-flag boolean and a non-boolean key both omit the field.
+        self::assertArrayNotHasKey('isFlag', $byKey['mail.events.welcome_enabled']);
+        self::assertArrayNotHasKey('isFlag', $byKey['site_name']);
+    }
+
     // ==================== /api/settings/global (settings:manage) ====================
 
     public function testGetGlobalRejectsReadOnlyCaller(): void
