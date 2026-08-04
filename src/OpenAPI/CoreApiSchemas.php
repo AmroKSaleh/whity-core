@@ -2252,6 +2252,18 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
             ], []),
 
+            // Server-side render (ADR 0012 / WC-docdesigner Track 2). `dataRows`
+            // is one flat string=>string map per label/row (omitted or empty ->
+            // a single row from the template's own placeholder samples);
+            // `sheet` is the optional N-up label-sheet tiling layout — both
+            // freeform (mirror the client's DocElement-adjacent JSON shapes
+            // rather than a rigid schema, same "verbatim client JSON" posture
+            // as DocumentTemplate.data itself).
+            'DocumentRenderRequest' => self::object([
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+            ], []),
+
             // ── Document/label designer blocks (WC-521) ───────────────────────
             // `data` is the verbatim client DocElement[] fragment (freeform array);
             // documents reference a block by POINTER (a `blockInstance` element
@@ -3608,6 +3620,23 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Template deleted'],
                     404 => self::errorResponse('Template not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            // Server-side render (ADR 0012 / WC-docdesigner Track 2): calls the
+            // separate `whity_render` service and streams back a PDF. Gated on
+            // documents.render_enabled (503 when the operator has the render
+            // tier turned off) BEFORE any RBAC/tenant work; 503 again if the
+            // render service itself is unreachable/errors — never a raw
+            // exception or a downstream stack trace.
+            self::permissionRoute('POST', '/api/document-templates/{id:\d+}/render', 'documents:render', [
+                'summary' => 'Render a document/label template to PDF',
+                'tags' => ['documents'],
+                'request' => 'DocumentRenderRequest',
+                'responses' => [
+                    200 => ['description' => 'The rendered PDF', 'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]]],
+                    404 => self::errorResponse('Template not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
+                    503 => self::errorResponse('Rendering is disabled on this instance, or the render service is unavailable'),
                 ] + self::authErrors(),
             ]),
         ];

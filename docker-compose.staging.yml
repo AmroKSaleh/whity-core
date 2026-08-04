@@ -68,6 +68,13 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
       # MUST be set outside development (AES-256-CBC key for stored TOTP secrets).
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+      # Document/label designer server-side render tier (ADR 0012). Optional —
+      # only meaningful when BOTH the `render` profile is started AND the
+      # documents.render_enabled setting is turned on; left unset/empty here is
+      # fine for a staging run that never uses it (the render endpoint 503s
+      # cleanly). Must match the render service's own secret when both are set.
+      RENDER_SERVICE_URL: ${RENDER_SERVICE_URL:-http://render:8130}
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-}
       # Explicit CORS allowlist (never a wildcard); reflected back with credentials.
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3100}
       # Seed/system-admin passwords consumed by `seed` / migration 010.
@@ -101,6 +108,26 @@ services:
       postgres:
         condition: service_healthy
     working_dir: /app
+
+  # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
+  # Track 2) — mirrors the dev compose `render` service (see docker-compose.yml
+  # for the full rationale). Opt-in: `docker compose -p whity-staging -f
+  # docker-compose.staging.yml --profile render up -d --build`. The secret is
+  # REQUIRED (not defaulted) once this profile is actually started — staging is
+  # prod-like, so no insecure dev fallback here.
+  render:
+    build:
+      context: .
+      dockerfile: render-service/Dockerfile
+    container_name: whity_staging_render
+    environment:
+      PORT: "8130"
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:?RENDER_SHARED_SECRET must be set to run the render profile}
+    ports:
+      - "${RENDER_PORT_HOST:-8130}:8130"
+    profiles:
+      - render
+    restart: unless-stopped
 
 volumes:
   # Distinct named volume so staging data never mixes with the dev demo's.

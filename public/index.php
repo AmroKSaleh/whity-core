@@ -1191,6 +1191,30 @@ $router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHan
 $router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
 
+// 13a-nonies. Server-side document/label render (ADR 0012 / WC-docdesigner
+// Track 2): POST /api/document-templates/{id}/render calls out to the separate
+// `whity_render` Docker service (headless Chromium + Puppeteer, opt-in `render`
+// compose profile) over internal HTTP, streaming back a PDF. The handler checks
+// the documents.render_enabled GLOBAL setting FIRST (default off — a heavyweight
+// optional add-on) before ever attempting the call; batch limits are tenant-
+// overridable settings, not hardcoded. RENDER_SERVICE_URL/RENDER_SHARED_SECRET
+// are deployment config (like JWT_SECRET), not settings — an unset/short secret
+// makes the client report itself unusable and every render 503s cleanly rather
+// than calling out with no auth.
+$documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
+    $documentTemplateRepository,
+    $documentBlockRepository,
+    $documentAccessPolicy,
+    $roleChecker,
+    $settingsService,
+    new \Whity\Core\Document\Render\RenderServiceClient(
+        (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
+        (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
+        (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
+    )
+);
+$router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
+
 // 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
 // a brand-new tenant should never open the designer to an empty library. The
 // SYNC 'tenant.created' hook (not '.async') is used deliberately — seeding

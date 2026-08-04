@@ -33,7 +33,9 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.deletion_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
-             'plugins.store_allowed_hosts'],
+             'plugins.store_allowed_hosts',
+             'documents.render_enabled', 'documents.render_max_rows',
+             'documents.render_max_pages', 'documents.render_max_template_bytes'],
             SettingsRegistry::keys()
         );
     }
@@ -58,9 +60,11 @@ final class SettingsRegistryTest extends TestCase
         self::assertTrue(SettingsRegistry::isGlobalOnly('storage.driver'));
         self::assertNotContains('storage.driver', SettingsRegistry::tenantTextKeys());
         // Only the genuinely tenant-overridable text keys remain: site_name,
-        // timezone, locale, support_email, mcp.enabled, and the desktop login TTL.
+        // timezone, locale, support_email, mcp.enabled, the desktop login TTL,
+        // and the three render batch limits (ADR 0012 — a per-tenant ceiling is
+        // meaningful, unlike the render_enabled master switch itself).
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
-        self::assertCount(6, SettingsRegistry::tenantTextKeys());
+        self::assertCount(9, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -183,7 +187,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(36, $describe);
+        self::assertCount(40, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
@@ -342,5 +346,57 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', '1'));
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', 'yes'));
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', ''));
+    }
+
+    // ---- documents.render_* (ADR 0012 / WC-docdesigner Track 2) ----
+
+    public function testDocumentsRenderEnabledIsGlobalOnlyBooleanDefaultFalse(): void
+    {
+        self::assertSame('false', SettingsRegistry::defaultFor('documents.render_enabled'));
+        self::assertSame('bool', SettingsRegistry::typeFor('documents.render_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('documents.render_enabled'));
+        self::assertNotContains('documents.render_enabled', SettingsRegistry::tenantTextKeys());
+
+        self::assertNull(SettingsRegistry::validate('documents.render_enabled', 'true'));
+        self::assertNull(SettingsRegistry::validate('documents.render_enabled', 'false'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_enabled', '1'));
+    }
+
+    public function testDocumentsRenderLimitsAreTenantOverridableWithSaneDefaults(): void
+    {
+        foreach (['documents.render_max_rows', 'documents.render_max_pages', 'documents.render_max_template_bytes'] as $key) {
+            self::assertFalse(SettingsRegistry::isGlobalOnly($key), "{$key} must be tenant-overridable, not global-only");
+            self::assertContains($key, SettingsRegistry::tenantTextKeys());
+            self::assertSame('string', SettingsRegistry::typeFor($key));
+        }
+
+        self::assertSame('500', SettingsRegistry::defaultFor('documents.render_max_rows'));
+        self::assertSame('2000', SettingsRegistry::defaultFor('documents.render_max_pages'));
+        self::assertSame('2000000', SettingsRegistry::defaultFor('documents.render_max_template_bytes'));
+    }
+
+    public function testDocumentsRenderMaxRowsValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('documents.render_max_rows', '1'));
+        self::assertNull(SettingsRegistry::validate('documents.render_max_rows', '100000'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_rows', '0'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_rows', '100001'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_rows', 'abc'));
+    }
+
+    public function testDocumentsRenderMaxPagesValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('documents.render_max_pages', '1'));
+        self::assertNull(SettingsRegistry::validate('documents.render_max_pages', '1000000'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_pages', '0'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_pages', '1000001'));
+    }
+
+    public function testDocumentsRenderMaxTemplateBytesValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('documents.render_max_template_bytes', '1024'));
+        self::assertNull(SettingsRegistry::validate('documents.render_max_template_bytes', (string) (20 * 1024 * 1024)));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_template_bytes', '1023'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_template_bytes', (string) (20 * 1024 * 1024 + 1)));
     }
 }

@@ -123,6 +123,31 @@ final class SettingsRegistry
     // SSRF control for server-side package fetches.
     public const PLUGINS_STORE_ALLOWED_HOSTS = 'plugins.store_allowed_hosts';
 
+    // Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
+    // Track 2). GLOBAL-ONLY operator toggle: the render endpoint calls out to the
+    // separate `whity_render` Docker service (headless-Chromium + Puppeteer), a
+    // heavyweight OPTIONAL add-on not every sovereign deployment wants running.
+    // Default 'false' (disabled) — opt-in, mirroring MCP_ENABLED's shape. The
+    // route checks this FIRST and returns a clean 503 (never a raw exception, and
+    // never attempts the internal HTTP call) when off.
+    public const DOCUMENTS_RENDER_ENABLED = 'documents.render_enabled';
+
+    // Render batch limits (ADR 0012): per-tenant-overridable ceilings so an
+    // operator can tune them without a code deploy, "no hardcoded values" per
+    // convention. Resolution is tenant override -> global default -> this
+    // registry default (same precedence as every other SettingsService::effective()
+    // key) — unlike DOCUMENTS_RENDER_ENABLED, these are ordinary tenant-overridable
+    // keys (a per-tenant ceiling is meaningful; the master on/off switch is not).
+    //   - render_max_rows: max dataset rows accepted in one render request.
+    //   - render_max_pages: max TOTAL render units (dataRows x template pages,
+    //     counted BEFORE any N-up sheet tiling collapses them onto fewer physical
+    //     sheet pages) accepted in one render request.
+    //   - render_max_template_bytes: max size (bytes, JSON-encoded) of the
+    //     template payload sent to the render service.
+    public const DOCUMENTS_RENDER_MAX_ROWS = 'documents.render_max_rows';
+    public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
+    public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
+
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
@@ -174,6 +199,12 @@ final class SettingsRegistry
         self::BILLING_ENFORCEMENT_DEFAULT,
         self::BILLING_GRACE_DAYS,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
+        // Master on/off switch for the render tier: infrastructure-level (is the
+        // whole optional subsystem available on this instance), not a per-tenant
+        // preference — a per-tenant override would be inert/misleading. The
+        // render LIMITS below are deliberately NOT in this list (they ARE
+        // meaningfully tenant-overridable).
+        self::DOCUMENTS_RENDER_ENABLED,
     ];
 
     /**
@@ -193,6 +224,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
         self::MAIL_EVENT_DELETION,
+        self::DOCUMENTS_RENDER_ENABLED,
     ];
 
     /**
@@ -296,6 +328,14 @@ final class SettingsRegistry
         self::BILLING_GRACE_DAYS => '7',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
         self::PLUGINS_STORE_ALLOWED_HOSTS => '',
+        // Heavyweight optional add-on (a whole separate Chromium-bearing
+        // container) — opt-in, not opt-out. A sovereign deploy that never runs
+        // the `render` compose profile stays disabled here regardless.
+        self::DOCUMENTS_RENDER_ENABLED => 'false',
+        self::DOCUMENTS_RENDER_MAX_ROWS => '500',
+        self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
+        // 2 MiB.
+        self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
     ];
 
     /**
@@ -562,6 +602,10 @@ final class SettingsRegistry
             self::MAIL_FROM_NAME,
             self::MAIL_FOOTER_TEXT,
             self::PLUGINS_STORE_ALLOWED_HOSTS => null, // free-form strings
+            self::DOCUMENTS_RENDER_ENABLED => self::validateBoolean($value, self::DOCUMENTS_RENDER_ENABLED),
+            self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
+            self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
+            self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
             default => "Unknown setting key: {$key}",
         };
     }
@@ -749,6 +793,67 @@ final class SettingsRegistry
     {
         if ($value !== 'true' && $value !== 'false') {
             return "mcp.enabled must be 'true' or 'false'.";
+        }
+
+        return null;
+    }
+
+    /**
+     * Max dataset rows per render request: a whole number, at least 1, capped
+     * at 100000 (a sanity ceiling on the ADMIN-set value itself — not the
+     * enforced default).
+     */
+    private static function validateRenderMaxRows(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.render_max_rows must be a whole number.';
+        }
+        $rows = (int) $value;
+        if ($rows < 1) {
+            return 'documents.render_max_rows must be at least 1.';
+        }
+        if ($rows > 100000) {
+            return 'documents.render_max_rows must be 100000 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max total render units (dataRows x template pages, pre-tiling) per
+     * request: a whole number, at least 1, capped at 1000000.
+     */
+    private static function validateRenderMaxPages(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.render_max_pages must be a whole number.';
+        }
+        $pages = (int) $value;
+        if ($pages < 1) {
+            return 'documents.render_max_pages must be at least 1.';
+        }
+        if ($pages > 1000000) {
+            return 'documents.render_max_pages must be 1000000 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max JSON-encoded template size (bytes) accepted for render: a whole
+     * number, at least 1024, capped at 20 MiB.
+     */
+    private static function validateRenderMaxTemplateBytes(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.render_max_template_bytes must be a whole number.';
+        }
+        $bytes = (int) $value;
+        if ($bytes < 1024) {
+            return 'documents.render_max_template_bytes must be at least 1024.';
+        }
+        if ($bytes > 20 * 1024 * 1024) {
+            return 'documents.render_max_template_bytes must be 20971520 (20 MiB) or fewer.';
         }
 
         return null;
