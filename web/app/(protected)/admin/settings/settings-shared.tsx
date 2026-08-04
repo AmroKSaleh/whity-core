@@ -170,6 +170,10 @@ export const FIELD_META: Record<string, FieldMeta> = {
     label: 'Workspace invitation email',
     help: 'Email people when they are invited to a workspace.',
   },
+  'plugins.store_enabled': {
+    label: 'Plugin marketplace',
+    help: 'Allow installing plugins from a trusted external store. A non-empty plugins.store_allowed_hosts allowlist is also required — this switch lets an operator disable the whole integration without losing that host list.',
+  },
 };
 
 export interface SectionDef {

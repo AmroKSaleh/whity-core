@@ -33,7 +33,7 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.deletion_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
-             'plugins.store_allowed_hosts',
+             'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes'],
             SettingsRegistry::keys()
@@ -187,7 +187,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(40, $describe);
+        self::assertCount(41, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
@@ -289,6 +289,11 @@ final class SettingsRegistryTest extends TestCase
         self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_registration_enabled'));
         self::assertTrue(SettingsRegistry::isFeatureFlag('auth.registration_approval_required'));
         self::assertTrue(SettingsRegistry::isFeatureFlag('auth.sso_enabled'));
+        // WC-feature-flags-audit: the plugin-marketplace master switch and the
+        // document render tier's master switch are both genuine heavyweight/
+        // optional-subsystem toggles, curated the same way as the four above.
+        self::assertTrue(SettingsRegistry::isFeatureFlag('plugins.store_enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('documents.render_enabled'));
 
         // Weak candidates: booleans, but config detail rather than a platform
         // capability — deliberately excluded from the curated set.
@@ -313,6 +318,8 @@ final class SettingsRegistryTest extends TestCase
 
         self::assertTrue($byKey['mcp.enabled']['isFlag'] ?? null);
         self::assertTrue($byKey['auth.sso_enabled']['isFlag'] ?? null);
+        self::assertTrue($byKey['plugins.store_enabled']['isFlag'] ?? null);
+        self::assertTrue($byKey['documents.render_enabled']['isFlag'] ?? null);
 
         // Mirrors the `options` field's shape: absent (not `false`) when the
         // key is not a feature flag, including for other boolean keys.
@@ -346,6 +353,36 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', '1'));
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', 'yes'));
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', ''));
+    }
+
+    // ---- plugins.store_enabled (WC-feature-flags-audit) ----
+
+    public function testPluginsStoreEnabledIsGlobalOnlyBooleanDefaultTrue(): void
+    {
+        // Opt-OUT default (unlike documents.render_enabled's opt-in default):
+        // the allowlist (plugins.store_allowed_hosts, empty by default) is
+        // already the primary off-switch, so this master switch defaults to
+        // 'true' to avoid silently disabling an already-configured deployment.
+        self::assertSame('true', SettingsRegistry::defaultFor('plugins.store_enabled'));
+        self::assertSame('bool', SettingsRegistry::typeFor('plugins.store_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('plugins.store_enabled'));
+        self::assertNotContains('plugins.store_enabled', SettingsRegistry::tenantTextKeys());
+
+        self::assertNull(SettingsRegistry::validate('plugins.store_enabled', 'true'));
+        self::assertNull(SettingsRegistry::validate('plugins.store_enabled', 'false'));
+        self::assertNotNull(SettingsRegistry::validate('plugins.store_enabled', '1'));
+        self::assertNotNull(SettingsRegistry::validate('plugins.store_enabled', ''));
+    }
+
+    public function testPluginsStoreAllowedHostsIsGlobalOnlyFreeformDefaultEmpty(): void
+    {
+        // The allowlist itself is free-form (validated at fetch time by the
+        // handler, not the registry) — empty is the secure-by-default OFF state.
+        self::assertSame('', SettingsRegistry::defaultFor('plugins.store_allowed_hosts'));
+        self::assertSame('string', SettingsRegistry::typeFor('plugins.store_allowed_hosts'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('plugins.store_allowed_hosts'));
+        self::assertNull(SettingsRegistry::validate('plugins.store_allowed_hosts', 'store.example.com'));
+        self::assertNull(SettingsRegistry::validate('plugins.store_allowed_hosts', ''));
     }
 
     // ---- documents.render_* (ADR 0012 / WC-docdesigner Track 2) ----
