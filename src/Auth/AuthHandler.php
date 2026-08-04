@@ -2190,7 +2190,15 @@ class AuthHandler
         if (!empty($twoFactorSecret)) {
             try {
                 $totpService = $this->getTotpService();
-                if ($totpService->validateCode($twoFactorSecret, $code)) {
+                $matchedStep = $totpService->matchedStep($twoFactorSecret, $code);
+                // Anti-replay (WC-security-audit): a TOTP code stays valid for
+                // its whole ~30s period no matter how many separate requests
+                // check it, so a captured valid code could otherwise
+                // authenticate more than once within that window. Atomically
+                // advance the per-profile floor; losing the race (0 rows)
+                // means this step was already consumed, so the code is
+                // rejected exactly like a replayed backup code.
+                if ($matchedStep !== null && $this->consumeTotpStep($profileId, $matchedStep)) {
                     $isValid = true;
                 }
             } catch (\Exception) {
@@ -2313,6 +2321,35 @@ class AuthHandler
             $this->totpService = new TotpService(TotpService::resolveEncryptionKey());
         }
         return $this->totpService;
+    }
+
+    /**
+     * Atomically advance `profiles.two_factor_last_used_step` to $step, but
+     * ONLY when it is currently NULL or strictly less than $step
+     * (WC-security-audit TOTP anti-replay floor).
+     *
+     * Mirrors the atomic single-use burn {@see \Whity\Auth\BackupCodesService::validateCode()}
+     * already uses for backup codes (`UPDATE ... WHERE used = false`), applied
+     * here to TOTP time-steps: the `WHERE` guard means only the request that
+     * actually flips the row wins (rowCount 1); a second request presenting a
+     * code matching the same or an earlier step flips nothing (rowCount 0) and
+     * must be rejected as a replay, even under concurrent FrankenPHP workers.
+     *
+     * @return bool True when this step was newly accepted; false when the
+     *   step (or a later one) was already consumed for this profile.
+     */
+    private function consumeTotpStep(int $profileId, int $step): bool
+    {
+        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+        $stmt = $this->db->prepare(
+            'UPDATE profiles
+                SET two_factor_last_used_step = :step, updated_at = CURRENT_TIMESTAMP
+              WHERE id = :pid
+                AND (two_factor_last_used_step IS NULL OR two_factor_last_used_step < :step2)'
+        );
+        $stmt->execute([':step' => $step, ':pid' => $profileId, ':step2' => $step]);
+
+        return $stmt->rowCount() === 1;
     }
 
     /**

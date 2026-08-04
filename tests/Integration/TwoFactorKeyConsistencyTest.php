@@ -200,6 +200,11 @@ class TwoFactorKeyConsistencyTest extends TestCase
                     // and the ActiveTenantMembershipGuard membership existence check.
                     $stmt->method('fetch')->willReturn(['role' => $roleName]);
                     $stmt->method('fetchColumn')->willReturn(1);
+                } elseif (str_contains($sql, 'UPDATE profiles') && str_contains($sql, 'two_factor_last_used_step')) {
+                    // consumeTotpStep() (WC-security-audit anti-replay floor): the
+                    // atomic advance always wins in this mock (fresh profile, no
+                    // prior step recorded), matching a first-time valid TOTP login.
+                    $stmt->method('rowCount')->willReturn(1);
                 } elseif (str_contains($sql, 'UPDATE backup_codes')) {
                     // The atomic single-use burn (WHERE id AND used = false): the
                     // row is flipped, so exactly one row is affected.
