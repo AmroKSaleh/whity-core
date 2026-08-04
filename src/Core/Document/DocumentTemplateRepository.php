@@ -63,15 +63,16 @@ final class DocumentTemplateRepository
 
     /**
      * @param array{name: string, data: array<string,mixed>, scope?: string,
-     *              required_permission?: ?string, is_system?: bool, created_by?: ?int} $rec
+     *              required_permission?: ?string, is_system?: bool, created_by?: ?int,
+     *              starter_key?: ?string} $rec
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_templates
-                 (tenant_id, name, data, scope, required_permission, is_system, created_by, created_at, updated_at)
-             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, NOW(), NOW())'
+                 (tenant_id, name, data, scope, required_permission, is_system, created_by, starter_key, created_at, updated_at)
+             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, :starter_key, NOW(), NOW())'
         );
         $stmt->execute([
             ':tenant_id'           => $tenantId,
@@ -81,9 +82,32 @@ final class DocumentTemplateRepository
             ':required_permission' => $rec['required_permission'] ?? null,
             ':is_system'           => ($rec['is_system'] ?? false) ? 1 : 0,
             ':created_by'          => $rec['created_by'] ?? null,
+            ':starter_key'         => $rec['starter_key'] ?? null,
         ]);
 
         return (int) $this->db->lastInsertId();
+    }
+
+    /**
+     * The seeder-only "which starters has this tenant already got" lookup
+     * (WC-515 REMAINING #3): the non-null `starter_key`s already present for
+     * the tenant, across BOTH user-visible and any other rows — a stable
+     * identity distinct from the (user-renameable) `name`, so the seeder can
+     * insert-if-missing per starter without duplicating or clobbering a row a
+     * user has since edited. Seeder-internal; not part of the public API
+     * response shape (see {@see DocumentRecordTrait::normalizeRow}).
+     *
+     * @return list<string>
+     */
+    public function starterKeysForTenant(int $tenantId): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT starter_key FROM document_templates WHERE tenant_id = :tenant_id AND starter_key IS NOT NULL'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        /** @var list<string> */
+        return array_map(strval(...), $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**
