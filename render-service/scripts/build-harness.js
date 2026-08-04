@@ -84,6 +84,15 @@ function resolveWithExtensions(basePath) {
   return basePath;
 }
 
+/** Escape every regex metacharacter (not just `/`) so a literal string is
+ * always matched literally when spliced into a RegExp source — the fixed
+ * PINNED_SHARED_MODULES keys never contain one today, but building the
+ * pattern this way is correct regardless of what a key looks like, rather
+ * than relying on that always staying true. */
+function escapeRegExp(literal) {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** esbuild plugin: rewrite `@/...` and `@amroksaleh/ui...` specifiers to the
  * matching source paths, mirroring web/tsconfig.json's `paths` map — plus pin
  * the shared runtime packages above to a single physical copy. */
@@ -92,7 +101,7 @@ function pathAliasPlugin() {
     name: 'whity-path-alias',
     setup(build) {
       const pinnedFilter = new RegExp(
-        '^(' + Object.keys(PINNED_SHARED_MODULES).map((k) => k.replace(/\//g, '\\/')).join('|') + ')$'
+        '^(' + Object.keys(PINNED_SHARED_MODULES).map(escapeRegExp).join('|') + ')$'
       );
       build.onResolve({ filter: pinnedFilter }, (args) => ({
         path: PINNED_SHARED_MODULES[args.path],
@@ -146,10 +155,18 @@ async function main() {
   // esbuild only emits bundle.css when the entry graph actually imports CSS
   // (it does, transitively, via katex/dist/katex.min.css) — but guard anyway
   // so a future dependency change that drops the CSS import doesn't break the
-  // static <link> in harness/index.html.
+  // static <link> in harness/index.html. Uses the exclusive-create flag ('wx')
+  // instead of a separate existsSync()-then-writeFileSync() pair: a
+  // check-then-act pair over two syscalls is a classic TOCTOU race, whereas a
+  // single open(..., O_CREAT|O_EXCL) is atomic — it fails with EEXIST rather
+  // than clobbering a file created between the check and the write.
   const cssOut = path.join(OUT_DIR, 'bundle.css');
-  if (!fs.existsSync(cssOut)) {
-    fs.writeFileSync(cssOut, '/* no CSS emitted by the harness bundle */\n');
+  try {
+    fs.writeFileSync(cssOut, '/* no CSS emitted by the harness bundle */\n', { flag: 'wx' });
+  } catch (err) {
+    if (!err || err.code !== 'EEXIST') {
+      throw err;
+    }
   }
 
   fs.copyFileSync(path.join(RENDER_SERVICE_ROOT, 'harness', 'index.html'), path.join(OUT_DIR, 'index.html'));

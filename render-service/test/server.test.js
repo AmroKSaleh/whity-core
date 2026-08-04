@@ -118,4 +118,30 @@ describe('whity_render server', () => {
 
     expect(res.status).toBe(401);
   });
+
+  test('POST /render rate-limits after RENDER_RATE_LIMIT_MAX requests in the window', async () => {
+    jest.resetModules();
+    process.env.RENDER_SHARED_SECRET = SECRET;
+    process.env.RENDER_RATE_LIMIT_MAX = '2';
+    jest.doMock('../src/renderer', () => ({
+      renderToPdf: jest.fn(async () => Buffer.from('%PDF-1.4\nfake\n%%EOF')),
+      shutdown: jest.fn(async () => {}),
+    }));
+    // eslint-disable-next-line global-require
+    const { app: limitedApp } = require('../src/server');
+
+    const send = () =>
+      request(limitedApp).post('/render').set('X-Render-Secret', SECRET).send({ template: minimalTemplate() });
+
+    const first = await send();
+    const second = await send();
+    const third = await send();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.status).toBe(429);
+    expect(third.headers['retry-after']).toBeDefined();
+
+    delete process.env.RENDER_RATE_LIMIT_MAX;
+  });
 });
