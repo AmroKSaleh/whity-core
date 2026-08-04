@@ -1178,8 +1178,9 @@ $router->register('DELETE', '/api/document-templates/{id:\d+}', [$documentTempla
 // `blockInstance` element, so delete() 409s when DocumentTemplateRepository::
 // referencesBlock() finds a live reference anywhere in the tenant's templates
 // (never silently orphans the pointer).
+$documentBlockRepository = new \Whity\Core\Document\DocumentBlockRepository($db->getPdo());
 $documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
-    new \Whity\Core\Document\DocumentBlockRepository($db->getPdo()),
+    $documentBlockRepository,
     $documentTemplateRepository,
     $documentAccessPolicy,
     $roleChecker
@@ -1189,6 +1190,26 @@ $router->register('POST',   '/api/document-blocks',          [$documentBlocksHan
 $router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
+
+// 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
+// a brand-new tenant should never open the designer to an empty library. The
+// SYNC 'tenant.created' hook (not '.async') is used deliberately — seeding
+// must complete before the tenant-creation response returns, same as the
+// AuditLogger audit-log write already subscribed to this same event just
+// above (so a sync DB-writing listener on this hook is an established
+// pattern, not a first use). Wrapped in its own try/catch AND
+// DocumentStarterSeeder::seedForTenant() itself never throws (see its
+// docblock) — a seeding failure must never turn a successful tenant creation
+// into a 500 for the caller.
+$documentStarterSeeder = new \Whity\Core\Document\DocumentStarterSeeder(
+    $documentTemplateRepository,
+    $documentBlockRepository,
+    $logger
+);
+$hookManager->listen('tenant.created', function ($data, $context) use ($documentStarterSeeder) {
+    $documentStarterSeeder->seedForTenant((int) $data['id'], (string) ($data['name'] ?? ''));
+    return $data;
+});
 
 // 13b-ter. Native taxonomy/tagging API (WC-621): a domain-neutral tagging
 // primitive. Tenant-scoped, RBAC-gated CRUD for tag groups + tags, plus a

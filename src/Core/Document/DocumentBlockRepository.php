@@ -61,15 +61,16 @@ final class DocumentBlockRepository
 
     /**
      * @param array{name: string, data: array<string,mixed>|list<mixed>, scope?: string,
-     *              required_permission?: ?string, is_system?: bool, created_by?: ?int} $rec
+     *              required_permission?: ?string, is_system?: bool, created_by?: ?int,
+     *              starter_key?: ?string} $rec
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_blocks
-                 (tenant_id, name, data, scope, required_permission, is_system, created_by, created_at, updated_at)
-             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, NOW(), NOW())'
+                 (tenant_id, name, data, scope, required_permission, is_system, created_by, starter_key, created_at, updated_at)
+             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, :starter_key, NOW(), NOW())'
         );
         $stmt->execute([
             ':tenant_id'           => $tenantId,
@@ -79,9 +80,30 @@ final class DocumentBlockRepository
             ':required_permission' => $rec['required_permission'] ?? null,
             ':is_system'           => ($rec['is_system'] ?? false) ? 1 : 0,
             ':created_by'          => $rec['created_by'] ?? null,
+            ':starter_key'         => $rec['starter_key'] ?? null,
         ]);
 
         return (int) $this->db->lastInsertId();
+    }
+
+    /**
+     * The seeder-only "which starters has this tenant already got" lookup —
+     * mirrors {@see DocumentTemplateRepository::starterKeysForTenant()} (see
+     * its docblock for the rationale: a stable identity distinct from the
+     * user-renameable `name`, seeder-internal, not part of the public API
+     * response shape).
+     *
+     * @return list<string>
+     */
+    public function starterKeysForTenant(int $tenantId): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT starter_key FROM document_blocks WHERE tenant_id = :tenant_id AND starter_key IS NOT NULL'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        /** @var list<string> */
+        return array_map(strval(...), $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**

@@ -128,20 +128,29 @@ export function DocumentDesigner() {
   const [sheet, setSheet] = useState<SheetSpec>(DEFAULT_SHEET);
   const [sequence, setSequence] = useState<SequenceConfig>(DEFAULT_SEQUENCE);
 
-  // Reusable blocks (personal, localStorage for the MVP). Documents reference a
-  // block by id via a `blockInstance` element; the block store holds the shared
-  // definition, so editing a block updates every instance.
+  // Reusable blocks (tenant-scoped, backend-persisted — WC-521). Documents
+  // reference a block by id via a `blockInstance` element; the block store
+  // holds the shared definition, so editing a block updates every instance.
   const [blocks, setBlocks] = useState<DocBlock[]>([]);
-  // Effective library = the user's saved blocks + any built-in starter blocks
-  // not already overridden (by id) — so the Blocks panel is never empty.
-  const refreshBlocks = useCallback(() => {
-    const saved = listBlocks();
-    const extras = STARTER_BLOCKS.filter((b) => !saved.some((s) => s.id === b.id));
-    setBlocks([...saved, ...extras]);
-  }, []);
+  // Effective library = the caller's visible blocks (server RBAC-filtered) +
+  // any built-in starter blocks not already covered — so the Blocks panel is
+  // never empty even for a tenant that predates per-tenant starter seeding.
+  // Matched by NAME (not id): a seeded starter's id is a real backend id, not
+  // the client constant's symbolic id ('sys-header'), so an id-based match
+  // would show both and duplicate it once the tenant IS seeded.
+  const refreshBlocks = useCallback(async () => {
+    try {
+      const saved = await listBlocks();
+      const extras = STARTER_BLOCKS.filter((b) => !saved.some((s) => s.name === b.name));
+      setBlocks([...saved, ...extras]);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to load blocks.', 'error');
+    }
+  }, [addToast]);
   useEffect(() => {
-    const p = Promise.resolve().then(refreshBlocks);
-    void p;
+    void (async () => {
+      await refreshBlocks();
+    })();
   }, [refreshBlocks]);
   const blocksMap = useMemo(() => blocksById(blocks), [blocks]);
 
@@ -179,13 +188,16 @@ export function DocumentDesigner() {
     setSelectedIds((prev) => (additive ? (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]) : [id]));
   };
 
-  // Read the saved-template list from localStorage after mount (client-only).
-  // Deferred off the synchronous effect tick to stay clear of the
-  // set-state-in-effect rule while still populating on first render.
+  // Load the saved-template list from the API after mount.
   useEffect(() => {
-    const p = Promise.resolve().then(() => setSaved(listSaved()));
-    void p;
-  }, []);
+    void (async () => {
+      try {
+        setSaved(await listSaved());
+      } catch (error) {
+        addToast(error instanceof Error ? error.message : 'Failed to load saved templates.', 'error');
+      }
+    })();
+  }, [addToast]);
 
   // Live state for the once-attached keyboard listener + history snapshots,
   // kept fresh by a per-render effect (so the stable listener/callbacks read
@@ -551,16 +563,20 @@ export function DocumentDesigner() {
   };
 
   // ── reusable blocks ───────────────────────────────────────────────────────
-  const saveSelectionAsBlock = () => {
+  const saveSelectionAsBlock = async () => {
     const sel = elements.filter((e) => selectedIds.includes(e.id));
     const block = makeBlockFromElements(`Block ${blocks.length + 1}`, sel);
     if (!block) {
       addToast('Select one or more elements to save as a block.', 'info');
       return;
     }
-    saveBlock(block);
-    refreshBlocks();
-    addToast(`Saved block “${block.name}”.`, 'success');
+    try {
+      await saveBlock(block);
+      await refreshBlocks();
+      addToast(`Saved block “${block.name}”.`, 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to save block.', 'error');
+    }
   };
 
   const insertBlock = (blockId: string) => {
@@ -585,19 +601,29 @@ export function DocumentDesigner() {
     });
   };
 
-  const deleteBlockDef = (id: string) => {
-    deleteBlock(id);
-    refreshBlocks();
-    addToast('Block deleted from your library.', 'info');
+  const deleteBlockDef = async (id: string) => {
+    try {
+      await deleteBlock(id);
+      await refreshBlocks();
+      addToast('Block deleted from your library.', 'info');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to delete block.', 'error');
+    }
   };
 
-  // Change a block's visibility tier. Tenant/global publishing will be RBAC-gated
-  // once the backend store exists; for now it updates the local library.
-  const setBlockScope = (id: string, scope: BlockScope) => {
+  // Change a block's visibility tier — a real, server-enforced publish action
+  // (WC-521): promoting to tenant/global requires documents:publish, which the
+  // caller may not hold (surfaced here as an error toast rather than a silent
+  // no-op).
+  const setBlockScope = async (id: string, scope: BlockScope) => {
     const b = blocksMap[id];
     if (!b) return;
-    saveBlock({ ...b, scope });
-    refreshBlocks();
+    try {
+      await saveBlock({ ...b, scope });
+      await refreshBlocks();
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to change the block’s visibility.', 'error');
+    }
   };
 
   // Enter block edit mode: stash the current editor state and load the block's
@@ -632,7 +658,7 @@ export function DocumentDesigner() {
   // Leave block edit mode. `save` writes the edited elements back to the block
   // (keeping its id, so all instances update); either way the pre-edit document
   // is restored.
-  const exitBlockEdit = (save: boolean) => {
+  const exitBlockEdit = async (save: boolean) => {
     const stash = blockStashRef.current;
     const editing = blockEdit;
     if (!stash || !editing) return;
@@ -640,9 +666,19 @@ export function DocumentDesigner() {
       const els = template.pages[0]?.elements ?? [];
       const rebuilt = makeBlockFromElements(editing.name, els);
       if (rebuilt) {
-        saveBlock({ ...rebuilt, id: editing.id });
-        refreshBlocks();
-        addToast(`Block “${editing.name}” updated.`, 'success');
+        // makeBlockFromElements always builds a fresh 'personal'-scope block
+        // (it has no idea this is an in-place edit of an existing one) — keep
+        // the block's CURRENT scope so an in-place content edit can never
+        // silently demote a published tenant/global/system block back to
+        // personal (which would drop it out of every other user's library).
+        const currentScope = blocksMap[editing.id]?.scope ?? rebuilt.scope;
+        try {
+          await saveBlock({ ...rebuilt, id: editing.id, scope: currentScope });
+          await refreshBlocks();
+          addToast(`Block “${editing.name}” updated.`, 'success');
+        } catch (error) {
+          addToast(error instanceof Error ? error.message : 'Failed to save block.', 'error');
+        }
       } else {
         addToast('A block needs at least one element; discarded.', 'info');
       }
@@ -735,15 +771,21 @@ export function DocumentDesigner() {
   // Fold the runtime print settings into the template for save/export.
   const withSettings = (t: DocTemplate): DocTemplate => ({ ...t, sheet, sequence });
 
-  const doSave = () => {
-    const id = saveTemplate(withSettings(template), currentId ?? undefined);
-    setCurrentId(id);
-    setSaved(listSaved());
-    addToast('Template saved.', 'success');
+  const doSave = async () => {
+    try {
+      const id = await saveTemplate(withSettings(template), currentId ?? undefined);
+      setCurrentId(id);
+      setSaved(await listSaved());
+      addToast('Template saved.', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to save template.', 'error');
+    }
   };
 
   const doLoad = (id: string) => {
-    const entry = listSaved().find((s) => s.id === id);
+    // Read from the already-loaded `saved` state rather than re-fetching —
+    // it is kept current by the mount effect and every save/delete below.
+    const entry = saved.find((s) => s.id === id);
     if (!entry) return;
     setTemplate(entry.data);
     setSheet(entry.data.sheet ?? DEFAULT_SHEET);
@@ -755,6 +797,18 @@ export function DocumentDesigner() {
     setBatchIndex(0);
     resetHistory();
     addToast(`Loaded “${entry.name}”.`, 'info');
+  };
+
+  const doDeleteSaved = async () => {
+    if (!currentId) return;
+    try {
+      await deleteSaved(currentId);
+      setSaved(await listSaved());
+      setCurrentId(null);
+      addToast('Saved template deleted.', 'info');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to delete template.', 'error');
+    }
   };
 
   // Load a fresh document (blank or a starter), resetting all editor state.
@@ -905,16 +959,7 @@ export function DocumentDesigner() {
           ))}
         </select>
         {currentId && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              deleteSaved(currentId);
-              setSaved(listSaved());
-              setCurrentId(null);
-              addToast('Saved template deleted.', 'info');
-            }}
-          >
+          <Button variant="ghost" size="sm" onClick={doDeleteSaved}>
             Delete saved
           </Button>
         )}
