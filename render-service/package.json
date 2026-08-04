@@ -1,0 +1,28 @@
+{
+  "name": "whity-render-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Server-side PDF/PNG export microservice for the whity-core document/label designer (ADR 0012). Loads the SAME React renderer the browser preview uses (web/components/documents/print-document.tsx) via headless Chromium, so exported output stays pixel-parity with the designer preview.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build:harness": "node scripts/build-harness.js",
+    "start": "npm run build:harness && node src/server.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "bwip-js": "^4.11.2",
+    "express": "^5.1.0",
+    "katex": "^0.18.1",
+    "puppeteer-core": "^24.10.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "jest": "^29.7.0",
+    "supertest": "^7.1.0"
+  }
+}
