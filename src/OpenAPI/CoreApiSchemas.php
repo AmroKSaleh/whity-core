@@ -1206,6 +1206,7 @@ final class CoreApiSchemas
                 'summary' => 'Fetch a package from a trusted plugin store and stage it (lands disabled)',
                 'description' => 'Downloads a plugin package from a store host that MUST be on the '
                     . 'operator `plugins.store_allowed_hosts` allowlist (SSRF control; empty ⇒ disabled), '
+                    . 'and requires the `plugins.store_enabled` master switch (default true) to also be on, '
                     . 'then validates and stages it through the same hardened installer as an upload.',
                 'tags' => ['platform-ops'],
                 'request' => 'InstallFromStoreRequest',
@@ -1222,7 +1223,8 @@ final class CoreApiSchemas
             self::permissionRoute('GET', '/api/plugins/store/allowed', 'plugins:read', [
                 'summary' => 'List the trusted store hosts (for the store-browser UI)',
                 'description' => 'Returns the operator `plugins.store_allowed_hosts` allowlist and whether '
-                    . 'installing from a store is enabled. Read-only; makes no outbound request.',
+                    . 'installing from a store is enabled (both the allowlist AND the `plugins.store_enabled` '
+                    . 'master switch must be on). Read-only; makes no outbound request.',
                 'tags' => ['platform-ops'],
                 'responses' => [
                     200 => self::jsonResponse('Allowed store hosts', 'StoreAllowedHostsResponse'),

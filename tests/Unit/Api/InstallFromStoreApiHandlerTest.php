@@ -69,6 +69,32 @@ final class InstallFromStoreApiHandlerTest extends TestCase
     }
 
     /**
+     * Like {@see self::handler()} but also sets the `plugins.store_enabled`
+     * master switch explicitly (WC-feature-flags-audit), so tests can prove
+     * the flag gates independently of the allowlist.
+     *
+     * @param array{0: array<int, array{url: string, headers: array<string, string>}>} $calls
+     */
+    private function handlerWithStoreEnabled(string $allowlist, bool $storeEnabled, ?string $fetchReturns, array &$calls): InstallFromStoreApiHandler
+    {
+        $pdo = SchemaFromMigrations::make(true);
+        $settings = new SettingsService(
+            new GlobalSettingsRepository($pdo),
+            new TenantSettingsRepository($pdo)
+        );
+        $settings->setGlobal(SettingsRegistry::PLUGINS_STORE_ALLOWED_HOSTS, $allowlist);
+        $settings->setGlobal(SettingsRegistry::PLUGINS_STORE_ENABLED, $storeEnabled ? 'true' : 'false');
+
+        $calls = [];
+        $fetch = function (string $url, array $headers) use (&$calls, $fetchReturns): ?string {
+            $calls[] = ['url' => $url, 'headers' => $headers];
+            return $fetchReturns;
+        };
+
+        return new InstallFromStoreApiHandler($this->pluginDir, $settings, null, null, $fetch);
+    }
+
+    /**
      * @param array<string, mixed> $body
      */
     private function request(array $body): Request
@@ -131,6 +157,40 @@ final class InstallFromStoreApiHandlerTest extends TestCase
         ]));
         self::assertSame(403, $res->getStatusCode());
         self::assertSame([], $calls, 'no outbound request when the feature is disabled');
+    }
+
+    // ── plugins.store_enabled master switch (WC-feature-flags-audit) ────────
+
+    public function testDisabledByMasterSwitchEvenWithHostsConfigured(): void
+    {
+        $calls = [];
+        // Hosts ARE configured, but the master switch is explicitly off — the
+        // switch must win, proving it is an independent gate, not decorative.
+        $handler = $this->handlerWithStoreEnabled('store.example.com', false, null, $calls);
+        $res = $handler->install($this->request([
+            'store_url' => 'https://store.example.com',
+            'slug' => 'acme',
+            'version' => '1.0.0',
+        ]));
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame([], $calls, 'no outbound request when the master switch is off');
+    }
+
+    public function testEnabledByDefaultWhenNotExplicitlySetAndHostsConfigured(): void
+    {
+        // The registry default is 'true' (opt-out) — an operator who configured
+        // hosts before this flag shipped keeps working without any migration.
+        $calls = [];
+        $handler = $this->handlerWithStoreEnabled('store.example.com', true, null, $calls);
+        $res = $handler->install($this->request([
+            'store_url' => 'https://store.example.com',
+            'slug' => 'acme',
+            'version' => '1.0.0',
+        ]));
+        // Reaches the fetch step (502, fetcher stub returns null) rather than
+        // being refused by the flag — proves 'true' truly allows the request.
+        self::assertSame(502, $res->getStatusCode());
+        self::assertCount(1, $calls);
     }
 
     public function testRejectsHostNotOnAllowlist(): void
@@ -289,6 +349,33 @@ final class InstallFromStoreApiHandlerTest extends TestCase
         return new Request('GET', '/api/plugins/store/catalog?' . $qs, [], '');
     }
 
+    /**
+     * Like {@see self::browseHandler()} but also sets `plugins.store_enabled`
+     * explicitly.
+     *
+     * @param array<string, mixed>|null $jsonReturns catalogue payload the store "returns"
+     * @param array{0: list<string>}    $urls        by-ref sink of fetched URLs (index 0)
+     */
+    private function browseHandlerWithStoreEnabled(string $allowlist, bool $storeEnabled, ?array $jsonReturns, array &$urls): InstallFromStoreApiHandler
+    {
+        $pdo = SchemaFromMigrations::make(true);
+        $settings = new SettingsService(
+            new GlobalSettingsRepository($pdo),
+            new TenantSettingsRepository($pdo)
+        );
+        $settings->setGlobal(SettingsRegistry::PLUGINS_STORE_ALLOWED_HOSTS, $allowlist);
+        $settings->setGlobal(SettingsRegistry::PLUGINS_STORE_ENABLED, $storeEnabled ? 'true' : 'false');
+
+        $urls = [];
+        $fetchJson = function (string $url) use (&$urls, $jsonReturns): ?array {
+            $urls[] = $url;
+            return $jsonReturns;
+        };
+        $fetchPackage = static fn (string $u, array $h): ?string => null;
+
+        return new InstallFromStoreApiHandler($this->pluginDir, $settings, null, null, $fetchPackage, $fetchJson);
+    }
+
     /** @return array<string, mixed> */
     private function sampleCatalog(): array
     {
@@ -335,6 +422,27 @@ final class InstallFromStoreApiHandlerTest extends TestCase
         $res = $handler->browseCatalog($this->catalogRequest('store_url=https://store.example.com'));
         self::assertSame(403, $res->getStatusCode());
         self::assertSame([], $urls, 'no outbound request when disabled');
+    }
+
+    public function testBrowseDisabledByMasterSwitchEvenWithHostsConfigured(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandlerWithStoreEnabled('store.example.com', false, $this->sampleCatalog(), $urls);
+        $res = $handler->browseCatalog($this->catalogRequest('store_url=https://store.example.com'));
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame([], $urls, 'no outbound request when the master switch is off');
+    }
+
+    public function testAllowedStoresReportsDisabledWhenMasterSwitchOffEvenWithHostsConfigured(): void
+    {
+        $urls = [];
+        $handler = $this->browseHandlerWithStoreEnabled('store.example.com', false, null, $urls);
+        $res = $handler->allowedStores(new Request('GET', '/api/plugins/store/allowed'));
+        $body = json_decode($res->getBody(), true);
+        // The allowlist has hosts, but the master switch is off — `enabled`
+        // must reflect BOTH gates, not just the allowlist.
+        self::assertFalse($body['data']['enabled']);
+        self::assertSame(['store.example.com'], $body['data']['hosts']);
     }
 
     public function testBrowseRejectsHostNotOnAllowlist(): void

@@ -123,6 +123,20 @@ final class SettingsRegistry
     // SSRF control for server-side package fetches.
     public const PLUGINS_STORE_ALLOWED_HOSTS = 'plugins.store_allowed_hosts';
 
+    // Plugin marketplace MASTER switch (WC-feature-flags-audit). A sovereign
+    // deployment may want to instantly kill every outbound call the store
+    // integration makes (install-from-store + the catalogue browser) without
+    // losing its configured `plugins.store_allowed_hosts` list — mirrors
+    // SSO_ENABLED's shape (an additional global kill-switch layered on top of
+    // per-feature configuration, not a replacement for it). Checked FIRST, before
+    // the allowlist, in InstallFromStoreApiHandler. Defaults 'true' (opt-OUT) —
+    // NOT 'true' because network calls are safe by default, but because the
+    // allowlist emptiness is already the PRIMARY off-switch (empty by default on
+    // a fresh install); defaulting this to 'true' avoids silently breaking an
+    // existing deployment that already configured trusted hosts before this flag
+    // shipped.
+    public const PLUGINS_STORE_ENABLED = 'plugins.store_enabled';
+
     // Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
     // Track 2). GLOBAL-ONLY operator toggle: the render endpoint calls out to the
     // separate `whity_render` Docker service (headless-Chromium + Puppeteer), a
@@ -199,6 +213,7 @@ final class SettingsRegistry
         self::BILLING_ENFORCEMENT_DEFAULT,
         self::BILLING_GRACE_DAYS,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
+        self::PLUGINS_STORE_ENABLED,
         // Master on/off switch for the render tier: infrastructure-level (is the
         // whole optional subsystem available on this instance), not a per-tenant
         // preference — a per-tenant override would be inert/misleading. The
@@ -224,6 +239,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
         self::MAIL_EVENT_DELETION,
+        self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
     ];
 
@@ -244,6 +260,12 @@ final class SettingsRegistry
      * `storage.s3.path_style` (an S3-compatibility detail, not something an
      * operator thinks of as a "feature").
      *
+     * WC-feature-flags-audit added `PLUGINS_STORE_ENABLED` (the plugin
+     * marketplace's kill-switch) and `DOCUMENTS_RENDER_ENABLED` (the document
+     * render tier, added earlier in the same effort) to this curated set — both
+     * are genuine capability toggles that gate a heavyweight/optional subsystem
+     * FIRST, before any other work, exactly like the four flags below.
+     *
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
@@ -251,6 +273,8 @@ final class SettingsRegistry
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
         self::SSO_ENABLED,
+        self::PLUGINS_STORE_ENABLED,
+        self::DOCUMENTS_RENDER_ENABLED,
     ];
 
     /**
@@ -328,6 +352,12 @@ final class SettingsRegistry
         self::BILLING_GRACE_DAYS => '7',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
         self::PLUGINS_STORE_ALLOWED_HOSTS => '',
+        // Master switch default TRUE (opt-out): the allowlist above is already
+        // the primary off-switch (empty by default), so this only needs to
+        // FLIP OFF an already-configured deployment; defaulting it false would
+        // silently disable the store for every instance that configured hosts
+        // before this flag existed.
+        self::PLUGINS_STORE_ENABLED => 'true',
         // Heavyweight optional add-on (a whole separate Chromium-bearing
         // container) — opt-in, not opt-out. A sovereign deploy that never runs
         // the `render` compose profile stays disabled here regardless.
@@ -602,6 +632,7 @@ final class SettingsRegistry
             self::MAIL_FROM_NAME,
             self::MAIL_FOOTER_TEXT,
             self::PLUGINS_STORE_ALLOWED_HOSTS => null, // free-form strings
+            self::PLUGINS_STORE_ENABLED => self::validateBoolean($value, self::PLUGINS_STORE_ENABLED),
             self::DOCUMENTS_RENDER_ENABLED => self::validateBoolean($value, self::DOCUMENTS_RENDER_ENABLED),
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
