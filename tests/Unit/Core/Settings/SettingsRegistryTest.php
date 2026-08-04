@@ -275,6 +275,55 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotNull(SettingsRegistry::validate('mail.events.welcome_enabled', 'yes'));
     }
 
+    // ---- feature flags (WC-feature-flags-settings-page) ----
+
+    public function testFeatureFlagKeysAreExactlyTheCuratedCapabilityToggles(): void
+    {
+        // Strong candidates: platform capability toggles an operator would
+        // recognise as a "feature flag".
+        self::assertTrue(SettingsRegistry::isFeatureFlag('mcp.enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_registration_enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.registration_approval_required'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.sso_enabled'));
+
+        // Weak candidates: booleans, but config detail rather than a platform
+        // capability — deliberately excluded from the curated set.
+        self::assertFalse(SettingsRegistry::isFeatureFlag('storage.s3.path_style'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.welcome_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.approval_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.invitation_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.verification_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.deletion_enabled'));
+
+        // Non-boolean and unknown keys are never feature flags.
+        self::assertFalse(SettingsRegistry::isFeatureFlag('site_name'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('not_a_setting'));
+    }
+
+    public function testDescriptorMarksFeatureFlagKeysWithIsFlagTrueAndOmitsItOtherwise(): void
+    {
+        $byKey = [];
+        foreach (SettingsRegistry::describe() as $d) {
+            $byKey[$d['key']] = $d;
+        }
+
+        self::assertTrue($byKey['mcp.enabled']['isFlag'] ?? null);
+        self::assertTrue($byKey['auth.sso_enabled']['isFlag'] ?? null);
+
+        // Mirrors the `options` field's shape: absent (not `false`) when the
+        // key is not a feature flag, including for other boolean keys.
+        self::assertArrayNotHasKey('isFlag', $byKey['mail.events.welcome_enabled']);
+        self::assertArrayNotHasKey('isFlag', $byKey['storage.s3.path_style']);
+        self::assertArrayNotHasKey('isFlag', $byKey['site_name']);
+
+        // Exact-shape check (mirrors testDescribePublishesKeyTypeAndDefault):
+        // a flag descriptor is key+type+default+isFlag, nothing more.
+        self::assertSame(
+            ['key' => 'mcp.enabled', 'type' => 'bool', 'default' => 'false', 'isFlag' => true],
+            $byKey['mcp.enabled']
+        );
+    }
+
     // ---- mcp.enabled (WC-149b2fc9) ----
 
     public function testMcpEnabledDefaultIsFalse(): void

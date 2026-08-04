@@ -196,6 +196,32 @@ final class SettingsRegistry
     ];
 
     /**
+     * FEATURE-FLAG keys (WC-feature-flags-settings-page): the curated subset of
+     * {@see BOOL_KEYS} that reads as a platform CAPABILITY toggle an operator
+     * would think of as a "feature flag" — something you casually switch on/off
+     * for the whole instance — rather than a technical config detail of some
+     * other feature. Drives the admin "Feature Flags" settings tab, which is a
+     * generic, registry-driven surface over these EXISTING boolean settings
+     * only (no new storage, no per-tenant overrides, no plugin-facing
+     * declaration system — that broader effort is tracked separately as
+     * GitHub issue #326, "Platform-level feature-flags registry", and is
+     * explicitly out of scope here).
+     *
+     * Deliberately excluded, even though they are booleans: the `mail.events.*`
+     * toggles (per-notification config, not a platform capability) and
+     * `storage.s3.path_style` (an S3-compatibility detail, not something an
+     * operator thinks of as a "feature").
+     *
+     * @var list<string>
+     */
+    private const FEATURE_FLAG_KEYS = [
+        self::MCP_ENABLED,
+        self::SELF_REGISTRATION_ENABLED,
+        self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SSO_ENABLED,
+    ];
+
+    /**
      * Enum-valued keys and their allowed values. Reported with type 'enum' and an
      * `options` list so clients render a fixed-choice selector.
      *
@@ -312,7 +338,7 @@ final class SettingsRegistry
      * Intended for the settings API handler so asset-kind keys are not published
      * on the GET /api/v1/settings surface.
      *
-     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}>
      */
     public static function describeText(): array
     {
@@ -321,9 +347,10 @@ final class SettingsRegistry
 
     /**
      * Build the API descriptor for a single key: key + type + default, plus an
-     * `options` list for enum-type keys.
+     * `options` list for enum-type keys and an `isFlag` marker for feature-flag
+     * keys.
      *
-     * @return array{key: string, type: string, default: string, options?: list<string>}
+     * @return array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}
      */
     private static function descriptorFor(string $key): array
     {
@@ -336,6 +363,15 @@ final class SettingsRegistry
         $options = self::optionsFor($key);
         if ($options !== null) {
             $descriptor['options'] = $options;
+        }
+
+        // Mirrors `options`: only present (and only ever `true`) for keys the
+        // registry curates as feature flags, so the client can filter the
+        // Feature Flags tab from ONE field instead of a hardcoded key list —
+        // adding a key to FEATURE_FLAG_KEYS is then the only change needed for
+        // it to appear there.
+        if (self::isFeatureFlag($key)) {
+            $descriptor['isFlag'] = true;
         }
 
         return $descriptor;
@@ -359,6 +395,18 @@ final class SettingsRegistry
     }
 
     /**
+     * Whether the key is a curated FEATURE FLAG — a capability toggle an
+     * operator would recognise as a "feature flag" (see {@see FEATURE_FLAG_KEYS}
+     * for the selection rationale). Drives the admin Feature Flags settings tab;
+     * NOT every boolean setting qualifies (see {@see BOOL_KEYS} for the full
+     * boolean set).
+     */
+    public static function isFeatureFlag(string $key): bool
+    {
+        return in_array($key, self::FEATURE_FLAG_KEYS, true);
+    }
+
+    /**
      * The text-kind keys that a TENANT may override — text keys minus the
      * global-only governance keys. Drives the per-tenant settings surface.
      *
@@ -376,7 +424,7 @@ final class SettingsRegistry
      * Like {@see describeText()} but restricted to the tenant-overridable keys
      * (excludes global-only governance keys) for the per-tenant settings API.
      *
-     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}>
      */
     public static function describeTenantText(): array
     {
@@ -457,7 +505,7 @@ final class SettingsRegistry
      * The registry descriptor list the API publishes alongside effective values:
      * one entry per key with its type and default (plus `options` for enums).
      *
-     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}>
      */
     public static function describe(): array
     {
