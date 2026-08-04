@@ -56,7 +56,17 @@
       path with its own synthetic INITIAL_TEST_PASSWORD var, self-managed.
     -->
     <php>
-        <ini name="memory_limit" value="512M"/>
+        <!-- WC-521: the CI "test" job runs this suite WITH pcov coverage
+             instrumentation (vendor/bin/phpunit with coverage flags), whose
+             per-file coverage bookkeeping accumulates for the life of the
+             process. At 3530+ tests the accumulated RSS was already close to
+             512M; the modest test-suite growth in WC-521 (document_blocks CRUD
+             plus delete-guard tests) reliably tipped it into a hard PHP Fatal
+             "Allowed memory size exhausted" partway through the run (a real,
+             reproducible failure, not a flake). Raised to 768M for headroom;
+             the coverage-free default local/SQLite gate was never affected,
+             only the coverage-instrumented CI path. -->
+        <ini name="memory_limit" value="768M"/>
         <env name="INITIAL_ADMIN_PASSWORD" value="test_initial_admin_password_min_32_chars"/>
         <env name="INITIAL_USER_PASSWORD" value="test_initial_user_password_min_32_chars_"/>
         <env name="INITIAL_SYSTEM_ADMIN_PASSWORD" value="test_initial_system_admin_password_min32"/>
