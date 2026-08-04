@@ -23,6 +23,8 @@ final class SettingsRegistryTest extends TestCase
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'mcp.enabled',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
+             'auth.self_password_reset_enabled', 'auth.password_reset_approval_required',
+             'auth.self_2fa_recovery_enabled',
              'auth.sso_enabled', 'auth.desktop_login_max_hours',
              'storage.driver', 'storage.s3.endpoint', 'storage.s3.region', 'storage.s3.bucket',
              'storage.s3.access_key', 'storage.s3.path_style', 'storage.s3.public_base_url',
@@ -30,7 +32,7 @@ final class SettingsRegistryTest extends TestCase
              'mail.smtp.username', 'mail.from_address', 'mail.from_name',
              'mail.events.welcome_enabled', 'mail.events.approval_enabled',
              'mail.events.invitation_enabled', 'mail.events.verification_enabled',
-             'mail.events.deletion_enabled',
+             'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
@@ -50,12 +52,18 @@ final class SettingsRegistryTest extends TestCase
     {
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_registration_enabled'));
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.registration_approval_required'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_password_reset_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.password_reset_approval_required'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_2fa_recovery_enabled'));
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.sso_enabled'));
         self::assertFalse(SettingsRegistry::isGlobalOnly('site_name'));
 
         // The per-tenant surface excludes the global-only governance keys.
         self::assertNotContains('auth.self_registration_enabled', SettingsRegistry::tenantTextKeys());
         self::assertNotContains('auth.registration_approval_required', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.self_password_reset_enabled', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.password_reset_approval_required', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.self_2fa_recovery_enabled', SettingsRegistry::tenantTextKeys());
         self::assertNotContains('auth.sso_enabled', SettingsRegistry::tenantTextKeys());
         self::assertTrue(SettingsRegistry::isGlobalOnly('storage.driver'));
         self::assertNotContains('storage.driver', SettingsRegistry::tenantTextKeys());
@@ -187,7 +195,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(41, $describe);
+        self::assertCount(45, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
@@ -202,7 +210,7 @@ final class SettingsRegistryTest extends TestCase
                   'mail.smtp.username', 'mail.from_address', 'mail.from_name',
                   'mail.events.welcome_enabled', 'mail.events.approval_enabled',
                   'mail.events.invitation_enabled', 'mail.events.verification_enabled',
-                  'mail.events.deletion_enabled',
+                  'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
                   'mail.brand_color', 'mail.footer_text'] as $key) {
             self::assertTrue(SettingsRegistry::isGlobalOnly($key), "{$key} must be global-only");
             self::assertNotContains($key, SettingsRegistry::tenantTextKeys());
@@ -288,6 +296,12 @@ final class SettingsRegistryTest extends TestCase
         self::assertTrue(SettingsRegistry::isFeatureFlag('mcp.enabled'));
         self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_registration_enabled'));
         self::assertTrue(SettingsRegistry::isFeatureFlag('auth.registration_approval_required'));
+        // WC-password-reset-2fa-recovery: the three forgotten-password / 2FA-
+        // recovery instance-governance toggles are curated the same way as the
+        // registration toggles above.
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_password_reset_enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.password_reset_approval_required'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_2fa_recovery_enabled'));
         self::assertTrue(SettingsRegistry::isFeatureFlag('auth.sso_enabled'));
         // WC-feature-flags-audit: the plugin-marketplace master switch and the
         // document render tier's master switch are both genuine heavyweight/
@@ -303,6 +317,7 @@ final class SettingsRegistryTest extends TestCase
         self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.invitation_enabled'));
         self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.verification_enabled'));
         self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.deletion_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.password_reset_enabled'));
 
         // Non-boolean and unknown keys are never feature flags.
         self::assertFalse(SettingsRegistry::isFeatureFlag('site_name'));

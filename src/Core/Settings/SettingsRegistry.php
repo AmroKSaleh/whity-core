@@ -55,6 +55,34 @@ final class SettingsRegistry
     public const SELF_REGISTRATION_ENABLED = 'auth.self_registration_enabled';
     public const REGISTRATION_APPROVAL_REQUIRED = 'auth.registration_approval_required';
 
+    // Forgotten-password + 2FA-recovery instance governance
+    // (WC-password-reset-2fa-recovery). Same two-toggle model as self-service
+    // registration above, but with different secure-by-default choices: unlike
+    // signing up (opt-in, closed by default), FORGETTING a password is routine
+    // and expected, so self-service reset defaults OPEN; approval is an opt-in
+    // extra gate for high-security tenants, so it defaults OFF (frictionless by
+    // default).
+    //   - self_password_reset_enabled: is POST /api/v1/auth/password/forgot open
+    //     at all? Default 'true' (OPEN).
+    //   - password_reset_approval_required: when a reset IS completed via a
+    //     valid token, must an admin approve it before the new password takes
+    //     effect? Default 'false' (frictionless).
+    public const SELF_PASSWORD_RESET_ENABLED = 'auth.self_password_reset_enabled';
+    public const PASSWORD_RESET_APPROVAL_REQUIRED = 'auth.password_reset_approval_required';
+
+    // "I lost my 2FA device" recovery-REQUEST master switch
+    // (WC-password-reset-2fa-recovery). Gates POST /api/v1/auth/2fa-recovery/request
+    // (and its confirm step) — whether a locked-out user (lost BOTH password and
+    // 2FA) may even SUBMIT a recovery request at all. There is no equivalent
+    // "approval required" toggle here: unlike password reset, this flow is
+    // ALREADY unconditionally approval-gated (see TwoFactorRecoveryService) —
+    // there is no instant self-service version, since that would defeat the
+    // point of a second factor. Default 'true' (permissive): without it a user
+    // who loses both factors has no path back into their account short of an
+    // out-of-band admin contact, and the built-in approval gate is the safety
+    // net that makes a permissive default reasonable.
+    public const SELF_2FA_RECOVERY_ENABLED = 'auth.self_2fa_recovery_enabled';
+
     // Instance SSO kill-switch (WC-28fb2e19). Global/operator-level: when 'false',
     // federated sign-in is disabled instance-wide (both operator and tenant IdPs).
     // Default 'true' — SSO is available where a provider is configured.
@@ -106,6 +134,12 @@ final class SettingsRegistry
     // Account/tenant removal notices — the friendly "sorry to see you go" farewell
     // and the terms-of-service termination notice (both fire on membership removal).
     public const MAIL_EVENT_DELETION = 'mail.events.deletion_enabled';
+    // Forgotten-password emails (WC-password-reset-2fa-recovery): the reset-link
+    // sent on POST /api/v1/auth/password/forgot, and the courtesy "your reset was
+    // approved" notice sent when an admin-approved reset is applied. Also reused
+    // by the 2FA-recovery-approval path's follow-up reset link (same underlying
+    // password-reset primitive).
+    public const MAIL_EVENT_PASSWORD_RESET = 'mail.events.password_reset_enabled';
     // Email TEMPLATE branding (WC-email): the customisation surface for the
     // transactional email layout. brand_color is a #RRGGBB hex; footer_text is a
     // free-form line shown in every message footer.
@@ -188,6 +222,9 @@ final class SettingsRegistry
     private const GLOBAL_ONLY_KEYS = [
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SELF_PASSWORD_RESET_ENABLED,
+        self::PASSWORD_RESET_APPROVAL_REQUIRED,
+        self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
         self::STORAGE_DRIVER,
         self::STORAGE_S3_ENDPOINT,
@@ -208,6 +245,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
         self::MAIL_EVENT_DELETION,
+        self::MAIL_EVENT_PASSWORD_RESET,
         self::MAIL_BRAND_COLOR,
         self::MAIL_FOOTER_TEXT,
         self::BILLING_ENFORCEMENT_DEFAULT,
@@ -232,6 +270,9 @@ final class SettingsRegistry
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SELF_PASSWORD_RESET_ENABLED,
+        self::PASSWORD_RESET_APPROVAL_REQUIRED,
+        self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
         self::STORAGE_S3_PATH_STYLE,
         self::MAIL_EVENT_WELCOME,
@@ -239,6 +280,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
         self::MAIL_EVENT_DELETION,
+        self::MAIL_EVENT_PASSWORD_RESET,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
     ];
@@ -266,12 +308,22 @@ final class SettingsRegistry
      * are genuine capability toggles that gate a heavyweight/optional subsystem
      * FIRST, before any other work, exactly like the four flags below.
      *
+     * WC-password-reset-2fa-recovery added `SELF_PASSWORD_RESET_ENABLED`,
+     * `PASSWORD_RESET_APPROVAL_REQUIRED`, and `SELF_2FA_RECOVERY_ENABLED` — each
+     * an instance-governance on/off switch an operator would recognise as a
+     * "feature flag", exactly like `SELF_REGISTRATION_ENABLED` /
+     * `REGISTRATION_APPROVAL_REQUIRED` above. `MAIL_EVENT_PASSWORD_RESET` is
+     * deliberately EXCLUDED, same reasoning as the other `mail.events.*` keys.
+     *
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SELF_PASSWORD_RESET_ENABLED,
+        self::PASSWORD_RESET_APPROVAL_REQUIRED,
+        self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
@@ -314,6 +366,15 @@ final class SettingsRegistry
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
+        // Opposite defaults from signup above: forgetting a password is routine
+        // and expected (OPEN by default), and approval is an opt-in extra gate
+        // (OFF by default — frictionless self-service unless a tenant opts in).
+        self::SELF_PASSWORD_RESET_ENABLED => 'true',
+        self::PASSWORD_RESET_APPROVAL_REQUIRED => 'false',
+        // Permissive by default: the flow is already unconditionally
+        // approval-gated (see TwoFactorRecoveryService), so a locked-out user
+        // always has a path back in without an extra operator opt-in.
+        self::SELF_2FA_RECOVERY_ENABLED => 'true',
         self::SSO_ENABLED => 'true',
         // 72 hours (3 days). A native client offline longer than this must
         // re-authenticate online before it will work again.
@@ -342,6 +403,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION => 'true',
         self::MAIL_EVENT_VERIFICATION => 'true',
         self::MAIL_EVENT_DELETION => 'true',
+        self::MAIL_EVENT_PASSWORD_RESET => 'true',
         // Email template branding: on-brand default; operator-overridable.
         self::MAIL_BRAND_COLOR => '#2B6CD2',
         self::MAIL_FOOTER_TEXT => '',
@@ -606,6 +668,9 @@ final class SettingsRegistry
             self::MCP_ENABLED => self::validateMcpEnabled($value),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
+            self::SELF_PASSWORD_RESET_ENABLED => self::validateBoolean($value, self::SELF_PASSWORD_RESET_ENABLED),
+            self::PASSWORD_RESET_APPROVAL_REQUIRED => self::validateBoolean($value, self::PASSWORD_RESET_APPROVAL_REQUIRED),
+            self::SELF_2FA_RECOVERY_ENABLED => self::validateBoolean($value, self::SELF_2FA_RECOVERY_ENABLED),
             self::SSO_ENABLED => self::validateBoolean($value, self::SSO_ENABLED),
             self::AUTH_DESKTOP_LOGIN_MAX_HOURS => self::validateDesktopLoginMaxHours($value),
             self::STORAGE_DRIVER => self::validateStorageDriver($value),
@@ -623,7 +688,8 @@ final class SettingsRegistry
             self::MAIL_EVENT_APPROVAL,
             self::MAIL_EVENT_INVITATION,
             self::MAIL_EVENT_VERIFICATION,
-            self::MAIL_EVENT_DELETION => self::validateBoolean($value, $key),
+            self::MAIL_EVENT_DELETION,
+            self::MAIL_EVENT_PASSWORD_RESET => self::validateBoolean($value, $key),
             self::BILLING_ENFORCEMENT_DEFAULT => self::validateEnum($key, $value),
             self::BILLING_GRACE_DAYS => self::validateGraceDays($value),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),

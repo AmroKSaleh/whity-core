@@ -495,19 +495,24 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
     ];
     $items[] = [
-        'id' => 'pending-registrations',
-        'label' => 'Pending Registrations',
+        'id' => 'approval-gating',
+        'label' => 'Approval Gating',
         'href' => '/admin/registrations',
         'icon' => 'user-check',
         'group' => 'admin',
         'order' => 9.5,
-        // WC-235: system-tenant governance surface. Mirrors GET
-        // /api/v1/registrations/pending, gated on registrations:approve AND the
-        // system tenant (id 0) — a regular tenant admin holds the permission in
-        // its own tenant but must never approve another workspace's owner, so
-        // the item is hidden for them (the page also enforces both server-side).
-        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::REGISTRATIONS_APPROVE,
-        'systemTenantOnly' => true,
+        // WC-password-reset-2fa-recovery: unified admin page (tabs: Signup /
+        // Password reset / 2FA auth reset — see web/app/(protected)/admin/
+        // approval-gating/). The first tab, at this href, is the WC-235
+        // pending-registrations queue (folded in unchanged: system-tenant +
+        // registrations:approve). Gated here on the broad 'admin' ROLE rather
+        // than any single one of the three underlying permissions, since a
+        // tenant admin who holds ONLY password_resets:approve or
+        // two_factor_recovery:approve (never registrations:approve, and never
+        // acting in the system tenant) must still see this entry to reach
+        // their own tab — each tab enforces its OWN precise permission +
+        // tenant/system-tenant scope server-side regardless of nav visibility.
+        'requiredRole' => 'admin',
     ];
     $items[] = [
         'id' => 'ai-principals',
@@ -851,6 +856,78 @@ $router->register('POST', '/api/auth/2fa/confirm', [$twoFactorHandler, 'confirm'
 $router->register('POST', '/api/auth/2fa/disable', [$twoFactorHandler, 'disable'], null);
 $router->register('POST', '/api/auth/2fa/regenerate-codes', [$twoFactorHandler, 'regenerateCodes'], null);
 $router->register('GET', '/api/auth/2fa/status', [$twoFactorHandler, 'status'], null);
+
+// 10c. Forgotten-password + "lost my 2FA device" recovery
+// (WC-password-reset-2fa-recovery). Public, unauthenticated, rate-limited
+// endpoints (mirroring the WC-235 email-verification wiring above) plus the
+// tenant-scoped admin approval queues.
+$passwordResetService = new \Whity\Core\Identity\PasswordResetService($db->getPdo());
+$resetUrlBase = (string) ($_ENV['PASSWORD_RESET_URL'] ?? getenv('PASSWORD_RESET_URL')
+    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/reset-password'));
+$passwordResetMailer = new \Whity\Core\Identity\PasswordResetMailer(
+    $mailer,
+    $resetUrlBase,
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService
+);
+$passwordResetHandler = new \Whity\Api\PasswordResetHandler(
+    $passwordResetService,
+    $profileEmailRepository,
+    $passwordResetMailer,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger,
+    $settingsService
+);
+$router->register('POST', '/api/auth/password/forgot', [$passwordResetHandler, 'forgot'], null);
+$router->register('POST', '/api/auth/password/reset', [$passwordResetHandler, 'reset'], null);
+
+$passwordResetApprovalsHandler = new \Whity\Api\PasswordResetApprovalsApiHandler(
+    $passwordResetService,
+    $roleChecker,
+    $auditLogger,
+    $passwordResetMailer
+);
+$router->register('GET',  '/api/password-resets/pending',      [$passwordResetApprovalsHandler, 'listPending'], null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
+$router->register('POST', '/api/password-resets/{id:\d+}/approve', [$passwordResetApprovalsHandler, 'approve'], null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
+$router->register('POST', '/api/password-resets/{id:\d+}/reject',  [$passwordResetApprovalsHandler, 'reject'],  null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
+
+$twoFactorRecoveryService = new \Whity\Core\Identity\TwoFactorRecoveryService(
+    $db->getPdo(),
+    $passwordResetService,
+    $backupCodesService
+);
+$twoFactorRecoveryConfirmUrlBase = (string) ($_ENV['TWO_FACTOR_RECOVERY_URL'] ?? getenv('TWO_FACTOR_RECOVERY_URL')
+    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/account-recovery'));
+$twoFactorRecoveryMailer = new \Whity\Core\Identity\TwoFactorRecoveryMailer(
+    $mailer,
+    $twoFactorRecoveryConfirmUrlBase,
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService
+);
+$twoFactorRecoveryHandler = new \Whity\Api\TwoFactorRecoveryHandler(
+    $twoFactorRecoveryService,
+    $profileEmailRepository,
+    $twoFactorRecoveryMailer,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger,
+    $settingsService
+);
+$router->register('POST', '/api/auth/2fa-recovery/request', [$twoFactorRecoveryHandler, 'request'], null);
+$router->register('POST', '/api/auth/2fa-recovery/confirm', [$twoFactorRecoveryHandler, 'confirm'], null);
+
+$twoFactorRecoveryApprovalsHandler = new \Whity\Api\TwoFactorRecoveryApprovalsApiHandler(
+    $twoFactorRecoveryService,
+    $roleChecker,
+    $auditLogger,
+    $passwordResetMailer
+);
+$router->register('GET',  '/api/2fa-recovery/pending',           [$twoFactorRecoveryApprovalsHandler, 'listPending'], null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+$router->register('POST', '/api/2fa-recovery/{id:\d+}/approve',  [$twoFactorRecoveryApprovalsHandler, 'approve'],     null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+$router->register('POST', '/api/2fa-recovery/{id:\d+}/reject',   [$twoFactorRecoveryApprovalsHandler, 'reject'],      null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+// Secondary fallback (no prior request): an admin forces the same primitive
+// directly onto a named profile, e.g. when the locked-out user cannot even
+// receive email and reaches an admin out-of-band.
+$router->register('POST', '/api/2fa-recovery/force-reset',       [$twoFactorRecoveryApprovalsHandler, 'forceReset'],  null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
 
 // 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
