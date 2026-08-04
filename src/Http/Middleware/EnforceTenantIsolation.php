@@ -97,6 +97,15 @@ class EnforceTenantIsolation
         // EmailVerificationHandler rate-limits + audits; no tenant to resolve.
         '/api/v1/email/request-verification',
         '/api/v1/email/verify',
+        // WC-password-reset-2fa-recovery: public self-service "forgot password"
+        // (a locked-out user has no session) and the "lost my 2FA device"
+        // recovery-request submission + confirmation. All four are
+        // rate-limited + generic-response by PasswordResetHandler /
+        // TwoFactorRecoveryHandler; no tenant to resolve.
+        '/api/v1/auth/password/forgot',
+        '/api/v1/auth/password/reset',
+        '/api/v1/auth/2fa-recovery/request',
+        '/api/v1/auth/2fa-recovery/confirm',
         // ADR 0005 §6: multi-membership tenant selection. Public like login/2fa —
         // the caller holds only the short-lived selection cookie (no session yet);
         // AuthHandler::handleSelectTenant re-validates membership before minting.

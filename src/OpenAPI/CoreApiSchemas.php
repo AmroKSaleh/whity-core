@@ -106,7 +106,9 @@ final class CoreApiSchemas
             self::documentBlockRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
-            self::tagRoutes()
+            self::tagRoutes(),
+            self::passwordResetRoutes(),
+            self::twoFactorRecoveryRoutes()
         );
     }
 
@@ -2865,6 +2867,75 @@ final class CoreApiSchemas
                 'type' => 'object',
                 'additionalProperties' => ['type' => 'string'],
             ]),
+
+            // ── Forgotten-password + 2FA-recovery (WC-password-reset-2fa-recovery) ──
+
+            // Shared by POST /api/auth/password/forgot and POST
+            // /api/auth/2fa-recovery/request — both take only an email.
+            'EmailOnlyRequest' => self::object(['email' => self::str()], ['email']),
+            // Shared by POST /api/auth/2fa-recovery/confirm.
+            'TokenOnlyRequest' => self::object(['token' => self::str()], ['token']),
+            // Shared generic 202 body for both public "request" endpoints above —
+            // deliberately identical whether or not the address has an account.
+            'GenericMessageDataResponse' => self::dataEnvelope(
+                self::object(['message' => self::str()], ['message'])
+            ),
+
+            // POST /api/auth/password/reset — request body.
+            'PasswordResetConfirmRequest' => self::object([
+                'token' => self::str(),
+                'password' => self::str(),
+            ], ['token', 'password']),
+            // POST /api/auth/password/reset — 200 response. `status` is
+            // 'applied' (self-service, no approval required) or
+            // 'awaiting_approval' (staged; an admin must approve it).
+            'PasswordResetConfirmResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['applied', 'awaiting_approval']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
+
+            // POST /api/auth/2fa-recovery/confirm — 200 response. Confirming
+            // only SUBMITS the request into the admin queue — status is always
+            // 'pending' here; nothing on the target profile has changed yet.
+            'TwoFactorRecoveryConfirmResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['pending']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
+
+            // One row of either admin approval queue (password-resets/pending,
+            // 2fa-recovery/pending) — same shape, listed under distinct names so
+            // each endpoint's response schema is self-describing.
+            'PendingPasswordResetItem' => self::object([
+                'id' => self::int(),
+                'profile_id' => self::int(),
+                'email' => self::str(),
+                'display_name' => self::str(),
+                'created_at' => self::str(),
+            ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
+            'PendingPasswordResetListResponse' => self::listEnvelope('PendingPasswordResetItem'),
+            'PendingTwoFactorRecoveryItem' => self::object([
+                'id' => self::int(),
+                'profile_id' => self::int(),
+                'email' => self::str(),
+                'display_name' => self::str(),
+                'created_at' => self::str(),
+            ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
+            'PendingTwoFactorRecoveryListResponse' => self::listEnvelope('PendingTwoFactorRecoveryItem'),
+
+            // Shared 200 response for every id-based approve/reject action across
+            // both queues (password-resets and 2fa-recovery).
+            'ApprovalStatusResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['approved', 'rejected']],
+            ], ['id', 'status'])),
+
+            // POST /api/2fa-recovery/force-reset — the secondary admin-direct
+            // fallback (no prior request): request body + 200 response.
+            'ForceResetRequest' => self::object(['profile_id' => self::int()], ['profile_id']),
+            'ForceResetResponse' => self::dataEnvelope(self::object([
+                'profile_id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['forced']],
+            ], ['profile_id', 'status'])),
         ];
     }
 
@@ -3290,6 +3361,163 @@ final class CoreApiSchemas
                     204 => ['description' => 'Policy removed'],
                     400 => self::errorResponse('Tenant context is required'),
                     404 => self::errorResponse('Policy not found'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Self-service "forgot password" routes (WC-password-reset-2fa-recovery):
+     * two PUBLIC endpoints (forgot/reset — PasswordResetHandler) plus the
+     * tenant-scoped admin approval queue (PasswordResetApprovalsApiHandler).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function passwordResetRoutes(): array
+    {
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/password/forgot',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Request a password-reset link (public, rate-limited, no enumeration)',
+                    'tags' => ['auth'],
+                    'request' => 'EmailOnlyRequest',
+                    'responses' => [
+                        202 => self::jsonResponse(
+                            'Always the same generic message, regardless of whether the address has an account',
+                            'GenericMessageDataResponse'
+                        ),
+                        422 => self::errorResponse('A valid email address is required'),
+                        429 => self::errorResponse('Too many password-reset requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/password/reset',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Confirm a reset token and set a new password',
+                    'tags' => ['auth'],
+                    'request' => 'PasswordResetConfirmRequest',
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Reset applied immediately, or submitted for admin approval — see `data.status`',
+                            'PasswordResetConfirmResponse'
+                        ),
+                        400 => self::errorResponse('The reset link is invalid or has expired'),
+                        422 => self::errorResponse('Missing token, or password does not meet the policy'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/password-resets/pending', 'password_resets:approve', [
+                'summary' => 'List pending password-reset requests for the caller\'s own tenant',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Requests awaiting approval', 'PendingPasswordResetListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/password-resets/{id:\d+}/approve', 'password_resets:approve', [
+                'summary' => 'Apply the staged password (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approved', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/password-resets/{id:\d+}/reject', 'password_resets:approve', [
+                'summary' => 'Discard the staged password (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * "I lost my 2FA device" recovery-request routes
+     * (WC-password-reset-2fa-recovery): two PUBLIC endpoints (request/confirm —
+     * TwoFactorRecoveryHandler) plus the tenant-scoped admin approval queue and
+     * the secondary admin-direct-force fallback
+     * (TwoFactorRecoveryApprovalsApiHandler).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function twoFactorRecoveryRoutes(): array
+    {
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/2fa-recovery/request',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Request account recovery after losing both password and 2FA device (public, rate-limited, no enumeration)',
+                    'tags' => ['auth'],
+                    'request' => 'EmailOnlyRequest',
+                    'responses' => [
+                        202 => self::jsonResponse(
+                            'Always the same generic message, regardless of whether the address has an account',
+                            'GenericMessageDataResponse'
+                        ),
+                        422 => self::errorResponse('A valid email address is required'),
+                        429 => self::errorResponse('Too many recovery requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/2fa-recovery/confirm',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Confirm the recovery token — CREATES the pending admin-queue entry (clears nothing)',
+                    'tags' => ['auth'],
+                    'request' => 'TokenOnlyRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Submitted for administrator review', 'TwoFactorRecoveryConfirmResponse'),
+                        400 => self::errorResponse('The confirmation link is invalid or has expired'),
+                        422 => self::errorResponse('A confirmation token is required'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/2fa-recovery/pending', 'two_factor_recovery:approve', [
+                'summary' => 'List pending 2FA-recovery requests for the caller\'s own tenant',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Requests awaiting approval', 'PendingTwoFactorRecoveryListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/{id:\d+}/approve', 'two_factor_recovery:approve', [
+                'summary' => 'Clear the target profile\'s 2FA and send a fresh password-reset link (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approved', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending 2FA-recovery request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/{id:\d+}/reject', 'two_factor_recovery:approve', [
+                'summary' => 'Leave the target profile untouched (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending 2FA-recovery request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/force-reset', 'two_factor_recovery:approve', [
+                'summary' => 'Secondary fallback: force-clear a named profile\'s 2FA with no prior request (tenant-scoped)',
+                'tags' => ['auth'],
+                'request' => 'ForceResetRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Forced', 'ForceResetResponse'),
+                    404 => self::errorResponse('No such profile in your tenant'),
+                    422 => self::errorResponse('A valid profile_id is required'),
                 ] + self::authErrors(),
             ]),
         ];
