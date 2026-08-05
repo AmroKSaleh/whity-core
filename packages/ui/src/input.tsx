@@ -80,12 +80,24 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       showNumberStepper = true,
       fileVariant = "dropzone",
       disabled,
+      id,
       ...props
     },
     ref
   ) => {
     const internalRef = React.useRef<HTMLInputElement>(null)
     React.useImperativeHandle(ref, () => internalRef.current!)
+
+    // Generate a unique ID for the input if not provided and label exists.
+    // This ensures proper label association for accessibility.
+    // If id is provided, always use it. Otherwise, generate one only if label exists.
+    const inputId = React.useMemo(() => {
+      if (id) return id
+      if (label) {
+        return `input-${Math.random().toString(36).substr(2, 9)}`
+      }
+      return undefined
+    }, [id, label])
 
     const [showPassword, setShowPassword] = React.useState(false)
     const [selectedFiles, setSelectedFiles] = React.useState<File[]>([])
@@ -284,9 +296,17 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           <div className="relative flex items-center w-full">
             <input
               ref={internalRef}
+              id={inputId}
               type={type}
               data-slot="input"
               disabled={disabled}
+              aria-invalid={!!errorText}
+              aria-describedby={[
+                errorText && inputId ? `${inputId}-error` : undefined,
+                helperText && inputId ? `${inputId}-helper` : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined}
               className={cn(
                 "h-7 w-full min-w-0 rounded-md border border-input bg-card ps-2.5 pe-8 py-0.5 text-xs font-medium transition-colors outline-none placeholder:text-muted-foreground placeholder:text-xs focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0",
                 className
@@ -322,9 +342,17 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             </div>
             <input
               ref={internalRef}
+              id={inputId}
               type="search"
               data-slot="input"
               disabled={disabled}
+              aria-invalid={!!errorText}
+              aria-describedby={[
+                errorText && inputId ? `${inputId}-error` : undefined,
+                helperText && inputId ? `${inputId}-helper` : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined}
               className={cn(
                 "h-7 w-full min-w-0 rounded-md border border-input bg-card ps-8 pe-2.5 py-0.5 text-xs font-medium transition-colors outline-none placeholder:text-muted-foreground placeholder:text-xs focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 [&::-webkit-search-cancel-button]:cursor-pointer",
                 className
@@ -341,9 +369,17 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           <div className="relative flex items-center w-full">
             <input
               ref={internalRef}
+              id={inputId}
               type={inputType}
               data-slot="input"
               disabled={disabled}
+              aria-invalid={!!errorText}
+              aria-describedby={[
+                errorText && inputId ? `${inputId}-error` : undefined,
+                helperText && inputId ? `${inputId}-helper` : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined}
               className={cn(
                 "h-7 w-full min-w-0 rounded-md border border-input bg-card ps-2.5 pe-8 py-0.5 text-xs font-medium transition-colors outline-none placeholder:text-muted-foreground placeholder:text-xs focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20",
                 className
@@ -384,9 +420,17 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             </button>
             <input
               ref={internalRef}
+              id={inputId}
               type="number"
               data-slot="input"
               disabled={disabled}
+              aria-invalid={!!errorText}
+              aria-describedby={[
+                errorText && inputId ? `${inputId}-error` : undefined,
+                helperText && inputId ? `${inputId}-helper` : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined}
               className={cn(
                 "h-7 w-full min-w-0 rounded-md border border-input bg-card px-8 py-0.5 text-center text-xs font-medium transition-colors outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none placeholder:text-muted-foreground placeholder:text-xs focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20",
                 className
@@ -440,10 +484,18 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             >
               <input
                 ref={internalRef}
+                id={inputId}
                 type="file"
                 data-slot="input"
                 disabled={disabled}
                 onChange={handleFileChange}
+                aria-invalid={!!errorText}
+                aria-describedby={[
+                  errorText && inputId ? `${inputId}-error` : undefined,
+                  helperText && inputId ? `${inputId}-helper` : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined}
                 className="sr-only"
                 {...props}
               />
@@ -509,10 +561,18 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           >
             <input
               ref={internalRef}
+              id={inputId}
               type="file"
               data-slot="input"
               disabled={disabled}
               onChange={handleFileChange}
+              aria-invalid={!!errorText}
+              aria-describedby={[
+                errorText && inputId ? `${inputId}-error` : undefined,
+                helperText && inputId ? `${inputId}-helper` : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined}
               className="sr-only"
               {...props}
             />
@@ -563,9 +623,17 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       return (
         <input
           ref={ref}
+          id={inputId}
           type={type}
           data-slot="input"
           disabled={disabled}
+          aria-invalid={!!errorText}
+          aria-describedby={[
+            errorText && inputId ? `${inputId}-error` : undefined,
+            helperText && inputId ? `${inputId}-helper` : undefined,
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined}
           className={cn(
             "h-7 w-full min-w-0 rounded-md border border-input bg-card px-2.5 py-0.5 text-xs font-medium transition-colors outline-none file:inline-flex file:h-full file:items-center file:border-0 file:border-e file:border-input/40 file:bg-muted file:px-2.5 file:text-xs file:font-semibold file:text-foreground hover:file:bg-muted/80 file:transition-colors file:cursor-pointer file:me-2 placeholder:text-muted-foreground placeholder:text-xs focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20",
             className
@@ -586,7 +654,13 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       <div className="flex flex-col gap-1 w-full text-start">
         {hasHeader && (
           <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
-            {label && <span>{label}</span>}
+            {label && inputId ? (
+              <label htmlFor={inputId} className="cursor-pointer">
+                {label}
+              </label>
+            ) : (
+              label && <span>{label}</span>
+            )}
             {required && <span className="text-destructive font-bold ms-0.5">*</span>}
             {tooltip && (
               <TooltipProvider>
@@ -608,9 +682,9 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         )}
         {renderInputControl()}
         {errorText ? (
-          <p className="text-[0.6875rem] font-medium text-destructive">{errorText}</p>
+          <p id={inputId ? `${inputId}-error` : undefined} className="text-[0.6875rem] font-medium text-destructive">{errorText}</p>
         ) : (
-          helperText && <p className="text-[0.6875rem] text-muted-foreground">{helperText}</p>
+          helperText && <p id={inputId ? `${inputId}-helper` : undefined} className="text-[0.6875rem] text-muted-foreground">{helperText}</p>
         )}
       </div>
     )
