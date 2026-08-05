@@ -12,7 +12,7 @@ use PDO;
  * Provides read access to languages from the database. Languages are global
  * (not tenant-scoped) and all tenants can access the same set of language codes.
  */
-final class LanguageRepository
+final class LanguageRepository implements LanguageRepositoryInterface
 {
     public function __construct(
         private readonly PDO $pdo,

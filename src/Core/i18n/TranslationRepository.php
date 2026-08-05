@@ -12,7 +12,7 @@ use PDO;
  * Provides read access to translations from the database. Translations are
  * tenant-scoped: NULL tenant_id = system default, tenant_id>0 = tenant override.
  */
-final class TranslationRepository
+final class TranslationRepository implements TranslationRepositoryInterface
 {
     public function __construct(
         private readonly PDO $pdo,

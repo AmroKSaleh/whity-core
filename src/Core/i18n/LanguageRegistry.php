@@ -48,8 +48,8 @@ final class LanguageRegistry
     private string $currentLanguageCode = 'en';
 
     public function __construct(
-        private readonly LanguageRepository $languageRepository,
-        private readonly TranslationRepository $translationRepository,
+        private readonly LanguageRepositoryInterface $languageRepository,
+        private readonly TranslationRepositoryInterface $translationRepository,
         private readonly TenantContextInterface $tenantContext,
     ) {
     }
@@ -65,6 +65,7 @@ final class LanguageRegistry
      * Boot is idempotent: calling it multiple times is safe and resets the cache.
      *
      * @return void
+     * @throws \Exception When language or translation loading fails.
      */
     public function boot(): void
     {
@@ -72,26 +73,43 @@ final class LanguageRegistry
         $this->translations = [];
         $this->languages = [];
 
-        // Load all languages.
-        $this->languages = $this->languageRepository->findAll(enabled: true);
+        try {
+            // Load all languages.
+            $this->languages = $this->languageRepository->findAll(enabled: true);
 
-        // Load all system default translations for all languages.
-        foreach ($this->languages as $language) {
-            $this->translations[$language->code] = [];
+            if (empty($this->languages)) {
+                throw new \Exception('No enabled languages found in database');
+            }
 
-            // Load system defaults (tenant_id = NULL).
-            $systemDefaults = $this->translationRepository->findAllSystemDefaults($language->id);
-            foreach ($systemDefaults as $domain => $keys) {
-                if (!isset($this->translations[$language->code][$domain])) {
-                    $this->translations[$language->code][$domain] = [];
-                }
-                foreach ($keys as $key => $translation) {
-                    $this->translations[$language->code][$domain][$key] = $translation->translation;
+            // Load all system default translations for all languages.
+            foreach ($this->languages as $language) {
+                $this->translations[$language->code] = [];
+
+                try {
+                    // Load system defaults (tenant_id = NULL).
+                    $systemDefaults = $this->translationRepository->findAllSystemDefaults($language->id);
+                    foreach ($systemDefaults as $domain => $keys) {
+                        if (!isset($this->translations[$language->code][$domain])) {
+                            $this->translations[$language->code][$domain] = [];
+                        }
+                        foreach ($keys as $key => $translation) {
+                            $this->translations[$language->code][$domain][$key] = $translation->translation;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    throw new \Exception(
+                        "Failed to load translations for language {$language->code}: {$e->getMessage()}",
+                        0,
+                        $e
+                    );
                 }
             }
-        }
 
-        $this->booted = true;
+            $this->booted = true;
+        } catch (\Throwable $e) {
+            // Re-throw to allow the caller (public/index.php) to handle it gracefully
+            throw new \Exception("LanguageRegistry boot failed: {$e->getMessage()}", 0, $e);
+        }
     }
 
     /**

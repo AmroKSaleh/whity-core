@@ -1140,18 +1140,22 @@ $router->register('GET', '/api/settings/tabs', [$settingsHandler, 'tabs']);
 // PATCH /api/v1/settings/language — authenticated, updates user's language preference.
 // Language preference is stored per-profile (language_code column) and follows the user across
 // all tenant memberships. NULL = use tenant default, explicit code = user's choice.
+error_log("[DEBUG] Initializing i18n: creating LanguageRepository...");
 $languageRepository = new \Whity\Core\i18n\LanguageRepository($db->getPdo());
+error_log("[DEBUG] Initializing i18n: creating TranslationRepository...");
 $translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo());
+error_log("[DEBUG] Initializing i18n: creating LanguageRegistry...");
 $languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
     $languageRepository,
     $translationRepository,
     new \Whity\Core\Tenant\StaticTenantContextAdapter()
 );
+error_log("[DEBUG] Initializing i18n: calling LanguageRegistry::boot()...");
 try {
     $languageRegistry->boot();
+    error_log("[DEBUG] LanguageRegistry boot completed successfully");
 } catch (\Throwable $e) {
     error_log("[WARN] LanguageRegistry boot failed (continuing without translations): {$e->getMessage()}");
-}
 $languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
 $router->register('GET',   '/api/languages',                   [$languagesHandler, 'list'],         null);
 $router->register('GET',   '/api/settings/language',           [$languagesHandler, 'getLanguage'], null);
