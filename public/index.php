@@ -1145,7 +1145,7 @@ $translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo(
 $languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
     $languageRepository,
     $translationRepository,
-    new \Whity\Core\Tenant\TenantContext()
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
 );
 $languageRegistry->boot();
 $languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
