@@ -22,7 +22,8 @@ import { SessionsSettings } from '@/components/SessionsSettings';
 const SESSIONS = [
   {
     id: 1,
-    user_agent: 'Mozilla/5.0 (Macintosh)',
+    user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15',
+    device: 'Safari on macOS',
     ip_address: '10.0.0.9',
     created_at: '2026-07-01 10:00:00',
     last_seen_at: '2026-07-07 09:00:00',
@@ -30,7 +31,8 @@ const SESSIONS = [
   },
   {
     id: 2,
-    user_agent: 'Mozilla/5.0 (Windows)',
+    user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    device: 'Chrome on Windows',
     ip_address: '10.0.0.8',
     created_at: '2026-07-02 10:00:00',
     last_seen_at: '2026-07-06 09:00:00',
@@ -38,8 +40,18 @@ const SESSIONS = [
   },
 ];
 
+interface SessionFixture {
+  id: number;
+  user_agent: string;
+  device?: string;
+  ip_address: string;
+  created_at: string;
+  last_seen_at: string;
+  current: boolean;
+}
+
 /** Route apiClient responses by method + path. */
-function wire(list = SESSIONS) {
+function wire(list: SessionFixture[] = SESSIONS) {
   mockApiClient.mockImplementation((url: string, opts?: { method?: string }) => {
     const method = opts?.method ?? 'GET';
     if (url === '/api/v1/me/sessions' && method === 'GET') {
@@ -112,4 +124,31 @@ it('shows an empty state when there are no sessions', async () => {
   wire([]);
   render(<SessionsSettings />);
   await waitFor(() => expect(screen.getByTestId('sessions-empty')).toBeInTheDocument());
+});
+
+it('renders the friendly device label as the primary text, not the raw user agent', async () => {
+  render(<SessionsSettings />);
+  await waitFor(() => expect(screen.getByTestId('session-row-2')).toBeInTheDocument());
+
+  // The friendly label (backend-computed via DeviceLabel::fromUserAgent) is
+  // the visible primary string...
+  expect(screen.getByText('Chrome on Windows')).toBeInTheDocument();
+  // ...and the raw UA is not rendered as visible text (it's tooltip-only).
+  expect(screen.queryByText(SESSIONS[1].user_agent)).not.toBeInTheDocument();
+});
+
+it('falls back to "Unknown device" when the backend omits a device label', async () => {
+  wire([
+    {
+      id: 3,
+      user_agent: 'some-obscure-client/1.0',
+      ip_address: '10.0.0.7',
+      created_at: '2026-07-03 10:00:00',
+      last_seen_at: '2026-07-03 10:00:00',
+      current: false,
+    },
+  ]);
+  render(<SessionsSettings />);
+  await waitFor(() => expect(screen.getByTestId('session-row-3')).toBeInTheDocument());
+  expect(screen.getByText('Unknown device')).toBeInTheDocument();
 });
