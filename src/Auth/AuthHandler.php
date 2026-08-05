@@ -1775,11 +1775,11 @@ class AuthHandler
         //  - Token mode (WC-ddcd16ad): read from Authorization: Bearer header or
         //    the body field "refresh_token". Cookie is tried first so a browser
         //    that accidentally sends both always goes through the cookie path.
+        $rawToken = null;
         if ($tokenMode) {
             // Accept from cookie first (safety), then Bearer, then body.
             $claims = $this->tokenValidator->validateRefreshToken();
             if ($claims === null) {
-                $rawToken = null;
                 $authHeader = $request->getHeader('Authorization');
                 if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
                     $rawToken = $m[1];
@@ -1794,10 +1794,28 @@ class AuthHandler
                     : null;
             }
         } else {
+            $rawToken = CookieManager::getRefreshToken();
             $claims = $this->tokenValidator->validateRefreshToken();
         }
 
         if ($claims === null) {
+            // WC-refresh-reuse: detect reuse attempts by checking if the token's jti
+            // is already in revoked_tokens. If so, it means we've already issued a new
+            // token for this refresh, and this is a reuse attempt → log security event.
+            if ($rawToken !== null) {
+                $parsedToken = $this->jwtParser->parse($rawToken);
+                if ($parsedToken !== null && isset($parsedToken['jti'], $parsedToken['profile_id'], $parsedToken['active_tenant_id'])) {
+                    $jti = $parsedToken['jti'];
+                    $profileId = $parsedToken['profile_id'];
+                    $activeTenantId = $parsedToken['active_tenant_id'];
+                    if (is_string($jti) && is_int($profileId) && is_int($activeTenantId)) {
+                        if ($this->isJtiRevoked($jti)) {
+                            // This token has been reused → log security event
+                            $this->audit('auth.refresh_token_reuse_detected', $request, $activeTenantId, $profileId);
+                        }
+                    }
+                }
+            }
             return Response::error('Unauthorized', 401);
         }
 
@@ -1854,6 +1872,11 @@ class AuthHandler
         $oldRefreshJti = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : null;
         if ($oldRefreshJti !== null) {
             $this->recordSession($accessToken, $newRefreshToken, $profileId, $activeTenantId, $request, false, $oldRefreshJti);
+
+            // WC-refresh-reuse: revoke the old refresh token to prevent reuse.
+            // On next use of this token, it will be detected as revoked and logged
+            // as a security incident (auth.refresh_token_reuse_detected).
+            $this->revokeRefreshToken($oldRefreshJti);
         }
 
         // WC-525: same grace-period nag as issueSessionForProfile() — the
@@ -2350,6 +2373,50 @@ class AuthHandler
         $stmt->execute([':step' => $step, ':pid' => $profileId, ':step2' => $step]);
 
         return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Check if a JWT ID (jti) has been revoked.
+     *
+     * Used by the refresh-token reuse detection logic (WC-refresh-reuse) to check
+     * if a refresh token has already been used (and thus added to revoked_tokens).
+     *
+     * @param string $jti The JWT ID to check
+     * @return bool True if the jti is in revoked_tokens, false otherwise
+     */
+    private function isJtiRevoked(string $jti): bool
+    {
+        try {
+            $stmt = $this->db->prepare('SELECT 1 FROM revoked_tokens WHERE jti = ? LIMIT 1');
+            $stmt->execute([$jti]);
+            return (bool) $stmt->fetchColumn();
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Revoke a refresh token by adding its jti to revoked_tokens.
+     *
+     * Used after a successful refresh to prevent reuse of the old refresh token.
+     * On the next presentation of this token, it will be rejected and the incident
+     * logged as a security event (WC-refresh-reuse).
+     *
+     * @param string $jti The JWT ID to revoke
+     */
+    private function revokeRefreshToken(string $jti): void
+    {
+        try {
+            // Calculate expiration time (604800 seconds = 7 days from now)
+            $expiresAt = date('Y-m-d H:i:s', time() + 604800);
+            $stmt = $this->db->prepare(
+                'INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'
+            );
+            $stmt->execute([$jti, $expiresAt]);
+        } catch (\Exception $e) {
+            // Best-effort: if revocation fails, log and continue
+            error_log('[refresh-token-revoke] failed: ' . $e->getMessage());
+        }
     }
 
     /**
