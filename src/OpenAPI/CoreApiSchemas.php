@@ -93,6 +93,7 @@ final class CoreApiSchemas
             self::platformOpsRoutes(),
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
+            self::languageRoutes(),
             self::brandingRoutes(),
             self::themeRoutes(),
             self::identityRoutes(),
@@ -1430,6 +1431,92 @@ final class CoreApiSchemas
                         200 => self::jsonResponse('The visible settings tabs, in display order', 'SettingsTabListResponse'),
                         403 => self::errorResponse('Unauthenticated or tenant not resolved'),
                     ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Language management and user language preference routes.
+     *
+     * GET /api/v1/languages — public endpoint, returns list of available languages
+     * (no auth required).
+     * GET /api/v1/settings/language — authenticated, returns user's language preference
+     * and list of available languages.
+     * PATCH /api/v1/settings/language — authenticated, updates user's language preference.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function languageRoutes(): array
+    {
+        $languageObject = self::object([
+            'code' => self::str(),
+            'name' => self::str(),
+        ], ['code', 'name']);
+
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/languages',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List available languages (public endpoint)',
+                    'tags' => ['languages'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The list of available languages',
+                            self::object([
+                                'languages' => ['type' => 'array', 'items' => $languageObject],
+                            ], ['languages'])
+                        ),
+                        500 => self::errorResponse('Internal error'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/settings/language',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Get the current user\'s language preference',
+                    'tags' => ['languages'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The user\'s language preference and available languages',
+                            self::object([
+                                'language_code' => self::str(nullable: true),
+                                'available_languages' => ['type' => 'array', 'items' => $languageObject],
+                            ], ['language_code', 'available_languages'])
+                        ),
+                        403 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('User profile not found'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'PATCH',
+                'path' => '/api/settings/language',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Update the current user\'s language preference',
+                    'tags' => ['languages'],
+                    'request' => self::object([
+                        'language_code' => self::str(nullable: true),
+                    ], ['language_code']),
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The updated language preference',
+                            self::object([
+                                'language_code' => self::str(nullable: true),
+                            ], ['language_code'])
+                        ),
+                        400 => self::errorResponse('Invalid request body'),
+                        403 => self::errorResponse('Authentication required'),
+                        422 => self::errorResponse('Invalid language code'),
+                    ] + self::authErrors(),
                 ],
             ],
         ];
