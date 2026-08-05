@@ -1,51 +1,27 @@
-import { useCallback, useMemo } from 'react';
-import { useAuth } from '@/lib/auth-context';
-import { useFetch } from '@/hooks/useFetch';
-import { parsePermissions } from '@/lib/capabilities';
+import { useCapabilitiesContext } from '@/lib/capabilities-context';
+import type { CapabilitiesContextValue } from '@/lib/capabilities-context';
 
 /**
- * Returns the caller's effective permission set from GET /api/me/capabilities.
+ * Shared capability surface for the currently active user + tenant
+ * (WC-663f6b6b). Backed by a single `CapabilitiesProvider` fetch of
+ * `GET /api/v1/me/capabilities` (mounted once in the root layout) rather than
+ * one fetch per call site, so every consumer sees the SAME answer and a
+ * tenant switch invalidates all of them together.
  *
- * Fail-closed: while loading or on any error (network failure, non-ok response,
- * malformed body) `permissions` is `[]` and `hasPermission` returns `false`.
- * The server stays authoritative — these slugs are UI hints that hide write
- * controls the caller cannot use; they grant nothing.
+ * `has(capability)` / `hasAny([...])` / `hasAll([...])` are the canonical
+ * checks. `hasPermission` is kept as an alias of `has` for existing call
+ * sites (WC-176/WC-177, #205).
+ *
+ * Fail-closed: while loading (including the in-flight window right after the
+ * active user or tenant changes) or on any error (network failure, non-ok
+ * response, malformed body), every check returns `false`. The server stays
+ * authoritative — these slugs are UI hints only and grant nothing.
+ *
+ * Must be called under `CapabilitiesProvider` (mounted in the root layout);
+ * throws otherwise, mirroring `useAuth`/`useNavigation`/`usePluginFeatures`.
  */
-export interface UseCapabilitiesResult {
-  /** The caller's resolved permission slugs, or `[]` while loading / on error. */
-  permissions: string[];
-  /** True while the capabilities fetch is in flight. */
-  loading: boolean;
-  /**
-   * Returns `true` only when loading is complete and `slug` is in
-   * `permissions`. Always returns `false` while loading or on error.
-   */
-  hasPermission: (slug: string) => boolean;
-}
+export type UseCapabilitiesResult = CapabilitiesContextValue;
 
 export function useCapabilities(): UseCapabilitiesResult {
-  const { apiClient } = useAuth();
-
-  const { data, loading } = useFetch(async () => {
-    const response = await apiClient('/api/v1/me/capabilities');
-    if (!response.ok) {
-      // Fail closed: a non-ok response yields an empty permission set.
-      return [];
-    }
-    return parsePermissions(await response.json());
-  }, [apiClient]);
-
-  // Stable reference: only changes when the fetched data changes, preventing
-  // hasPermission from being re-created on every render while data is null.
-  const permissions = useMemo(() => data ?? [], [data]);
-
-  const hasPermission = useCallback(
-    (slug: string): boolean => {
-      if (loading) return false;
-      return permissions.includes(slug);
-    },
-    [loading, permissions]
-  );
-
-  return { permissions, loading, hasPermission };
+  return useCapabilitiesContext();
 }

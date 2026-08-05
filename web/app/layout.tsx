@@ -7,6 +7,7 @@ import { ToastProvider } from "@/lib/toast-context";
 import { NavigationProvider } from "@/lib/navigation-context";
 import { DirectionProvider } from "@/lib/direction-context";
 import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
+import { CapabilitiesProvider } from "@/lib/capabilities-context";
 import { ToastContainer } from "@/components/ui/toast-container";
 import "@/lib/plugin-screens";
 import { getBranding } from "@/lib/branding";
@@ -94,14 +95,16 @@ export default async function RootLayout({
           <ThemeModeProvider>
             <DirectionProvider>
               <AuthProvider>
-                <ToastProvider>
-                  <NavigationProvider>
-                    <PluginFeaturesProvider>
-                      {children}
-                      <ToastContainer />
-                    </PluginFeaturesProvider>
-                  </NavigationProvider>
-                </ToastProvider>
+                <CapabilitiesProvider>
+                  <ToastProvider>
+                    <NavigationProvider>
+                      <PluginFeaturesProvider>
+                        {children}
+                        <ToastContainer />
+                      </PluginFeaturesProvider>
+                    </NavigationProvider>
+                  </ToastProvider>
+                </CapabilitiesProvider>
               </AuthProvider>
             </DirectionProvider>
           </ThemeModeProvider>
