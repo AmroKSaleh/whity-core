@@ -26,6 +26,21 @@ import { test, expect } from '@playwright/test';
 import { injectAxe, checkA11y, getViolations } from 'axe-playwright';
 
 /**
+ * Type definitions for axe-core violations and nodes.
+ * @see https://github.com/dequelabs/axe-core/blob/develop/doc/rule-descriptions.md
+ */
+interface AxeViolation {
+  id: string;
+  impact?: 'minor' | 'moderate' | 'serious' | 'critical';
+  description: string;
+  nodes: AxeViolationNode[];
+}
+
+interface AxeViolationNode {
+  html: string;
+}
+
+/**
  * Public pages that do NOT require authentication.
  */
 const PUBLIC_PAGES = [
@@ -96,9 +111,9 @@ test.describe('Accessibility — Public Pages', () => {
         // Report each violation
         if (violations.length > 0) {
           console.error(`A11y violations found on ${page.label}:`);
-          violations.forEach((violation) => {
+          violations.forEach((violation: AxeViolation) => {
             console.error(`  [${violation.impact}] ${violation.id}: ${violation.description}`);
-            violation.nodes.forEach((node) => {
+            violation.nodes.forEach((node: AxeViolationNode) => {
               console.error(`    - ${node.html}`);
             });
           });
@@ -148,9 +163,9 @@ test.describe('Accessibility — Protected Pages (Admin)', () => {
 
         if (violations.length > 0) {
           console.error(`A11y violations found on ${page.label}:`);
-          violations.forEach((violation) => {
+          violations.forEach((violation: AxeViolation) => {
             console.error(`  [${violation.impact}] ${violation.id}: ${violation.description}`);
-            violation.nodes.forEach((node) => {
+            violation.nodes.forEach((node: AxeViolationNode) => {
               console.error(`    - ${node.html}`);
             });
           });
