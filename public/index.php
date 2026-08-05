@@ -1156,6 +1156,8 @@ try {
     error_log("[DEBUG] LanguageRegistry boot completed successfully");
 } catch (\Throwable $e) {
     error_log("[WARN] LanguageRegistry boot failed (continuing without translations): {$e->getMessage()}");
+}
+
 $languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
 $router->register('GET',   '/api/languages',                   [$languagesHandler, 'list'],         null);
 $router->register('GET',   '/api/settings/language',           [$languagesHandler, 'getLanguage'], null);
