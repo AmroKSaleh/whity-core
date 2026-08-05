@@ -1163,6 +1163,14 @@ $router->registerUnversioned('GET',   '/api/v1/languages',                   [$l
 $router->registerUnversioned('GET',   '/api/v1/settings/language',           [$languagesHandler, 'getLanguage'], null);
 $router->registerUnversioned('PATCH', '/api/v1/settings/language',           [$languagesHandler, 'patchLanguage'], null);
 
+// Translations API handler — public endpoint for fetching translated strings
+$translationsHandler = new \Whity\Api\TranslationsApiHandler(
+    $languageRepository,
+    $translationRepository,
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+);
+$router->registerUnversioned('GET', '/api/v1/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
+
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved
 // app_settings key, NOT a registry setting). GET /instance/status is authenticated
