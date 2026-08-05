@@ -169,4 +169,48 @@ final class DeterministicRandomTest extends TestCase
 
         self::assertSame($itemsA, $itemsB);
     }
+
+    public function testDeriveWithTheSamePartsProducesTheSameSequence(): void
+    {
+        $a = DeterministicRandom::derive(42, 'user', '3', '7');
+        $b = DeterministicRandom::derive(42, 'user', '3', '7');
+
+        $sequenceA = [$a->nextUint32(), $a->nextUint32(), $a->nextUint32()];
+        $sequenceB = [$b->nextUint32(), $b->nextUint32(), $b->nextUint32()];
+
+        self::assertSame($sequenceA, $sequenceB);
+    }
+
+    public function testDeriveWithDifferentPartsProducesDifferentSequences(): void
+    {
+        $a = DeterministicRandom::derive(42, 'user', '3', '7');
+        $b = DeterministicRandom::derive(42, 'user', '3', '8');
+
+        self::assertNotSame($a->nextUint32(), $b->nextUint32());
+    }
+
+    public function testDeriveIsIndependentOfHowManyDrawsAnUnrelatedGeneratorConsumed(): void
+    {
+        // This is the property ScaleSeeder relies on: entity B's derived
+        // generator must be identical regardless of how many draws some
+        // OTHER entity A's (independently-derived) generator happened to
+        // consume beforehand.
+        $unrelated = DeterministicRandom::derive(42, 'tenant', '1');
+        for ($i = 0; $i < 37; $i++) {
+            $unrelated->nextUint32(); // simulate arbitrary unrelated consumption
+        }
+
+        $b1 = DeterministicRandom::derive(42, 'user', '1', '5');
+        $b2 = DeterministicRandom::derive(42, 'user', '1', '5');
+
+        self::assertSame($b1->nextUint32(), $b2->nextUint32());
+    }
+
+    public function testDeriveWithDifferentParentSeedsProducesDifferentSequences(): void
+    {
+        $a = DeterministicRandom::derive(1, 'relations', '1');
+        $b = DeterministicRandom::derive(2, 'relations', '1');
+
+        self::assertNotSame($a->nextUint32(), $b->nextUint32());
+    }
 }

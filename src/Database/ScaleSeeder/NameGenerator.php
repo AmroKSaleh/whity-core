@@ -6,10 +6,24 @@ namespace Whity\Database\ScaleSeeder;
 
 /**
  * Deterministic, human-readable name/slug/email generation for the
- * scale-seeder (WC-35). Every method is a pure function of either the shared
- * {@see DeterministicRandom} stream (word choice) or its integer inputs (slug/
- * email/path composition) — never real randomness — so the same seed always
- * spells out the same names.
+ * scale-seeder (WC-35).
+ *
+ * Two kinds of method:
+ *  - STATIC, pure functions of their integer inputs (slug/email composition:
+ *    {@see self::tenantSlug()}, {@see self::ouSlug()}, {@see self::userEmail()}) —
+ *    no PRNG draw involved, safe to call any number of times regardless of
+ *    whether the row they key already exists.
+ *  - INSTANCE methods that draw realistic-looking words from the injected
+ *    {@see DeterministicRandom} ({@see self::companyName()}, {@see self::personName()},
+ *    {@see self::ouName()}, {@see self::customRoleName()}). Callers MUST give each
+ *    of these its own freshly-{@see DeterministicRandom::derive()}d generator
+ *    (never a single stream shared across many entities) and MUST call them
+ *    unconditionally — even when the row already exists and the drawn value
+ *    ends up unused — so that a value drawn for entity X is byte-identical
+ *    every time regardless of what happened to any OTHER entity in the same
+ *    run (see {@see ScaleSeeder} for why: a shared stream desyncs the moment
+ *    any earlier "reuse" branch skips a draw that the matching "create"
+ *    branch would have made).
  *
  * Uniqueness discipline: several tables enforce UNIQUE constraints that span
  * MORE than one tenant (`tenants.name`/`tenants.slug` are globally unique,
@@ -73,8 +87,11 @@ final class NameGenerator
         return sprintf('%s %s %d-%d', $adjective, $noun, $seed, $tenantIndex);
     }
 
-    /** Globally-unique tenant slug (`tenants.slug` has no per-tenant scope). */
-    public function tenantSlug(int $seed, int $tenantIndex): string
+    /**
+     * Globally-unique tenant slug (`tenants.slug` has no per-tenant scope).
+     * Static: a pure function of its inputs, no PRNG draw involved.
+     */
+    public static function tenantSlug(int $seed, int $tenantIndex): string
     {
         return sprintf('scale-%d-t%d', $seed, $tenantIndex);
     }
@@ -99,8 +116,11 @@ final class NameGenerator
         return sprintf('%s %s', $this->rng->pick(self::DEPARTMENT_WORDS), $pathLabel);
     }
 
-    /** OU slug, unique within (seed, tenant) — organizational_units is UNIQUE(tenant_id, slug). */
-    public function ouSlug(int $seed, int $tenantIndex, string $pathLabel): string
+    /**
+     * OU slug, unique within (seed, tenant) — organizational_units is UNIQUE(tenant_id, slug).
+     * Static: a pure function of its inputs, no PRNG draw involved.
+     */
+    public static function ouSlug(int $seed, int $tenantIndex, string $pathLabel): string
     {
         $normalized = strtolower(str_replace(['.', ' '], '-', $pathLabel));
 
@@ -115,8 +135,11 @@ final class NameGenerator
         return sprintf('Scale %s %d-t%d-r%d', $word, $seed, $tenantIndex, $roleIndex);
     }
 
-    /** Globally-unique, deterministic email for a scale-seeded user (`profile_emails.email` is global). */
-    public function userEmail(int $seed, int $tenantIndex, int $userIndex): string
+    /**
+     * Globally-unique, deterministic email for a scale-seeded user (`profile_emails.email` is global).
+     * Static: a pure function of its inputs, no PRNG draw involved.
+     */
+    public static function userEmail(int $seed, int $tenantIndex, int $userIndex): string
     {
         return sprintf('scale-seed%d-t%d-u%d@example.test', $seed, $tenantIndex, $userIndex);
     }

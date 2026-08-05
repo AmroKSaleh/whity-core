@@ -50,6 +50,30 @@ final class DeterministicRandom
         $this->state = $folded !== 0 ? $folded : 0x9E3779B9;
     }
 
+    /**
+     * Derive an independent child generator from a parent seed plus arbitrary
+     * discriminator parts (e.g. a phase name, a tenant/user index).
+     *
+     * Two calls with the same parent seed and the same parts always produce
+     * the same child sequence — REGARDLESS of how many draws any OTHER
+     * derived generator consumed. This is what lets {@see \Whity\Database\ScaleSeeder\ScaleSeeder}
+     * regenerate the exact same value for a given entity whether or not that
+     * entity already existed in the database: a single SHARED stream would
+     * desync the moment any earlier step skipped a draw because its row was
+     * already present (the "reuse" branch never calls the name generator), so
+     * every independently-reproducible value gets its own derived generator
+     * instead of consuming a shared position in one global stream.
+     */
+    public static function derive(int $parentSeed, string ...$parts): self
+    {
+        $material = $parentSeed . '|' . implode('|', $parts);
+
+        // crc32() is deterministic and platform-independent (a fixed,
+        // standardised algorithm) — not used for anything security-sensitive,
+        // just to mix a seed + labels into a well-distributed 32-bit value.
+        return new self((int) crc32($material));
+    }
+
     /** Next raw unsigned 32-bit integer from the stream. */
     public function nextUint32(): int
     {

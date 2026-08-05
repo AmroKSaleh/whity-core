@@ -23,11 +23,18 @@ use Whity\Database\InitialPassword;
  * row per user (so the family-relations graph has real nodes), and a target
  * density of `relations` edges among those persons.
  *
- * Determinism: every random choice flows through ONE {@see DeterministicRandom}
- * instance seeded from {@see ScaleSeederConfig::$seed}, consumed in a fixed,
- * nested-loop order (tenant, then OU levels, then roles, then users, then
- * relations) — so the SAME config always produces the SAME sequence of
- * choices, and therefore the same dataset, on any machine.
+ * Determinism: every random choice is drawn from an INDEPENDENTLY-{@see
+ * DeterministicRandom::derive()}d generator, keyed by that specific entity's
+ * own identity (its tenant/user/role index, or OU path) — never from one
+ * stream shared across many entities. This is deliberate, not merely
+ * stylistic: a shared stream desyncs the moment a "reuse" branch skips a draw
+ * that the matching "create" branch would have made (e.g. a user whose
+ * profile already exists never draws a display name), so on a rerun every
+ * entity AFTER the first reused one would silently draw different values —
+ * corrupting both determinism and idempotency. Deriving each entity's
+ * generator from (seed, phase, indices) instead makes its value depend ONLY
+ * on its own identity, never on how many other entities were created vs.
+ * reused earlier in the same run.
  *
  * Idempotency: every insert is guarded (a natural-key existence pre-check, or
  * `ON CONFLICT ... DO NOTHING` + a fallback lookup on conflict), so re-running
@@ -72,9 +79,18 @@ final class ScaleSeeder
     }
 
     /**
-     * Delete every tenant (and, via cascade, its OUs/roles/memberships/
-     * persons/relations) plus every profile that THIS seed's parameters would
-     * have created, matched by their deterministic slug/email patterns.
+     * Delete every tenant this seed's parameters would have created — along
+     * with its OUs/roles/memberships/persons/relations — plus every profile
+     * (+ profile_email) it created, matched by their deterministic
+     * slug/email patterns.
+     *
+     * Every table is deleted EXPLICITLY rather than relying on the schema's
+     * `ON DELETE CASCADE`/`SET NULL` foreign keys: those fire correctly on
+     * PostgreSQL (which always enforces FKs), but SQLite enforces foreign
+     * keys only when `PRAGMA foreign_keys = ON` is set on the connection —
+     * which is NOT guaranteed here (a migration earlier in the chain may
+     * leave it off) — so relying on cascade would silently leave orphaned
+     * rows behind on that engine. Explicit deletes are correct on both.
      *
      * @return array{tenantsDeleted: int, profilesDeleted: int}
      */
@@ -87,24 +103,58 @@ final class ScaleSeeder
 
         $pdo->beginTransaction();
         try {
-            // Profiles carry no tenant_id at all (ADR 0005 — global identity),
-            // so a tenant delete's cascade never reaches them; remove them
-            // explicitly first, matched by the deterministic email pattern
-            // this seed produces. This cascades to profile_emails (ON DELETE
-            // CASCADE) and nulls out persons.profile_id (ON DELETE SET NULL) —
-            // the person rows themselves are then removed by the tenant
-            // cascade below.
-            $profileStmt = $pdo->prepare(
-                'DELETE FROM profiles WHERE id IN (
-                    SELECT profile_id FROM profile_emails WHERE email LIKE :pattern
-                )'
+            // Resolve the target tenant ids up front so every subsequent
+            // delete can bind an explicit tenant_id predicate (required by
+            // the tenant-isolation guard) instead of re-joining tenants.slug
+            // each time.
+            $tenantIdStmt = $pdo->prepare('SELECT id FROM tenants WHERE slug LIKE :pattern');
+            $tenantIdStmt->execute([':pattern' => $tenantSlugPattern]);
+            $tenantIds = array_map(
+                static fn(array $row): int => (int) $row['id'],
+                $tenantIdStmt->fetchAll(PDO::FETCH_ASSOC)
             );
-            $profileStmt->execute([':pattern' => $emailPattern]);
-            $profilesDeleted = $profileStmt->rowCount();
 
-            // Deleting the tenant cascades organizational_units, roles
-            // (tenant_id FK), memberships, persons, and relations — every
-            // tenant-owned table this seeder writes into.
+            if ($tenantIds !== []) {
+                $placeholders = implode(',', array_fill(0, count($tenantIds), '?'));
+
+                // role_permissions carries no tenant_id of its own (scoped
+                // transitively via role_id — see TenantOwnedTables); capture
+                // this seed's custom role ids BEFORE deleting the roles so
+                // their grants can be cleaned up explicitly too.
+                $roleIdStmt = $pdo->prepare("SELECT id FROM roles WHERE tenant_id IN ({$placeholders})");
+                $roleIdStmt->execute($tenantIds);
+                $roleIds = array_map(
+                    static fn(array $row): int => (int) $row['id'],
+                    $roleIdStmt->fetchAll(PDO::FETCH_ASSOC)
+                );
+
+                // Child-to-parent order so no statement depends on a cascade
+                // that may not fire. Each DELETE names its table as a literal
+                // (not a variable) and binds an explicit tenant_id predicate,
+                // so it is both correct regardless of FK-enforcement state and
+                // verifiable by the tenant-predicate guard.
+                $pdo->prepare("DELETE FROM relations WHERE tenant_id IN ({$placeholders})")->execute($tenantIds);
+                $pdo->prepare("DELETE FROM persons WHERE tenant_id IN ({$placeholders})")->execute($tenantIds);
+                $pdo->prepare("DELETE FROM memberships WHERE tenant_id IN ({$placeholders})")->execute($tenantIds);
+                $pdo->prepare("DELETE FROM organizational_units WHERE tenant_id IN ({$placeholders})")
+                    ->execute($tenantIds);
+
+                if ($roleIds !== []) {
+                    $rolePlaceholders = implode(',', array_fill(0, count($roleIds), '?'));
+                    $pdo->prepare("DELETE FROM role_permissions WHERE role_id IN ({$rolePlaceholders})")
+                        ->execute($roleIds);
+                }
+                $pdo->prepare("DELETE FROM roles WHERE tenant_id IN ({$placeholders})")->execute($tenantIds);
+            }
+
+            // Profiles carry no tenant_id at all (ADR 0005 — global identity):
+            // resolve which ones this seed created from its deterministic
+            // email pattern, then delete both profile_emails and profiles
+            // explicitly (not via cascade), matched by those ids.
+            $profilesDeleted = $this->deleteScaleSeededProfiles($pdo, $emailPattern);
+
+            // Now that every tenant-scoped and profile-scoped row is gone,
+            // remove the tenants themselves.
             $tenantStmt = $pdo->prepare('DELETE FROM tenants WHERE slug LIKE :pattern');
             $tenantStmt->execute([':pattern' => $tenantSlugPattern]);
             $tenantsDeleted = $tenantStmt->rowCount();
@@ -121,6 +171,36 @@ final class ScaleSeeder
     }
 
     /**
+     * Delete the profiles (and their profile_emails) matching this seed's
+     * deterministic email pattern. Explicit two-step delete — id capture then
+     * delete-by-id for both tables — so it is correct regardless of whether
+     * the engine enforces `profile_emails.profile_id REFERENCES profiles(id)
+     * ON DELETE CASCADE` (SQLite does not unless `PRAGMA foreign_keys = ON`).
+     */
+    private function deleteScaleSeededProfiles(PDO $pdo, string $emailPattern): int
+    {
+        $idStmt = $pdo->prepare('SELECT DISTINCT profile_id FROM profile_emails WHERE email LIKE :pattern');
+        $idStmt->execute([':pattern' => $emailPattern]);
+        $profileIds = array_map(
+            static fn(array $row): int => (int) $row['profile_id'],
+            $idStmt->fetchAll(PDO::FETCH_ASSOC)
+        );
+
+        if ($profileIds === []) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($profileIds), '?'));
+
+        $pdo->prepare("DELETE FROM profile_emails WHERE profile_id IN ({$placeholders})")->execute($profileIds);
+
+        $deleteStmt = $pdo->prepare("DELETE FROM profiles WHERE id IN ({$placeholders})");
+        $deleteStmt->execute($profileIds);
+
+        return $deleteStmt->rowCount();
+    }
+
+    /**
      * Run the generator against the live connection.
      *
      * @param (callable(int $tenantIndex, int $totalTenants, ScaleSeederResult $soFar): void)|null $onTenantDone
@@ -130,9 +210,8 @@ final class ScaleSeeder
     {
         $pdo = $this->db->getPdo();
         $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $seed = $config->seed;
 
-        $rng = new DeterministicRandom($config->seed);
-        $names = new NameGenerator($rng);
         $result = new ScaleSeederResult();
 
         $adminRoleId = $this->resolveGlobalRoleId($pdo, 'admin');
@@ -144,18 +223,16 @@ final class ScaleSeeder
         for ($t = 1; $t <= $config->tenants; $t++) {
             $pdo->beginTransaction();
             try {
-                $tenantId = $this->ensureTenant($pdo, $driver, $config->seed, $t, $names, $result);
-                $ouIds = $this->ensureOuTree($pdo, $driver, $tenantId, $config->seed, $t, $config, $names, $result);
+                $tenantId = $this->ensureTenant($pdo, $driver, $seed, $t, $result);
+                $ouIds = $this->ensureOuTree($pdo, $driver, $tenantId, $seed, $t, $config, $result);
                 $customRoleIds = $this->ensureCustomRoles(
                     $pdo,
                     $driver,
                     $tenantId,
-                    $config->seed,
+                    $seed,
                     $t,
                     $config,
-                    $names,
                     $permissionIds,
-                    $rng,
                     $result
                 );
                 $roleChoices = $this->buildRoleChoices($adminRoleId, $userRoleId, $customRoleIds);
@@ -167,14 +244,12 @@ final class ScaleSeeder
                         $pdo,
                         $driver,
                         $tenantId,
-                        $config->seed,
+                        $seed,
                         $t,
                         $u,
-                        $names,
                         $passwordHash,
                         $roleChoices,
                         $ouIds,
-                        $rng,
                         $result
                     );
 
@@ -195,10 +270,11 @@ final class ScaleSeeder
                     $pdo,
                     $driver,
                     $tenantId,
+                    $seed,
+                    $t,
                     $personIds,
                     $relationshipTypeIds,
                     $config->relationsPerPerson,
-                    $rng,
                     $result
                 );
 
@@ -225,10 +301,16 @@ final class ScaleSeeder
         string $driver,
         int $seed,
         int $tenantIndex,
-        NameGenerator $names,
         ScaleSeederResult $result
     ): int {
-        $slug = $names->tenantSlug($seed, $tenantIndex);
+        $slug = NameGenerator::tenantSlug($seed, $tenantIndex);
+
+        // Draw the name UNCONDITIONALLY, before the existence check: this
+        // entity's own derived generator must always advance the same way,
+        // whether or not the row turns out to already exist (see class
+        // docblock — determinism/idempotency depends on this).
+        $tenantRng = DeterministicRandom::derive($seed, 'tenant', (string) $tenantIndex);
+        $name = (new NameGenerator($tenantRng))->companyName($seed, $tenantIndex);
 
         $existing = $this->fetchOne($pdo, 'SELECT id FROM tenants WHERE slug = :slug', [':slug' => $slug]);
         if ($existing !== null) {
@@ -236,7 +318,6 @@ final class ScaleSeeder
             return (int) $existing['id'];
         }
 
-        $name = $names->companyName($seed, $tenantIndex);
         $insertSql = $driver === 'pgsql'
             ? 'INSERT INTO tenants (name, slug, created_at) VALUES (:name, :slug, NOW())
                ON CONFLICT (slug) DO NOTHING RETURNING id'
@@ -274,7 +355,6 @@ final class ScaleSeeder
         int $seed,
         int $tenantIndex,
         ScaleSeederConfig $config,
-        NameGenerator $names,
         ScaleSeederResult $result
     ): array {
         /** @var array<string, int> $existingBySlug slug => id, preloaded once for this tenant */
@@ -296,7 +376,9 @@ final class ScaleSeeder
 
         $allIds = [];
 
-        $rootSlug = $names->ouSlug($seed, $tenantIndex, 'HQ');
+        // Root name is a fixed literal (no PRNG draw), so it needs no derived
+        // generator to stay reproducible.
+        $rootSlug = NameGenerator::ouSlug($seed, $tenantIndex, 'HQ');
         $rootId = $this->resolveOrInsertOu(
             $pdo,
             $driver,
@@ -317,8 +399,12 @@ final class ScaleSeeder
             foreach (array_values($parents) as $parentIndex => $parentId) {
                 for ($child = 1; $child <= $config->ouBreadth; $child++) {
                     $pathLabel = sprintf('L%d-%d-%d', $level, $parentIndex + 1, $child);
-                    $slug = $names->ouSlug($seed, $tenantIndex, $pathLabel);
-                    $name = $names->ouName($pathLabel);
+                    $slug = NameGenerator::ouSlug($seed, $tenantIndex, $pathLabel);
+                    // Every node's own generator is derived from its unique
+                    // path label, so its name is reproducible independent of
+                    // any other node's create/reuse outcome.
+                    $ouRng = DeterministicRandom::derive($seed, 'ou', (string) $tenantIndex, $pathLabel);
+                    $name = (new NameGenerator($ouRng))->ouName($pathLabel);
                     $id = $this->resolveOrInsertOu(
                         $pdo,
                         $driver,
@@ -413,15 +499,28 @@ final class ScaleSeeder
         int $seed,
         int $tenantIndex,
         ScaleSeederConfig $config,
-        NameGenerator $names,
         array $permissionIds,
-        DeterministicRandom $rng,
         ScaleSeederResult $result
     ): array {
         $roleIds = [];
 
         for ($r = 1; $r <= $config->customRolesPerTenant; $r++) {
-            $name = $names->customRoleName($seed, $tenantIndex, $r);
+            // This role's own generator, derived from its (tenant, role
+            // index) identity. Both draws below — the name's word pick, then
+            // the permission-grant shuffle — happen UNCONDITIONALLY in this
+            // fixed order every time, whether or not the role already
+            // exists, so both stay reproducible independent of anything else
+            // in the run.
+            $roleRng = DeterministicRandom::derive($seed, 'role', (string) $tenantIndex, (string) $r);
+            $name = (new NameGenerator($roleRng))->customRoleName($seed, $tenantIndex, $r);
+
+            $grants = [];
+            if ($permissionIds !== []) {
+                $shuffled = $permissionIds;
+                $roleRng->shuffle($shuffled);
+                $grantCount = min(count($shuffled), $roleRng->nextInt(2, 6));
+                $grants = array_slice($shuffled, 0, $grantCount);
+            }
 
             $existing = $this->fetchOne(
                 $pdo,
@@ -463,18 +562,16 @@ final class ScaleSeeder
             } else {
                 $result->customRolesCreated++;
 
-                // Grant a deterministic random subset of the existing permission
-                // catalogue to the newly created role, for RBAC realism.
-                if ($permissionIds !== []) {
-                    $shuffled = $permissionIds;
-                    $rng->shuffle($shuffled);
-                    $grantCount = min(count($shuffled), $rng->nextInt(2, 6));
+                // Write the grant subset computed above (RBAC realism) — only
+                // on first creation; a reused role already has its grants
+                // from whichever run created it.
+                if ($grants !== []) {
                     $grantStmt = $pdo->prepare(
                         'INSERT INTO role_permissions (role_id, permission_id, created_at)
                          VALUES (:role_id, :permission_id, NOW())
                          ON CONFLICT (role_id, permission_id) DO NOTHING'
                     );
-                    foreach (array_slice($shuffled, 0, $grantCount) as $permissionId) {
+                    foreach ($grants as $permissionId) {
                         $grantStmt->execute([':role_id' => $id, ':permission_id' => $permissionId]);
                     }
                 }
@@ -518,14 +615,20 @@ final class ScaleSeeder
         int $seed,
         int $tenantIndex,
         int $userIndex,
-        NameGenerator $names,
         string $passwordHash,
         array $roleChoices,
         array $ouIds,
-        DeterministicRandom $rng,
         ScaleSeederResult $result
     ): int {
-        $email = $names->userEmail($seed, $tenantIndex, $userIndex);
+        $email = NameGenerator::userEmail($seed, $tenantIndex, $userIndex);
+
+        // This user's own generator, derived from its (tenant, user index)
+        // identity. Every draw below — display name, then role, then OU —
+        // happens UNCONDITIONALLY in this fixed order every time, whether or
+        // not the profile already exists, so all three stay reproducible
+        // independent of anything else in the run.
+        $userRng = DeterministicRandom::derive($seed, 'user', (string) $tenantIndex, (string) $userIndex);
+        $displayName = (new NameGenerator($userRng))->personName()['display'];
 
         $existing = $this->fetchOne(
             $pdo,
@@ -537,8 +640,6 @@ final class ScaleSeeder
             $profileId = (int) $existing['profile_id'];
             $result->usersReused++;
         } else {
-            $displayName = $names->personName()['display'];
-
             $profileInsertSql = $driver === 'pgsql'
                 ? "INSERT INTO profiles
                        (display_name, password_hash, two_factor_enabled, two_factor_secret,
@@ -574,8 +675,8 @@ final class ScaleSeeder
             $result->usersCreated++;
         }
 
-        $roleId = (int) $rng->weightedPick($roleChoices);
-        $ouId = ($ouIds !== [] && $rng->chance(0.9)) ? (int) $rng->pick($ouIds) : null;
+        $roleId = (int) $userRng->weightedPick($roleChoices);
+        $ouId = ($ouIds !== [] && $userRng->chance(0.9)) ? (int) $userRng->pick($ouIds) : null;
 
         $membershipStmt = $pdo->prepare(
             "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
@@ -694,10 +795,11 @@ final class ScaleSeeder
         PDO $pdo,
         string $driver,
         int $tenantId,
+        int $seed,
+        int $tenantIndex,
         array $personIds,
         array $relationshipTypeIds,
         float $relationsPerPerson,
-        DeterministicRandom $rng,
         ScaleSeederResult $result
     ): void {
         $n = count($personIds);
@@ -710,6 +812,10 @@ final class ScaleSeeder
             return;
         }
 
+        // This tenant's own generator for the whole relation-building pass,
+        // independent of every other phase.
+        $rng = DeterministicRandom::derive($seed, 'relations', (string) $tenantIndex);
+
         /** @var list<array{0: int, 1: float}> $typeChoices */
         $typeChoices = [
             [$relationshipTypeIds['Spouse'], 1.0],
@@ -717,17 +823,47 @@ final class ScaleSeeder
             [$relationshipTypeIds['Parent'], 1.0],
         ];
 
-        // Preload already-connected pairs so a rerun of the same seed (which
-        // draws the identical sequence of candidate pairs) recognises them as
-        // already satisfied rather than attempting duplicate inserts.
-        /** @var array<string, true> $connectedPairs */
-        $connectedPairs = [];
-        $existingStmt = $pdo->prepare(
-            'SELECT from_person_id, to_person_id FROM relations WHERE tenant_id = :tenant_id'
-        );
-        $existingStmt->execute([':tenant_id' => $tenantId]);
-        foreach ($existingStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $connectedPairs[self::pairKey((int) $row['from_person_id'], (int) $row['to_person_id'])] = true;
+        // Selection is deliberately kept independent of the database: which
+        // pairs get targeted depends ONLY on this tenant's derived rng stream
+        // and the in-memory dedup below — NEVER on which relations already
+        // exist. That is what makes a rerun idempotent: it selects the
+        // IDENTICAL set of pairs every time (same seed => same draws => same
+        // dedup outcome), and each selected pair is then inserted
+        // idempotently (ON CONFLICT DO NOTHING) below, so a rerun finds every
+        // pair already present and creates nothing new. (An earlier version
+        // fed already-connected pairs back into the selection loop's stop
+        // condition to try to replicate the original run's stopping point —
+        // that broke down because a rerun's replayed sequence does not
+        // consume rng draws in the same pattern as an original run whose
+        // early exit depended on how many distinct pairs it had found so
+        // far. Decoupling selection from DB state sidesteps the problem
+        // entirely instead of patching around it.)
+        /** @var array<string, array{0: int, 1: int, 2: int}> $selected key => [from, to, typeId] */
+        $selected = [];
+        $attempts = 0;
+        $maxAttempts = $targetEdges * 20 + 50;
+
+        while (count($selected) < $targetEdges && $attempts < $maxAttempts) {
+            $attempts++;
+
+            $from = (int) $rng->pick($personIds);
+            $to = (int) $rng->pick($personIds);
+            $typeId = (int) $rng->weightedPick($typeChoices);
+
+            if ($from === $to) {
+                continue;
+            }
+
+            $key = self::pairKey($from, $to);
+            if (isset($selected[$key])) {
+                continue; // at most one edge per unordered pair
+            }
+
+            $selected[$key] = [$from, $to, $typeId];
+        }
+
+        if ($selected === []) {
+            return;
         }
 
         $insertSql = $driver === 'pgsql'
@@ -740,27 +876,7 @@ final class ScaleSeeder
                ON CONFLICT (tenant_id, from_person_id, to_person_id, relationship_type_id) DO NOTHING';
         $stmt = $pdo->prepare($insertSql);
 
-        $created = 0;
-        $attempts = 0;
-        $maxAttempts = $targetEdges * 20 + 50;
-
-        while ($created < $targetEdges && $attempts < $maxAttempts) {
-            $attempts++;
-
-            $from = (int) $rng->pick($personIds);
-            $to = (int) $rng->pick($personIds);
-            if ($from === $to) {
-                continue;
-            }
-
-            $key = self::pairKey($from, $to);
-            if (isset($connectedPairs[$key])) {
-                continue;
-            }
-            $connectedPairs[$key] = true; // at most one edge per unordered pair
-
-            $typeId = (int) $rng->weightedPick($typeChoices);
-
+        foreach ($selected as [$from, $to, $typeId]) {
             $stmt->execute([
                 ':tenant_id' => $tenantId,
                 ':from_id' => $from,
@@ -769,7 +885,6 @@ final class ScaleSeeder
             ]);
 
             if ($this->resolveInsertedId($pdo, $driver, $stmt) !== null) {
-                $created++;
                 $result->relationsCreated++;
             } else {
                 $result->relationsReused++;
