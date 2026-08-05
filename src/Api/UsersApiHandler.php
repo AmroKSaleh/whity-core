@@ -129,9 +129,11 @@ class UsersApiHandler
                 // @tenant-guard-ignore: system-tenant (id 0) lists active memberships across all tenants; scoped else-branch binds m.tenant_id = :tenant_id
                 $stmt = $this->db->prepare("
                     SELECT m.profile_id AS id, pe.email, r.name AS role,
-                           m.tenant_id, m.ou_id, m.created_at, m.status
+                           m.tenant_id, m.ou_id, m.created_at, m.status,
+                           p.status AS account_status
                     FROM memberships m
                     JOIN roles r ON m.role_id = r.id
+                    JOIN profiles p ON p.id = m.profile_id
                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                     WHERE m.status = 'active'
                     ORDER BY m.tenant_id, m.created_at DESC, m.profile_id ASC
@@ -151,9 +153,11 @@ class UsersApiHandler
 
                 $stmt = $this->db->prepare("
                     SELECT m.profile_id AS id, pe.email, r.name AS role,
-                           m.tenant_id, m.ou_id, m.created_at, m.status
+                           m.tenant_id, m.ou_id, m.created_at, m.status,
+                           p.status AS account_status
                     FROM memberships m
                     JOIN roles r ON m.role_id = r.id
+                    JOIN profiles p ON p.id = m.profile_id
                     LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                     WHERE m.tenant_id = :tenant_id AND m.status = 'active'
                     ORDER BY m.created_at DESC, m.profile_id ASC
@@ -190,8 +194,8 @@ class UsersApiHandler
      * required). Snake_case columns are aliased to the camelCase keys the
      * frontend `User` type binds; the password hash is never included.
      *
-     * @param array<string, mixed> $row Raw row (id = profile_id, email, role, tenant_id, ou_id, created_at, status).
-     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null, status: string}
+     * @param array<string, mixed> $row Raw row (id = profile_id, email, role, tenant_id, ou_id, created_at, status, account_status).
+     * @return array{id: int, name: string, email: string, role: string, tenantId: int, ou_id: int|null, createdAt: string|null, status: string, accountStatus: string}
      */
     private function toPublicUser(array $row): array
     {
@@ -210,6 +214,12 @@ class UsersApiHandler
             // The membership status (active|invited|suspended). The list only
             // ever returns 'active', but GET/{id} may surface others.
             'status' => (string)($row['status'] ?? ''),
+            // The GLOBAL account-level active/inactive switch (WC-user-status,
+            // profiles.status — ADR 0005 §1). Deliberately distinct from
+            // `status` above (the PER-TENANT membership lifecycle): deactivating
+            // a profile blocks login everywhere it holds a membership, not just
+            // in this tenant.
+            'accountStatus' => (string)($row['account_status'] ?? 'active'),
         ];
     }
 
@@ -436,11 +446,18 @@ class UsersApiHandler
     /**
      * PATCH /api/users/{id} - Update a user (profile membership) by profile_id.
      *
-     * Persists the editable fields: `email` and `password` on the PROFILE
-     * (profile_emails / profiles); `role` and `ou_id` on the tenant MEMBERSHIP.
-     * `name` is derived/read-only and `tenantId` is out of scope; both are
-     * ignored if sent. Tenant-scoped + ownership-checked: a non-system tenant may
-     * edit ONLY a profile with a membership in its own tenant (else 404), the
+     * Persists the editable fields: `email`, `password` and `accountStatus` on
+     * the PROFILE (profile_emails / profiles); `role` and `ou_id` on the tenant
+     * MEMBERSHIP. `accountStatus` (WC-user-status) is the admin deactivate/
+     * reactivate control — 'active' | 'inactive' — gated on the SAME
+     * CorePermissions::USERS_WRITE as every other field here (no dedicated
+     * permission). It is deliberately GLOBAL (unlike the membership-lifecycle
+     * `status` in the response, which stays per-tenant): toggling it blocks/
+     * restores login for the profile everywhere it holds a membership, not just
+     * in the caller's tenant. `name` is derived/read-only and `tenantId` is out
+     * of scope; both are ignored if sent. Tenant-scoped + ownership-checked: a
+     * non-system tenant may edit ONLY a profile with a membership in its own
+     * tenant (else 404), the
      * SYSTEM tenant (id 0) may edit across tenants, and an assigned role must be
      * visible to the tenant. A role/OU change invalidates the effective-permission
      * cache.
@@ -481,11 +498,13 @@ class UsersApiHandler
             $ouChanged = false;
             $emailChanged = false;
             $passwordChanged = false;
+            $accountStatusChanged = false;
             $newRoleId = null;
             $newOuId = null;
             $ouSetNull = false;
             $newEmail = null;
             $newPasswordHash = null;
+            $newAccountStatus = null;
 
             // Email change lives on profile_emails (global identity). Enforce the
             // GLOBAL uniqueness of profile_emails.email (ADR 0005 §2).
@@ -554,8 +573,26 @@ class UsersApiHandler
                 }
             }
 
+            // Account-level status (profiles.status) — the WC-user-status
+            // admin deactivate/reactivate control (CorePermissions::USERS_WRITE,
+            // same gate as every other field on this endpoint; no dedicated
+            // permission was introduced). Deliberately GLOBAL, unlike the
+            // membership `status` above: this affects the profile everywhere it
+            // holds a membership, not just the caller's tenant.
+            if (isset($body['accountStatus']) && $body['accountStatus'] !== '') {
+                $requestedAccountStatus = (string)$body['accountStatus'];
+                if (!in_array($requestedAccountStatus, ['active', 'inactive'], true)) {
+                    return Response::error('Invalid account status', 400);
+                }
+                $currentAccountStatus = (string)($membership['account_status'] ?? 'active');
+                if ($requestedAccountStatus !== $currentAccountStatus) {
+                    $newAccountStatus = $requestedAccountStatus;
+                    $accountStatusChanged = true;
+                }
+            }
+
             // A true no-op (nothing genuinely changed) still returns a sensible 200.
-            if (!$roleChanged && !$ouChanged && !$emailChanged && !$passwordChanged) {
+            if (!$roleChanged && !$ouChanged && !$emailChanged && !$passwordChanged && !$accountStatusChanged) {
                 $this->log('info', 'User update was a no-op', [
                     'event' => 'users.update.noop',
                     'tenant_id' => $currentTenantId,
@@ -583,6 +620,12 @@ class UsersApiHandler
                     $this->db->prepare(
                         'UPDATE profiles SET password_hash = ?, updated_at = NOW() WHERE id = ?'
                     )->execute([$newPasswordHash, $profileId]);
+                }
+                if ($accountStatusChanged && $newAccountStatus !== null) {
+                    // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+                    $this->db->prepare(
+                        'UPDATE profiles SET status = ?, updated_at = NOW() WHERE id = ?'
+                    )->execute([$newAccountStatus, $profileId]);
                 }
 
                 // Membership writes (tenant-owned). The UPDATE carries the tenant
@@ -644,6 +687,7 @@ class UsersApiHandler
                 'user_id' => $profileId,
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
+                'account_status_changed' => $accountStatusChanged,
             ]);
 
             // Notify listeners (e.g. the audit trail, WC-34) after a successful
@@ -653,6 +697,7 @@ class UsersApiHandler
                 'tenant_id' => $ownerTenantId,
                 'role_changed' => $roleChanged,
                 'ou_changed' => $ouChanged,
+                'account_status_changed' => $accountStatusChanged,
             ]);
 
             $row = $this->fetchMembershipRow($profileId, $ownerTenantId);
@@ -780,9 +825,11 @@ class UsersApiHandler
             // @tenant-guard-ignore: system-tenant (id 0) resolves a profile's membership in any tenant; scoped else-branch binds m.tenant_id = ?
             $stmt = $this->db->prepare("
                 SELECT m.profile_id AS id, pe.email, r.name AS role,
-                       m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id
+                       m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id,
+                       p.status AS account_status
                 FROM memberships m
                 JOIN roles r ON m.role_id = r.id
+                JOIN profiles p ON p.id = m.profile_id
                 LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                 WHERE m.profile_id = ?
                 ORDER BY m.created_at DESC, m.tenant_id ASC
@@ -792,9 +839,11 @@ class UsersApiHandler
         } else {
             $stmt = $this->db->prepare("
                 SELECT m.profile_id AS id, pe.email, r.name AS role,
-                       m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id
+                       m.tenant_id, m.ou_id, m.created_at, m.status, m.role_id,
+                       p.status AS account_status
                 FROM memberships m
                 JOIN roles r ON m.role_id = r.id
+                JOIN profiles p ON p.id = m.profile_id
                 LEFT JOIN profile_emails pe ON pe.profile_id = m.profile_id AND pe.is_primary = true
                 WHERE m.profile_id = ? AND m.tenant_id = ?
                 LIMIT 1
@@ -856,6 +905,7 @@ class UsersApiHandler
             'ou_id' => null,
             'createdAt' => null,
             'status' => '',
+            'accountStatus' => 'active',
         ];
     }
 

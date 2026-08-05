@@ -1658,7 +1658,10 @@ final class CoreApiSchemas
         // is an ACTIVE membership; role/ou_id/status come from that membership,
         // email/name from the profile identity. `status` is the membership
         // lifecycle state (active|invited|suspended); the list only returns
-        // 'active' but reads may surface others.
+        // 'active' but reads may surface others. `accountStatus` (WC-user-status)
+        // is the DISTINCT, GLOBAL profile-level active/inactive switch (ADR 0005
+        // §1, migration 083) — deactivating it blocks login for the profile
+        // everywhere it holds a membership, not just in one tenant.
         $user = self::object([
             'id' => self::int(),
             'name' => self::str(),
@@ -1668,6 +1671,7 @@ final class CoreApiSchemas
             'ou_id' => self::int(true),
             'createdAt' => self::str(true),
             'status' => self::str(),
+            'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
         ], ['id', 'name', 'email', 'role', 'tenantId', 'createdAt']);
 
         $permission = self::object([
@@ -2404,6 +2408,8 @@ final class CoreApiSchemas
                 'password' => ['type' => 'string', 'minLength' => 6],
                 'role' => $permissionRef,
                 'ou_id' => self::int(true),
+                // WC-user-status: the admin deactivate/reactivate control.
+                'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
             ], []),
 
             'Permission' => $permission,
@@ -4052,6 +4058,9 @@ final class CoreApiSchemas
     }
 
     /**
+     * @param string|array<string, mixed> $component A registered component NAME
+     *        (rendered as a `$ref`), or an inline JSON-Schema fragment (e.g. from
+     *        {@see self::object()}) for a response with no named component.
      * @return array<string, mixed>
      */
     private static function jsonResponse(string $description, string|array $component): array
