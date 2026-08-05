@@ -175,15 +175,20 @@ export class AppShell {
   }
 
   async logout(): Promise<void> {
-    // Use the API directly instead of clicking the logout button.
-    // This avoids issues with the NextJS dev overlay portal blocking UI interactions.
-    // The logout API clears the httpOnly cookie and returns a 200 response.
-    const response = await this.page.request.post('/api/v1/auth/logout');
-    if (!response.ok()) {
-      throw new Error(`Logout failed with status ${response.status()}`);
-    }
-    // Navigate to login page after logout
-    await this.page.goto('/login');
+    // The sidebar's logout handler fires POST /api/auth/logout and pushes to
+    // /login WITHOUT awaiting the request, so the URL changes while the
+    // httpOnly cookie may still be valid. Wait for the logout RESPONSE (which
+    // carries the cookie-clearing headers), not just the URL — otherwise an
+    // immediate follow-up (e.g. re-login in a role-switch flow) races the
+    // in-flight logout and /login bounces straight back to /dashboard.
+    const logoutResponse = this.page.waitForResponse(
+      (res) =>
+        res.url().includes('/api/v1/auth/logout') &&
+        res.request().method() === 'POST'
+    );
+    await this.logoutButton.click();
+    await this.page.waitForURL('**/login');
+    await logoutResponse;
   }
 }
 

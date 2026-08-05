@@ -23,6 +23,12 @@ use Whity\Core\Tenant\TenantContextInterface;
 final class LanguageRegistry
 {
     /**
+     * The operator/system tenant. Its translations live as system defaults
+     * (translations.tenant_id IS NULL), never as override rows.
+     */
+    private const SYSTEM_TENANT_ID = 0;
+
+    /**
      * In-memory translation cache, keyed by language code, domain, and key.
      * Structure: [language_code][domain][key] = translation_string
      *
@@ -175,8 +181,11 @@ final class LanguageRegistry
             }
         }
 
-        // Check if a tenant override exists (if tenantId is set).
-        if ($tenantId !== null) {
+        // Check if a tenant override exists. Tenant 0 is the system tenant,
+        // whose strings ARE the system defaults (translations.tenant_id IS
+        // NULL) — it can never own an override row, so skip the lookup rather
+        // than issue a query that can only come back empty.
+        if ($tenantId !== null && $tenantId !== self::SYSTEM_TENANT_ID) {
             $tenantOverride = $this->getTranslationForTenant(
                 $languageCode,
                 $domain,

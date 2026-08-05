@@ -68,10 +68,10 @@ describe('useTranslation hook', () => {
   })
 
   it('should throw if used outside LanguageProvider', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { result } = renderHook(() => useTranslation('common')) as any
-    expect(result.error).toBeTruthy()
-    expect(result.error?.message).toContain('LanguageProvider')
+    // @testing-library/react's renderHook has no `result.error` (that was the
+    // old react-hooks testing library) — a throwing hook propagates out of
+    // render, so assert on the call itself.
+    expect(() => renderHook(() => useTranslation('common'))).toThrow(/LanguageProvider/)
   })
 
   it('should return a translation function', async () => {
@@ -154,10 +154,7 @@ describe('useCurrentLanguage hook', () => {
   })
 
   it('should throw if used outside LanguageProvider', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { result } = renderHook(() => useCurrentLanguage()) as any
-    expect(result.error).toBeTruthy()
-    expect(result.error?.message).toContain('LanguageProvider')
+    expect(() => renderHook(() => useCurrentLanguage())).toThrow(/LanguageProvider/)
   })
 
   it('should return current language info', async () => {
@@ -285,7 +282,17 @@ describe('LanguageProvider', () => {
     })
   })
 
-  it('should support custom default language', () => {
+  it('should fall back to the custom default when the user has no preference', async () => {
+    // No stored preference — this is the only case defaultLanguage decides.
+    // (A stored preference wins; that is covered above.)
+    mockApi.fetchLanguageSettings.mockResolvedValue({
+      language_code: null,
+      available_languages: [
+        { code: 'en', name: 'English' },
+        { code: 'ar', name: 'العربية' },
+      ],
+    })
+
     const customWrapper = ({ children }: { children: ReactNode }) => (
       <LanguageProvider defaultLanguage="ar">{children}</LanguageProvider>
     )
@@ -294,7 +301,12 @@ describe('LanguageProvider', () => {
       wrapper: customWrapper,
     })
 
-    // Should use default until API call completes
-    expect(result.current.currentLanguage).toBe('en') // API overrides it
+    // Nothing is resolved until the round-trip settles: the provider reports
+    // isLoading rather than guessing a language it may have to swap out.
+    expect(result.current.currentLanguage).toBeNull()
+
+    await waitFor(() => {
+      expect(result.current.currentLanguage).toBe('ar')
+    })
   })
 })

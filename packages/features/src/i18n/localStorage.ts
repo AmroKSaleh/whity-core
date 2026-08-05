@@ -136,7 +136,7 @@ export function clearLanguageCache(languageCode: string): void {
     const keysToDelete: string[] = []
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i)
-      if (key && key.startsWith(`${CACHE_NAMESPACE}_{languageCode}_`)) {
+      if (key && key.startsWith(`${CACHE_NAMESPACE}_${languageCode}_`)) {
         keysToDelete.push(key)
       }
     }
