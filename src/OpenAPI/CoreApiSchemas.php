@@ -4058,6 +4058,9 @@ final class CoreApiSchemas
     }
 
     /**
+     * @param string|array<string, mixed> $component A registered component NAME
+     *        (rendered as a `$ref`), or an inline JSON-Schema fragment (e.g. from
+     *        {@see self::object()}) for a response with no named component.
      * @return array<string, mixed>
      */
     private static function jsonResponse(string $description, string|array $component): array
