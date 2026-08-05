@@ -21958,6 +21958,13 @@
                     },
                     "status": {
                         "type": "string"
+                    },
+                    "accountStatus": {
+                        "type": "string",
+                        "enum": [
+                            "active",
+                            "inactive"
+                        ]
                     }
                 },
                 "required": [
@@ -22047,6 +22054,13 @@
                     "ou_id": {
                         "type": "integer",
                         "nullable": true
+                    },
+                    "accountStatus": {
+                        "type": "string",
+                        "enum": [
+                            "active",
+                            "inactive"
+                        ]
                     }
                 }
             }

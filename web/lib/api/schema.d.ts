@@ -3651,6 +3651,8 @@ export interface components {
             ou_id?: number | null;
             createdAt: string | null;
             status?: string;
+            /** @enum {string} */
+            accountStatus?: "active" | "inactive";
         };
         UserCreateRequest: {
             email: string;
@@ -3669,6 +3671,8 @@ export interface components {
             password?: string;
             role?: number | string;
             ou_id?: number | null;
+            /** @enum {string} */
+            accountStatus?: "active" | "inactive";
         };
     };
     responses: never;

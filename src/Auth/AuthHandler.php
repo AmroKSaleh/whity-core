@@ -325,7 +325,7 @@ class AuthHandler
         // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1), not tenant-owned
         $profStmt = $this->db->prepare(
             'SELECT id, password_hash, two_factor_enabled, two_factor_secret,
-                    two_factor_backup_codes_version, token_epoch
+                    two_factor_backup_codes_version, token_epoch, status
              FROM profiles
              WHERE id = ?
              LIMIT 1'
@@ -338,6 +338,24 @@ class AuthHandler
             $this->audit('auth.login.failure', $request, null, null, [
                 'email'  => $email,
                 'reason' => 'profile_row_missing',
+            ]);
+            $this->loginThrottle?->recordFailure($profileId, $ip);
+            return Response::error('Invalid credentials', 401);
+        }
+
+        // A deactivated account (WC-user-status, profiles.status = 'inactive')
+        // must never authenticate. Return a GENERIC 401 "Invalid credentials"
+        // (NOT a distinct "account deactivated" message): a deactivation-specific
+        // error is a user-enumeration oracle — it would reveal that the email is
+        // registered but deactivated, exactly like the unverified-email guard
+        // above. Same timing compensation: burn the dummy bcrypt verify BEFORE
+        // the real one so this path costs the same as every other failure.
+        if ((string) ($profile['status'] ?? 'active') === 'inactive') {
+            password_verify(is_string($password) ? $password : '', self::DUMMY_PASSWORD_HASH);
+
+            $this->audit('auth.login.failure', $request, null, $profileId, [
+                'email'  => $email,
+                'reason' => 'profile_inactive',
             ]);
             $this->loginThrottle?->recordFailure($profileId, $ip);
             return Response::error('Invalid credentials', 401);
