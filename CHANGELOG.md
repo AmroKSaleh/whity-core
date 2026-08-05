@@ -16,9 +16,11 @@ uses tag-based releases (see the `v*` tags in the repository).
 - `EnforceTenantIsolation` now exposes a narrow, anchored exemption for the plugin store's public read routes (catalog browse, registry index, token-gated download) without loosening any other route.
 - Query-string parameters read via `parse_url($request->getPath(), PHP_URL_QUERY)` were silently empty at runtime (FrankenPHP strips the query from the request path) in `PersonsApiHandler` and the tenant-isolation query-based declared-target check; both now read `$_GET` as the runtime source.
 - The Plugin Store admin page now surfaces the actual backend error message on a failed install or browse, instead of one generic message for every failure reason.
+- Accessibility: `Input` now associates its label via `htmlFor` and sets `aria-invalid`/`aria-describedby` for validation errors; `Table` headers carry a `scope` attribute. See [`docs/wiki/A11Y.md`](docs/wiki/A11Y.md).
 
 ### Security
 - **TOTP replay**: a captured valid 2FA code could authenticate a second, independent login within its validity window (`AuthHandler::handle2fa()` had no anti-replay state). Fixed with a per-profile anti-replay floor (`profiles.two_factor_last_used_step`, migration 080) atomically advanced on each accepted code, mirroring the existing backup-code single-use burn.
+- **Refresh token reuse**: a stolen refresh token could be replayed to mint new token pairs indefinitely. Each successful refresh now immediately revokes the token it consumed (added to `revoked_tokens`); any later reuse of that same token is detected, logged as a security incident (`auth.refresh_token_reuse_detected`), and rejected with 401.
 - **`ENCRYPTION_KEY` strength**: the documented ">= 32 chars outside development" convention (already enforced for `JWT_SECRET`/`RENDER_SHARED_SECRET`) was never actually checked for `ENCRYPTION_KEY` — only emptiness was rejected. New `EncryptionKeyGuard` closes the gap for both consumers (`TotpService::resolveEncryptionKey()`, `EncryptedSecretStore::fromEnv()`).
 - Added `docs/wiki/Threat-Model.md` (STRIDE) and `docs/wiki/Pen-Test-Scoping-Brief.md` from an adversarial internal security audit; re-verified the tenant-isolation invariant across every table added since the prior 2026-07-20 investigation, with no drift found.
 
