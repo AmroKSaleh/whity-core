@@ -1,3 +1,5 @@
+'use client'
+
 /**
  * LanguageProvider context component.
  *

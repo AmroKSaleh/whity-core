@@ -1,3 +1,5 @@
+'use client'
+
 /**
  * LanguageSwitcher component — a simple UI for switching languages.
  *

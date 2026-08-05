@@ -1,3 +1,5 @@
+'use client'
+
 /**
  * useCurrentLanguage hook — access and switch the current language.
  *

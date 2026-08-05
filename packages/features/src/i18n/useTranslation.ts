@@ -1,3 +1,5 @@
+'use client'
+
 /**
  * useTranslation hook — access translations in React components.
  *
