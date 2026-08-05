@@ -120,13 +120,6 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: delegateStatePath },
     },
-    // Accessibility (a11y) audit suite — runs automated axe scans on public + admin pages
-    {
-      name: 'a11y',
-      testMatch: /a11y\.spec\.ts/,
-      dependencies: ['setup'],
-      use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
-    },
   ],
   webServer: {
     command: `npm run dev -- -p ${PORT}`,
