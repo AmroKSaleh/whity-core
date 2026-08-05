@@ -24,7 +24,7 @@ Domain logic ships as **plugins** dropped into `/plugins/` — discovered, loade
 - **Operational safety** — graceful worker recycling on a configurable memory ceiling, `/api/health` endpoint reporting worker/memory/DB status (200 healthy, 503 degraded).
 - **Design system** — OKLCH design tokens (light + dark, white-label-overridable per tenant) generated from a single source to CSS, JSON, and Dart; shadcn/Radix component library on Tailwind v4.
 - **OpenAPI** — schema generated from the routing layer for client/type generation.
-- **Tested** — 700+ PHPUnit tests (with real-engine SQLite coverage for data-layer logic), PHPStan, and a 67-flow Playwright E2E suite.
+- **Tested** — 3400+ PHPUnit tests (with real-engine SQLite coverage for data-layer logic), PHPStan, and 162 Playwright E2E tests.
 
 ## Architecture
 
@@ -158,7 +158,7 @@ CI runs PHPUnit + PHPStan on every PR (`.github/workflows/automated-tests.yml`).
 
 ## Roadmap
 
-Core platform — **delivered**: FrankenPHP runtime, plugin hot-loading + lifecycle, RBAC (registry, hierarchy, OU inheritance), multi-tenant isolation, 2FA, design system, developer docs, and an E2E test suite.
+Core platform — **delivered**: FrankenPHP runtime, plugin hot-loading + lifecycle, RBAC (registry, hierarchy, OU inheritance), multi-tenant isolation, feature flagging system, 2FA, design system, developer docs, and an E2E test suite.
 
 Under consideration: organizational-unit hierarchy visualizer, user profile management, family-relations module, and the Flutter/Electron clients. See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
 
