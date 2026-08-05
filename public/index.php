@@ -1150,8 +1150,7 @@ $languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
 try {
     $languageRegistry->boot();
 } catch (\Throwable $e) {
-    error_log("[CRITICAL] LanguageRegistry boot failed: {$e->getMessage()} at {$e->getFile()}:{$e->getLine()}");
-    throw $e;
+    error_log("[WARN] LanguageRegistry boot failed (continuing without translations): {$e->getMessage()}");
 }
 $languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
 $router->register('GET',   '/api/languages',                   [$languagesHandler, 'list'],         null);
