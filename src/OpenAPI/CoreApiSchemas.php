@@ -4054,11 +4054,11 @@ final class CoreApiSchemas
     /**
      * @return array<string, mixed>
      */
-    private static function jsonResponse(string $description, string $component): array
+    private static function jsonResponse(string $description, string|array $component): array
     {
         return [
             'description' => $description,
-            'content' => ['application/json' => ['schema' => SchemaBuilder::ref($component)]],
+            'content' => ['application/json' => ['schema' => is_string($component) ? SchemaBuilder::ref($component) : $component]],
         ];
     }
 
