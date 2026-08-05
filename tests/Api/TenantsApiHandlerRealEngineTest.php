@@ -246,6 +246,210 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
         );
     }
 
+    // ==================== access control (WC-81, migrated from the mocked-PDO unit test) ====================
+    //
+    // Migrated from the mocked-PDO tests/Unit/Api/TenantsApiHandlerTest.php onto
+    // this real-engine fixture (tenants 1 and 2), preserving the original
+    // intent/assertions: system users (tenant_id=0) may update/delete any other
+    // tenant, the system tenant (id=0) can never be deleted, and non-system
+    // users may not update/delete tenants other than their own.
+
+    /**
+     * AC1: a system user (tenant_id=0) updating another tenant succeeds (200)
+     * and the write actually lands.
+     */
+    public function testSystemUserCanUpdateAnotherTenant(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/tenants/1', [], (string) json_encode(['name' => 'Tenant A Renamed'])),
+            ['id' => 1]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $this->assertSame(1, $data['data']['id']);
+        $this->assertSame(
+            'Tenant A Renamed',
+            $this->pdo->query('SELECT name FROM tenants WHERE id = 1')->fetchColumn()
+        );
+    }
+
+    /**
+     * An over-long name (VARCHAR(255)) on update is rejected with a clean 422
+     * before the write (input hardening).
+     */
+    public function testUpdateRejectsOverLongNameWith422(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/tenants/1', [], (string) json_encode(['name' => str_repeat('a', 256)])),
+            ['id' => 1]
+        );
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('name', json_decode($response->getBody(), true)['details']['field']);
+    }
+
+    /**
+     * AC1: a system user (tenant_id=0) deleting another tenant (with zero
+     * active members) succeeds (200) and the row is removed.
+     */
+    public function testSystemUserCanDeleteAnotherTenant(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->delete(new Request('DELETE', '/api/tenants/2', []), ['id' => 2]);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true);
+        $this->assertSame(2, $data['data']['id']);
+        $this->assertSame('Tenant deleted', $data['data']['message']);
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM tenants WHERE id = 2')->fetchColumn()
+        );
+    }
+
+    /**
+     * AC2: deleting tenant 0 returns 400 "Cannot delete system tenant" and the
+     * guard trips before any tenant row is touched.
+     */
+    public function testDeletingSystemTenantReturns400(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->delete(new Request('DELETE', '/api/tenants/0', []), ['id' => 0]);
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertSame('Cannot delete system tenant', json_decode($response->getBody(), true)['error']);
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM tenants WHERE id = 0')->fetchColumn(),
+            'The system tenant row must survive the rejected delete.'
+        );
+    }
+
+    /**
+     * AC2: the guard also applies when the id is provided as a string "0".
+     */
+    public function testDeletingSystemTenantStringIdReturns400(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->delete(new Request('DELETE', '/api/tenants/0', []), ['id' => '0']);
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertSame('Cannot delete system tenant', json_decode($response->getBody(), true)['error']);
+    }
+
+    /**
+     * AC3: a non-system user updating a tenant other than their own returns 403
+     * and the target row is untouched.
+     */
+    public function testNonSystemUserCannotUpdateAnotherTenant(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/tenants/2', [], (string) json_encode(['name' => 'Hijack'])),
+            ['id' => 2]
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertStringContainsString(
+            'Cannot update other tenants',
+            json_decode($response->getBody(), true)['error']
+        );
+        $this->assertSame('Tenant B', $this->pdo->query('SELECT name FROM tenants WHERE id = 2')->fetchColumn());
+    }
+
+    /**
+     * AC3: a non-system user deleting a tenant other than their own returns 403
+     * and the target row survives.
+     */
+    public function testNonSystemUserCannotDeleteAnotherTenant(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->delete(new Request('DELETE', '/api/tenants/2', []), ['id' => 2]);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertStringContainsString(
+            'Cannot delete other tenants',
+            json_decode($response->getBody(), true)['error']
+        );
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM tenants WHERE id = 2')->fetchColumn()
+        );
+    }
+
+    /**
+     * Regression: a non-system user updating their OWN tenant still succeeds.
+     */
+    public function testNonSystemUserCanUpdateOwnTenant(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/tenants/1', [], (string) json_encode(['slug' => 'tenant-a-new'])),
+            ['id' => 1]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('tenant-a-new', $this->pdo->query('SELECT slug FROM tenants WHERE id = 1')->fetchColumn());
+    }
+
+    /**
+     * Regression: a non-system user deleting their OWN (empty) tenant still
+     * succeeds.
+     */
+    public function testNonSystemUserCanDeleteOwnTenant(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->delete(new Request('DELETE', '/api/tenants/1', []), ['id' => 1]);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM tenants WHERE id = 1')->fetchColumn()
+        );
+    }
+
+    /**
+     * A system user updating a tenant that does not exist returns 404.
+     */
+    public function testSystemUserUpdatingMissingTenantReturns404(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/tenants/99', [], (string) json_encode(['name' => 'X'])),
+            ['id' => 99]
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * A missing id on update returns 400.
+     */
+    public function testUpdateWithoutIdReturns400(): void
+    {
+        MockRequestFactory::setTestTenant(0);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/tenants', [], (string) json_encode(['name' => 'X'])),
+            []
+        );
+
+        $this->assertSame(400, $response->getStatusCode());
+    }
+
     // ==================== Helpers ====================
 
     /**

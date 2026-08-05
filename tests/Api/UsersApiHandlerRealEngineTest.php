@@ -542,6 +542,154 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertFalse($this->cacheIsWarm(), 'A role change must clear the effective-permission cache.');
     }
 
+    // ==================== update: ou_id assignment (migrated from the mocked-PDO unit test) ====================
+    //
+    // Migrated from the mocked-PDO tests/Unit/Api/UsersApiHandlerTest.php onto
+    // this real-engine fixture, preserving the original intent/assertions. The
+    // mocked file predated the identity hard cutover and stubbed a legacy
+    // `users` table read/write path that no longer exists (a `createMock(PDO)`
+    // happily returns canned rows regardless of the actual SQL the handler
+    // issues); the ou_id validation/assignment behaviour it exercised still
+    // exists today on the membership row, so it is ported here against the
+    // genuine profiles/profile_emails/memberships schema.
+
+    /**
+     * Assigning a valid, own-tenant ou_id persists it on the membership.
+     */
+    public function testUpdateWithValidOuIdPersists(): void
+    {
+        $this->seedProfile(70, 'ou-target@example.com');
+        $this->seedMembership(70, 1, 2);
+        $ouId = $this->seedOu(1, 'Engineering');
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/70', ['ou_id' => $ouId]),
+            ['id' => '70']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            $ouId,
+            (int) $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 70 AND tenant_id = 1')->fetchColumn()
+        );
+    }
+
+    /**
+     * ou_id = 0 clears the membership's OU assignment (treated as NULL).
+     */
+    public function testUpdateWithOuIdZeroClearsAssignment(): void
+    {
+        $this->seedProfile(71, 'ou-clear-zero@example.com');
+        $ouId = $this->seedOu(1, 'Sales');
+        $this->seedMembershipWithOu(71, 1, 2, $ouId);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/71', ['ou_id' => 0]),
+            ['id' => '71']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertNull(
+            $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 71 AND tenant_id = 1')->fetchColumn() ?: null
+        );
+    }
+
+    /**
+     * ou_id = null clears the membership's OU assignment.
+     *
+     * BUG FOUND BY THIS MIGRATION: the handler used to guard this branch with
+     * `isset($body['ou_id'])`, which is FALSE for an explicit JSON `null` value
+     * (PHP's isset() treats a null value as absent) — so a `{"ou_id": null}`
+     * body silently fell through to the "nothing changed" no-op and never
+     * cleared the membership's OU. The mocked-PDO version of this test
+     * (`testUpdateUserWithOuIdNullReturns200`) never caught it because it only
+     * asserted the response status, never that the DB write actually happened.
+     * Fixed in {@see \Whity\Api\UsersApiHandler::update()} by switching to
+     * `array_key_exists()`, mirroring the same isset-vs-null fix already
+     * documented on {@see \Whity\Api\OusApiHandler::update()}'s parent_id
+     * handling.
+     */
+    public function testUpdateWithOuIdNullClearsAssignment(): void
+    {
+        $this->seedProfile(72, 'ou-clear-null@example.com');
+        $ouId = $this->seedOu(1, 'Marketing');
+        $this->seedMembershipWithOu(72, 1, 2, $ouId);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/72', ['ou_id' => null]),
+            ['id' => '72']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertNull(
+            $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 72 AND tenant_id = 1')->fetchColumn() ?: null
+        );
+    }
+
+    /**
+     * A cross-tenant ou_id (belonging to a different tenant than the
+     * membership's owning tenant) is rejected with 403 and the membership's
+     * ou_id is left untouched.
+     */
+    public function testUpdateWithCrossTenantOuIdReturns403(): void
+    {
+        $this->seedProfile(73, 'ou-cross@example.com');
+        $this->seedMembership(73, 1, 2);
+        $foreignOuId = $this->seedOu(2, 'Tenant2 OU');
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/73', ['ou_id' => $foreignOuId]),
+            ['id' => '73']
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertStringContainsString(
+            'OU does not belong to current tenant',
+            json_decode($response->getBody(), true)['error']
+        );
+        $this->assertNull(
+            $this->pdo->query('SELECT ou_id FROM memberships WHERE profile_id = 73 AND tenant_id = 1')->fetchColumn() ?: null
+        );
+    }
+
+    /**
+     * A role NAME that is not visible to the tenant is rejected with 404 on
+     * UPDATE (mirroring create's resolution guard) and nothing is persisted.
+     */
+    public function testUpdateWithUnresolvableRoleReturns404(): void
+    {
+        $this->seedProfile(74, 'ghost-role@example.com');
+        $this->seedMembership(74, 1, 2);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/74', ['role' => 'ghost-role']),
+            ['id' => '74']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(
+            2,
+            (int) $this->pdo->query('SELECT role_id FROM memberships WHERE profile_id = 74 AND tenant_id = 1')->fetchColumn(),
+            'An unresolvable role must not change the persisted role_id.'
+        );
+    }
+
+    /**
+     * Missing `id` route param on update returns 400.
+     */
+    public function testUpdateWithoutIdReturns400(): void
+    {
+        $handler = $this->handler();
+        $response = $handler->update($this->authedRequest('PATCH', '/api/users', ['ou_id' => 10]), []);
+
+        $this->assertSame(400, $response->getStatusCode());
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): UsersApiHandler
@@ -594,6 +742,28 @@ final class UsersApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, '', ?, datetime('now'))"
         );
         $stmt->execute([$id, $name, $tenantId]);
+    }
+
+    /** Seed a membership with an explicit ou_id (rather than seedMembership()'s NULL). */
+    private function seedMembershipWithOu(int $profileId, int $tenantId, int $roleId, int $ouId, string $status = 'active'): void
+    {
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))"
+        )->execute([$profileId, $tenantId, $roleId, $ouId, $status]);
+    }
+
+    /** Seed an organizational unit for the given tenant and return its id. */
+    private function seedOu(int $tenantId, string $name): int
+    {
+        $slug = strtolower(str_replace(' ', '-', $name)) . '-' . $tenantId;
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
+             VALUES (?, NULL, ?, ?, '', datetime('now'))"
+        );
+        $stmt->execute([$tenantId, $name, $slug]);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     /**
