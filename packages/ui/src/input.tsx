@@ -88,11 +88,12 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
     const internalRef = React.useRef<HTMLInputElement>(null)
     React.useImperativeHandle(ref, () => internalRef.current!)
 
-    // Generate a unique ID for the input if not provided and label exists
-    // This ensures proper label association for accessibility
+    // Generate a unique ID for the input if not provided and label exists.
+    // This ensures proper label association for accessibility.
+    // If id is provided, always use it. Otherwise, generate one only if label exists.
     const inputId = React.useMemo(() => {
       if (id) return id
-      if (label && !id) {
+      if (label) {
         return `input-${Math.random().toString(36).substr(2, 9)}`
       }
       return undefined
