@@ -1159,9 +1159,9 @@ try {
 }
 
 $languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
-$router->register('GET',   '/api/languages',                   [$languagesHandler, 'list'],         null);
-$router->register('GET',   '/api/settings/language',           [$languagesHandler, 'getLanguage'], null);
-$router->register('PATCH', '/api/settings/language',           [$languagesHandler, 'patchLanguage'], null);
+$router->register('GET',   '/api/v1/languages',                   [$languagesHandler, 'list'],         null);
+$router->register('GET',   '/api/v1/settings/language',           [$languagesHandler, 'getLanguage'], null);
+$router->register('PATCH', '/api/v1/settings/language',           [$languagesHandler, 'patchLanguage'], null);
 
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved

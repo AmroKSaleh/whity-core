@@ -31,6 +31,14 @@ final class LanguageRegistry
     private array $translations = [];
 
     /**
+     * Tenant-specific translation overrides cache.
+     * Structure: [language_code][tenant_id][domain][key] = translation_string
+     *
+     * @var array<string, array<int, array<string, array<string, string>>>>
+     */
+    private array $tenantTranslations = [];
+
+    /**
      * Languages cache, keyed by code.
      *
      * @var array<string, Language>
@@ -71,6 +79,7 @@ final class LanguageRegistry
     {
         // Clear existing cache to allow re-boot.
         $this->translations = [];
+        $this->tenantTranslations = [];
         $this->languages = [];
 
         try {
@@ -157,9 +166,13 @@ final class LanguageRegistry
             $languageCode = 'en';
         }
 
-        // If domain is not in cache, return key.
+        // If domain is not in cache, fall back to English if not already.
         if (!isset($this->translations[$languageCode][$domain])) {
-            return $key;
+            if ($languageCode !== 'en' && isset($this->translations['en'][$domain])) {
+                $languageCode = 'en';
+            } else {
+                return $key;
+            }
         }
 
         // Check if a tenant override exists (if tenantId is set).
@@ -198,34 +211,33 @@ final class LanguageRegistry
         string $key,
         int $tenantId
     ): ?string {
-        // Check if we have a tenant cache for this language.
-        $cacheKey = "tenant_{$tenantId}";
-        if (!isset($this->translations[$languageCode][$cacheKey])) {
+        // Check if we have loaded tenant overrides for this language and tenant.
+        if (!isset($this->tenantTranslations[$languageCode][$tenantId])) {
             // Load tenant overrides for this language and tenant.
             $language = $this->languages[$languageCode] ?? null;
             if ($language === null) {
                 return null;
             }
 
-            $this->translations[$languageCode][$cacheKey] = [];
+            $this->tenantTranslations[$languageCode][$tenantId] = [];
             $tenantOverrides = $this->translationRepository->findAllTenantOverrides(
                 $language->id,
                 $tenantId
             );
 
-            // Flatten tenant overrides into a domain/key structure.
+            // Flatten tenant overrides into a domain/key structure in tenant cache.
             foreach ($tenantOverrides as $d => $keys) {
-                if (!isset($this->translations[$languageCode][$d])) {
-                    $this->translations[$languageCode][$d] = [];
+                if (!isset($this->tenantTranslations[$languageCode][$tenantId][$d])) {
+                    $this->tenantTranslations[$languageCode][$tenantId][$d] = [];
                 }
                 foreach ($keys as $k => $translation) {
-                    $this->translations[$languageCode][$d][$k] = $translation->translation;
+                    $this->tenantTranslations[$languageCode][$tenantId][$d][$k] = $translation->translation;
                 }
             }
         }
 
         // Check if the override exists in the domain.
-        return $this->translations[$languageCode][$domain][$key] ?? null;
+        return $this->tenantTranslations[$languageCode][$tenantId][$domain][$key] ?? null;
     }
 
     /**
