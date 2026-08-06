@@ -751,6 +751,16 @@ parameters:
 			path: tests/Database/MigrationSchemaTest.php
 
 		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Database/ScaleSeeder/ScaleSeederRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 13
+			path: tests/Database/ScaleSeeder/ScaleSeederRealEngineTest.php
+
+		-
 			message: "#^Method class@anonymous/tests/Http/HttpKernelTest\\.php\\:367\\:\\:__construct\\(\\) has parameter \\$executionOrder with no value type specified in iterable type array\\.$#"
 			count: 1
 			path: tests/Http/HttpKernelTest.php
