@@ -136,16 +136,36 @@ whity-core/
 
 ## Testing
 
-```bash
-# PHP (CI parity) — run in a php:8.4 container
-docker run --rm -v "$PWD:/app" -w /app php:8.4-cli php vendor/bin/phpunit
-docker run --rm -v "$PWD:/app" -w /app php:8.4-cli php vendor/bin/phpstan analyse src tests
+The PHP toolchain lives only in Docker (there is no `php` on a typical Windows
+dev box), so `scripts/ci-local.sh` runs the GitHub-Actions PHP jobs locally,
+step for step, in a Linux container that carries the same PHP 8.4 + extension
+set + `pcov` the workflow uses.
 
-# Web E2E (against a running stack)
-cd web && npm run test:e2e
+```bash
+scripts/ci-local.sh phpstan        # just PHPStan (~2 min warm) — the usual culprit
+scripts/ci-local.sh unit           # the "Unit, static analysis & plugin smoke (SQLite)" job:
+                                   #   phpunit+coverage, coverage floor, OpenAPI drift,
+                                   #   phpstan, plugin smoke, tenant guards
+scripts/ci-local.sh pg             # the "Migrations + Integration + Security on real
+                                   #   PostgreSQL" job, against a throwaway Postgres
+scripts/ci-local.sh all --clean    # both, against a pristine export of HEAD
+
+# Web (runs natively, no container needed)
+cd web && npx tsc --noEmit && npx jest
+cd web && npm run test:e2e         # E2E, against a running stack
 ```
 
-CI runs PHPUnit + PHPStan on every PR (`.github/workflows/automated-tests.yml`).
+Pass `--clean` before pushing: it runs against a `git archive` of HEAD, so
+untracked-but-gitignored files (e.g. a local `plugins/PluginStore/`) cannot
+add errors CI will never see. `--fresh` rebuilds the image and drops the
+cached `vendor/` + PHPStan volumes.
+
+`scripts/ci-local.sh` mirrors `.github/workflows/automated-tests.yml` — when
+that workflow changes, update the script in the same PR. A local runner that
+has drifted from CI is worse than none, because it reports confident false
+greens.
+
+CI runs these same jobs plus Playwright E2E on every PR.
 
 ## Documentation
 
