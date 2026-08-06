@@ -33,6 +33,21 @@ final class ScaleSeedCommandTest extends TestCase
         putenv(self::PASSWORD_ENV_VAR);
     }
 
+    /**
+     * Close the output buffer and return what the command printed.
+     *
+     * ob_get_clean() is declared string|false — false only when no buffer is
+     * active, which never happens here since every caller opens one first.
+     * Asserting that narrows the type for the assertions downstream.
+     */
+    private static function endCapture(): string
+    {
+        $output = ob_get_clean();
+        self::assertIsString($output, 'An output buffer must be active.');
+
+        return $output;
+    }
+
     private function inMemoryDatabase(): Database
     {
         $pdo = SchemaFromMigrations::make();
@@ -53,7 +68,7 @@ final class ScaleSeedCommandTest extends TestCase
 
         ob_start();
         $exitCode = $command->execute(['--help']);
-        $output = ob_get_clean();
+        $output = self::endCapture();
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('scale:seed', $output);
@@ -70,7 +85,7 @@ final class ScaleSeedCommandTest extends TestCase
 
         ob_start();
         $exitCode = $command->execute(['--dry-run', '--tenants=3', '--users-per-tenant=10']);
-        $output = ob_get_clean();
+        $output = self::endCapture();
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('Dry run', $output);
@@ -84,7 +99,7 @@ final class ScaleSeedCommandTest extends TestCase
 
         ob_start();
         $exitCode = $command->execute(['--tenants=not-a-number']);
-        $output = ob_get_clean();
+        $output = self::endCapture();
 
         self::assertSame(1, $exitCode);
         self::assertStringContainsString('Error', $output);
@@ -104,7 +119,7 @@ final class ScaleSeedCommandTest extends TestCase
             '--custom-roles-per-tenant=1',
             '--relations-per-person=1',
         ]);
-        $output = ob_get_clean();
+        $output = self::endCapture();
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('Scale-seed complete', $output);
@@ -124,7 +139,7 @@ final class ScaleSeedCommandTest extends TestCase
 
         ob_start();
         $exitCode = (new ScaleSeedCommand($db))->execute($args);
-        $output = ob_get_clean();
+        $output = self::endCapture();
 
         self::assertSame(0, $exitCode);
         // "tenants:      0 / 1" -> zero created, one reused.
@@ -142,7 +157,7 @@ final class ScaleSeedCommandTest extends TestCase
 
         ob_start();
         $exitCode = (new ScaleSeedCommand($db))->execute([...$args, '--reset']);
-        $output = ob_get_clean();
+        $output = self::endCapture();
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('Resetting prior scale-seeded data', $output);

@@ -46,6 +46,9 @@ class ScaleSeedCommand
     {
     }
 
+    /**
+     * @param list<string> $argv
+     */
     public function execute(array $argv): int
     {
         if ($this->wantsHelp($argv)) {
