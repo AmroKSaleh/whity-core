@@ -23,12 +23,26 @@ use Whity\Core\Tenant\TenantContextInterface;
 final class LanguageRegistry
 {
     /**
+     * The operator/system tenant. Its translations live as system defaults
+     * (translations.tenant_id IS NULL), never as override rows.
+     */
+    private const SYSTEM_TENANT_ID = 0;
+
+    /**
      * In-memory translation cache, keyed by language code, domain, and key.
      * Structure: [language_code][domain][key] = translation_string
      *
      * @var array<string, array<string, array<string, string>>>
      */
     private array $translations = [];
+
+    /**
+     * Tenant-specific translation overrides cache.
+     * Structure: [language_code][tenant_id][domain][key] = translation_string
+     *
+     * @var array<string, array<int, array<string, array<string, string>>>>
+     */
+    private array $tenantTranslations = [];
 
     /**
      * Languages cache, keyed by code.
@@ -48,8 +62,8 @@ final class LanguageRegistry
     private string $currentLanguageCode = 'en';
 
     public function __construct(
-        private readonly LanguageRepository $languageRepository,
-        private readonly TranslationRepository $translationRepository,
+        private readonly LanguageRepositoryInterface $languageRepository,
+        private readonly TranslationRepositoryInterface $translationRepository,
         private readonly TenantContextInterface $tenantContext,
     ) {
     }
@@ -65,33 +79,52 @@ final class LanguageRegistry
      * Boot is idempotent: calling it multiple times is safe and resets the cache.
      *
      * @return void
+     * @throws \Exception When language or translation loading fails.
      */
     public function boot(): void
     {
         // Clear existing cache to allow re-boot.
         $this->translations = [];
+        $this->tenantTranslations = [];
         $this->languages = [];
 
-        // Load all languages.
-        $this->languages = $this->languageRepository->findAll(enabled: true);
+        try {
+            // Load all languages.
+            $this->languages = $this->languageRepository->findAll(enabled: true);
 
-        // Load all system default translations for all languages.
-        foreach ($this->languages as $language) {
-            $this->translations[$language->code] = [];
+            if (empty($this->languages)) {
+                throw new \Exception('No enabled languages found in database');
+            }
 
-            // Load system defaults (tenant_id = NULL).
-            $systemDefaults = $this->translationRepository->findAllSystemDefaults($language->id);
-            foreach ($systemDefaults as $domain => $keys) {
-                if (!isset($this->translations[$language->code][$domain])) {
-                    $this->translations[$language->code][$domain] = [];
-                }
-                foreach ($keys as $key => $translation) {
-                    $this->translations[$language->code][$domain][$key] = $translation->translation;
+            // Load all system default translations for all languages.
+            foreach ($this->languages as $language) {
+                $this->translations[$language->code] = [];
+
+                try {
+                    // Load system defaults (tenant_id = NULL).
+                    $systemDefaults = $this->translationRepository->findAllSystemDefaults($language->id);
+                    foreach ($systemDefaults as $domain => $keys) {
+                        if (!isset($this->translations[$language->code][$domain])) {
+                            $this->translations[$language->code][$domain] = [];
+                        }
+                        foreach ($keys as $key => $translation) {
+                            $this->translations[$language->code][$domain][$key] = $translation->translation;
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    throw new \Exception(
+                        "Failed to load translations for language {$language->code}: {$e->getMessage()}",
+                        0,
+                        $e
+                    );
                 }
             }
-        }
 
-        $this->booted = true;
+            $this->booted = true;
+        } catch (\Throwable $e) {
+            // Re-throw to allow the caller (public/index.php) to handle it gracefully
+            throw new \Exception("LanguageRegistry boot failed: {$e->getMessage()}", 0, $e);
+        }
     }
 
     /**
@@ -139,13 +172,20 @@ final class LanguageRegistry
             $languageCode = 'en';
         }
 
-        // If domain is not in cache, return key.
+        // If domain is not in cache, fall back to English if not already.
         if (!isset($this->translations[$languageCode][$domain])) {
-            return $key;
+            if ($languageCode !== 'en' && isset($this->translations['en'][$domain])) {
+                $languageCode = 'en';
+            } else {
+                return $key;
+            }
         }
 
-        // Check if a tenant override exists (if tenantId is set).
-        if ($tenantId !== null) {
+        // Check if a tenant override exists. Tenant 0 is the system tenant,
+        // whose strings ARE the system defaults (translations.tenant_id IS
+        // NULL) — it can never own an override row, so skip the lookup rather
+        // than issue a query that can only come back empty.
+        if ($tenantId !== null && $tenantId !== self::SYSTEM_TENANT_ID) {
             $tenantOverride = $this->getTranslationForTenant(
                 $languageCode,
                 $domain,
@@ -180,34 +220,33 @@ final class LanguageRegistry
         string $key,
         int $tenantId
     ): ?string {
-        // Check if we have a tenant cache for this language.
-        $cacheKey = "tenant_{$tenantId}";
-        if (!isset($this->translations[$languageCode][$cacheKey])) {
+        // Check if we have loaded tenant overrides for this language and tenant.
+        if (!isset($this->tenantTranslations[$languageCode][$tenantId])) {
             // Load tenant overrides for this language and tenant.
             $language = $this->languages[$languageCode] ?? null;
             if ($language === null) {
                 return null;
             }
 
-            $this->translations[$languageCode][$cacheKey] = [];
+            $this->tenantTranslations[$languageCode][$tenantId] = [];
             $tenantOverrides = $this->translationRepository->findAllTenantOverrides(
                 $language->id,
                 $tenantId
             );
 
-            // Flatten tenant overrides into a domain/key structure.
+            // Flatten tenant overrides into a domain/key structure in tenant cache.
             foreach ($tenantOverrides as $d => $keys) {
-                if (!isset($this->translations[$languageCode][$d])) {
-                    $this->translations[$languageCode][$d] = [];
+                if (!isset($this->tenantTranslations[$languageCode][$tenantId][$d])) {
+                    $this->tenantTranslations[$languageCode][$tenantId][$d] = [];
                 }
                 foreach ($keys as $k => $translation) {
-                    $this->translations[$languageCode][$d][$k] = $translation->translation;
+                    $this->tenantTranslations[$languageCode][$tenantId][$d][$k] = $translation->translation;
                 }
             }
         }
 
         // Check if the override exists in the domain.
-        return $this->translations[$languageCode][$domain][$key] ?? null;
+        return $this->tenantTranslations[$languageCode][$tenantId][$domain][$key] ?? null;
     }
 
     /**

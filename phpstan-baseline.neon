@@ -146,6 +146,16 @@ parameters:
 			path: src/Api/TenantsApiHandler.php
 
 		-
+			message: "#^Method Whity\\\\Api\\\\TranslationsApiHandler\\:\\:getTranslations\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
+			count: 1
+			path: src/Api/TranslationsApiHandler.php
+
+		-
+			message: "#^Strict comparison using \\=\\=\\= between non\\-falsy\\-string and '' will always evaluate to false\\.$#"
+			count: 2
+			path: src/Api/TranslationsApiHandler.php
+
+		-
 			message: "#^Method Whity\\\\Auth\\\\AuthHandler\\:\\:handle\\(\\) has parameter \\$params with no value type specified in iterable type array\\.$#"
 			count: 1
 			path: src/Auth/AuthHandler.php
@@ -446,6 +456,11 @@ parameters:
 			path: src/Core/PluginLoader.php
 
 		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: src/Core/i18n/LanguageRepository.php
+
+		-
 			message: "#^Strict comparison using \\=\\=\\= between mixed and null will always evaluate to false\\.$#"
 			count: 1
 			path: src/Database/Database.php
@@ -552,7 +567,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 18
+			count: 24
 			path: tests/Api/UsersApiHandlerRealEngineTest.php
 
 		-
@@ -564,16 +579,6 @@ parameters:
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 3
 			path: tests/Auth/AccessTokenRevocationRealEngineTest.php
-
-		-
-			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 4
-			path: tests/Integration/DeviceTokensRealEngineTest.php
-
-		-
-			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 2
-			path: tests/Integration/SessionsRealEngineTest.php
 
 		-
 			message: "#^Parameter \\#1 \\$string of function base64_encode expects string, string\\|false given\\.$#"
@@ -826,6 +831,11 @@ parameters:
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
 
 		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 4
+			path: tests/Integration/DeviceTokensRealEngineTest.php
+
+		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
 			count: 1
 			path: tests/Integration/OuRbacTest.php
@@ -901,9 +911,29 @@ parameters:
 			path: tests/Integration/RbacRouteEnforcementTest.php
 
 		-
+			message: "#^Else branch is unreachable because ternary operator condition is always true\\.$#"
+			count: 1
+			path: tests/Integration/RefreshTokenReuseDetectionTest.php
+
+		-
+			message: "#^Method Tests\\\\Integration\\\\RefreshTokenReuseDetectionTest\\:\\:getAuditLogEntries\\(\\) return type has no value type specified in iterable type array\\.$#"
+			count: 1
+			path: tests/Integration/RefreshTokenReuseDetectionTest.php
+
+		-
+			message: "#^Offset 'jti' does not exist on array\\<string, mixed\\>\\|null\\.$#"
+			count: 4
+			path: tests/Integration/RefreshTokenReuseDetectionTest.php
+
+		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
 			count: 1
 			path: tests/Integration/RolesApiTenantIsolationTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
+			path: tests/Integration/SessionsRealEngineTest.php
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
@@ -961,6 +991,16 @@ parameters:
 			path: tests/Integration/TenantManagementRbacTest.php
 
 		-
+			message: "#^Parameter \\#1 \\$input of method OTPHP\\\\TOTP\\:\\:at\\(\\) expects int\\<0, max\\>, int given\\.$#"
+			count: 2
+			path: tests/Integration/TotpReplayRealEngineTest.php
+
+		-
+			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
+			count: 3
+			path: tests/Integration/TotpReplayRealEngineTest.php
+
+		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 2
 			path: tests/Integration/TotpSecretReencryptorTest.php
@@ -984,6 +1024,11 @@ parameters:
 			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
 			count: 3
 			path: tests/Integration/TwoFactorKeyConsistencyTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
+			path: tests/Integration/UsersApiRbacTest.php
 
 		-
 			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
@@ -1201,24 +1246,14 @@ parameters:
 			path: tests/Unit/Auth/BackupCodesServiceTest.php
 
 		-
-			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
-			count: 4
-			path: tests/Unit/Auth/TotpServiceTest.php
-
-		-
 			message: "#^Parameter \\#1 \\$input of method OTPHP\\\\TOTP\\:\\:at\\(\\) expects int\\<0, max\\>, int given\\.$#"
 			count: 1
 			path: tests/Unit/Auth/TotpServiceTest.php
 
 		-
 			message: "#^Parameter \\#1 \\$secret of static method OTPHP\\\\TOTP\\:\\:create\\(\\) expects non\\-empty\\-string\\|null, string given\\.$#"
-			count: 3
-			path: tests/Integration/TotpReplayRealEngineTest.php
-
-		-
-			message: "#^Parameter \\#1 \\$input of method OTPHP\\\\TOTP\\:\\:at\\(\\) expects int\\<0, max\\>, int given\\.$#"
-			count: 2
-			path: tests/Integration/TotpReplayRealEngineTest.php
+			count: 4
+			path: tests/Unit/Auth/TotpServiceTest.php
 
 		-
 			message: "#^Anonymous function should return PDO but returns PDO\\|null\\.$#"

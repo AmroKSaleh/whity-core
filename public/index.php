@@ -1145,13 +1145,32 @@ $translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo(
 $languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
     $languageRepository,
     $translationRepository,
-    new \Whity\Core\Tenant\TenantContext()
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
 );
-$languageRegistry->boot();
+// A missing/unseeded languages table must not take the whole API down: the
+// registry falls back to returning the key itself, so boot failure degrades
+// translation only.
+try {
+    $languageRegistry->boot();
+} catch (\Throwable $e) {
+    error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
+}
+
+// Registered versioned (bare paths) so the router prepends /v1 itself —
+// writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
 $languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
-$router->register('GET',   '/api/languages',                   [$languagesHandler, 'list'],         null);
-$router->register('GET',   '/api/settings/language',           [$languagesHandler, 'getLanguage'], null);
-$router->register('PATCH', '/api/settings/language',           [$languagesHandler, 'patchLanguage'], null);
+$router->register('GET',   '/api/languages',         [$languagesHandler, 'list'],          null);
+$router->register('GET',   '/api/settings/language', [$languagesHandler, 'getLanguage'],   null);
+$router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchLanguage'], null);
+
+// Translations API handler — public endpoint for fetching translated strings
+// before a session exists (the login screen needs its own language).
+$translationsHandler = new \Whity\Api\TranslationsApiHandler(
+    $languageRepository,
+    $translationRepository,
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+);
+$router->register('GET', '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
 
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved

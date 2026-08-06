@@ -13,6 +13,7 @@ import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
 import { ThemeModeProvider, ThemeModeInitScript } from "@/lib/theme-mode-context";
+import { LanguageProvider } from "@amroksaleh/features/i18n";
 
 // Design-token font families (see src/design/tokens/base.json): Noto Sans
 // (latin) + Noto Sans Arabic together drive --font-sans / --font-heading (see
@@ -94,14 +95,16 @@ export default async function RootLayout({
           <ThemeModeProvider>
             <DirectionProvider>
               <AuthProvider>
-                <ToastProvider>
-                  <NavigationProvider>
-                    <PluginFeaturesProvider>
-                      {children}
-                      <ToastContainer />
-                    </PluginFeaturesProvider>
-                  </NavigationProvider>
-                </ToastProvider>
+                <LanguageProvider>
+                  <ToastProvider>
+                    <NavigationProvider>
+                      <PluginFeaturesProvider>
+                        {children}
+                        <ToastContainer />
+                      </PluginFeaturesProvider>
+                    </NavigationProvider>
+                  </ToastProvider>
+                </LanguageProvider>
               </AuthProvider>
             </DirectionProvider>
           </ThemeModeProvider>

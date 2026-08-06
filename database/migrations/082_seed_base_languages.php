@@ -23,36 +23,33 @@ class SeedBaseLanguages
 {
     public static function up(Database $db): void
     {
+        $pdo = $db->getPdo();
+
         // Seed English language (idempotent via ON CONFLICT).
-        $db->query(
+        $stmt = $pdo->prepare(
             'INSERT INTO languages (code, name, enabled, created_at, updated_at)
              VALUES (:code, :name, true, NOW(), NOW())
-             ON CONFLICT (code) DO NOTHING',
-            [
-                ':code' => 'en',
-                ':name' => 'English',
-            ]
+             ON CONFLICT (code) DO NOTHING'
         );
+        $stmt->execute([
+            ':code' => 'en',
+            ':name' => 'English',
+        ]);
 
         // Seed Arabic language (idempotent via ON CONFLICT).
-        $db->query(
+        $stmt = $pdo->prepare(
             'INSERT INTO languages (code, name, enabled, created_at, updated_at)
              VALUES (:code, :name, true, NOW(), NOW())
-             ON CONFLICT (code) DO NOTHING',
-            [
-                ':code' => 'ar',
-                ':name' => 'العربية',
-            ]
+             ON CONFLICT (code) DO NOTHING'
         );
+        $stmt->execute([
+            ':code' => 'ar',
+            ':name' => 'العربية',
+        ]);
     }
 
     public static function down(Database $db): void
     {
-        // Remove the seeded languages by code.
-        // Only delete if they exist; this is safe if other languages were added.
-        $db->query(
-            'DELETE FROM languages WHERE code IN (?, ?)',
-            ['en', 'ar']
-        );
+        $db->getPdo()->exec('DELETE FROM languages WHERE code IN (\'en\', \'ar\')');
     }
 }
