@@ -8,9 +8,9 @@ use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\MockObject\MockObject;
 use Whity\Core\i18n\Language;
 use Whity\Core\i18n\LanguageRegistry;
-use Whity\Core\i18n\LanguageRepository;
+use Whity\Core\i18n\LanguageRepositoryInterface;
 use Whity\Core\i18n\Translation;
-use Whity\Core\i18n\TranslationRepository;
+use Whity\Core\i18n\TranslationRepositoryInterface;
 use Whity\Core\Tenant\TenantContextInterface;
 
 /**
@@ -37,8 +37,8 @@ class LanguageRegistryTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->languageRepository = $this->createMock(LanguageRepository::class);
-        $this->translationRepository = $this->createMock(TranslationRepository::class);
+        $this->languageRepository = $this->createMock(LanguageRepositoryInterface::class);
+        $this->translationRepository = $this->createMock(TranslationRepositoryInterface::class);
         $this->tenantContext = $this->createMock(TenantContextInterface::class);
 
         $this->registry = new LanguageRegistry(
