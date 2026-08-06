@@ -921,21 +921,6 @@ parameters:
 			path: tests/Integration/RbacRouteEnforcementTest.php
 
 		-
-			message: "#^Else branch is unreachable because ternary operator condition is always true\\.$#"
-			count: 1
-			path: tests/Integration/RefreshTokenReuseDetectionTest.php
-
-		-
-			message: "#^Method Tests\\\\Integration\\\\RefreshTokenReuseDetectionTest\\:\\:getAuditLogEntries\\(\\) return type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Integration/RefreshTokenReuseDetectionTest.php
-
-		-
-			message: "#^Offset 'jti' does not exist on array\\<string, mixed\\>\\|null\\.$#"
-			count: 4
-			path: tests/Integration/RefreshTokenReuseDetectionTest.php
-
-		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
 			count: 1
 			path: tests/Integration/RolesApiTenantIsolationTest.php
