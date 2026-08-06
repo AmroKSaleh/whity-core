@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { SessionsSettings } from '@/components/SessionsSettings';
+import { DevicesSettings } from '@/components/DevicesSettings';
 import { EmailAddressesSettings } from '@/components/EmailAddressesSettings';
 import { ProfileForm } from './profile-form';
 
@@ -58,14 +59,27 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Sessions & devices (WC-b-logout-others) */}
+      {/* Sessions (WC-b-logout-others) — interactive browser/app logins only;
+          native-device credentials are a genuinely separate list below (#409). */}
       <Card>
         <CardHeader>
-          <CardTitle>Sessions &amp; devices</CardTitle>
-          <CardDescription>Sign out of sessions on your other browsers, apps, and devices</CardDescription>
+          <CardTitle>Sessions</CardTitle>
+          <CardDescription>Sign out of your active sessions on other browsers and apps</CardDescription>
         </CardHeader>
         <CardContent>
           <SessionsSettings />
+        </CardContent>
+      </Card>
+
+      {/* Devices (#409) — long-lived native-client credentials (e.g. Elmak),
+          distinct from the interactive sessions above. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Devices</CardTitle>
+          <CardDescription>Manage native apps and devices with long-lived access to your account</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DevicesSettings />
         </CardContent>
       </Card>
     </div>
