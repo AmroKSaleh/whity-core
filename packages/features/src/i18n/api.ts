@@ -29,14 +29,14 @@ export async function fetchAvailableLanguages(): Promise<Language[]> {
     })
 
     if (!response.ok) {
-      console.error('Failed to fetch languages:', response.status, response.statusText)
+      console.warn(`Language list unavailable (${response.status}); using the default language`)
       return []
     }
 
     const data = await response.json()
     return data.languages || []
   } catch (error) {
-    console.error('Error fetching languages:', error)
+    console.warn('Language list unavailable; using the default language', error)
     return []
   }
 }
@@ -63,17 +63,21 @@ export async function fetchLanguageSettings(): Promise<LanguageSettings | null> 
     })
 
     if (!response.ok) {
-      if (response.status === 401) {
-        // Not authenticated — return null and let the app handle login
+      // Signed-out callers are the common case, not an error: the provider
+      // mounts on /login too. EnforceTenantIsolation answers an unauthenticated
+      // caller with 403 (no tenant to resolve), so 403 counts as "not signed
+      // in" here alongside 401 — logging it would fire on every login-page
+      // load and, in dev, raise Next's error overlay over the form.
+      if (response.status === 401 || response.status === 403) {
         return null
       }
-      console.error('Failed to fetch language settings:', response.status, response.statusText)
+      console.warn(`Language preference unavailable (${response.status}); using the default language`)
       return null
     }
 
     return response.json()
   } catch (error) {
-    console.error('Error fetching language settings:', error)
+    console.warn('Language preference unavailable; using the default language', error)
     return null
   }
 }
@@ -137,11 +141,14 @@ export async function fetchTranslations(
       },
     })
 
+    // A missing bundle is a normal degraded state, not a fault: useTranslation
+    // falls back to the key, so the UI stays readable. Deliberately NOT
+    // console.error — Next's dev overlay promotes console.error to a portal
+    // that covers the page and swallows pointer events, which turns a missing
+    // translation domain into unclickable chrome (and red e2e runs).
     if (!response.ok) {
-      console.error(
-        `Failed to fetch translations for ${languageCode}/${domain}:`,
-        response.status,
-        response.statusText
+      console.warn(
+        `Translations unavailable for ${languageCode}/${domain} (${response.status}); falling back to keys`
       )
       return {}
     }
@@ -149,7 +156,7 @@ export async function fetchTranslations(
     const data = await response.json()
     return data.translations || {}
   } catch (error) {
-    console.error(`Error fetching translations for ${languageCode}/${domain}:`, error)
+    console.warn(`Translations unavailable for ${languageCode}/${domain}; falling back to keys`, error)
     return {}
   }
 }
