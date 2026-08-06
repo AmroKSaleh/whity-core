@@ -181,6 +181,56 @@ final class UsersApiRbacTest extends TestCase
         $this->assertNotSame(401, $response->getStatusCode());
     }
 
+    // ==================== users:write gating (PATCH accountStatus) ====================
+
+    /**
+     * Toggling the WC-user-status account status is gated on the SAME
+     * users:write permission as any other PATCH field — no dedicated
+     * permission was introduced for it.
+     */
+    public function testDeactivateAccountWithoutUsersWriteIsForbidden(): void
+    {
+        $target = $this->seedUserWithPermissions(1, []);
+        $caller = $this->seedUserWithPermissions(1, [CorePermissions::USERS_READ]);
+        TenantContext::setTenantId(1);
+
+        $response = $this->dispatch(new Request(
+            'PATCH',
+            "/api/users/{$target}",
+            $this->auth($caller, 1),
+            (string) json_encode(['accountStatus' => 'inactive'])
+        ));
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(CorePermissions::USERS_WRITE, json_decode($response->getBody(), true)['required']);
+
+        $this->assertSame(
+            'active',
+            (string) $this->pdo->query("SELECT status FROM profiles WHERE id = {$target}")->fetchColumn(),
+            'A denied caller must never toggle the account status.'
+        );
+    }
+
+    public function testDeactivateAccountWithUsersWriteReachesHandler(): void
+    {
+        $target = $this->seedUserWithPermissions(1, []);
+        $caller = $this->seedUserWithPermissions(1, [CorePermissions::USERS_WRITE]);
+        TenantContext::setTenantId(1);
+
+        $response = $this->dispatch(new Request(
+            'PATCH',
+            "/api/users/{$target}",
+            $this->auth($caller, 1),
+            (string) json_encode(['accountStatus' => 'inactive'])
+        ));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            'inactive',
+            (string) $this->pdo->query("SELECT status FROM profiles WHERE id = {$target}")->fetchColumn()
+        );
+    }
+
     // ==================== users:delete gating ====================
 
     public function testDeleteWithoutUsersDeleteIsForbidden(): void
