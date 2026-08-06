@@ -506,6 +506,11 @@ parameters:
 			path: tests/Api/MeCapabilitiesApiHandlerRealEngineTest.php
 
 		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Api/OusApiHandlerRealEngineTest.php
+
+		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 17
 			path: tests/Api/OusApiHandlerRealEngineTest.php
