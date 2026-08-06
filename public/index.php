@@ -1140,28 +1140,37 @@ $router->register('GET', '/api/settings/tabs', [$settingsHandler, 'tabs']);
 // PATCH /api/v1/settings/language — authenticated, updates user's language preference.
 // Language preference is stored per-profile (language_code column) and follows the user across
 // all tenant memberships. NULL = use tenant default, explicit code = user's choice.
-error_log("[DEBUG] Initializing i18n: creating LanguageRepository...");
 $languageRepository = new \Whity\Core\i18n\LanguageRepository($db->getPdo());
-error_log("[DEBUG] Initializing i18n: creating TranslationRepository...");
 $translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo());
-error_log("[DEBUG] Initializing i18n: creating LanguageRegistry...");
 $languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
     $languageRepository,
     $translationRepository,
     new \Whity\Core\Tenant\StaticTenantContextAdapter()
 );
-error_log("[DEBUG] Initializing i18n: calling LanguageRegistry::boot()...");
+// A missing/unseeded languages table must not take the whole API down: the
+// registry falls back to returning the key itself, so boot failure degrades
+// translation only.
 try {
     $languageRegistry->boot();
-    error_log("[DEBUG] LanguageRegistry boot completed successfully");
 } catch (\Throwable $e) {
-    error_log("[WARN] LanguageRegistry boot failed (continuing without translations): {$e->getMessage()}");
+    error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
 }
 
+// Registered versioned (bare paths) so the router prepends /v1 itself —
+// writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
 $languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
-$router->register('GET',   '/api/languages',                   [$languagesHandler, 'list'],         null);
-$router->register('GET',   '/api/settings/language',           [$languagesHandler, 'getLanguage'], null);
-$router->register('PATCH', '/api/settings/language',           [$languagesHandler, 'patchLanguage'], null);
+$router->register('GET',   '/api/languages',         [$languagesHandler, 'list'],          null);
+$router->register('GET',   '/api/settings/language', [$languagesHandler, 'getLanguage'],   null);
+$router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchLanguage'], null);
+
+// Translations API handler — public endpoint for fetching translated strings
+// before a session exists (the login screen needs its own language).
+$translationsHandler = new \Whity\Api\TranslationsApiHandler(
+    $languageRepository,
+    $translationRepository,
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+);
+$router->register('GET', '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
 
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved

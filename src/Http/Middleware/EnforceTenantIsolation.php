@@ -150,6 +150,11 @@ class EnforceTenantIsolation
         // TenantContext inside the dispatcher. The standard access-token flow
         // would reject an mcp token here, so /mcp bypasses tenant resolution.
         '/mcp',
+        // i18n: public endpoints for language/translation discovery. Clients must
+        // fetch available languages and translations before auth is possible
+        // (to render the UI in the correct language during login). The settings
+        // endpoint (/api/v1/settings/language) remains authenticated for updates.
+        '/api/v1/languages',
     ];
 
     /**
@@ -168,6 +173,10 @@ class EnforceTenantIsolation
         // (a pre-login user has no session/tenant); the OIDC state/nonce/PKCE flow
         // is the safeguard, and the callback logs in only an already-linked identity.
         '/api/v1/auth/sso/',
+        // i18n: public translation fetching endpoint. Path includes {language_code}
+        // and {domain} segments, so a prefix check is used. Clients fetch
+        // translations before auth is available (to render UI in correct language).
+        '/api/v1/translations/',
     ];
 
     /**

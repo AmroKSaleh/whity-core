@@ -74,7 +74,9 @@ export function LanguageProvider({
         setCurrentLanguage(languageCode)
         setIsLoading(false)
       } catch (err) {
-        console.error('Failed to initialize language provider:', err)
+        // Degraded, not broken: the app renders in defaultLanguage with keys
+        // as fallbacks. warn, not error — see fetchTranslations for why.
+        console.warn('Language provider fell back to the default language:', err)
         setError(err instanceof Error ? err : new Error('Failed to initialize languages'))
         setCurrentLanguage(defaultLanguage)
         setIsLoading(false)
@@ -115,7 +117,7 @@ export function LanguageProvider({
 
         setTranslations(newTranslations)
       } catch (err) {
-        console.error('Failed to load translations:', err)
+        console.warn('Translations unavailable; falling back to keys:', err)
         setError(err instanceof Error ? err : new Error('Failed to load translations'))
       }
     }
