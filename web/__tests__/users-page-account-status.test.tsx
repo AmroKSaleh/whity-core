@@ -51,6 +51,22 @@ jest.mock('@/app/(protected)/admin/users/delete-modal', () => ({
 const mockUseCapabilities = useCapabilities as jest.MockedFunction<typeof useCapabilities>;
 const mockUseToast = useToast as jest.MockedFunction<typeof useToast>;
 
+/**
+ * WC-663f6b6b: useCapabilities now exposes has/hasAny/hasAll (hasPermission is
+ * a back-compat alias), so a mock must supply the whole surface.
+ */
+function setCapabilities(perms: string[]): void {
+  const has = (slug: string) => perms.includes(slug);
+  mockUseCapabilities.mockReturnValue({
+    permissions: perms,
+    loading: false,
+    has,
+    hasAny: (slugs: readonly string[]) => slugs.some(has),
+    hasAll: (slugs: readonly string[]) => slugs.every(has),
+    hasPermission: has,
+  });
+}
+
 const ACTIVE_USER: User = {
   id: 1,
   name: 'alice',
@@ -104,11 +120,7 @@ async function openRowMenu(rowName: string): Promise<HTMLElement> {
 
 describe('UsersPage account status (WC-user-status)', () => {
   it('renders an Active badge for an active user and an Inactive badge for a deactivated one', async () => {
-    mockUseCapabilities.mockReturnValue({
-      permissions: [],
-      loading: false,
-      hasPermission: () => true,
-    });
+    setCapabilities(['users:write', 'users:delete']);
     mockUsers([ACTIVE_USER, INACTIVE_USER]);
 
     render(<UsersPage />);
@@ -122,11 +134,7 @@ describe('UsersPage account status (WC-user-status)', () => {
   });
 
   it('offers "Deactivate" for an active user and calls PATCH with accountStatus: inactive', async () => {
-    mockUseCapabilities.mockReturnValue({
-      permissions: [],
-      loading: false,
-      hasPermission: () => true,
-    });
+    setCapabilities(['users:write', 'users:delete']);
     mockUsers([ACTIVE_USER]);
     const user = userEvent.setup();
 
@@ -152,11 +160,7 @@ describe('UsersPage account status (WC-user-status)', () => {
   });
 
   it('offers "Reactivate" for an inactive user and calls PATCH with accountStatus: active', async () => {
-    mockUseCapabilities.mockReturnValue({
-      permissions: [],
-      loading: false,
-      hasPermission: () => true,
-    });
+    setCapabilities(['users:write', 'users:delete']);
     mockUsers([INACTIVE_USER]);
     const user = userEvent.setup();
 
@@ -183,11 +187,7 @@ describe('UsersPage account status (WC-user-status)', () => {
 
   it('hides the Deactivate/Reactivate action for a caller without users:write', async () => {
     // Only users:delete — mirrors the existing Edit gating contract.
-    mockUseCapabilities.mockReturnValue({
-      permissions: [],
-      loading: false,
-      hasPermission: (slug: string) => slug === 'users:delete',
-    });
+    setCapabilities(['users:delete']);
     mockUsers([ACTIVE_USER]);
 
     render(<UsersPage />);
@@ -200,11 +200,7 @@ describe('UsersPage account status (WC-user-status)', () => {
   });
 
   it('surfaces a toast error and does not crash when the status toggle fails', async () => {
-    mockUseCapabilities.mockReturnValue({
-      permissions: [],
-      loading: false,
-      hasPermission: () => true,
-    });
+    setCapabilities(['users:write', 'users:delete']);
     mockUsers([ACTIVE_USER]);
     mockApiPatch.mockResolvedValue({
       data: undefined,
