@@ -542,6 +542,176 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $this->assertFalse($this->cacheIsWarm(), 'A role change must clear the effective-permission cache.');
     }
 
+    // ==================== account status (WC-user-status): deactivate/reactivate ====================
+
+    /**
+     * An admin can deactivate a user (profiles.status -> 'inactive') via PATCH,
+     * and the change is visible both in the DB and in the response's
+     * `accountStatus` field.
+     */
+    public function testUpdateCanDeactivateAccount(): void
+    {
+        $this->seedProfile(200, 'deactivate-me@example.com');
+        $this->seedMembership(200, 1, 2);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/200', ['accountStatus' => 'inactive']),
+            ['id' => '200']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            'inactive',
+            (string) $this->pdo->query('SELECT status FROM profiles WHERE id = 200')->fetchColumn(),
+            'profiles.status must be written to inactive.'
+        );
+
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('inactive', $data['accountStatus']);
+    }
+
+    /**
+     * A deactivated account can be reactivated the same way (round-trip).
+     */
+    public function testUpdateCanReactivateAccount(): void
+    {
+        $this->seedProfile(201, 'reactivate-me@example.com', 'inactive');
+        $this->seedMembership(201, 1, 2);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/201', ['accountStatus' => 'active']),
+            ['id' => '201']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            'active',
+            (string) $this->pdo->query('SELECT status FROM profiles WHERE id = 201')->fetchColumn()
+        );
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('active', $data['accountStatus']);
+    }
+
+    /**
+     * An unrecognised accountStatus value is rejected (400) and nothing is
+     * written.
+     */
+    public function testUpdateRejectsInvalidAccountStatusValue(): void
+    {
+        $this->seedProfile(202, 'invalid-status@example.com');
+        $this->seedMembership(202, 1, 2);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/202', ['accountStatus' => 'banned']),
+            ['id' => '202']
+        );
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertSame(
+            'active',
+            (string) $this->pdo->query('SELECT status FROM profiles WHERE id = 202')->fetchColumn(),
+            'An invalid accountStatus must not be persisted.'
+        );
+    }
+
+    /**
+     * Re-submitting the SAME accountStatus is a genuine no-op: 200, nothing
+     * changes, and the record is echoed back unchanged (mirrors the existing
+     * role no-op contract, testNoopReturnsCurrentRecord).
+     */
+    public function testAccountStatusNoopReturnsCurrentRecord(): void
+    {
+        $this->seedProfile(203, 'status-noop@example.com');
+        $this->seedMembership(203, 1, 2);
+
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/203', ['accountStatus' => 'active']),
+            ['id' => '203']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('active', $data['accountStatus']);
+    }
+
+    /**
+     * Deactivating a profile is GLOBAL (ADR 0005 §1): it is not scoped to one
+     * tenant's membership row. A profile with memberships in two tenants is
+     * deactivated everywhere by a single tenant's admin action.
+     */
+    public function testDeactivateAffectsProfileAcrossAllItsTenantMemberships(): void
+    {
+        $this->seedProfile(204, 'multi-tenant@example.com');
+        $this->seedMembership(204, 1, 2);
+        $this->seedMembership(204, 2, 2);
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $handler->update(
+            $this->authedRequest('PATCH', '/api/users/204', ['accountStatus' => 'inactive']),
+            ['id' => '204']
+        );
+
+        $this->assertSame(
+            'inactive',
+            (string) $this->pdo->query('SELECT status FROM profiles WHERE id = 204')->fetchColumn(),
+            'The GLOBAL profile status must reflect the deactivation regardless of which tenant acted.'
+        );
+    }
+
+    /**
+     * A non-system tenant cannot deactivate a profile that has no membership
+     * in ITS tenant (404, same as any other cross-tenant edit attempt) — the
+     * account status is untouched.
+     */
+    public function testCannotDeactivateUserOutsideTenantReturns404(): void
+    {
+        $this->seedProfile(205, 'foreign-status@example.com');
+        $this->seedMembership(205, 2, 2); // membership only in tenant 2
+
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/205', ['accountStatus' => 'inactive']),
+            ['id' => '205']
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(
+            'active',
+            (string) $this->pdo->query('SELECT status FROM profiles WHERE id = 205')->fetchColumn(),
+            "Tenant 1 must not be able to deactivate tenant 2's user."
+        );
+    }
+
+    /**
+     * The SYSTEM tenant (id 0) MAY deactivate a profile whose only membership
+     * is in a different tenant.
+     */
+    public function testSystemTenantCanDeactivateAcrossTenants(): void
+    {
+        $this->seedProfile(206, 'system-deactivate@example.com');
+        $this->seedMembership(206, 2, 2);
+
+        MockRequestFactory::setTestTenant(0);
+        $handler = $this->handler();
+        $response = $handler->update(
+            $this->authedRequest('PATCH', '/api/users/206', ['accountStatus' => 'inactive'], 0),
+            ['id' => '206']
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            'inactive',
+            (string) $this->pdo->query('SELECT status FROM profiles WHERE id = 206')->fetchColumn(),
+            'The SYSTEM tenant must be able to deactivate a cross-tenant profile.'
+        );
+    }
+
     // ==================== update: ou_id assignment (migrated from the mocked-PDO unit test) ====================
     //
     // Migrated from the mocked-PDO tests/Unit/Api/UsersApiHandlerTest.php onto
@@ -713,13 +883,13 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         return $request;
     }
 
-    private function seedProfile(int $id, string $email): void
+    private function seedProfile(int $id, string $email, string $status = 'active'): void
     {
         $this->pdo->prepare(
             "INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled,
-                two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, ?, 'x', false, 0, 0, datetime('now'), datetime('now'))"
-        )->execute([$id, strstr($email, '@', true) ?: $email]);
+                two_factor_backup_codes_version, token_epoch, status, created_at, updated_at)
+             VALUES (?, ?, 'x', false, 0, 0, ?, datetime('now'), datetime('now'))"
+        )->execute([$id, strstr($email, '@', true) ?: $email, $status]);
 
         $this->pdo->prepare(
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
@@ -742,28 +912,6 @@ final class UsersApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, '', ?, datetime('now'))"
         );
         $stmt->execute([$id, $name, $tenantId]);
-    }
-
-    /** Seed a membership with an explicit ou_id (rather than seedMembership()'s NULL). */
-    private function seedMembershipWithOu(int $profileId, int $tenantId, int $roleId, int $ouId, string $status = 'active'): void
-    {
-        $this->pdo->prepare(
-            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
-             VALUES (?, ?, ?, ?, ?, datetime('now'))"
-        )->execute([$profileId, $tenantId, $roleId, $ouId, $status]);
-    }
-
-    /** Seed an organizational unit for the given tenant and return its id. */
-    private function seedOu(int $tenantId, string $name): int
-    {
-        $slug = strtolower(str_replace(' ', '-', $name)) . '-' . $tenantId;
-        $stmt = $this->pdo->prepare(
-            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
-             VALUES (?, NULL, ?, ?, '', datetime('now'))"
-        );
-        $stmt->execute([$tenantId, $name, $slug]);
-
-        return (int) $this->pdo->lastInsertId();
     }
 
     /**
@@ -793,5 +941,28 @@ final class UsersApiHandlerRealEngineTest extends TestCase
         $pdo->exec("INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES (3, 'moderator', '', NULL, datetime('now'))");
 
         return $pdo;
+    }
+
+
+    /** Seed a membership with an explicit ou_id (rather than seedMembership()'s NULL). */
+    private function seedMembershipWithOu(int $profileId, int $tenantId, int $roleId, int $ouId, string $status = 'active'): void
+    {
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))"
+        )->execute([$profileId, $tenantId, $roleId, $ouId, $status]);
+    }
+
+    /** Seed an organizational unit for the given tenant and return its id. */
+    private function seedOu(int $tenantId, string $name): int
+    {
+        $slug = strtolower(str_replace(' ', '-', $name)) . '-' . $tenantId;
+        $stmt = $this->pdo->prepare(
+            "INSERT INTO organizational_units (tenant_id, parent_id, name, slug, description, created_at)
+             VALUES (?, NULL, ?, ?, '', datetime('now'))"
+        );
+        $stmt->execute([$tenantId, $name, $slug]);
+
+        return (int) $this->pdo->lastInsertId();
     }
 }

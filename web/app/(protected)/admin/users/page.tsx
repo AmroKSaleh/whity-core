@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -10,6 +11,7 @@ import { USERS_WRITE, USERS_DELETE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Button } from '@amroksaleh/ui/button';
+import { Badge } from '@amroksaleh/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,11 +74,47 @@ export default function UsersPage() {
     setIsDeleteModalOpen(true);
   };
 
+  // Deactivate/reactivate (WC-user-status) is gated on the SAME users:write
+  // capability as Edit — no dedicated permission exists for it server-side.
+  const handleToggleAccountStatus = async (user: User) => {
+    const nextStatus = user.accountStatus === 'inactive' ? 'active' : 'inactive';
+    try {
+      const { error, response } = await api.PATCH('/api/v1/users/{id}', {
+        params: { path: { id: user.id } },
+        body: { accountStatus: nextStatus },
+      });
+
+      if (error !== undefined || !response.ok) {
+        throw new Error(error?.error ?? 'Failed to update user status');
+      }
+
+      addToast(
+        nextStatus === 'inactive' ? 'User deactivated' : 'User reactivated',
+        'success'
+      );
+      fetchUsers();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to update user status';
+      addToast(message, 'error');
+    }
+  };
+
   const columns: DataTableColumn<User>[] = [
     { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
     { accessorKey: 'email', header: 'Email', enableSorting: true, enableColumnFilter: true },
     { accessorKey: 'role', header: 'Role', enableSorting: true },
     { accessorKey: 'tenantId', header: 'Tenant ID' },
+    {
+      accessorKey: 'accountStatus',
+      header: 'Status',
+      enableSorting: true,
+      cell: (user) => (
+        <Badge variant={user.accountStatus === 'inactive' ? 'secondary' : 'outline'}>
+          {user.accountStatus === 'inactive' ? 'Inactive' : 'Active'}
+        </Badge>
+      ),
+    },
     { accessorKey: 'createdAt', header: 'Created At', enableSorting: true },
   ];
 
@@ -93,6 +131,11 @@ export default function UsersPage() {
           {canEdit && (
             <DropdownMenuItem onClick={() => handleEditClick(user)}>
               Edit
+            </DropdownMenuItem>
+          )}
+          {canEdit && (
+            <DropdownMenuItem onClick={() => handleToggleAccountStatus(user)}>
+              {user.accountStatus === 'inactive' ? 'Reactivate' : 'Deactivate'}
             </DropdownMenuItem>
           )}
           {canDelete && (
