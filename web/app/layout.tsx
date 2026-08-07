@@ -7,12 +7,14 @@ import { ToastProvider } from "@/lib/toast-context";
 import { NavigationProvider } from "@/lib/navigation-context";
 import { DirectionProvider } from "@/lib/direction-context";
 import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
+import { CapabilitiesProvider } from "@/lib/capabilities-context";
 import { ToastContainer } from "@/components/ui/toast-container";
 import "@/lib/plugin-screens";
 import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
 import { ThemeModeProvider, ThemeModeInitScript } from "@/lib/theme-mode-context";
+import { LanguageProvider } from "@amroksaleh/features/i18n";
 
 // Design-token font families (see src/design/tokens/base.json): Noto Sans
 // (latin) + Noto Sans Arabic together drive --font-sans / --font-heading (see
@@ -94,14 +96,18 @@ export default async function RootLayout({
           <ThemeModeProvider>
             <DirectionProvider>
               <AuthProvider>
-                <ToastProvider>
-                  <NavigationProvider>
-                    <PluginFeaturesProvider>
-                      {children}
-                      <ToastContainer />
-                    </PluginFeaturesProvider>
-                  </NavigationProvider>
-                </ToastProvider>
+                <LanguageProvider>
+                  <CapabilitiesProvider>
+                    <ToastProvider>
+                      <NavigationProvider>
+                        <PluginFeaturesProvider>
+                          {children}
+                          <ToastContainer />
+                        </PluginFeaturesProvider>
+                      </NavigationProvider>
+                    </ToastProvider>
+                  </CapabilitiesProvider>
+                </LanguageProvider>
               </AuthProvider>
             </DirectionProvider>
           </ThemeModeProvider>

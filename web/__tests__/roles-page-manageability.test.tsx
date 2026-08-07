@@ -98,11 +98,14 @@ beforeEach(() => {
     addToast: jest.fn(),
   } as unknown as ReturnType<typeof useToast>);
   // Caller holds both write capabilities so only manageability differs.
+  const has = (slug: string) => slug === ROLES_WRITE || slug === ROLES_DELETE;
   mockUseCapabilities.mockReturnValue({
     permissions: [ROLES_WRITE, ROLES_DELETE],
     loading: false,
-    hasPermission: (slug: string) =>
-      slug === ROLES_WRITE || slug === ROLES_DELETE,
+    has,
+    hasAny: (slugs: readonly string[]) => slugs.some(has),
+    hasAll: (slugs: readonly string[]) => slugs.every(has),
+    hasPermission: has,
   });
 });
 

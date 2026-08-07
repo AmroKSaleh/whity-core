@@ -1,0 +1,104 @@
+/*
+ * Render harness base stylesheet (ADR 0012 / WC-docdesigner Track 2).
+ *
+ * This is NOT the app's Tailwind build — the render service is a standalone
+ * Node project with no Next.js/Tailwind toolchain. `print-document.tsx` and
+ * its element renderers are almost entirely INLINE-STYLED (mm-absolute
+ * positioning, colors, fonts) which this file does not need to touch; the
+ * handful of Tailwind utility classes used ONLY for placeholder/empty states
+ * (a missing block, an unresolved image binding, an invalid barcode value —
+ * states a well-formed production template should rarely hit) are
+ * approximated here so they degrade gracefully instead of being unstyled.
+ *
+ * The print page rules mirror `web/components/documents/document-designer.tsx`'s
+ * own `@media print` stylesheet exactly (break-after: page, @page size) —
+ * this harness IS the print context (nothing else is ever on the page), so
+ * they apply unconditionally rather than behind `@media print`.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /* No explicit font-family override: the on-screen preview never sets one
+     either (TextStyle carries no fontFamily field), so both fall back to the
+     platform default sans-serif. Arabic legibility instead comes from the
+     Noto Naskh/Sans Arabic fonts baked into this image system-wide (see the
+     Dockerfile) — fontconfig substitutes them for Arabic-script runs even
+     without an explicit CSS font-family. */
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  position: relative;
+}
+
+.doc-print-doc {
+  position: relative;
+}
+
+.doc-print-page {
+  break-after: page;
+}
+
+.doc-print-page:last-child {
+  break-after: auto;
+}
+
+/* Utility-class approximations for placeholder/empty states only. */
+.flex {
+  display: flex;
+}
+.h-full {
+  height: 100%;
+}
+.w-full {
+  width: 100%;
+}
+.items-center {
+  align-items: center;
+}
+.justify-center {
+  justify-content: center;
+}
+.overflow-hidden {
+  overflow: hidden;
+}
+.rounded-sm {
+  border-radius: 2px;
+}
+.border {
+  border-width: 1px;
+  border-style: solid;
+}
+.border-dashed {
+  border-style: dashed;
+}
+.border-border {
+  border-color: #d4d4d8;
+}
+.border-destructive\/60 {
+  border-color: rgba(220, 38, 38, 0.6);
+}
+.bg-muted\/30 {
+  background-color: rgba(228, 228, 231, 0.3);
+}
+.bg-destructive\/5 {
+  background-color: rgba(220, 38, 38, 0.05);
+}
+.text-muted-foreground {
+  color: #71717a;
+}
+.text-destructive {
+  color: #dc2626;
+}
+.text-\[8px\] {
+  font-size: 8px;
+}
+.block {
+  display: block;
+}

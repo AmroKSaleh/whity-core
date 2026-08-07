@@ -75,6 +75,7 @@ beforeAll(() => {
 import AdminSettingsPage from '@/app/(protected)/admin/settings/page';
 import BrandingSettingsPage from '@/app/(protected)/admin/settings/branding/page';
 import SignupSettingsPage from '@/app/(protected)/admin/settings/signup/page';
+import FeatureFlagsSettingsPage from '@/app/(protected)/admin/settings/feature-flags/page';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -494,5 +495,96 @@ describe('SignupSettingsPage — registry-driven form', () => {
     await screen.findByTestId('settings-section-signup');
     expect(screen.queryByTestId('settings-section-general')).not.toBeInTheDocument();
     expect(screen.queryByTestId('settings-section-storage')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature Flags (app/(protected)/admin/settings/feature-flags/page.tsx)
+//
+// A generic admin surface over the registry's curated `isFlag`-marked boolean
+// settings (SettingsRegistry::FEATURE_FLAG_KEYS / isFeatureFlag()). The flag
+// set is NOT hardcoded on the client — these tests pin that the page renders
+// whatever the registry marks `isFlag: true`, and nothing else, mirroring the
+// backend contract rather than a fixed key list.
+// ---------------------------------------------------------------------------
+
+describe('FeatureFlagsSettingsPage — RBAC gating (system tenant + settings:manage)', () => {
+  it('renders Access Denied for a non-system tenant, even with settings:manage', () => {
+    setTenant(5);
+    grant('settings:manage');
+    render(<FeatureFlagsSettingsPage />);
+    expect(screen.getByRole('heading', { name: /access denied/i })).toBeInTheDocument();
+  });
+
+  it('renders Access Denied for the system tenant without settings:manage', () => {
+    setTenant(0);
+    grant();
+    render(<FeatureFlagsSettingsPage />);
+    expect(screen.getByRole('heading', { name: /access denied/i })).toBeInTheDocument();
+  });
+});
+
+describe('FeatureFlagsSettingsPage — registry-driven, isFlag-filtered form', () => {
+  it('renders only entries the registry marks isFlag, as toggles', async () => {
+    setTenant(0);
+    grant('settings:manage');
+    const registry = [
+      ...REGISTRY, // site_name/timezone/locale/support_email — none flagged
+      { key: 'mail.events.welcome_enabled', type: 'bool', default: 'true' }, // bool, NOT a flag
+      { key: 'storage.driver', type: 'string', default: 'local' }, // not bool, not a flag
+      { key: 'mcp.enabled', type: 'bool', default: 'false', isFlag: true },
+      { key: 'auth.sso_enabled', type: 'bool', default: 'true', isFlag: true },
+    ];
+    const global = {
+      ...GLOBAL,
+      'mail.events.welcome_enabled': 'true',
+      'storage.driver': 'local',
+      'mcp.enabled': 'false',
+      'auth.sso_enabled': 'true',
+    };
+    routeGet(['site_name'], true, registry, global);
+
+    render(<FeatureFlagsSettingsPage />);
+
+    expect(await screen.findByTestId('setting-switch-mcp.enabled')).toBeInTheDocument();
+    expect(screen.getByTestId('setting-switch-auth.sso_enabled')).toBeInTheDocument();
+    // Non-flagged keys (bool or not) never render on this page.
+    expect(screen.queryByTestId('setting-row-mail.events.welcome_enabled')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('setting-row-storage.driver')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('setting-row-site_name')).not.toBeInTheDocument();
+  });
+
+  it('toggles a flag and PATCHes /api/v1/settings/global with true/false', async () => {
+    setTenant(0);
+    grant('settings:manage');
+    const registry = [...REGISTRY, { key: 'mcp.enabled', type: 'bool', default: 'false', isFlag: true }];
+    const global = { ...GLOBAL, 'mcp.enabled': 'false' };
+    routeGet(['site_name'], true, registry, global);
+
+    render(<FeatureFlagsSettingsPage />);
+    const toggle = await screen.findByTestId('setting-switch-mcp.enabled');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('button', { name: /save feature flags/i }));
+
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith(
+        '/api/v1/settings/global',
+        expect.objectContaining({ body: { settings: { 'mcp.enabled': 'true' } } })
+      )
+    );
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith(expect.any(String), 'success'));
+  });
+
+  it('shows an empty state and a disabled Save when no keys are flagged', async () => {
+    setTenant(0);
+    grant('settings:manage');
+    routeGet(['site_name'], true, REGISTRY, GLOBAL); // no entry carries isFlag
+    render(<FeatureFlagsSettingsPage />);
+
+    expect(await screen.findByText(/no feature flags are published/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save feature flags/i })).toBeDisabled();
   });
 });

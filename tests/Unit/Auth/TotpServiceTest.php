@@ -200,6 +200,66 @@ class TotpServiceTest extends TestCase
     }
 
     /**
+     * matchedStep() must return the step a valid code matches, and that step
+     * must be reproducible: calling it again with the SAME code within the
+     * same window returns the SAME step (the anti-replay caller relies on
+     * this being stable so it can compare against the stored floor).
+     */
+    public function testMatchedStepReturnsSameStepForSameCode(): void
+    {
+        $secret = $this->totpService->generateSecret();
+        $encrypted = $this->totpService->encryptSecret($secret);
+        $code = \OTPHP\TOTP::create($secret)->now();
+
+        $step1 = $this->totpService->matchedStep($encrypted, $code);
+        $step2 = $this->totpService->matchedStep($encrypted, $code);
+
+        $this->assertIsInt($step1);
+        $this->assertSame($step1, $step2);
+    }
+
+    /**
+     * matchedStep() must return null for a code that does not verify.
+     */
+    public function testMatchedStepReturnsNullForInvalidCode(): void
+    {
+        $secret = $this->totpService->generateSecret();
+        $encrypted = $this->totpService->encryptSecret($secret);
+
+        $this->assertNull($this->totpService->matchedStep($encrypted, '000000'));
+    }
+
+    /**
+     * matchedStep() must return null for a malformed encrypted secret,
+     * mirroring validateCode()'s fail-closed behaviour.
+     */
+    public function testMatchedStepReturnsNullForMalformedSecret(): void
+    {
+        $this->assertNull($this->totpService->matchedStep('not-a-valid-encrypted-secret', '123456'));
+    }
+
+    /**
+     * A code from an ADJACENT step (±1 period, i.e. ±30s clock skew) must
+     * still match, and at a DIFFERENT step value than "now" — proving the
+     * returned step actually tracks which step matched, not just a fixed
+     * current-time value.
+     */
+    public function testMatchedStepDistinguishesAdjacentSteps(): void
+    {
+        $secret = $this->totpService->generateSecret();
+        $encrypted = $this->totpService->encryptSecret($secret);
+        $totp = \OTPHP\TOTP::create($secret);
+
+        $nowStep = $this->totpService->matchedStep($encrypted, $totp->now());
+        $futureCode = $totp->at(time() + $totp->getPeriod());
+        $futureStep = $this->totpService->matchedStep($encrypted, $futureCode);
+
+        $this->assertIsInt($nowStep);
+        $this->assertIsInt($futureStep);
+        $this->assertGreaterThan($nowStep, $futureStep);
+    }
+
+    /**
      * verifyPlainCode validates a code against a PLAINTEXT secret — used during enrollment
      * confirmation, where the caller still holds the plaintext and must not round-trip it
      * through encrypt()+decrypt() just to validate (WC-158).
@@ -211,5 +271,57 @@ class TotpServiceTest extends TestCase
 
         $this->assertTrue($this->totpService->verifyPlainCode($secret, $validCode));
         $this->assertFalse($this->totpService->verifyPlainCode($secret, '000000'));
+    }
+
+    /**
+     * resolveEncryptionKey() (WC-security-audit): outside development, a
+     * SHORT (but non-empty) ENCRYPTION_KEY must be rejected, not silently
+     * accepted. Before this fix only an EMPTY key was rejected — the >= 32
+     * char convention was documented in .env.example but never enforced.
+     */
+    public function testResolveEncryptionKeyRejectsShortKeyOutsideDevelopment(): void
+    {
+        $_ENV['APP_ENV'] = 'production';
+        $_ENV['ENCRYPTION_KEY'] = 'too-short';
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('at least 32 characters');
+
+        try {
+            TotpService::resolveEncryptionKey();
+        } finally {
+            unset($_ENV['APP_ENV'], $_ENV['ENCRYPTION_KEY']);
+        }
+    }
+
+    /**
+     * A key of exactly 32 chars must be accepted outside development.
+     */
+    public function testResolveEncryptionKeyAcceptsThirtyTwoCharKeyOutsideDevelopment(): void
+    {
+        $_ENV['APP_ENV'] = 'production';
+        $_ENV['ENCRYPTION_KEY'] = str_repeat('k', 32);
+
+        try {
+            $this->assertSame(str_repeat('k', 32), TotpService::resolveEncryptionKey());
+        } finally {
+            unset($_ENV['APP_ENV'], $_ENV['ENCRYPTION_KEY']);
+        }
+    }
+
+    /**
+     * Development must remain unaffected: a short (or the well-known dev
+     * default) key is still fine there.
+     */
+    public function testResolveEncryptionKeyAcceptsShortKeyInDevelopment(): void
+    {
+        $_ENV['APP_ENV'] = 'development';
+        $_ENV['ENCRYPTION_KEY'] = 'short';
+
+        try {
+            $this->assertSame('short', TotpService::resolveEncryptionKey());
+        } finally {
+            unset($_ENV['APP_ENV'], $_ENV['ENCRYPTION_KEY']);
+        }
     }
 }

@@ -178,6 +178,29 @@ final class CorePermissions
     public const NOTIFICATIONS_MANAGE = 'notifications:manage';
     public const NOTIFICATION_SETTINGS_MANAGE = 'notification_settings:manage';
 
+    // Password-reset approval queue (WC-password-reset-2fa-recovery). Gates the
+    // admin review of pending SELF-SERVICE password-reset requests staged for
+    // approval (auth.password_reset_approval_required) — list/approve/reject.
+    // Deliberately narrow and distinct from USERS_WRITE (too broad — grants
+    // full user mutation, not just reviewing a staged credential change) and
+    // from SECURITY_MANAGE (a different, unrelated policy surface). Unlike
+    // REGISTRATIONS_APPROVE, this is NOT system-tenant-restricted: the
+    // requesting user's account and its tenant already exist, so their OWN
+    // tenant's admin (any tenant) reviews it — the handler scopes the queue to
+    // tenants where the requester holds an active membership.
+    public const PASSWORD_RESETS_APPROVE = 'password_resets:approve';
+
+    // 2FA-recovery approval queue (WC-password-reset-2fa-recovery). Gates the
+    // admin review of "I lost my 2FA device" recovery requests: list/approve/
+    // reject, and the optional admin-direct-force fallback (no prior request).
+    // Approving CLEARS the target profile's 2FA (mirrors TwoFactorHandler::
+    // disable(), applied to the TARGET, not the caller) and issues a fresh
+    // password-reset link — a genuinely account-takeover-adjacent capability,
+    // so it is kept intentionally distinct and narrow rather than folded into
+    // PASSWORD_RESETS_APPROVE or SECURITY_MANAGE. Tenant-scoped like
+    // PASSWORD_RESETS_APPROVE above, not system-tenant-restricted.
+    public const TWO_FACTOR_RECOVERY_APPROVE = 'two_factor_recovery:approve';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -232,6 +255,8 @@ final class CorePermissions
             self::JOBS_READ,
             self::NOTIFICATIONS_MANAGE,
             self::NOTIFICATION_SETTINGS_MANAGE,
+            self::PASSWORD_RESETS_APPROVE,
+            self::TWO_FACTOR_RECOVERY_APPROVE,
         ];
     }
 }
