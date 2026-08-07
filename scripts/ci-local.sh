@@ -49,6 +49,7 @@ JOB=""
 USE_CLEAN=0
 USE_FRESH=0
 CLEAN_WORKTREE=""
+WROTE_ENV=0
 
 for arg in "$@"; do
   case "$arg" in
@@ -68,7 +69,17 @@ cleanup() {
   dc down --remove-orphans >/dev/null 2>&1 || true
   # Never leave the CI .env or a half-written spec behind in a real checkout.
   if [ -n "${CI_LOCAL_SRC:-}" ] && [ "$USE_CLEAN" -eq 0 ]; then
-    rm -f "$CI_LOCAL_SRC/.env.ci-local" "$CI_LOCAL_SRC/public/openapi.json.ci-local-orig"
+    # Restore the spec if we died mid-drift-check, and drop the coverage
+    # artifact phpunit writes into the checkout. A run must never leave the
+    # working copy dirty — a local gate you have to `git checkout --` after is
+    # a gate people stop running.
+    if [ -e "$CI_LOCAL_SRC/public/openapi.json.ci-local-orig" ]; then
+      mv "$CI_LOCAL_SRC/public/openapi.json.ci-local-orig" "$CI_LOCAL_SRC/public/openapi.json"
+    fi
+    # Only the .env WE wrote — job_pg refuses to start when one already
+    # exists, but a crash between that check and here must not eat it.
+    if [ "$WROTE_ENV" -eq 1 ]; then rm -f "$CI_LOCAL_SRC/.env"; fi
+    rm -f "$CI_LOCAL_SRC/coverage.xml"
   fi
   if [ -n "$CLEAN_WORKTREE" ] && [ -d "$CLEAN_WORKTREE" ]; then
     rm -rf "$(dirname "$CLEAN_WORKTREE")" 2>/dev/null || true
@@ -162,7 +173,11 @@ job_unit() {
     mv "$CI_LOCAL_SRC/public/openapi.json.ci-local-orig" "$CI_LOCAL_SRC/public/openapi.json"
     fail "public/openapi.json is stale — run generate:openapi, commit it, and regenerate web/lib/api/schema.d.ts (cd web && npm run generate:api)"
   fi
-  rm -f "$CI_LOCAL_SRC/public/openapi.json.ci-local-orig"
+  # Put the ORIGINAL back even on success. generate:openapi rewrote the file
+  # in place, and on Windows that silently swaps its CRLF endings for LF —
+  # leaving `git status` dirty with a 22k-line whitespace diff after a run that
+  # found nothing wrong. Content is already proven identical at this point.
+  mv "$CI_LOCAL_SRC/public/openapi.json.ci-local-orig" "$CI_LOCAL_SRC/public/openapi.json"
 
   job_phpstan
 
