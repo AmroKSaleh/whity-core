@@ -19,6 +19,7 @@ class CliRunner
         'totp'       => 'Whity\Cli\Commands\TotpCommand',
         'queue:work' => 'Whity\Cli\Commands\QueueWorkCommand',
         'schedule:run' => 'Whity\Cli\Commands\ScheduleRunCommand',
+        'scale:seed' => 'Whity\Cli\Commands\ScaleSeedCommand',
     ];
 
     /**
@@ -76,7 +77,8 @@ class CliRunner
         echo "  tenant     Manage tenants (list, create, update, delete)\n";
         echo "  totp       TOTP secret maintenance (reencrypt legacy secrets)\n";
         echo "  queue:work Run the durable async job worker loop\n";
-        echo "  schedule:run Run the cron-tick scheduler (exactly-once per minute across workers)\n\n";
+        echo "  schedule:run Run the cron-tick scheduler (exactly-once per minute across workers)\n";
+        echo "  scale:seed Bulk-insert a parameterized, deterministic large-scale multi-tenant dataset\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }

@@ -435,9 +435,15 @@ export default function LoginPage() {
 
               {/* Password Field */}
               <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">
-                  Password
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="password" className="text-sm font-medium">
+                    Password
+                  </label>
+                  {/* WC-password-reset-2fa-recovery: self-service reset entry point. */}
+                  <Link href="/forgot-password" className="text-xs font-medium text-primary hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
                 <Input
                   id="password"
                   type="password"
@@ -474,6 +480,16 @@ export default function LoginPage() {
                 New here?{' '}
                 <Link href="/register" className="font-medium text-primary hover:underline">
                   Create a workspace
+                </Link>
+              </p>
+
+              {/* WC-password-reset-2fa-recovery: a user who ALSO lost their 2FA
+                  device (so "Forgot password?" alone can't get them back in)
+                  needs this reachable from login too. */}
+              <p className="text-sm text-center text-muted-foreground">
+                Lost your authenticator too?{' '}
+                <Link href="/account-recovery" className="font-medium text-primary hover:underline">
+                  Recover your account
                 </Link>
               </p>
 

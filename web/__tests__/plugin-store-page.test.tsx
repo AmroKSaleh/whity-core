@@ -75,7 +75,7 @@ test('shows Access Denied without plugins:read', () => {
 test('shows the disabled state when no stores are configured', async () => {
   routeGet(allowedResponse(false, []));
   render(<PluginStorePage />);
-  expect(await screen.findByText(/No trusted stores configured/i)).toBeInTheDocument();
+  expect(await screen.findByText(/Plugin store disabled/i)).toBeInTheDocument();
 });
 
 test('browses the store and renders plugin cards', async () => {

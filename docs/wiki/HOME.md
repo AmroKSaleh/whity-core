@@ -21,6 +21,7 @@ Welcome to the Whity Core documentation.
 - **[Family Relations](RELATIONS.md)** — Person-node graph, relationship types, the relations API + admin hub.
 - **[Document & Label Designer](Document-Designer.md)** — WYSIWYG designer for docs/labels: multi-page, variable-data batch (serials/CSV), N-up sheets, reusable blocks, starters, RTL; model, rendering, and the backend persistence/PDF contract.
 - **[Navigation Customization](Navigation-Customization.md)** — Design for a customizable sidebar: tenant default layout + per-user overrides gated by a tenant setting; server resolves RBAC ∩ tenant ∩ user.
+- **[Feature Flags](Feature-Flags.md)** — The `SettingsRegistry`-based capability toggle mechanism: how a flag gates code, the generic admin page, the recipe for adding a new one, and the current inventory.
 
 ## Contributing
 

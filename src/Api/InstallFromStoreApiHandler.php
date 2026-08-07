@@ -24,7 +24,13 @@ use Whity\Core\Settings\SettingsService;
  * {@see PluginInstaller} pipeline as a manual upload.
  *
  * SECURITY — this endpoint makes the SERVER fetch an operator-supplied URL, so
- * SSRF is the headline risk. Two layers:
+ * SSRF is the headline risk. Three layers, checked in order (all reachable
+ * WITHOUT a live store — every negative path returns before any outbound call):
+ *   0. MASTER SWITCH (WC-feature-flags-audit) — `plugins.store_enabled`
+ *      (default 'true'). An additional global kill-switch, same shape as
+ *      `auth.sso_enabled`: lets an operator instantly disable the WHOLE store
+ *      integration (install-from-store + the catalogue browser) without losing
+ *      the allowlist below. Checked FIRST, before the allowlist itself.
  *   1. PRIMARY — an operator ALLOWLIST of trusted store hosts
  *      (`plugins.store_allowed_hosts`). Empty ⇒ the feature is OFF (403). The
  *      store URL's host must EXACTLY match an allowlisted host, so the server can
@@ -153,7 +159,10 @@ final class InstallFromStoreApiHandler
 
         return Response::json([
             'data' => [
-                'enabled' => $hosts !== [],
+                // Both gates must pass: the operator master switch AND a
+                // non-empty allowlist. Reported together so the admin UI shows
+                // one clear signal regardless of which gate is actually closed.
+                'enabled' => $this->storeEnabled() && $hosts !== [],
                 'hosts' => $hosts,
             ],
         ]);
@@ -262,6 +271,17 @@ final class InstallFromStoreApiHandler
      */
     private function resolveStoreOrigin(string $storeUrl): array
     {
+        // Master switch FIRST (WC-feature-flags-audit): checked before the
+        // allowlist itself, and before anything else in this method, so a
+        // disabled instance never even evaluates the allowlist — mirrors
+        // DocumentRenderApiHandler's flag-first pattern.
+        if (!$this->storeEnabled()) {
+            return [null, Response::error(
+                'Installing from a store is disabled on this instance.',
+                403
+            )];
+        }
+
         $allowed = $this->allowedHosts();
         if ($allowed === []) {
             return [null, Response::error(
@@ -290,6 +310,17 @@ final class InstallFromStoreApiHandler
         }
 
         return ['https://' . $host, null];
+    }
+
+    /**
+     * The operator master switch (WC-feature-flags-audit): read fresh per
+     * request, like {@see SsoAuthHandler::ssoEnabled()}. Default 'true' — see
+     * {@see SettingsRegistry::PLUGINS_STORE_ENABLED} for why the default is
+     * opt-out rather than opt-in.
+     */
+    private function storeEnabled(): bool
+    {
+        return ($this->settings->getGlobal()[SettingsRegistry::PLUGINS_STORE_ENABLED] ?? 'true') === 'true';
     }
 
     /**

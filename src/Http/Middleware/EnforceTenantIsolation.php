@@ -97,6 +97,15 @@ class EnforceTenantIsolation
         // EmailVerificationHandler rate-limits + audits; no tenant to resolve.
         '/api/v1/email/request-verification',
         '/api/v1/email/verify',
+        // WC-password-reset-2fa-recovery: public self-service "forgot password"
+        // (a locked-out user has no session) and the "lost my 2FA device"
+        // recovery-request submission + confirmation. All four are
+        // rate-limited + generic-response by PasswordResetHandler /
+        // TwoFactorRecoveryHandler; no tenant to resolve.
+        '/api/v1/auth/password/forgot',
+        '/api/v1/auth/password/reset',
+        '/api/v1/auth/2fa-recovery/request',
+        '/api/v1/auth/2fa-recovery/confirm',
         // ADR 0005 §6: multi-membership tenant selection. Public like login/2fa —
         // the caller holds only the short-lived selection cookie (no session yet);
         // AuthHandler::handleSelectTenant re-validates membership before minting.
@@ -141,6 +150,11 @@ class EnforceTenantIsolation
         // TenantContext inside the dispatcher. The standard access-token flow
         // would reject an mcp token here, so /mcp bypasses tenant resolution.
         '/mcp',
+        // i18n: public endpoints for language/translation discovery. Clients must
+        // fetch available languages and translations before auth is possible
+        // (to render the UI in the correct language during login). The settings
+        // endpoint (/api/v1/settings/language) remains authenticated for updates.
+        '/api/v1/languages',
     ];
 
     /**
@@ -159,6 +173,10 @@ class EnforceTenantIsolation
         // (a pre-login user has no session/tenant); the OIDC state/nonce/PKCE flow
         // is the safeguard, and the callback logs in only an already-linked identity.
         '/api/v1/auth/sso/',
+        // i18n: public translation fetching endpoint. Path includes {language_code}
+        // and {domain} segments, so a prefix check is used. Clients fetch
+        // translations before auth is available (to render UI in correct language).
+        '/api/v1/translations/',
     ];
 
     /**

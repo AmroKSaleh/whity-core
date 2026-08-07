@@ -481,19 +481,38 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_READ,
     ];
     $items[] = [
-        'id' => 'pending-registrations',
-        'label' => 'Pending Registrations',
+        'id' => 'documents',
+        'label' => 'Document Designer',
+        'href' => '/admin/documents',
+        'icon' => 'file-text',
+        'group' => 'admin',
+        'order' => 9.2,
+        // WC-docdesigner: the document/label template designer. Mirrors GET
+        // /api/document-templates (DocumentTemplatesApiHandler), gated on
+        // documents:read. The nav item carries the requirement so a
+        // permission-aware client hides it; the page/API also enforce it
+        // server-side (write/publish/render are separately gated).
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
+    ];
+    $items[] = [
+        'id' => 'approval-gating',
+        'label' => 'Approval Gating',
         'href' => '/admin/registrations',
         'icon' => 'user-check',
         'group' => 'admin',
         'order' => 9.5,
-        // WC-235: system-tenant governance surface. Mirrors GET
-        // /api/v1/registrations/pending, gated on registrations:approve AND the
-        // system tenant (id 0) — a regular tenant admin holds the permission in
-        // its own tenant but must never approve another workspace's owner, so
-        // the item is hidden for them (the page also enforces both server-side).
-        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::REGISTRATIONS_APPROVE,
-        'systemTenantOnly' => true,
+        // WC-password-reset-2fa-recovery: unified admin page (tabs: Signup /
+        // Password reset / 2FA auth reset — see web/app/(protected)/admin/
+        // approval-gating/). The first tab, at this href, is the WC-235
+        // pending-registrations queue (folded in unchanged: system-tenant +
+        // registrations:approve). Gated here on the broad 'admin' ROLE rather
+        // than any single one of the three underlying permissions, since a
+        // tenant admin who holds ONLY password_resets:approve or
+        // two_factor_recovery:approve (never registrations:approve, and never
+        // acting in the system tenant) must still see this entry to reach
+        // their own tab — each tab enforces its OWN precise permission +
+        // tenant/system-tenant scope server-side regardless of nav visibility.
+        'requiredRole' => 'admin',
     ];
     $items[] = [
         'id' => 'ai-principals',
@@ -838,6 +857,78 @@ $router->register('POST', '/api/auth/2fa/disable', [$twoFactorHandler, 'disable'
 $router->register('POST', '/api/auth/2fa/regenerate-codes', [$twoFactorHandler, 'regenerateCodes'], null);
 $router->register('GET', '/api/auth/2fa/status', [$twoFactorHandler, 'status'], null);
 
+// 10c. Forgotten-password + "lost my 2FA device" recovery
+// (WC-password-reset-2fa-recovery). Public, unauthenticated, rate-limited
+// endpoints (mirroring the WC-235 email-verification wiring above) plus the
+// tenant-scoped admin approval queues.
+$passwordResetService = new \Whity\Core\Identity\PasswordResetService($db->getPdo());
+$resetUrlBase = (string) ($_ENV['PASSWORD_RESET_URL'] ?? getenv('PASSWORD_RESET_URL')
+    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/reset-password'));
+$passwordResetMailer = new \Whity\Core\Identity\PasswordResetMailer(
+    $mailer,
+    $resetUrlBase,
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService
+);
+$passwordResetHandler = new \Whity\Api\PasswordResetHandler(
+    $passwordResetService,
+    $profileEmailRepository,
+    $passwordResetMailer,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger,
+    $settingsService
+);
+$router->register('POST', '/api/auth/password/forgot', [$passwordResetHandler, 'forgot'], null);
+$router->register('POST', '/api/auth/password/reset', [$passwordResetHandler, 'reset'], null);
+
+$passwordResetApprovalsHandler = new \Whity\Api\PasswordResetApprovalsApiHandler(
+    $passwordResetService,
+    $roleChecker,
+    $auditLogger,
+    $passwordResetMailer
+);
+$router->register('GET',  '/api/password-resets/pending',      [$passwordResetApprovalsHandler, 'listPending'], null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
+$router->register('POST', '/api/password-resets/{id:\d+}/approve', [$passwordResetApprovalsHandler, 'approve'], null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
+$router->register('POST', '/api/password-resets/{id:\d+}/reject',  [$passwordResetApprovalsHandler, 'reject'],  null, null, CorePermissions::PASSWORD_RESETS_APPROVE);
+
+$twoFactorRecoveryService = new \Whity\Core\Identity\TwoFactorRecoveryService(
+    $db->getPdo(),
+    $passwordResetService,
+    $backupCodesService
+);
+$twoFactorRecoveryConfirmUrlBase = (string) ($_ENV['TWO_FACTOR_RECOVERY_URL'] ?? getenv('TWO_FACTOR_RECOVERY_URL')
+    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/account-recovery'));
+$twoFactorRecoveryMailer = new \Whity\Core\Identity\TwoFactorRecoveryMailer(
+    $mailer,
+    $twoFactorRecoveryConfirmUrlBase,
+    new \Whity\Core\Mail\EmailLayout(),
+    $settingsService
+);
+$twoFactorRecoveryHandler = new \Whity\Api\TwoFactorRecoveryHandler(
+    $twoFactorRecoveryService,
+    $profileEmailRepository,
+    $twoFactorRecoveryMailer,
+    new DatabaseSharedStore($db->getPdo()),
+    $auditLogger,
+    $settingsService
+);
+$router->register('POST', '/api/auth/2fa-recovery/request', [$twoFactorRecoveryHandler, 'request'], null);
+$router->register('POST', '/api/auth/2fa-recovery/confirm', [$twoFactorRecoveryHandler, 'confirm'], null);
+
+$twoFactorRecoveryApprovalsHandler = new \Whity\Api\TwoFactorRecoveryApprovalsApiHandler(
+    $twoFactorRecoveryService,
+    $roleChecker,
+    $auditLogger,
+    $passwordResetMailer
+);
+$router->register('GET',  '/api/2fa-recovery/pending',           [$twoFactorRecoveryApprovalsHandler, 'listPending'], null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+$router->register('POST', '/api/2fa-recovery/{id:\d+}/approve',  [$twoFactorRecoveryApprovalsHandler, 'approve'],     null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+$router->register('POST', '/api/2fa-recovery/{id:\d+}/reject',   [$twoFactorRecoveryApprovalsHandler, 'reject'],      null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+// Secondary fallback (no prior request): an admin forces the same primitive
+// directly onto a named profile, e.g. when the locked-out user cannot even
+// receive email and reaches an admin out-of-band.
+$router->register('POST', '/api/2fa-recovery/force-reset',       [$twoFactorRecoveryApprovalsHandler, 'forceReset'],  null, null, CorePermissions::TWO_FACTOR_RECOVERY_APPROVE);
+
 // 11. Register API handlers
 $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
 // WC-203: gate users routes on fine-grained permission grants instead of the
@@ -1043,6 +1134,44 @@ $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlob
 // /api/navigation's permission-free registration.
 $router->register('GET', '/api/settings/tabs', [$settingsHandler, 'tabs']);
 
+// 12. Languages API (WC-i18n). i18n language management and user language preference.
+// GET /api/v1/languages — public endpoint, returns list of available languages (no auth required).
+// GET /api/v1/settings/language — authenticated, returns user's language preference.
+// PATCH /api/v1/settings/language — authenticated, updates user's language preference.
+// Language preference is stored per-profile (language_code column) and follows the user across
+// all tenant memberships. NULL = use tenant default, explicit code = user's choice.
+$languageRepository = new \Whity\Core\i18n\LanguageRepository($db->getPdo());
+$translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo());
+$languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
+    $languageRepository,
+    $translationRepository,
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+);
+// A missing/unseeded languages table must not take the whole API down: the
+// registry falls back to returning the key itself, so boot failure degrades
+// translation only.
+try {
+    $languageRegistry->boot();
+} catch (\Throwable $e) {
+    error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
+}
+
+// Registered versioned (bare paths) so the router prepends /v1 itself —
+// writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
+$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
+$router->register('GET',   '/api/languages',         [$languagesHandler, 'list'],          null);
+$router->register('GET',   '/api/settings/language', [$languagesHandler, 'getLanguage'],   null);
+$router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchLanguage'], null);
+
+// Translations API handler — public endpoint for fetching translated strings
+// before a session exists (the login screen needs its own language).
+$translationsHandler = new \Whity\Api\TranslationsApiHandler(
+    $languageRepository,
+    $translationRepository,
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+);
+$router->register('GET', '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
+
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved
 // app_settings key, NOT a registry setting). GET /instance/status is authenticated
@@ -1145,9 +1274,11 @@ $router->register('GET', '/api/subscription',                  [$subscriptionHan
 // documents:write on writes) is the baseline; the handler ADDITIONALLY row-
 // filters list/get by scope + required_permission (server-side, so a caller only
 // receives templates it may see) and gates publishing on documents:publish.
+$documentTemplateRepository = new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo());
+$documentAccessPolicy = new \Whity\Core\Document\DocumentAccessPolicy();
 $documentTemplatesHandler = new \Whity\Api\DocumentTemplatesApiHandler(
-    new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo()),
-    new \Whity\Core\Document\DocumentAccessPolicy(),
+    $documentTemplateRepository,
+    $documentAccessPolicy,
     $roleChecker
 );
 $router->register('GET',    '/api/document-templates',          [$documentTemplatesHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
@@ -1155,6 +1286,69 @@ $router->register('POST',   '/api/document-templates',          [$documentTempla
 $router->register('GET',    '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PATCH',  '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
+
+// 13a-septies. Document/label designer BLOCKS API (WC-521) — mirrors the
+// templates handler above exactly. The one thing beyond CRUD is the reference-
+// integrity delete guard: a block is pointer-referenced by templates via a
+// `blockInstance` element, so delete() 409s when DocumentTemplateRepository::
+// referencesBlock() finds a live reference anywhere in the tenant's templates
+// (never silently orphans the pointer).
+$documentBlockRepository = new \Whity\Core\Document\DocumentBlockRepository($db->getPdo());
+$documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
+    $documentBlockRepository,
+    $documentTemplateRepository,
+    $documentAccessPolicy,
+    $roleChecker
+);
+$router->register('GET',    '/api/document-blocks',          [$documentBlocksHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-blocks',          [$documentBlocksHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
+
+// 13a-nonies. Server-side document/label render (ADR 0012 / WC-docdesigner
+// Track 2): POST /api/document-templates/{id}/render calls out to the separate
+// `whity_render` Docker service (headless Chromium + Puppeteer, opt-in `render`
+// compose profile) over internal HTTP, streaming back a PDF. The handler checks
+// the documents.render_enabled GLOBAL setting FIRST (default off — a heavyweight
+// optional add-on) before ever attempting the call; batch limits are tenant-
+// overridable settings, not hardcoded. RENDER_SERVICE_URL/RENDER_SHARED_SECRET
+// are deployment config (like JWT_SECRET), not settings — an unset/short secret
+// makes the client report itself unusable and every render 503s cleanly rather
+// than calling out with no auth.
+$documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
+    $documentTemplateRepository,
+    $documentBlockRepository,
+    $documentAccessPolicy,
+    $roleChecker,
+    $settingsService,
+    new \Whity\Core\Document\Render\RenderServiceClient(
+        (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
+        (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
+        (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
+    )
+);
+$router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
+
+// 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
+// a brand-new tenant should never open the designer to an empty library. The
+// SYNC 'tenant.created' hook (not '.async') is used deliberately — seeding
+// must complete before the tenant-creation response returns, same as the
+// AuditLogger audit-log write already subscribed to this same event just
+// above (so a sync DB-writing listener on this hook is an established
+// pattern, not a first use). Wrapped in its own try/catch AND
+// DocumentStarterSeeder::seedForTenant() itself never throws (see its
+// docblock) — a seeding failure must never turn a successful tenant creation
+// into a 500 for the caller.
+$documentStarterSeeder = new \Whity\Core\Document\DocumentStarterSeeder(
+    $documentTemplateRepository,
+    $documentBlockRepository,
+    $logger
+);
+$hookManager->listen('tenant.created', function ($data, $context) use ($documentStarterSeeder) {
+    $documentStarterSeeder->seedForTenant((int) $data['id'], (string) ($data['name'] ?? ''));
+    return $data;
+});
 
 // 13b-ter. Native taxonomy/tagging API (WC-621): a domain-neutral tagging
 // primitive. Tenant-scoped, RBAC-gated CRUD for tag groups + tags, plus a
@@ -1664,6 +1858,15 @@ if ($isWorker) {
                 \Whity\Core\Tenant\TenantContext::reset();
                 // Reset the audit actor/IP context for the same reason (WC-34).
                 AuditContext::reset();
+                // RoleChecker's effective-permission cache is PROCESS-level, so
+                // it outlives the request that filled it. Every mutating write
+                // calls RoleChecker::clearCache(), but that only clears the ONE
+                // worker that served the write — the other workers keep serving
+                // the stale set until they recycle. That means a granted
+                // permission can stay invisible and, worse, a REVOKED one can
+                // stay live. Scope the cache to the request instead; it still
+                // de-duplicates the repeated resolutions within a single one.
+                RoleChecker::clearCache();
                 // DB session hygiene (WC-21/PR #84): after the response is sent,
                 // roll back any dangling transaction and DISCARD ALL session-local
                 // state on the shared worker connection so nothing request-specific
@@ -1777,6 +1980,9 @@ if ($isWorker) {
     } finally {
         \Whity\Core\Tenant\TenantContext::reset();
         AuditContext::reset();
+        // Same reasoning as the worker loop above: the effective-permission
+        // cache must not outlive the request that filled it.
+        RoleChecker::clearCache();
     }
 }
 
