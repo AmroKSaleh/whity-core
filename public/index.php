@@ -1858,6 +1858,15 @@ if ($isWorker) {
                 \Whity\Core\Tenant\TenantContext::reset();
                 // Reset the audit actor/IP context for the same reason (WC-34).
                 AuditContext::reset();
+                // RoleChecker's effective-permission cache is PROCESS-level, so
+                // it outlives the request that filled it. Every mutating write
+                // calls RoleChecker::clearCache(), but that only clears the ONE
+                // worker that served the write — the other workers keep serving
+                // the stale set until they recycle. That means a granted
+                // permission can stay invisible and, worse, a REVOKED one can
+                // stay live. Scope the cache to the request instead; it still
+                // de-duplicates the repeated resolutions within a single one.
+                RoleChecker::clearCache();
                 // DB session hygiene (WC-21/PR #84): after the response is sent,
                 // roll back any dangling transaction and DISCARD ALL session-local
                 // state on the shared worker connection so nothing request-specific
@@ -1971,6 +1980,9 @@ if ($isWorker) {
     } finally {
         \Whity\Core\Tenant\TenantContext::reset();
         AuditContext::reset();
+        // Same reasoning as the worker loop above: the effective-permission
+        // cache must not outlive the request that filled it.
+        RoleChecker::clearCache();
     }
 }
 
