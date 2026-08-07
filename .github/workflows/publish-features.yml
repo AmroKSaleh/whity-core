@@ -1,0 +1,56 @@
+name: Publish @amroksaleh/features
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/features/**"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@amroksaleh"
+
+      - name: Install dependencies
+        working-directory: packages/features
+        run: npm install
+
+      # Mirrors packages/ui's guard (publish-ui.yml): this package is the
+      # extraction target for web/'s feature UI onto non-Next clients
+      # (Tauri/Vite SPA, Flutter) — a Next-only import here would silently
+      # break that promise for every consumer.
+      - name: Guard against Next.js-only imports
+        working-directory: packages/features
+        run: |
+          if grep -rEn "from ['\"]next/" src --include="*.tsx" --include="*.ts"; then
+            echo "::error::A packages/features component imports a Next.js-only module (next/*). This package must stay usable from a plain Vite/Tauri SPA — remove the Next-specific dependency (inject as a prop/adapter instead)."
+            exit 1
+          fi
+          echo "No Next.js-only imports found."
+
+      # Idempotent publish, same rationale as publish-ui.yml: a push touching
+      # packages/features without a version bump must not fail the build.
+      - name: Publish if the version is new
+        working-directory: packages/features
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::$NAME@$VERSION is already published — skipping. Bump the version in packages/features/package.json to publish a new release."
+          else
+            echo "Publishing $NAME@$VERSION"
+            npm publish
+          fi

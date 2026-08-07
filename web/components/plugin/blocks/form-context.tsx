@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import type { Block, FormBlock } from '@/lib/plugin-features';
+import type { Block, FormBlock, LocalizedTextValue } from '@/lib/plugin-features';
 import { apiClient } from '@/lib/api-client';
 import { submitPluginAction, type ActionIssue } from '@/lib/plugin-action-submit';
 import { useToast } from '@/lib/toast-context';
@@ -19,10 +19,20 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 /** Sentinel: when a sensitive field holds this value, it is omitted from the submit payload. */
 export const SENSITIVE_SENTINEL = '••••••';
 
+/** A `fieldArray` (WC-532 A2) value: an ordered list of per-row sub-records. */
+export type FieldArrayValue = Record<string, string | boolean | LocalizedTextValue>[];
+
+/**
+ * A single form field's value. Most inputs are `string | boolean`; a
+ * `bilingualText` input (WC-532 A4) holds a `{ar?, en?}` object; a `fieldArray`
+ * (WC-532 A2) holds an array of row records.
+ */
+export type FormValue = string | boolean | LocalizedTextValue | FieldArrayValue;
+
 /** The value shape exposed to all form descendants via context. */
 export interface FormBlockContextValue {
-  values: Record<string, string | boolean>;
-  setValue(name: string, value: string | boolean): void;
+  values: Record<string, FormValue>;
+  setValue(name: string, value: FormValue): void;
   errors: Record<string, string>;
   isSubmitting: boolean;
   submit(): void;
@@ -36,6 +46,22 @@ const FormBlockContext = React.createContext<FormBlockContextValue | null>(null)
  */
 export function useFormBlockContext(): FormBlockContextValue | null {
   return React.useContext(FormBlockContext);
+}
+
+/**
+ * WC-532 A2: provide a scoped form context to a subtree. A `fieldArray` uses
+ * this to give each row its own `{values, setValue}` (backed by that row's
+ * slice of the array) so the ORDINARY input renderers work unchanged inside a
+ * row — their `name`s resolve against the row record, not the outer form.
+ */
+export function FormScopeProvider({
+  value,
+  children,
+}: {
+  value: FormBlockContextValue;
+  children: React.ReactNode;
+}) {
+  return <FormBlockContext.Provider value={value}>{children}</FormBlockContext.Provider>;
 }
 
 // ---- helpers ----
@@ -102,6 +128,9 @@ const FORM_INPUT_TYPES = [
   'dateInput',
   'fileInput',
   'colorInput',
+  'bilingualText',
+  'referenceSelect',
+  'richTextInput',
 ] as const;
 
 /**
@@ -122,6 +151,13 @@ function collectFormInputs(blocks: Block[]): Block[] {
     if (block.type === 'form') {
       continue;
     }
+    if (block.type === 'fieldArray') {
+      // WC-532 A2: a fieldArray owns ONE flat value (its row array) keyed by
+      // its own name — include it, but never flatten its per-row template
+      // inputs into the outer form (their names are row-scoped).
+      inputs.push(block);
+      continue;
+    }
     const nested = (block as { children?: unknown }).children;
     if (Array.isArray(nested)) {
       inputs.push(...collectFormInputs(nested as Block[]));
@@ -138,13 +174,23 @@ function collectFormInputs(blocks: Block[]): Block[] {
  */
 function collectDefaults(
   children: FormBlock['children']
-): Record<string, string | boolean> {
-  const defaults: Record<string, string | boolean> = {};
+): Record<string, FormValue> {
+  const defaults: Record<string, FormValue> = {};
   for (const input of collectFormInputs(children)) {
-    if (input.type === 'checkbox') {
+    if (input.type === 'fieldArray') {
+      // Seed `min` empty rows (each with the template's own defaults) so a
+      // required-min array starts populated; 0 min → an empty array.
+      const min = typeof input.min === 'number' && input.min > 0 ? input.min : 0;
+      const rowDefault = collectDefaults(input.children) as FieldArrayValue[number];
+      defaults[input.name] = Array.from({ length: min }, () => ({ ...rowDefault }));
+    } else if (input.type === 'checkbox') {
       if (typeof input.default === 'boolean') {
         defaults[input.name] = input.default;
       }
+    } else if (input.type === 'bilingualText') {
+      // Seed an empty {ar, en} so the field exists in the value map and the
+      // renderer/required-check have a stable object to read.
+      defaults[input.name] = {};
     } else if (
       input.type === 'textInput' ||
       input.type === 'textArea' ||
@@ -152,7 +198,9 @@ function collectDefaults(
       input.type === 'select' ||
       input.type === 'slider' ||
       input.type === 'dateInput' ||
-      input.type === 'colorInput'
+      input.type === 'colorInput' ||
+      input.type === 'referenceSelect' ||
+      input.type === 'richTextInput'
     ) {
       if (typeof input.default === 'string') {
         defaults[input.name] = input.default;
@@ -182,7 +230,7 @@ export function FormProvider({
 }) {
   const { addToast } = useToast();
 
-  const [values, setValues] = React.useState<Record<string, string | boolean>>(
+  const [values, setValues] = React.useState<Record<string, FormValue>>(
     () => collectDefaults(block.children)
   );
   const [errors, setErrors] = React.useState<Record<string, string>>({});
@@ -202,7 +250,7 @@ export function FormProvider({
         if (data !== null && typeof data === 'object') {
           setValues((prev) => ({
             ...prev,
-            ...(data as Record<string, string | boolean>),
+            ...(data as Record<string, FormValue>),
           }));
         }
         setIsLoading(false);
@@ -237,7 +285,8 @@ export function FormProvider({
           child.type === 'numberInput' ||
           child.type === 'select' ||
           child.type === 'dateInput' ||
-          child.type === 'fileInput') &&
+          child.type === 'fileInput' ||
+          child.type === 'richTextInput') &&
         child.required === true
       ) {
         const val = values[child.name];
@@ -245,6 +294,25 @@ export function FormProvider({
           typeof val === 'string' ? val.trim() !== '' : val !== undefined;
         if (!filled) {
           newErrors[child.name] = `${child.label} is required`;
+        }
+      } else if (child.type === 'bilingualText' && child.required === true) {
+        // A required bilingual field is satisfied by at least one language
+        // (mirrors the CRUD localized-text rule).
+        const val = values[child.name];
+        const filled =
+          val !== null &&
+          typeof val === 'object' &&
+          !Array.isArray(val) &&
+          ((val.ar ?? '').trim() !== '' || (val.en ?? '').trim() !== '');
+        if (!filled) {
+          newErrors[child.name] = `${child.label} is required`;
+        }
+      } else if (child.type === 'fieldArray' && typeof child.min === 'number' && child.min > 0) {
+        // WC-532 A2: enforce the minimum row count.
+        const val = values[child.name];
+        const count = Array.isArray(val) ? val.length : 0;
+        if (count < child.min) {
+          newErrors[child.name] = `${child.label} needs at least ${child.min} ${child.min === 1 ? 'entry' : 'entries'}`;
         }
       }
     }

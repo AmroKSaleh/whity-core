@@ -23,17 +23,21 @@ final class SettingsRegistryTest extends TestCase
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'mcp.enabled',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
-             'auth.sso_enabled',
+             'auth.self_password_reset_enabled', 'auth.password_reset_approval_required',
+             'auth.self_2fa_recovery_enabled',
+             'auth.sso_enabled', 'auth.desktop_login_max_hours',
              'storage.driver', 'storage.s3.endpoint', 'storage.s3.region', 'storage.s3.bucket',
              'storage.s3.access_key', 'storage.s3.path_style', 'storage.s3.public_base_url',
              'mail.transport', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.encryption',
              'mail.smtp.username', 'mail.from_address', 'mail.from_name',
              'mail.events.welcome_enabled', 'mail.events.approval_enabled',
              'mail.events.invitation_enabled', 'mail.events.verification_enabled',
-             'mail.events.deletion_enabled',
+             'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
-             'plugins.store_allowed_hosts'],
+             'plugins.store_allowed_hosts', 'plugins.store_enabled',
+             'documents.render_enabled', 'documents.render_max_rows',
+             'documents.render_max_pages', 'documents.render_max_template_bytes'],
             SettingsRegistry::keys()
         );
     }
@@ -48,19 +52,33 @@ final class SettingsRegistryTest extends TestCase
     {
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_registration_enabled'));
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.registration_approval_required'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_password_reset_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.password_reset_approval_required'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('auth.self_2fa_recovery_enabled'));
         self::assertTrue(SettingsRegistry::isGlobalOnly('auth.sso_enabled'));
         self::assertFalse(SettingsRegistry::isGlobalOnly('site_name'));
 
         // The per-tenant surface excludes the global-only governance keys.
         self::assertNotContains('auth.self_registration_enabled', SettingsRegistry::tenantTextKeys());
         self::assertNotContains('auth.registration_approval_required', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.self_password_reset_enabled', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.password_reset_approval_required', SettingsRegistry::tenantTextKeys());
+        self::assertNotContains('auth.self_2fa_recovery_enabled', SettingsRegistry::tenantTextKeys());
         self::assertNotContains('auth.sso_enabled', SettingsRegistry::tenantTextKeys());
         self::assertTrue(SettingsRegistry::isGlobalOnly('storage.driver'));
         self::assertNotContains('storage.driver', SettingsRegistry::tenantTextKeys());
         // Only the genuinely tenant-overridable text keys remain: site_name,
-        // timezone, locale, support_email, mcp.enabled.
+        // timezone, locale, support_email, mcp.enabled, the desktop login TTL,
+        // and the three render batch limits (ADR 0012 — a per-tenant ceiling is
+        // meaningful, unlike the render_enabled master switch itself).
         self::assertContains('site_name', SettingsRegistry::tenantTextKeys());
-        self::assertCount(5, SettingsRegistry::tenantTextKeys());
+        self::assertCount(9, SettingsRegistry::tenantTextKeys());
+
+        // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
+        // plain numeric string key.
+        self::assertFalse(SettingsRegistry::isGlobalOnly('auth.desktop_login_max_hours'));
+        self::assertContains('auth.desktop_login_max_hours', SettingsRegistry::tenantTextKeys());
+        self::assertSame('string', SettingsRegistry::typeFor('auth.desktop_login_max_hours'));
 
         // Boolean flags report type 'bool' (clients render a toggle).
         self::assertSame('bool', SettingsRegistry::typeFor('auth.sso_enabled'));
@@ -177,7 +195,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(35, $describe);
+        self::assertCount(45, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
@@ -192,7 +210,7 @@ final class SettingsRegistryTest extends TestCase
                   'mail.smtp.username', 'mail.from_address', 'mail.from_name',
                   'mail.events.welcome_enabled', 'mail.events.approval_enabled',
                   'mail.events.invitation_enabled', 'mail.events.verification_enabled',
-                  'mail.events.deletion_enabled',
+                  'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
                   'mail.brand_color', 'mail.footer_text'] as $key) {
             self::assertTrue(SettingsRegistry::isGlobalOnly($key), "{$key} must be global-only");
             self::assertNotContains($key, SettingsRegistry::tenantTextKeys());
@@ -269,6 +287,69 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotNull(SettingsRegistry::validate('mail.events.welcome_enabled', 'yes'));
     }
 
+    // ---- feature flags (WC-feature-flags-settings-page) ----
+
+    public function testFeatureFlagKeysAreExactlyTheCuratedCapabilityToggles(): void
+    {
+        // Strong candidates: platform capability toggles an operator would
+        // recognise as a "feature flag".
+        self::assertTrue(SettingsRegistry::isFeatureFlag('mcp.enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_registration_enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.registration_approval_required'));
+        // WC-password-reset-2fa-recovery: the three forgotten-password / 2FA-
+        // recovery instance-governance toggles are curated the same way as the
+        // registration toggles above.
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_password_reset_enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.password_reset_approval_required'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.self_2fa_recovery_enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('auth.sso_enabled'));
+        // WC-feature-flags-audit: the plugin-marketplace master switch and the
+        // document render tier's master switch are both genuine heavyweight/
+        // optional-subsystem toggles, curated the same way as the four above.
+        self::assertTrue(SettingsRegistry::isFeatureFlag('plugins.store_enabled'));
+        self::assertTrue(SettingsRegistry::isFeatureFlag('documents.render_enabled'));
+
+        // Weak candidates: booleans, but config detail rather than a platform
+        // capability — deliberately excluded from the curated set.
+        self::assertFalse(SettingsRegistry::isFeatureFlag('storage.s3.path_style'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.welcome_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.approval_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.invitation_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.verification_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.deletion_enabled'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.password_reset_enabled'));
+
+        // Non-boolean and unknown keys are never feature flags.
+        self::assertFalse(SettingsRegistry::isFeatureFlag('site_name'));
+        self::assertFalse(SettingsRegistry::isFeatureFlag('not_a_setting'));
+    }
+
+    public function testDescriptorMarksFeatureFlagKeysWithIsFlagTrueAndOmitsItOtherwise(): void
+    {
+        $byKey = [];
+        foreach (SettingsRegistry::describe() as $d) {
+            $byKey[$d['key']] = $d;
+        }
+
+        self::assertTrue($byKey['mcp.enabled']['isFlag'] ?? null);
+        self::assertTrue($byKey['auth.sso_enabled']['isFlag'] ?? null);
+        self::assertTrue($byKey['plugins.store_enabled']['isFlag'] ?? null);
+        self::assertTrue($byKey['documents.render_enabled']['isFlag'] ?? null);
+
+        // Mirrors the `options` field's shape: absent (not `false`) when the
+        // key is not a feature flag, including for other boolean keys.
+        self::assertArrayNotHasKey('isFlag', $byKey['mail.events.welcome_enabled']);
+        self::assertArrayNotHasKey('isFlag', $byKey['storage.s3.path_style']);
+        self::assertArrayNotHasKey('isFlag', $byKey['site_name']);
+
+        // Exact-shape check (mirrors testDescribePublishesKeyTypeAndDefault):
+        // a flag descriptor is key+type+default+isFlag, nothing more.
+        self::assertSame(
+            ['key' => 'mcp.enabled', 'type' => 'bool', 'default' => 'false', 'isFlag' => true],
+            $byKey['mcp.enabled']
+        );
+    }
+
     // ---- mcp.enabled (WC-149b2fc9) ----
 
     public function testMcpEnabledDefaultIsFalse(): void
@@ -287,5 +368,87 @@ final class SettingsRegistryTest extends TestCase
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', '1'));
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', 'yes'));
         self::assertNotNull(SettingsRegistry::validate('mcp.enabled', ''));
+    }
+
+    // ---- plugins.store_enabled (WC-feature-flags-audit) ----
+
+    public function testPluginsStoreEnabledIsGlobalOnlyBooleanDefaultTrue(): void
+    {
+        // Opt-OUT default (unlike documents.render_enabled's opt-in default):
+        // the allowlist (plugins.store_allowed_hosts, empty by default) is
+        // already the primary off-switch, so this master switch defaults to
+        // 'true' to avoid silently disabling an already-configured deployment.
+        self::assertSame('true', SettingsRegistry::defaultFor('plugins.store_enabled'));
+        self::assertSame('bool', SettingsRegistry::typeFor('plugins.store_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('plugins.store_enabled'));
+        self::assertNotContains('plugins.store_enabled', SettingsRegistry::tenantTextKeys());
+
+        self::assertNull(SettingsRegistry::validate('plugins.store_enabled', 'true'));
+        self::assertNull(SettingsRegistry::validate('plugins.store_enabled', 'false'));
+        self::assertNotNull(SettingsRegistry::validate('plugins.store_enabled', '1'));
+        self::assertNotNull(SettingsRegistry::validate('plugins.store_enabled', ''));
+    }
+
+    public function testPluginsStoreAllowedHostsIsGlobalOnlyFreeformDefaultEmpty(): void
+    {
+        // The allowlist itself is free-form (validated at fetch time by the
+        // handler, not the registry) — empty is the secure-by-default OFF state.
+        self::assertSame('', SettingsRegistry::defaultFor('plugins.store_allowed_hosts'));
+        self::assertSame('string', SettingsRegistry::typeFor('plugins.store_allowed_hosts'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('plugins.store_allowed_hosts'));
+        self::assertNull(SettingsRegistry::validate('plugins.store_allowed_hosts', 'store.example.com'));
+        self::assertNull(SettingsRegistry::validate('plugins.store_allowed_hosts', ''));
+    }
+
+    // ---- documents.render_* (ADR 0012 / WC-docdesigner Track 2) ----
+
+    public function testDocumentsRenderEnabledIsGlobalOnlyBooleanDefaultFalse(): void
+    {
+        self::assertSame('false', SettingsRegistry::defaultFor('documents.render_enabled'));
+        self::assertSame('bool', SettingsRegistry::typeFor('documents.render_enabled'));
+        self::assertTrue(SettingsRegistry::isGlobalOnly('documents.render_enabled'));
+        self::assertNotContains('documents.render_enabled', SettingsRegistry::tenantTextKeys());
+
+        self::assertNull(SettingsRegistry::validate('documents.render_enabled', 'true'));
+        self::assertNull(SettingsRegistry::validate('documents.render_enabled', 'false'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_enabled', '1'));
+    }
+
+    public function testDocumentsRenderLimitsAreTenantOverridableWithSaneDefaults(): void
+    {
+        foreach (['documents.render_max_rows', 'documents.render_max_pages', 'documents.render_max_template_bytes'] as $key) {
+            self::assertFalse(SettingsRegistry::isGlobalOnly($key), "{$key} must be tenant-overridable, not global-only");
+            self::assertContains($key, SettingsRegistry::tenantTextKeys());
+            self::assertSame('string', SettingsRegistry::typeFor($key));
+        }
+
+        self::assertSame('500', SettingsRegistry::defaultFor('documents.render_max_rows'));
+        self::assertSame('2000', SettingsRegistry::defaultFor('documents.render_max_pages'));
+        self::assertSame('2000000', SettingsRegistry::defaultFor('documents.render_max_template_bytes'));
+    }
+
+    public function testDocumentsRenderMaxRowsValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('documents.render_max_rows', '1'));
+        self::assertNull(SettingsRegistry::validate('documents.render_max_rows', '100000'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_rows', '0'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_rows', '100001'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_rows', 'abc'));
+    }
+
+    public function testDocumentsRenderMaxPagesValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('documents.render_max_pages', '1'));
+        self::assertNull(SettingsRegistry::validate('documents.render_max_pages', '1000000'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_pages', '0'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_pages', '1000001'));
+    }
+
+    public function testDocumentsRenderMaxTemplateBytesValidation(): void
+    {
+        self::assertNull(SettingsRegistry::validate('documents.render_max_template_bytes', '1024'));
+        self::assertNull(SettingsRegistry::validate('documents.render_max_template_bytes', (string) (20 * 1024 * 1024)));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_template_bytes', '1023'));
+        self::assertNotNull(SettingsRegistry::validate('documents.render_max_template_bytes', (string) (20 * 1024 * 1024 + 1)));
     }
 }

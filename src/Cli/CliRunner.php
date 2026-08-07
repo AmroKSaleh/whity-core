@@ -13,10 +13,13 @@ class CliRunner
      * @var array<string, string> Map of command names to class names
      */
     private array $commands = [
-        'migrate' => 'Whity\Cli\Commands\MigrationsCommand',
-        'plugin'  => 'Whity\Cli\Commands\PluginsCommand',
-        'tenant'  => 'Whity\Cli\Commands\TenantsCommand',
-        'totp'    => 'Whity\Cli\Commands\TotpCommand',
+        'migrate'    => 'Whity\Cli\Commands\MigrationsCommand',
+        'plugin'     => 'Whity\Cli\Commands\PluginsCommand',
+        'tenant'     => 'Whity\Cli\Commands\TenantsCommand',
+        'totp'       => 'Whity\Cli\Commands\TotpCommand',
+        'queue:work' => 'Whity\Cli\Commands\QueueWorkCommand',
+        'schedule:run' => 'Whity\Cli\Commands\ScheduleRunCommand',
+        'scale:seed' => 'Whity\Cli\Commands\ScaleSeedCommand',
     ];
 
     /**
@@ -72,7 +75,10 @@ class CliRunner
         echo "  migrate    Manage database migrations (status, run, rollback)\n";
         echo "  plugin     Manage plugins (list, enable, disable, reload)\n";
         echo "  tenant     Manage tenants (list, create, update, delete)\n";
-        echo "  totp       TOTP secret maintenance (reencrypt legacy secrets)\n\n";
+        echo "  totp       TOTP secret maintenance (reencrypt legacy secrets)\n";
+        echo "  queue:work Run the durable async job worker loop\n";
+        echo "  schedule:run Run the cron-tick scheduler (exactly-once per minute across workers)\n";
+        echo "  scale:seed Bulk-insert a parameterized, deterministic large-scale multi-tenant dataset\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }

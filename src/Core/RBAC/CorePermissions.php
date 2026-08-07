@@ -154,6 +154,53 @@ final class CorePermissions
     // sets to require 2FA enrollment. Tenant-scoped.
     public const SECURITY_MANAGE = 'security:manage';
 
+    // Native taxonomy/tagging (WC-621). A domain-neutral tagging primitive:
+    // tag groups + tags + polymorphic entity<->tag associations. Tenant-scoped.
+    // read = list/read groups & tags, read an entity's tags, and filter entities
+    // by tag; manage = create/update/delete groups & tags and attach/detach tags
+    // to entities.
+    public const TAGS_READ = 'tags:read';
+    public const TAGS_MANAGE = 'tags:manage';
+
+    // Generic async-job API (WC-jobs-api). Tenant-scoped submission + status.
+    // submit = POST /api/jobs (enqueue an allow-listed job name for this tenant)
+    // and read its own jobs; read = GET /api/jobs/{id} status/progress/result.
+    public const JOBS_SUBMIT = 'jobs:submit';
+    public const JOBS_READ = 'jobs:read';
+
+    // Notification administration (WC-notifications, #4b87abf0). The self-service
+    // inbox + preferences are user-scoped and need NO permission; these gate the
+    // ADMIN surfaces. notification_settings:manage governs a tenant's sender
+    // configuration (from/reply-to, transport, encrypted creds — see
+    // TenantNotificationSettingsApiHandler). notifications:manage governs
+    // managing notifications themselves (e.g. templates administration / broadcast
+    // surfaces as they land).
+    public const NOTIFICATIONS_MANAGE = 'notifications:manage';
+    public const NOTIFICATION_SETTINGS_MANAGE = 'notification_settings:manage';
+
+    // Password-reset approval queue (WC-password-reset-2fa-recovery). Gates the
+    // admin review of pending SELF-SERVICE password-reset requests staged for
+    // approval (auth.password_reset_approval_required) — list/approve/reject.
+    // Deliberately narrow and distinct from USERS_WRITE (too broad — grants
+    // full user mutation, not just reviewing a staged credential change) and
+    // from SECURITY_MANAGE (a different, unrelated policy surface). Unlike
+    // REGISTRATIONS_APPROVE, this is NOT system-tenant-restricted: the
+    // requesting user's account and its tenant already exist, so their OWN
+    // tenant's admin (any tenant) reviews it — the handler scopes the queue to
+    // tenants where the requester holds an active membership.
+    public const PASSWORD_RESETS_APPROVE = 'password_resets:approve';
+
+    // 2FA-recovery approval queue (WC-password-reset-2fa-recovery). Gates the
+    // admin review of "I lost my 2FA device" recovery requests: list/approve/
+    // reject, and the optional admin-direct-force fallback (no prior request).
+    // Approving CLEARS the target profile's 2FA (mirrors TwoFactorHandler::
+    // disable(), applied to the TARGET, not the caller) and issues a fresh
+    // password-reset link — a genuinely account-takeover-adjacent capability,
+    // so it is kept intentionally distinct and narrow rather than folded into
+    // PASSWORD_RESETS_APPROVE or SECURITY_MANAGE. Tenant-scoped like
+    // PASSWORD_RESETS_APPROVE above, not system-tenant-restricted.
+    public const TWO_FACTOR_RECOVERY_APPROVE = 'two_factor_recovery:approve';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -202,6 +249,14 @@ final class CorePermissions
             self::DOCUMENTS_PUBLISH,
             self::DOCUMENTS_RENDER,
             self::SECURITY_MANAGE,
+            self::TAGS_READ,
+            self::TAGS_MANAGE,
+            self::JOBS_SUBMIT,
+            self::JOBS_READ,
+            self::NOTIFICATIONS_MANAGE,
+            self::NOTIFICATION_SETTINGS_MANAGE,
+            self::PASSWORD_RESETS_APPROVE,
+            self::TWO_FACTOR_RECOVERY_APPROVE,
         ];
     }
 }

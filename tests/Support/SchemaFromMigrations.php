@@ -73,6 +73,7 @@ final class SchemaFromMigrations
         }
 
         $pdo = self::buildTranslatingPdo($stringifyFetches);
+        $pdo->sqliteCreateFunction('NOW', static fn(): string => date('Y-m-d H:i:s'), 0);
         self::runMigrations($pdo);
         return $pdo;
     }

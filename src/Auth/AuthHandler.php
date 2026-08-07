@@ -9,6 +9,8 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\RateLimit\ClientIp;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
 use Whity\Http\JsonBody;
 use PDO;
 use PDOStatement;
@@ -103,6 +105,15 @@ class AuthHandler
     private ?TwoFactorPolicyResolver $twoFactorPolicyResolver;
 
     /**
+     * Optional settings service (WC-desktop-ttl). When set, the device-token
+     * exchange ({@see self::handleDeviceTokenExchange()}) resolves and enforces
+     * the tenant's `auth.desktop_login_max_hours` and echoes the resolved
+     * offline-lock window back to the native client. Null disables that
+     * enforcement/echo (keeps existing tests and call sites untouched).
+     */
+    private ?SettingsService $settingsService;
+
+    /**
      * Constructor
      *
      * @param PDO $db Database connection
@@ -132,7 +143,8 @@ class AuthHandler
         ?LoggerInterface $logger = null,
         ?AuditLogger $auditLogger = null,
         ?LoginThrottleService $loginThrottle = null,
-        ?TwoFactorPolicyResolver $twoFactorPolicyResolver = null
+        ?TwoFactorPolicyResolver $twoFactorPolicyResolver = null,
+        ?SettingsService $settingsService = null
     ) {
         $this->db = $db;
         $this->jwtParser = $jwtParser;
@@ -143,6 +155,7 @@ class AuthHandler
         $this->auditLogger = $auditLogger;
         $this->loginThrottle = $loginThrottle;
         $this->twoFactorPolicyResolver = $twoFactorPolicyResolver;
+        $this->settingsService = $settingsService;
     }
 
     /**
@@ -312,7 +325,7 @@ class AuthHandler
         // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1), not tenant-owned
         $profStmt = $this->db->prepare(
             'SELECT id, password_hash, two_factor_enabled, two_factor_secret,
-                    two_factor_backup_codes_version, token_epoch
+                    two_factor_backup_codes_version, token_epoch, status
              FROM profiles
              WHERE id = ?
              LIMIT 1'
@@ -325,6 +338,24 @@ class AuthHandler
             $this->audit('auth.login.failure', $request, null, null, [
                 'email'  => $email,
                 'reason' => 'profile_row_missing',
+            ]);
+            $this->loginThrottle?->recordFailure($profileId, $ip);
+            return Response::error('Invalid credentials', 401);
+        }
+
+        // A deactivated account (WC-user-status, profiles.status = 'inactive')
+        // must never authenticate. Return a GENERIC 401 "Invalid credentials"
+        // (NOT a distinct "account deactivated" message): a deactivation-specific
+        // error is a user-enumeration oracle — it would reveal that the email is
+        // registered but deactivated, exactly like the unverified-email guard
+        // above. Same timing compensation: burn the dummy bcrypt verify BEFORE
+        // the real one so this path costs the same as every other failure.
+        if ((string) ($profile['status'] ?? 'active') === 'inactive') {
+            password_verify(is_string($password) ? $password : '', self::DUMMY_PASSWORD_HASH);
+
+            $this->audit('auth.login.failure', $request, null, $profileId, [
+                'email'  => $email,
+                'reason' => 'profile_inactive',
             ]);
             $this->loginThrottle?->recordFailure($profileId, $ip);
             return Response::error('Invalid credentials', 401);
@@ -726,6 +757,10 @@ class AuthHandler
      *                                               switches are not indistinguishable from logins
      *                                               in the audit trail (WC-f8164c87).
      * @param array<string, mixed> $auditMetadata   Extra audit metadata to attach to the event.
+     * @param array<string, mixed> $extraTokenBody  Extra fields merged into the token-mode JSON
+     *                                               body (e.g. the WC-desktop-ttl offline-lock
+     *                                               window on a device-token exchange). Ignored in
+     *                                               cookie mode.
      */
     private function issueSessionForProfile(
         int $profileId,
@@ -737,7 +772,8 @@ class AuthHandler
         string $auditAction = 'auth.login.success',
         array $auditMetadata = [],
         bool $recordNewSession = false,
-        ?string $rotateSessionFromJti = null
+        ?string $rotateSessionFromJti = null,
+        array $extraTokenBody = []
     ): Response
     {
         // Resolve role from the active membership (post-cutover: no legacy users row).
@@ -838,7 +874,7 @@ class AuthHandler
                 'token_type'    => 'Bearer',
                 'expires_in'    => 900,
                 'user'          => $userShape,
-            ] + $enrollmentNag, 200);
+            ] + $enrollmentNag + $extraTokenBody, 200);
         }
 
         return Response::json(['user' => $userShape] + $enrollmentNag, 200);
@@ -1757,11 +1793,11 @@ class AuthHandler
         //  - Token mode (WC-ddcd16ad): read from Authorization: Bearer header or
         //    the body field "refresh_token". Cookie is tried first so a browser
         //    that accidentally sends both always goes through the cookie path.
+        $rawToken = null;
         if ($tokenMode) {
             // Accept from cookie first (safety), then Bearer, then body.
             $claims = $this->tokenValidator->validateRefreshToken();
             if ($claims === null) {
-                $rawToken = null;
                 $authHeader = $request->getHeader('Authorization');
                 if ($authHeader !== null && preg_match('/^Bearer\s+(\S+)$/', $authHeader, $m) === 1) {
                     $rawToken = $m[1];
@@ -1776,10 +1812,28 @@ class AuthHandler
                     : null;
             }
         } else {
+            $rawToken = CookieManager::getRefreshToken();
             $claims = $this->tokenValidator->validateRefreshToken();
         }
 
         if ($claims === null) {
+            // WC-refresh-reuse: detect reuse attempts by checking if the token's jti
+            // is already in revoked_tokens. If so, it means we've already issued a new
+            // token for this refresh, and this is a reuse attempt → log security event.
+            if ($rawToken !== null) {
+                $parsedToken = $this->jwtParser->parse($rawToken);
+                if ($parsedToken !== null && isset($parsedToken['jti'], $parsedToken['profile_id'], $parsedToken['active_tenant_id'])) {
+                    $jti = $parsedToken['jti'];
+                    $profileId = $parsedToken['profile_id'];
+                    $activeTenantId = $parsedToken['active_tenant_id'];
+                    if (is_string($jti) && is_int($profileId) && is_int($activeTenantId)) {
+                        if ($this->isJtiRevoked($jti)) {
+                            // This token has been reused → log security event
+                            $this->audit('auth.refresh_token_reuse_detected', $request, $activeTenantId, $profileId);
+                        }
+                    }
+                }
+            }
             return Response::error('Unauthorized', 401);
         }
 
@@ -1836,6 +1890,11 @@ class AuthHandler
         $oldRefreshJti = isset($claims['jti']) && is_string($claims['jti']) ? $claims['jti'] : null;
         if ($oldRefreshJti !== null) {
             $this->recordSession($accessToken, $newRefreshToken, $profileId, $activeTenantId, $request, false, $oldRefreshJti);
+
+            // WC-refresh-reuse: revoke the old refresh token to prevent reuse.
+            // On next use of this token, it will be detected as revoked and logged
+            // as a security incident (auth.refresh_token_reuse_detected).
+            $this->revokeRefreshToken($oldRefreshJti);
         }
 
         // WC-525: same grace-period nag as issueSessionForProfile() — the
@@ -1942,7 +2001,27 @@ class AuthHandler
         // (same rationale as handleRefresh, WC-185).
         $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
 
-        // Native clients always want body tokens — force token mode.
+        // WC-desktop-ttl: resolve + enforce the tenant's desktop-login TTL. The
+        // credential's baked exp already reflects the policy at issue time
+        // (DeviceCredentialService caps it), but re-checking against the
+        // credential's age here makes a LATER reduction bite an already-issued,
+        // longer-lived credential immediately — the exchange 401s once the age
+        // exceeds the current window.
+        $maxSeconds = DeviceCredentialService::CREDENTIAL_LIFETIME_SECONDS;
+        if ($this->settingsService !== null) {
+            $hours = (int) ($this->settingsService->effective($activeTenantId)[SettingsRegistry::AUTH_DESKTOP_LOGIN_MAX_HOURS]
+                ?? SettingsRegistry::defaultFor(SettingsRegistry::AUTH_DESKTOP_LOGIN_MAX_HOURS));
+            $maxSeconds = min($maxSeconds, max(1, $hours) * 3600);
+        }
+        $issuedAt = (isset($claims['iat']) && is_int($claims['iat'])) ? $claims['iat'] : time();
+        if ((time() - $issuedAt) > $maxSeconds) {
+            $this->loginThrottle?->recordFailure(null, $ip);
+            return Response::error('Device credential expired under current policy', 401);
+        }
+
+        // Native clients always want body tokens — force token mode. Echo the
+        // resolved offline-lock window so the client can enforce it locally
+        // without needing settings:read.
         return $this->issueSessionForProfile(
             $profileId,
             $activeTenantId,
@@ -1950,7 +2029,14 @@ class AuthHandler
             $tokenEpoch,
             $request,
             true,
-            'auth.device.exchange'
+            'auth.device.exchange',
+            [],    // auditMetadata
+            false, // recordNewSession
+            null,  // rotateSessionFromJti
+            [
+                'desktop_login_max_seconds' => $maxSeconds,
+                'desktop_login_expires_at'  => date('c', $issuedAt + $maxSeconds),
+            ]
         );
     }
 
@@ -2145,7 +2231,15 @@ class AuthHandler
         if (!empty($twoFactorSecret)) {
             try {
                 $totpService = $this->getTotpService();
-                if ($totpService->validateCode($twoFactorSecret, $code)) {
+                $matchedStep = $totpService->matchedStep($twoFactorSecret, $code);
+                // Anti-replay (WC-security-audit): a TOTP code stays valid for
+                // its whole ~30s period no matter how many separate requests
+                // check it, so a captured valid code could otherwise
+                // authenticate more than once within that window. Atomically
+                // advance the per-profile floor; losing the race (0 rows)
+                // means this step was already consumed, so the code is
+                // rejected exactly like a replayed backup code.
+                if ($matchedStep !== null && $this->consumeTotpStep($profileId, $matchedStep)) {
                     $isValid = true;
                 }
             } catch (\Exception) {
@@ -2268,6 +2362,79 @@ class AuthHandler
             $this->totpService = new TotpService(TotpService::resolveEncryptionKey());
         }
         return $this->totpService;
+    }
+
+    /**
+     * Atomically advance `profiles.two_factor_last_used_step` to $step, but
+     * ONLY when it is currently NULL or strictly less than $step
+     * (WC-security-audit TOTP anti-replay floor).
+     *
+     * Mirrors the atomic single-use burn {@see \Whity\Auth\BackupCodesService::validateCode()}
+     * already uses for backup codes (`UPDATE ... WHERE used = false`), applied
+     * here to TOTP time-steps: the `WHERE` guard means only the request that
+     * actually flips the row wins (rowCount 1); a second request presenting a
+     * code matching the same or an earlier step flips nothing (rowCount 0) and
+     * must be rejected as a replay, even under concurrent FrankenPHP workers.
+     *
+     * @return bool True when this step was newly accepted; false when the
+     *   step (or a later one) was already consumed for this profile.
+     */
+    private function consumeTotpStep(int $profileId, int $step): bool
+    {
+        // @tenant-guard-ignore: profiles is a sanctioned GLOBAL identity table (ADR 0005 §1)
+        $stmt = $this->db->prepare(
+            'UPDATE profiles
+                SET two_factor_last_used_step = :step, updated_at = CURRENT_TIMESTAMP
+              WHERE id = :pid
+                AND (two_factor_last_used_step IS NULL OR two_factor_last_used_step < :step2)'
+        );
+        $stmt->execute([':step' => $step, ':pid' => $profileId, ':step2' => $step]);
+
+        return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Check if a JWT ID (jti) has been revoked.
+     *
+     * Used by the refresh-token reuse detection logic (WC-refresh-reuse) to check
+     * if a refresh token has already been used (and thus added to revoked_tokens).
+     *
+     * @param string $jti The JWT ID to check
+     * @return bool True if the jti is in revoked_tokens, false otherwise
+     */
+    private function isJtiRevoked(string $jti): bool
+    {
+        try {
+            $stmt = $this->db->prepare('SELECT 1 FROM revoked_tokens WHERE jti = ? LIMIT 1');
+            $stmt->execute([$jti]);
+            return (bool) $stmt->fetchColumn();
+        } catch (\Exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Revoke a refresh token by adding its jti to revoked_tokens.
+     *
+     * Used after a successful refresh to prevent reuse of the old refresh token.
+     * On the next presentation of this token, it will be rejected and the incident
+     * logged as a security event (WC-refresh-reuse).
+     *
+     * @param string $jti The JWT ID to revoke
+     */
+    private function revokeRefreshToken(string $jti): void
+    {
+        try {
+            // Calculate expiration time (604800 seconds = 7 days from now)
+            $expiresAt = date('Y-m-d H:i:s', time() + 604800);
+            $stmt = $this->db->prepare(
+                'INSERT INTO revoked_tokens (jti, expires_at) VALUES (?, ?) ON CONFLICT (jti) DO NOTHING'
+            );
+            $stmt->execute([$jti, $expiresAt]);
+        } catch (\Exception $e) {
+            // Best-effort: if revocation fails, log and continue
+            error_log('[refresh-token-revoke] failed: ' . $e->getMessage());
+        }
     }
 
     /**

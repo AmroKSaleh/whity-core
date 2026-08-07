@@ -32,7 +32,16 @@ import type { components } from '@/lib/api/schema';
  * unit tests, which render each page directly without a router context.
  */
 
-export type SettingsTabId = 'general' | 'branding' | 'signup' | 'sso' | 'email' | 'storage' | 'security';
+export type SettingsTabId =
+  | 'general'
+  | 'branding'
+  | 'signup'
+  | 'sso'
+  | 'email'
+  | 'email-domains'
+  | 'storage'
+  | 'feature-flags'
+  | 'security';
 
 interface SettingsTabsProps {
   active: SettingsTabId;

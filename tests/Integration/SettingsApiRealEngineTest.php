@@ -81,11 +81,14 @@ final class SettingsApiRealEngineTest extends TestCase
         $data = $this->decode($response)['data'];
         self::assertSame('Whity', $data['effective']['site_name']);
         self::assertSame('UTC', $data['effective']['timezone']);
-        // 5 tenant-overridable text keys: site_name, timezone, locale,
-        // support_email, mcp.enabled. The two instance-governance flags
-        // (auth.self_registration_enabled, auth.registration_approval_required)
-        // are GLOBAL-ONLY (WC-696206d8) and excluded from the per-tenant surface.
-        self::assertCount(5, $data['registry']);
+        // 9 tenant-overridable text keys: site_name, timezone, locale,
+        // support_email, mcp.enabled, auth.desktop_login_max_hours, and the
+        // three render batch limits (documents.render_max_rows/_max_pages/
+        // _max_template_bytes — ADR 0012, meaningfully per-tenant). The
+        // instance-governance / storage / mail / billing keys — and the
+        // documents.render_enabled MASTER SWITCH itself — are GLOBAL-ONLY
+        // (WC-696206d8) and excluded from the per-tenant surface.
+        self::assertCount(9, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }
@@ -211,6 +214,35 @@ final class SettingsApiRealEngineTest extends TestCase
             (int) $this->pdo->query('SELECT COUNT(*) FROM tenant_settings')->fetchColumn(),
             'Clearing an override must remove the row, not store an empty value'
         );
+    }
+
+    /**
+     * WC-feature-flags-settings-page: the GLOBAL registry surface marks each
+     * curated feature-flag key with `isFlag: true`, and omits the field for
+     * every other key (including other booleans) — the frontend's Feature
+     * Flags tab filters on exactly this field rather than a hardcoded list.
+     */
+    public function testGetGlobalRegistryMarksFeatureFlagKeysWithIsFlag(): void
+    {
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $response = $this->handler->getGlobal(
+            $this->req('GET', '/api/settings/global', null, self::USER_FULL, self::SYSTEM_TENANT)
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $byKey = [];
+        foreach ($this->decode($response)['data']['registry'] as $entry) {
+            $byKey[$entry['key']] = $entry;
+        }
+
+        self::assertTrue($byKey['mcp.enabled']['isFlag'] ?? false);
+        self::assertTrue($byKey['auth.sso_enabled']['isFlag'] ?? false);
+        self::assertTrue($byKey['auth.self_registration_enabled']['isFlag'] ?? false);
+        self::assertTrue($byKey['auth.registration_approval_required']['isFlag'] ?? false);
+
+        // A non-flag boolean and a non-boolean key both omit the field.
+        self::assertArrayNotHasKey('isFlag', $byKey['mail.events.welcome_enabled']);
+        self::assertArrayNotHasKey('isFlag', $byKey['site_name']);
     }
 
     // ==================== /api/settings/global (settings:manage) ====================

@@ -60,7 +60,7 @@ final class SettingsApiHandler
      * list (not hook/plugin-extensible like the sidebar), so it lives here
      * rather than behind the `navigation.register` hook.
      *
-     * @var list<array{id: string, href: string, label: string, requiredPermission?: string, systemTenantOnly?: bool}>
+     * @var list<array{id: string, href: string, label: string, requiredPermission?: string, requiredRole?: string, systemTenantOnly?: bool}>
      */
     private const TABS = [
         ['id' => 'general', 'href' => '/admin/settings', 'label' => 'General', 'requiredPermission' => CorePermissions::SETTINGS_READ],
@@ -68,7 +68,18 @@ final class SettingsApiHandler
         ['id' => 'signup', 'href' => '/admin/settings/signup', 'label' => 'Sign-up', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
         ['id' => 'sso', 'href' => '/admin/settings/sso', 'label' => 'Single sign-on', 'requiredPermission' => CorePermissions::AUTH_PROVIDERS_MANAGE],
         ['id' => 'email', 'href' => '/admin/settings/email', 'label' => 'Email', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
+        // Email-domain policy (WC-ac35b6cf): gated on the `admin` ROLE — the
+        // backend route itself (TenantEmailDomainApiHandler) is role-gated,
+        // not permission-gated, so this is the one tab that checks requiredRole
+        // instead of requiredPermission.
+        ['id' => 'email-domains', 'href' => '/admin/settings/email-domains', 'label' => 'Email domains', 'requiredRole' => 'admin'],
         ['id' => 'storage', 'href' => '/admin/settings/storage', 'label' => 'Storage', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
+        // Feature Flags (WC-feature-flags-settings-page): a generic admin
+        // surface over the registry's curated FEATURE_FLAG_KEYS boolean
+        // settings (see SettingsRegistry::isFeatureFlag()). The underlying
+        // data is global-only, so this mirrors Sign-up/Email/Storage's gate
+        // exactly: settings:manage AND the system tenant only.
+        ['id' => 'feature-flags', 'href' => '/admin/settings/feature-flags', 'label' => 'Feature flags', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
         ['id' => 'security', 'href' => '/admin/settings/security', 'label' => 'Security', 'requiredPermission' => CorePermissions::SECURITY_MANAGE],
     ];
 
@@ -114,13 +125,19 @@ final class SettingsApiHandler
      * Whether the caller satisfies a tab's declared gate(s). Mirrors
      * {@see NavigationApiHandler::isVisibleTo()}'s ALL-gates-must-pass model.
      *
-     * @param array{id: string, href: string, label: string, requiredPermission?: string, systemTenantOnly?: bool} $tab
+     * @param array{id: string, href: string, label: string, requiredPermission?: string, requiredRole?: string, systemTenantOnly?: bool} $tab
      */
     private function tabVisibleTo(array $tab, int $userId, int $tenantId): bool
     {
         $requiredPermission = $tab['requiredPermission'] ?? null;
         if (is_string($requiredPermission) && $requiredPermission !== ''
             && !$this->roleChecker->hasPermissionForProfile($userId, $requiredPermission, $tenantId)) {
+            return false;
+        }
+
+        $requiredRole = $tab['requiredRole'] ?? null;
+        if (is_string($requiredRole) && $requiredRole !== ''
+            && !$this->roleChecker->hasRoleForProfile($userId, $requiredRole, $tenantId)) {
             return false;
         }
 

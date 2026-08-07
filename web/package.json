@@ -22,6 +22,7 @@
     "tokens:check": "node ../src/design/tokens/generate-tokens.js check"
   },
   "dependencies": {
+    "@amroksaleh/features": "file:../packages/features",
     "@amroksaleh/ui": "file:../packages/ui",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-dialog": "^1.1.21",
@@ -48,6 +49,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.60.0",
     "@storybook/addon-docs": "^10.5.3",
     "@storybook/nextjs-vite": "^10.5.3",
@@ -71,6 +73,7 @@
     "storybook": "^10.4.6",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "valibot": "^1.1.0",
     "vite": "^8"
   },
   "msw": {

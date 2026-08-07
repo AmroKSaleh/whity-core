@@ -55,10 +55,49 @@ final class SettingsRegistry
     public const SELF_REGISTRATION_ENABLED = 'auth.self_registration_enabled';
     public const REGISTRATION_APPROVAL_REQUIRED = 'auth.registration_approval_required';
 
+    // Forgotten-password + 2FA-recovery instance governance
+    // (WC-password-reset-2fa-recovery). Same two-toggle model as self-service
+    // registration above, but with different secure-by-default choices: unlike
+    // signing up (opt-in, closed by default), FORGETTING a password is routine
+    // and expected, so self-service reset defaults OPEN; approval is an opt-in
+    // extra gate for high-security tenants, so it defaults OFF (frictionless by
+    // default).
+    //   - self_password_reset_enabled: is POST /api/v1/auth/password/forgot open
+    //     at all? Default 'true' (OPEN).
+    //   - password_reset_approval_required: when a reset IS completed via a
+    //     valid token, must an admin approve it before the new password takes
+    //     effect? Default 'false' (frictionless).
+    public const SELF_PASSWORD_RESET_ENABLED = 'auth.self_password_reset_enabled';
+    public const PASSWORD_RESET_APPROVAL_REQUIRED = 'auth.password_reset_approval_required';
+
+    // "I lost my 2FA device" recovery-REQUEST master switch
+    // (WC-password-reset-2fa-recovery). Gates POST /api/v1/auth/2fa-recovery/request
+    // (and its confirm step) — whether a locked-out user (lost BOTH password and
+    // 2FA) may even SUBMIT a recovery request at all. There is no equivalent
+    // "approval required" toggle here: unlike password reset, this flow is
+    // ALREADY unconditionally approval-gated (see TwoFactorRecoveryService) —
+    // there is no instant self-service version, since that would defeat the
+    // point of a second factor. Default 'true' (permissive): without it a user
+    // who loses both factors has no path back into their account short of an
+    // out-of-band admin contact, and the built-in approval gate is the safety
+    // net that makes a permissive default reasonable.
+    public const SELF_2FA_RECOVERY_ENABLED = 'auth.self_2fa_recovery_enabled';
+
     // Instance SSO kill-switch (WC-28fb2e19). Global/operator-level: when 'false',
     // federated sign-in is disabled instance-wide (both operator and tenant IdPs).
     // Default 'true' — SSO is available where a provider is configured.
     public const SSO_ENABLED = 'auth.sso_enabled';
+
+    // Desktop-client login TTL (WC-desktop-ttl). The maximum wall-clock a
+    // native/desktop client's cached login (its device credential) stays valid
+    // before the app must re-authenticate ONLINE — even offline, the client
+    // hard-locks once this elapses since its last successful online auth. A whole
+    // number of HOURS; per-tenant overridable (NOT global-only), capped at 2160h
+    // (= 90 days, the device-credential ceiling in DeviceCredentialService), so it
+    // can only ever SHORTEN that lifetime. Enforced server-side by capping the
+    // issued credential + exchanged session, and echoed on the device-token
+    // exchange so the client learns its offline window without needing settings:read.
+    public const AUTH_DESKTOP_LOGIN_MAX_HOURS = 'auth.desktop_login_max_hours';
 
     // Storage backend selection + S3-compatible config (WC-b8c5a271 / WC-28fb2e19).
     // Global/operator-level. `storage.driver` selects local (default) or s3; the
@@ -95,6 +134,12 @@ final class SettingsRegistry
     // Account/tenant removal notices — the friendly "sorry to see you go" farewell
     // and the terms-of-service termination notice (both fire on membership removal).
     public const MAIL_EVENT_DELETION = 'mail.events.deletion_enabled';
+    // Forgotten-password emails (WC-password-reset-2fa-recovery): the reset-link
+    // sent on POST /api/v1/auth/password/forgot, and the courtesy "your reset was
+    // approved" notice sent when an admin-approved reset is applied. Also reused
+    // by the 2FA-recovery-approval path's follow-up reset link (same underlying
+    // password-reset primitive).
+    public const MAIL_EVENT_PASSWORD_RESET = 'mail.events.password_reset_enabled';
     // Email TEMPLATE branding (WC-email): the customisation surface for the
     // transactional email layout. brand_color is a #RRGGBB hex; footer_text is a
     // free-form line shown in every message footer.
@@ -111,6 +156,45 @@ final class SettingsRegistry
     // (default) = the feature is OFF — no store is trusted. This is the PRIMARY
     // SSRF control for server-side package fetches.
     public const PLUGINS_STORE_ALLOWED_HOSTS = 'plugins.store_allowed_hosts';
+
+    // Plugin marketplace MASTER switch (WC-feature-flags-audit). A sovereign
+    // deployment may want to instantly kill every outbound call the store
+    // integration makes (install-from-store + the catalogue browser) without
+    // losing its configured `plugins.store_allowed_hosts` list — mirrors
+    // SSO_ENABLED's shape (an additional global kill-switch layered on top of
+    // per-feature configuration, not a replacement for it). Checked FIRST, before
+    // the allowlist, in InstallFromStoreApiHandler. Defaults 'true' (opt-OUT) —
+    // NOT 'true' because network calls are safe by default, but because the
+    // allowlist emptiness is already the PRIMARY off-switch (empty by default on
+    // a fresh install); defaulting this to 'true' avoids silently breaking an
+    // existing deployment that already configured trusted hosts before this flag
+    // shipped.
+    public const PLUGINS_STORE_ENABLED = 'plugins.store_enabled';
+
+    // Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
+    // Track 2). GLOBAL-ONLY operator toggle: the render endpoint calls out to the
+    // separate `whity_render` Docker service (headless-Chromium + Puppeteer), a
+    // heavyweight OPTIONAL add-on not every sovereign deployment wants running.
+    // Default 'false' (disabled) — opt-in, mirroring MCP_ENABLED's shape. The
+    // route checks this FIRST and returns a clean 503 (never a raw exception, and
+    // never attempts the internal HTTP call) when off.
+    public const DOCUMENTS_RENDER_ENABLED = 'documents.render_enabled';
+
+    // Render batch limits (ADR 0012): per-tenant-overridable ceilings so an
+    // operator can tune them without a code deploy, "no hardcoded values" per
+    // convention. Resolution is tenant override -> global default -> this
+    // registry default (same precedence as every other SettingsService::effective()
+    // key) — unlike DOCUMENTS_RENDER_ENABLED, these are ordinary tenant-overridable
+    // keys (a per-tenant ceiling is meaningful; the master on/off switch is not).
+    //   - render_max_rows: max dataset rows accepted in one render request.
+    //   - render_max_pages: max TOTAL render units (dataRows x template pages,
+    //     counted BEFORE any N-up sheet tiling collapses them onto fewer physical
+    //     sheet pages) accepted in one render request.
+    //   - render_max_template_bytes: max size (bytes, JSON-encoded) of the
+    //     template payload sent to the render service.
+    public const DOCUMENTS_RENDER_MAX_ROWS = 'documents.render_max_rows';
+    public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
+    public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
     /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
@@ -138,6 +222,9 @@ final class SettingsRegistry
     private const GLOBAL_ONLY_KEYS = [
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SELF_PASSWORD_RESET_ENABLED,
+        self::PASSWORD_RESET_APPROVAL_REQUIRED,
+        self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
         self::STORAGE_DRIVER,
         self::STORAGE_S3_ENDPOINT,
@@ -158,11 +245,19 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
         self::MAIL_EVENT_DELETION,
+        self::MAIL_EVENT_PASSWORD_RESET,
         self::MAIL_BRAND_COLOR,
         self::MAIL_FOOTER_TEXT,
         self::BILLING_ENFORCEMENT_DEFAULT,
         self::BILLING_GRACE_DAYS,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
+        self::PLUGINS_STORE_ENABLED,
+        // Master on/off switch for the render tier: infrastructure-level (is the
+        // whole optional subsystem available on this instance), not a per-tenant
+        // preference — a per-tenant override would be inert/misleading. The
+        // render LIMITS below are deliberately NOT in this list (they ARE
+        // meaningfully tenant-overridable).
+        self::DOCUMENTS_RENDER_ENABLED,
     ];
 
     /**
@@ -175,6 +270,9 @@ final class SettingsRegistry
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SELF_PASSWORD_RESET_ENABLED,
+        self::PASSWORD_RESET_APPROVAL_REQUIRED,
+        self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
         self::STORAGE_S3_PATH_STYLE,
         self::MAIL_EVENT_WELCOME,
@@ -182,6 +280,53 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION,
         self::MAIL_EVENT_VERIFICATION,
         self::MAIL_EVENT_DELETION,
+        self::MAIL_EVENT_PASSWORD_RESET,
+        self::PLUGINS_STORE_ENABLED,
+        self::DOCUMENTS_RENDER_ENABLED,
+    ];
+
+    /**
+     * FEATURE-FLAG keys (WC-feature-flags-settings-page): the curated subset of
+     * {@see BOOL_KEYS} that reads as a platform CAPABILITY toggle an operator
+     * would think of as a "feature flag" — something you casually switch on/off
+     * for the whole instance — rather than a technical config detail of some
+     * other feature. Drives the admin "Feature Flags" settings tab, which is a
+     * generic, registry-driven surface over these EXISTING boolean settings
+     * only (no new storage, no per-tenant overrides, no plugin-facing
+     * declaration system — that broader effort is tracked separately as
+     * GitHub issue #326, "Platform-level feature-flags registry", and is
+     * explicitly out of scope here).
+     *
+     * Deliberately excluded, even though they are booleans: the `mail.events.*`
+     * toggles (per-notification config, not a platform capability) and
+     * `storage.s3.path_style` (an S3-compatibility detail, not something an
+     * operator thinks of as a "feature").
+     *
+     * WC-feature-flags-audit added `PLUGINS_STORE_ENABLED` (the plugin
+     * marketplace's kill-switch) and `DOCUMENTS_RENDER_ENABLED` (the document
+     * render tier, added earlier in the same effort) to this curated set — both
+     * are genuine capability toggles that gate a heavyweight/optional subsystem
+     * FIRST, before any other work, exactly like the four flags below.
+     *
+     * WC-password-reset-2fa-recovery added `SELF_PASSWORD_RESET_ENABLED`,
+     * `PASSWORD_RESET_APPROVAL_REQUIRED`, and `SELF_2FA_RECOVERY_ENABLED` — each
+     * an instance-governance on/off switch an operator would recognise as a
+     * "feature flag", exactly like `SELF_REGISTRATION_ENABLED` /
+     * `REGISTRATION_APPROVAL_REQUIRED` above. `MAIL_EVENT_PASSWORD_RESET` is
+     * deliberately EXCLUDED, same reasoning as the other `mail.events.*` keys.
+     *
+     * @var list<string>
+     */
+    private const FEATURE_FLAG_KEYS = [
+        self::MCP_ENABLED,
+        self::SELF_REGISTRATION_ENABLED,
+        self::REGISTRATION_APPROVAL_REQUIRED,
+        self::SELF_PASSWORD_RESET_ENABLED,
+        self::PASSWORD_RESET_APPROVAL_REQUIRED,
+        self::SELF_2FA_RECOVERY_ENABLED,
+        self::SSO_ENABLED,
+        self::PLUGINS_STORE_ENABLED,
+        self::DOCUMENTS_RENDER_ENABLED,
     ];
 
     /**
@@ -221,7 +366,19 @@ final class SettingsRegistry
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
+        // Opposite defaults from signup above: forgetting a password is routine
+        // and expected (OPEN by default), and approval is an opt-in extra gate
+        // (OFF by default — frictionless self-service unless a tenant opts in).
+        self::SELF_PASSWORD_RESET_ENABLED => 'true',
+        self::PASSWORD_RESET_APPROVAL_REQUIRED => 'false',
+        // Permissive by default: the flow is already unconditionally
+        // approval-gated (see TwoFactorRecoveryService), so a locked-out user
+        // always has a path back in without an extra operator opt-in.
+        self::SELF_2FA_RECOVERY_ENABLED => 'true',
         self::SSO_ENABLED => 'true',
+        // 72 hours (3 days). A native client offline longer than this must
+        // re-authenticate online before it will work again.
+        self::AUTH_DESKTOP_LOGIN_MAX_HOURS => '72',
         self::STORAGE_DRIVER => 'local',
         self::STORAGE_S3_ENDPOINT => '',
         self::STORAGE_S3_REGION => '',
@@ -246,6 +403,7 @@ final class SettingsRegistry
         self::MAIL_EVENT_INVITATION => 'true',
         self::MAIL_EVENT_VERIFICATION => 'true',
         self::MAIL_EVENT_DELETION => 'true',
+        self::MAIL_EVENT_PASSWORD_RESET => 'true',
         // Email template branding: on-brand default; operator-overridable.
         self::MAIL_BRAND_COLOR => '#2B6CD2',
         self::MAIL_FOOTER_TEXT => '',
@@ -256,6 +414,20 @@ final class SettingsRegistry
         self::BILLING_GRACE_DAYS => '7',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
         self::PLUGINS_STORE_ALLOWED_HOSTS => '',
+        // Master switch default TRUE (opt-out): the allowlist above is already
+        // the primary off-switch (empty by default), so this only needs to
+        // FLIP OFF an already-configured deployment; defaulting it false would
+        // silently disable the store for every instance that configured hosts
+        // before this flag existed.
+        self::PLUGINS_STORE_ENABLED => 'true',
+        // Heavyweight optional add-on (a whole separate Chromium-bearing
+        // container) — opt-in, not opt-out. A sovereign deploy that never runs
+        // the `render` compose profile stays disabled here regardless.
+        self::DOCUMENTS_RENDER_ENABLED => 'false',
+        self::DOCUMENTS_RENDER_MAX_ROWS => '500',
+        self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
+        // 2 MiB.
+        self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
     ];
 
     /**
@@ -298,7 +470,7 @@ final class SettingsRegistry
      * Intended for the settings API handler so asset-kind keys are not published
      * on the GET /api/v1/settings surface.
      *
-     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}>
      */
     public static function describeText(): array
     {
@@ -307,9 +479,10 @@ final class SettingsRegistry
 
     /**
      * Build the API descriptor for a single key: key + type + default, plus an
-     * `options` list for enum-type keys.
+     * `options` list for enum-type keys and an `isFlag` marker for feature-flag
+     * keys.
      *
-     * @return array{key: string, type: string, default: string, options?: list<string>}
+     * @return array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}
      */
     private static function descriptorFor(string $key): array
     {
@@ -322,6 +495,15 @@ final class SettingsRegistry
         $options = self::optionsFor($key);
         if ($options !== null) {
             $descriptor['options'] = $options;
+        }
+
+        // Mirrors `options`: only present (and only ever `true`) for keys the
+        // registry curates as feature flags, so the client can filter the
+        // Feature Flags tab from ONE field instead of a hardcoded key list —
+        // adding a key to FEATURE_FLAG_KEYS is then the only change needed for
+        // it to appear there.
+        if (self::isFeatureFlag($key)) {
+            $descriptor['isFlag'] = true;
         }
 
         return $descriptor;
@@ -345,6 +527,18 @@ final class SettingsRegistry
     }
 
     /**
+     * Whether the key is a curated FEATURE FLAG — a capability toggle an
+     * operator would recognise as a "feature flag" (see {@see FEATURE_FLAG_KEYS}
+     * for the selection rationale). Drives the admin Feature Flags settings tab;
+     * NOT every boolean setting qualifies (see {@see BOOL_KEYS} for the full
+     * boolean set).
+     */
+    public static function isFeatureFlag(string $key): bool
+    {
+        return in_array($key, self::FEATURE_FLAG_KEYS, true);
+    }
+
+    /**
      * The text-kind keys that a TENANT may override — text keys minus the
      * global-only governance keys. Drives the per-tenant settings surface.
      *
@@ -362,7 +556,7 @@ final class SettingsRegistry
      * Like {@see describeText()} but restricted to the tenant-overridable keys
      * (excludes global-only governance keys) for the per-tenant settings API.
      *
-     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}>
      */
     public static function describeTenantText(): array
     {
@@ -443,7 +637,7 @@ final class SettingsRegistry
      * The registry descriptor list the API publishes alongside effective values:
      * one entry per key with its type and default (plus `options` for enums).
      *
-     * @return list<array{key: string, type: string, default: string, options?: list<string>}>
+     * @return list<array{key: string, type: string, default: string, options?: list<string>, isFlag?: bool}>
      */
     public static function describe(): array
     {
@@ -474,7 +668,11 @@ final class SettingsRegistry
             self::MCP_ENABLED => self::validateMcpEnabled($value),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
+            self::SELF_PASSWORD_RESET_ENABLED => self::validateBoolean($value, self::SELF_PASSWORD_RESET_ENABLED),
+            self::PASSWORD_RESET_APPROVAL_REQUIRED => self::validateBoolean($value, self::PASSWORD_RESET_APPROVAL_REQUIRED),
+            self::SELF_2FA_RECOVERY_ENABLED => self::validateBoolean($value, self::SELF_2FA_RECOVERY_ENABLED),
             self::SSO_ENABLED => self::validateBoolean($value, self::SSO_ENABLED),
+            self::AUTH_DESKTOP_LOGIN_MAX_HOURS => self::validateDesktopLoginMaxHours($value),
             self::STORAGE_DRIVER => self::validateStorageDriver($value),
             self::STORAGE_S3_PATH_STYLE => self::validateBoolean($value, self::STORAGE_S3_PATH_STYLE),
             self::STORAGE_S3_ENDPOINT,
@@ -490,7 +688,8 @@ final class SettingsRegistry
             self::MAIL_EVENT_APPROVAL,
             self::MAIL_EVENT_INVITATION,
             self::MAIL_EVENT_VERIFICATION,
-            self::MAIL_EVENT_DELETION => self::validateBoolean($value, $key),
+            self::MAIL_EVENT_DELETION,
+            self::MAIL_EVENT_PASSWORD_RESET => self::validateBoolean($value, $key),
             self::BILLING_ENFORCEMENT_DEFAULT => self::validateEnum($key, $value),
             self::BILLING_GRACE_DAYS => self::validateGraceDays($value),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
@@ -499,6 +698,11 @@ final class SettingsRegistry
             self::MAIL_FROM_NAME,
             self::MAIL_FOOTER_TEXT,
             self::PLUGINS_STORE_ALLOWED_HOSTS => null, // free-form strings
+            self::PLUGINS_STORE_ENABLED => self::validateBoolean($value, self::PLUGINS_STORE_ENABLED),
+            self::DOCUMENTS_RENDER_ENABLED => self::validateBoolean($value, self::DOCUMENTS_RENDER_ENABLED),
+            self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
+            self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
+            self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
             default => "Unknown setting key: {$key}",
         };
     }
@@ -551,6 +755,28 @@ final class SettingsRegistry
         }
         if ((int) $value > 3650) {
             return 'billing.grace_days must be 3650 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate the desktop-client login TTL: a whole number of HOURS, at least 1,
+     * capped at 2160 (= 90 days, the DeviceCredentialService credential ceiling).
+     * The setting can only shorten that lifetime, never extend it, so a value
+     * above the ceiling is rejected rather than silently clamped.
+     */
+    private static function validateDesktopLoginMaxHours(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'auth.desktop_login_max_hours must be a whole number of hours.';
+        }
+        $hours = (int) $value;
+        if ($hours < 1) {
+            return 'auth.desktop_login_max_hours must be at least 1 hour.';
+        }
+        if ($hours > 2160) {
+            return 'auth.desktop_login_max_hours must be 2160 (90 days) or fewer.';
         }
 
         return null;
@@ -664,6 +890,67 @@ final class SettingsRegistry
     {
         if ($value !== 'true' && $value !== 'false') {
             return "mcp.enabled must be 'true' or 'false'.";
+        }
+
+        return null;
+    }
+
+    /**
+     * Max dataset rows per render request: a whole number, at least 1, capped
+     * at 100000 (a sanity ceiling on the ADMIN-set value itself — not the
+     * enforced default).
+     */
+    private static function validateRenderMaxRows(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.render_max_rows must be a whole number.';
+        }
+        $rows = (int) $value;
+        if ($rows < 1) {
+            return 'documents.render_max_rows must be at least 1.';
+        }
+        if ($rows > 100000) {
+            return 'documents.render_max_rows must be 100000 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max total render units (dataRows x template pages, pre-tiling) per
+     * request: a whole number, at least 1, capped at 1000000.
+     */
+    private static function validateRenderMaxPages(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.render_max_pages must be a whole number.';
+        }
+        $pages = (int) $value;
+        if ($pages < 1) {
+            return 'documents.render_max_pages must be at least 1.';
+        }
+        if ($pages > 1000000) {
+            return 'documents.render_max_pages must be 1000000 or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Max JSON-encoded template size (bytes) accepted for render: a whole
+     * number, at least 1024, capped at 20 MiB.
+     */
+    private static function validateRenderMaxTemplateBytes(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'documents.render_max_template_bytes must be a whole number.';
+        }
+        $bytes = (int) $value;
+        if ($bytes < 1024) {
+            return 'documents.render_max_template_bytes must be at least 1024.';
+        }
+        if ($bytes > 20 * 1024 * 1024) {
+            return 'documents.render_max_template_bytes must be 20971520 (20 MiB) or fewer.';
         }
 
         return null;

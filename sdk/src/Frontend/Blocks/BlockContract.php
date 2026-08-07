@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry a `children` array
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -88,6 +88,12 @@ final class BlockContract
                 'container' => true,
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
+                    // WC-532 A3: presentational conditional visibility. When
+                    // inside a `form`, the section (and its subtree) is hidden
+                    // unless the referenced sibling field matches. Purely a
+                    // render-time facet — the server stays authoritative on
+                    // validation and never trusts client-side visibility.
+                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'card' => [
@@ -95,6 +101,7 @@ final class BlockContract
                 'props' => [
                     'title' => ['type' => 'string', 'required' => false],
                     'description' => ['type' => 'string', 'required' => false],
+                    'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
                 ],
             ],
             'grid' => [
@@ -205,6 +212,24 @@ final class BlockContract
                     'content' => ['type' => 'string', 'required' => true],
                 ],
             ],
+            // ---- WC-532 A5: math + markdown display blocks ----
+            // A LaTeX expression rendered via KaTeX (trust:false, so it can
+            // never inject executable content). `block` selects display mode.
+            'math' => [
+                'container' => false,
+                'props' => [
+                    'expression' => ['type' => 'string', 'required' => true],
+                    'block'      => ['type' => 'bool',   'required' => false],
+                ],
+            ],
+            // Markdown source rendered by the web's dependency-free, XSS-safe
+            // renderer (React elements only, sanitized links, inline $…$ math).
+            'markdown' => [
+                'container' => false,
+                'props' => [
+                    'content' => ['type' => 'string', 'required' => true],
+                ],
+            ],
 
             // ---- data-bound leaves (SP2, WC-229) ----
             // WC-241: 'columns' upgraded to 'dataColumnList' (adds optional
@@ -213,11 +238,25 @@ final class BlockContract
             // still comes from ONE already-verified fetch of 'source'; sort,
             // filter, and page state are applied entirely client-side over
             // that response and never trigger a second request.
+            // WC-532 A7 (master-detail): every data-bound block accepts an
+            // optional `params` facet — a list of {param, from} that the web
+            // renderer appends to `source` as query params (URL-encoded), the
+            // value taken from the named `selector`'s current selection. The
+            // base `source` stays a plain owned apiPath (still ownership-checked
+            // + version-rewritten); ONLY whitelisted query params interpolate,
+            // so the SSRF/ownership gate is never widened. Changing a selection
+            // re-fetches the block (usePluginData keys on the effective source).
             'dataTable' => ['container' => false, 'props' => [
                 'source'    => ['type' => 'apiPath',        'required' => true],
                 'columns'   => ['type' => 'dataColumnList', 'required' => true],
                 'pageSize'  => ['type' => 'int',            'required' => false],
                 'emptyText' => ['type' => 'string',         'required' => false],
+                // WC-532 A1: optional per-row affordances rendered in a trailing
+                // "Actions" column. Each is either an internal-nav `href` or a
+                // `{method, endpoint}` mutation, both templated with `{field}`
+                // placeholders from the row (see rowActionList validation).
+                'rowActions' => ['type' => 'rowActionList', 'required' => false],
+                'params'     => ['type' => 'sourceParamList', 'required' => false],
             ]],
             'dataStat' => ['container' => false, 'props' => [
                 'source'     => ['type' => 'apiPath', 'required' => true],
@@ -226,6 +265,7 @@ final class BlockContract
                 'hintField'  => ['type' => 'string',  'required' => false],
                 'trendField' => ['type' => 'string',  'required' => false],
                 'emptyText'  => ['type' => 'string',  'required' => false],
+                'params'     => ['type' => 'sourceParamList', 'required' => false],
             ]],
             // WC-241: 'sortable' (alphabetical toggle) / 'filterable' (a
             // search box over itemField) / 'pageSize' (client pagination) —
@@ -238,6 +278,7 @@ final class BlockContract
                 'filterable' => ['type' => 'bool',       'required' => false],
                 'pageSize'   => ['type' => 'int',        'required' => false],
                 'emptyText'  => ['type' => 'string',     'required' => false],
+                'params'     => ['type' => 'sourceParamList', 'required' => false],
             ]],
             // ---- SP4 chart block (WC-240) ----
             'chart' => ['container' => false, 'props' => [
@@ -247,6 +288,21 @@ final class BlockContract
                 'series'    => ['type' => 'chartSeriesList', 'required' => true],
                 'xField'    => ['type' => 'string',          'required' => false],
                 'emptyText' => ['type' => 'string',          'required' => false],
+                'params'    => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+            // WC-532 A7: the MASTER control. Populates a dropdown from an
+            // owned collection `source` (ownership-checked like dataTable) and
+            // publishes the chosen `valueField` under `name` into a shared
+            // master-detail context; sibling data-bound blocks read it via
+            // their `params` facet. Not a form input — it drives fetches, not
+            // form submission.
+            'selector' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'source'      => ['type' => 'apiPath',    'required' => true],
+                'valueField'  => ['type' => 'string',     'required' => true],
+                'labelField'  => ['type' => 'string',     'required' => true],
+                'placeholder' => ['type' => 'string',     'required' => false],
             ]],
 
             // ---- interactive blocks (SP3, WC-233) ----
@@ -254,65 +310,132 @@ final class BlockContract
                 'submit'             => ['type' => 'submitSpec', 'required' => true],
                 'requiredPermission' => ['type' => 'string',     'required' => false],
             ]],
+            // WC-532 A2: a repeatable field-group. Its `children` are the
+            // per-row sub-form template (input leaves); the web renderer lets
+            // the user add / remove / reorder rows and submits the collected
+            // rows as a JSON array under `name`. Form-only (needs a `form`
+            // ancestor) and, like `form`, scopes its template input names per
+            // row. `min`/`max` bound the row count; `itemLabel` names each row.
+            'fieldArray' => ['container' => true, 'props' => [
+                'name'      => ['type' => 'inputName', 'required' => true],
+                'label'     => ['type' => 'string',    'required' => true],
+                'itemLabel' => ['type' => 'string',    'required' => false],
+                'min'       => ['type' => 'int',       'required' => false],
+                'max'       => ['type' => 'int',       'required' => false],
+            ]],
+            // WC-532 A3: every input carries an optional `visibleWhen`
+            // presentational facet — the web renderer hides the input unless a
+            // sibling field in the same form matches (equals / in). It never
+            // affects submission or server validation.
             'textInput' => ['container' => false, 'props' => [
                 'name'        => ['type' => 'inputName', 'required' => true],
                 'label'       => ['type' => 'string',    'required' => true],
                 'placeholder' => ['type' => 'string',    'required' => false],
                 'required'    => ['type' => 'bool',      'required' => false],
                 'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'textArea' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'rows'     => ['type' => 'int',       'required' => false],
-                'required' => ['type' => 'bool',      'required' => false],
-                'default'  => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'rows'        => ['type' => 'int',       'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
+            ]],
+            // WC-532 A5: a Markdown-aware multi-line input. Submits Markdown
+            // SOURCE (a plain string) like textArea; the web renderer shows a
+            // live preview via the same XSS-safe renderer as the markdown block.
+            'richTextInput' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'rows'        => ['type' => 'int',       'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'numberInput' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'min'      => ['type' => 'int',       'required' => false],
-                'max'      => ['type' => 'int',       'required' => false],
-                'step'     => ['type' => 'int',       'required' => false],
-                'required' => ['type' => 'bool',      'required' => false],
-                'default'  => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'min'         => ['type' => 'int',       'required' => false],
+                'max'         => ['type' => 'int',       'required' => false],
+                'step'        => ['type' => 'int',       'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'select' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName',    'required' => true],
-                'label'    => ['type' => 'string',       'required' => true],
-                'options'  => ['type' => 'selectOptions', 'required' => true],
-                'required' => ['type' => 'bool',         'required' => false],
-                'default'  => ['type' => 'string',       'required' => false],
+                'name'        => ['type' => 'inputName',    'required' => true],
+                'label'       => ['type' => 'string',       'required' => true],
+                'options'     => ['type' => 'selectOptions', 'required' => true],
+                'required'    => ['type' => 'bool',         'required' => false],
+                'default'     => ['type' => 'string',       'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'checkbox' => ['container' => false, 'props' => [
-                'name'    => ['type' => 'inputName', 'required' => true],
-                'label'   => ['type' => 'string',    'required' => true],
-                'default' => ['type' => 'bool',      'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'default'     => ['type' => 'bool',      'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'slider' => ['container' => false, 'props' => [
-                'name'    => ['type' => 'inputName', 'required' => true],
-                'label'   => ['type' => 'string',    'required' => true],
-                'min'     => ['type' => 'int',       'required' => true],
-                'max'     => ['type' => 'int',       'required' => true],
-                'step'    => ['type' => 'int',       'required' => false],
-                'default' => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'min'         => ['type' => 'int',       'required' => true],
+                'max'         => ['type' => 'int',       'required' => true],
+                'step'        => ['type' => 'int',       'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'dateInput' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'required' => ['type' => 'bool',      'required' => false],
-                'default'  => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'fileInput' => ['container' => false, 'props' => [
-                'name'     => ['type' => 'inputName', 'required' => true],
-                'label'    => ['type' => 'string',    'required' => true],
-                'accept'   => ['type' => 'string',    'required' => false],
-                'required' => ['type' => 'bool',      'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'accept'      => ['type' => 'string',    'required' => false],
+                'required'    => ['type' => 'bool',      'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
             ]],
             'colorInput' => ['container' => false, 'props' => [
-                'name'    => ['type' => 'inputName', 'required' => true],
-                'label'   => ['type' => 'string',    'required' => true],
-                'default' => ['type' => 'string',    'required' => false],
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'default'     => ['type' => 'string',    'required' => false],
+                'visibleWhen' => ['type' => 'visibilityRule', 'required' => false],
+            ]],
+            // WC-532 A4: a paired Arabic/English bilingual text input. Submits a
+            // `{ar?, en?}` LocalizedText object under `name` (matching the
+            // schema-driven CRUD screen's localized-field convention), rendered
+            // via the shared BilingualInput (RTL/LTR synced). `arLabel`/`enLabel`
+            // override the per-field sub-labels.
+            'bilingualText' => ['container' => false, 'props' => [
+                'name'     => ['type' => 'inputName', 'required' => true],
+                'label'    => ['type' => 'string',    'required' => true],
+                'required' => ['type' => 'bool',      'required' => false],
+                'arLabel'  => ['type' => 'string',    'required' => false],
+                'enLabel'  => ['type' => 'string',    'required' => false],
+            ]],
+            // WC-532 A6: a foreign-key / reference select. Unlike `select`
+            // (static `options`), it populates its dropdown from a resource
+            // COLLECTION at `source` — an apiPath, so it is ownership-checked
+            // and version-rewritten by the PluginLoader exactly like a
+            // `dataTable.source` (a plugin can only reference its OWN routes).
+            // Each row's `valueField` becomes the submitted value; `labelField`
+            // is the display text. Also the reusable primitive behind the
+            // Part-B tag-picker.
+            'referenceSelect' => ['container' => false, 'props' => [
+                'name'        => ['type' => 'inputName', 'required' => true],
+                'label'       => ['type' => 'string',    'required' => true],
+                'source'      => ['type' => 'apiPath',    'required' => true],
+                'valueField'  => ['type' => 'string',     'required' => true],
+                'labelField'  => ['type' => 'string',     'required' => true],
+                'required'    => ['type' => 'bool',       'required' => false],
+                'placeholder' => ['type' => 'string',     'required' => false],
+                'default'     => ['type' => 'string',     'required' => false],
             ]],
             'submitButton' => ['container' => false, 'props' => [
                 'label'              => ['type' => 'string', 'required' => true],

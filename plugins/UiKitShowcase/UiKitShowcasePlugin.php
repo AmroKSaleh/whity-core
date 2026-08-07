@@ -639,6 +639,30 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                      'content' => '{ "screen": "blocks" }']
                     PHP,
             ),
+            // WC-532 A5: math + markdown display blocks.
+            $this->demo(
+                'math',
+                'A LaTeX expression rendered with KaTeX (trust:false — never executes).',
+                [
+                    'type' => 'math',
+                    'expression' => 'e^{i\\pi} + 1 = 0',
+                    'block' => true,
+                ],
+                <<<'PHP'
+                    ['type' => 'math', 'expression' => 'e^{i\\pi}+1=0', 'block' => true]
+                    PHP,
+            ),
+            $this->demo(
+                'markdown',
+                'Markdown rendered by the XSS-safe renderer, with inline $…$ math.',
+                [
+                    'type' => 'markdown',
+                    'content' => "## Notes\n\n**Bold**, _italic_, `code`, a [link](/plugins), and inline math \$a^2+b^2=c^2\$.\n\n- first\n- second",
+                ],
+                <<<'PHP'
+                    ['type' => 'markdown', 'content' => "## Notes\n\n**Bold** and math \$a^2\$"]
+                    PHP,
+            ),
         ];
     }
 
@@ -780,6 +804,44 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     ['name' => 'Camille Dupont','role' => 'Viewer'],
                                 ]]);
                             }
+                            PHP,
+                    ),
+                    // WC-532 A7: master-detail — a selector drives a sibling
+                    // dataTable via its `params` facet. Labels avoid "name".
+                    $this->demo(
+                        'selector + master-detail',
+                        'A selector publishes its choice into the shared context; a sibling dataTable '
+                            . 'appends it to its source as a query param via the `params` facet (WC-532 A7). '
+                            . 'The base source stays a plain owned route — only the whitelisted param interpolates.',
+                        [
+                            'type' => 'section',
+                            'title' => 'Filter members by role',
+                            'children' => [
+                                [
+                                    'type' => 'selector',
+                                    'name' => 'roleFilter',
+                                    'label' => 'Filter by role',
+                                    'source' => '/api/uikit/demo/rows',
+                                    'valueField' => 'role',
+                                    'labelField' => 'role',
+                                ],
+                                // Detail: a dataStat that re-fetches with the
+                                // selected role appended (?role=…) — its base
+                                // source stays a plain owned route.
+                                [
+                                    'type' => 'dataStat',
+                                    'source' => '/api/uikit/demo/metric',
+                                    'label' => 'Users in role',
+                                    'valueField' => 'value',
+                                    'params' => [['param' => 'role', 'from' => 'roleFilter']],
+                                ],
+                            ],
+                        ],
+                        <<<'PHP'
+                            ['type' => 'selector', 'name' => 'roleFilter', 'source' => '/api/uikit/demo/rows',
+                             'valueField' => 'role', 'labelField' => 'role'],
+                            ['type' => 'dataStat', 'source' => '/api/uikit/demo/metric', 'valueField' => 'value',
+                             'params' => [['param' => 'role', 'from' => 'roleFilter']]]
                             PHP,
                     ),
                     $this->dataBoundDemo(
@@ -1005,6 +1067,51 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     'name' => 'accent',
                                     'label' => 'Accent colour',
                                     'default' => '#6366f1',
+                                ],
+                                // WC-532 A4: bilingual AR/EN paired-text input.
+                                // Labels deliberately avoid the substring "name"
+                                // so they never collide with the e2e's
+                                // getByLabel('Name') on the textInput above.
+                                [
+                                    'type' => 'bilingualText',
+                                    'name' => 'bilingualTitle',
+                                    'label' => 'Bilingual title',
+                                    'arLabel' => 'العنوان بالعربية',
+                                    'enLabel' => 'Title (English)',
+                                ],
+                                // WC-532 A6: foreign-key select populated from a
+                                // plugin-owned collection (GET /api/uikit/demo/rows).
+                                // Label avoids "name" to steer clear of the e2e's
+                                // getByLabel('Name') on the textInput above.
+                                [
+                                    'type' => 'referenceSelect',
+                                    'name' => 'assignedRole',
+                                    'label' => 'Assigned role',
+                                    'source' => '/api/uikit/demo/rows',
+                                    'valueField' => 'role',
+                                    'labelField' => 'role',
+                                ],
+                                // WC-532 A5: Markdown-aware input with a live
+                                // preview. Label avoids "name" (e2e getByLabel).
+                                [
+                                    'type' => 'richTextInput',
+                                    'name' => 'notes',
+                                    'label' => 'Notes (Markdown)',
+                                    'rows' => 4,
+                                ],
+                                // WC-532 A2: a repeatable field-group. Labels avoid
+                                // "name" (the e2e's getByLabel('Name')); starts with
+                                // zero rows (min unset) so it adds no required fields.
+                                [
+                                    'type' => 'fieldArray',
+                                    'name' => 'lineItems',
+                                    'label' => 'Line items',
+                                    'itemLabel' => 'Line',
+                                    'max' => 5,
+                                    'children' => [
+                                        ['type' => 'textInput', 'name' => 'description', 'label' => 'Description'],
+                                        ['type' => 'numberInput', 'name' => 'qty', 'label' => 'Quantity', 'min' => 0],
+                                    ],
                                 ],
                                 [
                                     'type' => 'submitButton',

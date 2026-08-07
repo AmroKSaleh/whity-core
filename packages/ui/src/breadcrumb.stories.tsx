@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import * as React from "react"
+import { IconBuilding, IconFolder, IconHome, IconUsers } from "@tabler/icons-react"
 
 import { Breadcrumb } from "./breadcrumb"
 
@@ -21,8 +23,30 @@ export const Default: Story = {
   },
 }
 
+export const WithHomeIcon: Story = {
+  args: {
+    showHomeIcon: true,
+    items: [
+      { label: "Home", href: "/" },
+      { label: "Settings", href: "/settings" },
+      { label: "Team Members" },
+    ],
+  },
+}
+
+export const WithCustomIcons: Story = {
+  args: {
+    items: [
+      { label: "Organization", href: "#", icon: <IconBuilding /> },
+      { label: "Projects", href: "#", icon: <IconFolder /> },
+      { label: "Engineering Team", icon: <IconUsers /> },
+    ],
+  },
+}
+
 export const SingleLevel: Story = {
   args: {
+    showHomeIcon: true,
     items: [{ label: "Dashboard" }],
   },
 }

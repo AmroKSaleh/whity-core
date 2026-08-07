@@ -192,11 +192,12 @@ export default function PluginStorePage() {
         <Card className="border border-border/80 bg-card/50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
-              <IconBuildingStore className="w-5 h-5" /> No trusted stores configured
+              <IconBuildingStore className="w-5 h-5" /> Plugin store disabled
             </CardTitle>
             <CardDescription>
-              Installing from a store is disabled. An operator must set{' '}
-              <code>plugins.store_allowed_hosts</code> in global settings before you can browse a store.
+              Installing from a store is disabled on this instance. An operator can turn it on from{' '}
+              <code>plugins.store_enabled</code> (Admin → Settings → Feature flags), and must configure at
+              least one trusted host in <code>plugins.store_allowed_hosts</code> (global settings).
             </CardDescription>
           </CardHeader>
         </Card>

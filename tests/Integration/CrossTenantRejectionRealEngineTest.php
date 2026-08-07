@@ -26,7 +26,13 @@ use Whity\Core\Delegation\DelegationRepository;
 use Whity\Core\Deployment\DeploymentManager;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
+use Whity\Core\Events\DomainEventStore;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Notification\NotificationPreferenceRepository;
+use Whity\Core\Notification\NotificationRepository;
+use Whity\Core\Notification\NotificationTemplateRepository;
+use Whity\Core\Notification\TenantNotificationSettingsRepository;
+use Whity\Core\Queue\JobRepository;
 use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Request;
@@ -1799,6 +1805,204 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         $this->assertArrayHasKey('data', $decoded);
 
         return $decoded['data'];
+    }
+
+    // ==================== jobs (WC-627 / WC-jobs-api) ====================
+    //
+    // The durable job queue has TWO faces. The WORKER/RELAY side is SYSTEM INFRA
+    // that operates ACROSS tenants by design (reserve/complete/fail/reclaim are
+    // by-id/system, annotated @tenant-guard-ignore); runtime isolation comes from
+    // JobRunner restoring each job's ORIGIN tenant into TenantContext before its
+    // handler (proven in JobRunnerRealEngineTest). The API/READ side (WC-jobs-api)
+    // added TENANT-SCOPED accessors — find()/findByIdempotencyKey()/listForTenant()
+    // — which MUST reject a foreign tenant. So this proves both: (a) a job is
+    // stamped with, and keeps, the exact tenant it was enqueued for, and (b) the
+    // tenant-scoped read accessors never surface another tenant's job.
+
+    public function testJobsAreStampedWithAndKeepTheirOriginTenant(): void
+    {
+        $repo = new JobRepository($this->pdo);
+        $repo->enqueue(self::TENANT_A, 'a.job', ['owner' => 'A']);
+        $repo->enqueue(self::TENANT_B, 'b.job', ['owner' => 'B']);
+
+        // The system worker claims across tenants (deliberately not tenant-scoped);
+        // each reserved job carries the tenant it was enqueued for, never the other.
+        $first = $repo->reserve();
+        $second = $repo->reserve();
+        self::assertNotNull($first);
+        self::assertNotNull($second);
+
+        $nameByTenant = [];
+        foreach ([$first, $second] as $job) {
+            $nameByTenant[$job['tenant_id']] = $job['name'];
+        }
+        self::assertSame('a.job', $nameByTenant[self::TENANT_A] ?? null, 'tenant A job kept tenant A');
+        self::assertSame('b.job', $nameByTenant[self::TENANT_B] ?? null, 'tenant B job kept tenant B');
+        self::assertCount(2, $nameByTenant, 'the two jobs belong to two distinct tenants');
+    }
+
+    public function testTenantScopedJobReadAccessorsRejectAForeignTenant(): void
+    {
+        $repo = new JobRepository($this->pdo);
+        $idA = (int) $repo->enqueue(self::TENANT_A, 'a.job', ['owner' => 'A'], ['idempotency_key' => 'ka', 'retain_result' => true]);
+
+        // Tenant A sees its own job; tenant B must not — by id or by key.
+        self::assertNotNull($repo->find(self::TENANT_A, $idA));
+        self::assertNull($repo->find(self::TENANT_B, $idA), "tenant B must not read tenant A's job by id");
+        self::assertNull($repo->findByIdempotencyKey(self::TENANT_B, 'ka'), "tenant B must not resolve tenant A's idempotency key");
+        self::assertCount(1, $repo->listForTenant(self::TENANT_A, null, null, 50, 0));
+        self::assertCount(0, $repo->listForTenant(self::TENANT_B, null, null, 50, 0), "tenant B's job list excludes tenant A");
+    }
+
+    // ==================== scheduled_jobs (WC-scheduler) ====================
+    //
+    // The scheduler's TICK claims due schedules ACROSS tenants (system infra),
+    // but its CRUD is TENANT-SCOPED: find/list/setEnabled/delete must never
+    // surface or mutate another tenant's schedule. Registration stamps the
+    // caller's tenant, so the tick's enqueue runs under the right origin tenant.
+
+    public function testTenantScopedScheduleAccessorsRejectAForeignTenant(): void
+    {
+        $repo = new \Whity\Core\Scheduler\ScheduledJobRepository($this->pdo);
+        $idA = $repo->register(self::TENANT_A, 'nightly', '0 0 * * *', ['owner' => 'A']);
+
+        self::assertNotNull($repo->find(self::TENANT_A, $idA));
+        self::assertNull($repo->find(self::TENANT_B, $idA), "tenant B must not read tenant A's schedule");
+        self::assertCount(1, $repo->listForTenant(self::TENANT_A));
+        self::assertCount(0, $repo->listForTenant(self::TENANT_B), "tenant B's schedule list excludes tenant A");
+        self::assertFalse($repo->setEnabled(self::TENANT_B, $idA, false), "tenant B cannot disable tenant A's schedule");
+        self::assertFalse($repo->delete(self::TENANT_B, $idA), "tenant B cannot delete tenant A's schedule");
+        self::assertNotNull($repo->find(self::TENANT_A, $idA), "tenant A's schedule survived the cross-tenant attempts");
+    }
+
+    // ============ domain_events / event_outbox (#154 event spine) ============
+    //
+    // Like `jobs`, the event spine is SYSTEM INFRA that relays ACROSS tenants:
+    // one relay claims every tenant's events, so DomainEventStore exposes NO
+    // tenant-scoped accessor to reject a foreign tenant through — reserve/mark/
+    // reclaim are by-id/system (annotated @tenant-guard-ignore). Isolation is
+    // enforced at RUNTIME: the relay restores each event's ORIGIN tenant (carried
+    // on event_outbox.tenant_id, denormalised from the event) before any
+    // tenant-scoped handler runs. So the invariant proven HERE is that an
+    // appended event is stamped with — and keeps — the exact tenant it was
+    // appended for: reserve() returns each claim's outbox tenant_id paired with
+    // its own domain_events content, never the other tenant's.
+
+    public function testDomainEventsAreStampedWithAndKeepTheirOriginTenant(): void
+    {
+        $store = new DomainEventStore($this->pdo);
+        $store->append(self::TENANT_A, 'a.event', ['owner' => 'A']);
+        $store->append(self::TENANT_B, 'b.event', ['owner' => 'B']);
+
+        // The system relay claims across tenants (deliberately not tenant-scoped);
+        // each reserved event carries the tenant it was appended for, never the other.
+        $first = $store->reserve();
+        $second = $store->reserve();
+        self::assertNotNull($first);
+        self::assertNotNull($second);
+
+        $nameByTenant = [];
+        foreach ([$first, $second] as $claim) {
+            $nameByTenant[$claim['tenant_id']] = $claim['event_name'];
+        }
+        self::assertSame('a.event', $nameByTenant[self::TENANT_A] ?? null, 'tenant A event kept tenant A');
+        self::assertSame('b.event', $nameByTenant[self::TENANT_B] ?? null, 'tenant B event kept tenant B');
+        self::assertCount(2, $nameByTenant, 'the two events belong to two distinct tenants');
+    }
+
+    // ========= notifications / notification_deliveries (WC-notifications) =========
+    //
+    // The notification spine is TENANT-SCOPED end to end: a notification and its
+    // per-channel delivery rows carry the enqueuing tenant, and the persistence
+    // primitives bind tenant_id so one tenant can never read another's message or
+    // its delivery history. (The eventual relay sweep runs as system infra ACROSS
+    // tenants in its own slice; here we prove the tenant-scoped read path.)
+
+    public function testTenantScopedNotificationReadRejectsAForeignTenant(): void
+    {
+        $repo = new NotificationRepository($this->pdo);
+        $idA = $repo->create(self::TENANT_A, 101, 'a.notice', ['subject' => 'A only']);
+
+        self::assertNotNull($repo->find(self::TENANT_A, $idA), 'tenant A reads its own notification');
+        self::assertNull($repo->find(self::TENANT_B, $idA), "tenant B must not read tenant A's notification");
+    }
+
+    public function testTenantScopedDeliveryListRejectsAForeignTenant(): void
+    {
+        $repo = new NotificationRepository($this->pdo);
+        $notificationId = $repo->create(self::TENANT_A, 101, 'a.notice');
+        $repo->recordDelivery(self::TENANT_A, $notificationId, 'email');
+
+        self::assertCount(1, $repo->listDeliveries(self::TENANT_A, $notificationId), 'tenant A sees its delivery history');
+        self::assertCount(
+            0,
+            $repo->listDeliveries(self::TENANT_B, $notificationId),
+            "tenant B's scoped delivery list must exclude tenant A's rows"
+        );
+    }
+
+    public function testTenantScopedNotificationPreferencesRejectAForeignTenant(): void
+    {
+        $repo = new NotificationPreferenceRepository($this->pdo);
+        // The SAME (profile, type, channel) toggle owned independently by each tenant.
+        $repo->set(self::TENANT_A, 101, '*', 'email', false);
+        $repo->set(self::TENANT_B, 101, '*', 'email', true);
+
+        self::assertFalse($repo->listForProfile(self::TENANT_A, 101)[0]['enabled'], 'tenant A reads its own toggle');
+        self::assertTrue($repo->listForProfile(self::TENANT_B, 101)[0]['enabled'], "tenant B's toggle is independent");
+
+        // A tenant-A-scoped delete removes only tenant A's row; tenant B's survives.
+        self::assertTrue($repo->delete(self::TENANT_A, 101, '*', 'email'));
+        self::assertCount(0, $repo->listForProfile(self::TENANT_A, 101));
+        self::assertCount(1, $repo->listForProfile(self::TENANT_B, 101), "tenant B's toggle survives tenant A's delete");
+    }
+
+    public function testTenantScopedNotificationTemplatesRejectAForeignTenant(): void
+    {
+        $repo = new NotificationTemplateRepository($this->pdo);
+        // A global default both tenants inherit, plus a per-tenant override each.
+        $repo->upsert(0, 'welcome', 'email', '', ['subject' => 'Global']);
+        $repo->upsert(self::TENANT_A, 'welcome', 'email', '', ['subject' => 'A override']);
+        $repo->upsert(self::TENANT_B, 'welcome', 'email', '', ['subject' => 'B override']);
+
+        // Each tenant resolves ITS OWN override (never the other's), above the global.
+        $a = $repo->resolve(self::TENANT_A, 'welcome', 'email', null);
+        $b = $repo->resolve(self::TENANT_B, 'welcome', 'email', null);
+        self::assertNotNull($a);
+        self::assertNotNull($b);
+        self::assertSame('A override', $a['subject']);
+        self::assertSame('B override', $b['subject']);
+        // listForTenant returns only the caller's own override, never the other's or the global.
+        self::assertSame(['A override'], array_column($repo->listForTenant(self::TENANT_A), 'subject'));
+
+        // A tenant-A delete cannot remove tenant B's override.
+        $repo->delete(self::TENANT_A, 'welcome', 'email', '');
+        $bAfter = $repo->resolve(self::TENANT_B, 'welcome', 'email', null);
+        self::assertNotNull($bAfter);
+        self::assertSame('B override', $bAfter['subject']);
+    }
+
+    public function testTenantScopedSenderSettingsRejectAForeignTenant(): void
+    {
+        $repo = new TenantNotificationSettingsRepository($this->pdo);
+        $repo->upsertConfig(self::TENANT_A, 'email', ['from_address' => 'a@a.test']);
+        $repo->setCredentials(self::TENANT_A, 'email', 'A-BLOB');
+        $repo->upsertConfig(self::TENANT_B, 'email', ['from_address' => 'b@b.test']);
+
+        // Each tenant lists only its own channel config.
+        self::assertSame(['a@a.test'], array_column($repo->listForTenant(self::TENANT_A), 'from_address'));
+        self::assertSame(['b@b.test'], array_column($repo->listForTenant(self::TENANT_B), 'from_address'));
+
+        // Tenant B's channel carries its own (empty) credentials — never tenant A's blob.
+        $bRow = $repo->findWithCredentials(self::TENANT_B, 'email');
+        self::assertNotNull($bRow);
+        self::assertNull($bRow['credentials_encrypted'], "tenant B never sees tenant A's credentials");
+
+        // A tenant-B delete cannot remove tenant A's config or credentials.
+        $repo->delete(self::TENANT_B, 'email');
+        $aCreds = $repo->findWithCredentials(self::TENANT_A, 'email');
+        self::assertNotNull($aCreds, "tenant A's config survives tenant B's delete");
+        self::assertSame('A-BLOB', $aCreds['credentials_encrypted'], "tenant A's credentials survive");
     }
 
     /**

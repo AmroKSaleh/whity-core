@@ -187,6 +187,114 @@ final class AuditLogApiHandler
     }
 
     /**
+     * GET /api/me/audit-logs — the CALLER's own activity feed.
+     *
+     * Self-service analogue of {@see self::list()}: no AUDIT_READ permission is
+     * required (every authenticated user may see their own history), and
+     * `actor_user_id` is pinned to the caller — the `actor` filter from the
+     * admin endpoint does not apply here; a caller can never widen this to see
+     * another profile's rows. Tenant-scoped the same way (system tenant, id 0,
+     * still sees only ITS OWN actions across tenants — self-service is about
+     * "who did this", not "which tenant", so system-tenant callers are not
+     * widened to every tenant's audit rows the way admin `list()` widens them).
+     *
+     * @param Request $request The incoming request.
+     * @return Response JSON `{ data: [...], pagination: {...} }` (200) or an error.
+     */
+    public function listOwn(Request $request): Response
+    {
+        try {
+            $tenantId = TenantContext::getTenantId();
+            if ($tenantId === null) {
+                return Response::error('Tenant context is required', 403);
+            }
+
+            $actor = $request->user;
+            $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+                ? $actor->profile_id
+                : null;
+            if ($userId === null) {
+                return Response::error('Unauthorized', 401);
+            }
+
+            $query = [];
+            foreach ($_GET as $k => $v) {
+                if (is_string($k) && is_string($v)) {
+                    $query[$k] = $v;
+                }
+            }
+            $qs = parse_url($request->getPath(), PHP_URL_QUERY);
+            if (is_string($qs) && $qs !== '') {
+                parse_str($qs, $parsed);
+                foreach ($parsed as $k => $v) {
+                    if (is_string($k) && is_string($v)) {
+                        $query[$k] = $v;
+                    }
+                }
+            }
+
+            // Always scoped to this tenant AND this actor — neither is
+            // caller-controlled, unlike the admin endpoint's optional filters.
+            $conditions = ['tenant_id = :tenant_id', 'actor_user_id = :actor_user_id'];
+            $params = [':tenant_id' => $tenantId, ':actor_user_id' => $userId];
+
+            if (isset($query['action']) && $query['action'] !== '') {
+                $conditions[] = 'action = :action';
+                $params[':action'] = (string) $query['action'];
+            }
+
+            if (isset($query['target_type']) && $query['target_type'] !== '') {
+                $conditions[] = 'target_type = :target_type';
+                $params[':target_type'] = (string) $query['target_type'];
+            }
+
+            if (isset($query['from']) && $query['from'] !== '') {
+                $conditions[] = 'created_at >= :from';
+                $params[':from'] = (string) $query['from'];
+            }
+
+            if (isset($query['to']) && $query['to'] !== '') {
+                $conditions[] = 'created_at <= :to';
+                $params[':to'] = (string) $query['to'];
+            }
+
+            // @tenant-guard-ignore: $conditions ALWAYS begins with 'tenant_id = :tenant_id' (set unconditionally above); every query below binds it. The scanner cannot resolve the imploded builder array, so it must be told this WHERE clause is tenant-scoped. Covers both queries that consume $where.
+            $where = ' WHERE ' . implode(' AND ', $conditions);
+
+            $countStmt = $this->db->prepare('SELECT COUNT(*) AS cnt FROM audit_log' . $where);
+            $countStmt->execute($params);
+            $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
+            $total = $countRow !== false ? (int) ($countRow['cnt'] ?? 0) : 0;
+
+            $p = PaginationParams::fromQuery($query);
+
+            $listStmt = $this->db->prepare(
+                'SELECT id, tenant_id, actor_user_id, action, target_type, target_id, metadata, ip_address, created_at
+                 FROM audit_log' . $where . '
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT :limit OFFSET :offset'
+            );
+            foreach ($params as $key => $value) {
+                $listStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+            }
+            $listStmt->bindValue(':limit', $p->perPage, PDO::PARAM_INT);
+            $listStmt->bindValue(':offset', $p->offset, PDO::PARAM_INT);
+            $listStmt->execute();
+
+            /** @var array<int, array<string, mixed>> $rows */
+            $rows = $listStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            return Response::json([
+                'data' => array_map([$this, 'toPublicEntry'], $rows),
+                'pagination' => $p->meta($total),
+            ], 200);
+        } catch (\Exception $e) {
+            error_log('[AuditLogApiHandler] listOwn failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch audit logs', 500);
+        }
+    }
+
+    /**
      * Shape a raw audit_log row into the public API contract.
      *
      * Casts integer-like columns (PDO returns them as strings under Postgres) and

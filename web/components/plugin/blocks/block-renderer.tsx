@@ -10,6 +10,8 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconMinus,
+  IconPlus,
+  IconTrash,
   IconPointFilled,
   IconRefresh,
   IconSearch,
@@ -18,6 +20,7 @@ import type {
   ActionButtonBlock,
   AlertBlock,
   BadgeBlock,
+  BilingualTextInputBlock,
   Block,
   ButtonBlock,
   CardBlock,
@@ -29,6 +32,7 @@ import type {
   DataStatBlock,
   DataTableBlock,
   DateInputBlock,
+  FieldArrayBlock,
   FileInputBlock,
   FormBlock,
   GridBlock,
@@ -36,11 +40,19 @@ import type {
   IconBlock,
   KeyValueBlock,
   ListBlock,
+  LocalizedTextValue,
+  MarkdownBlock,
+  MathBlock,
   NumberInputBlock,
+  ReferenceSelectBlock,
+  RichTextInputBlock,
+  RowAction,
   RowBlock,
   SectionBlock,
   SelectBlock,
+  SelectorBlock,
   SliderBlock,
+  SourceParam,
   StatBlock,
   SubmitButtonBlock,
   TabBlock,
@@ -49,10 +61,14 @@ import type {
   TextAreaBlock,
   TextBlock,
   TextInputBlock,
+  VisibleWhen,
 } from '@/lib/plugin-features';
 import { Chart } from '@amroksaleh/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
 import { Input } from '@amroksaleh/ui/input';
+import { BilingualInput } from '@amroksaleh/ui/bilingual-input';
+import { MathText } from '@amroksaleh/ui/math-text';
+import { renderMarkdown } from '@/lib/safe-markdown';
 import { Pagination } from '@amroksaleh/ui/pagination';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import {
@@ -76,8 +92,11 @@ import {
 import { PermissionButton } from '@/components/rbac/permission-button';
 import {
   FormProvider,
+  FormScopeProvider,
   useFormBlockContext,
   IssuesReport,
+  type FormBlockContextValue,
+  type FieldArrayValue,
 } from '@/components/plugin/blocks/form-context';
 import { submitPluginAction } from '@/lib/plugin-action-submit';
 import type { ActionIssue } from '@/lib/plugin-action-submit';
@@ -582,6 +601,113 @@ function CodeRenderer({ block }: { block: CodeBlock }) {
   );
 }
 
+// WC-532 A5: a LaTeX expression via the KaTeX MathText atom (trust:false).
+function MathRenderer({ block }: { block: MathBlock }) {
+  return (
+    <div className="overflow-x-auto" data-slot="math-block">
+      <MathText expression={block.expression} block={block.block === true} />
+    </div>
+  );
+}
+
+// WC-532 A5: Markdown rendered by the dependency-free, XSS-safe renderer.
+function MarkdownRenderer({ block }: { block: MarkdownBlock }) {
+  return <div data-slot="markdown-block">{renderMarkdown(block.content)}</div>;
+}
+
+// ---- WC-532 A7: master-detail (selector → data-bound source params) ----
+
+interface MasterDetail {
+  selections: Record<string, string>;
+  setSelection: (name: string, value: string) => void;
+}
+
+const MasterDetailContext = React.createContext<MasterDetail | null>(null);
+
+function useMasterDetail(): MasterDetail | null {
+  return React.useContext(MasterDetailContext);
+}
+
+/**
+ * Provides the shared selection state that `selector` blocks write and
+ * data-bound blocks' `params` read. Rendered once at the BlockRenderer root, so
+ * a selection is visible to every sibling block on the screen.
+ */
+function MasterDetailProvider({ children }: { children: React.ReactNode }) {
+  const [selections, setSelections] = React.useState<Record<string, string>>({});
+  const setSelection = React.useCallback(
+    (name: string, value: string) => setSelections((prev) => ({ ...prev, [name]: value })),
+    []
+  );
+  const value = React.useMemo<MasterDetail>(() => ({ selections, setSelection }), [selections, setSelection]);
+  return <MasterDetailContext.Provider value={value}>{children}</MasterDetailContext.Provider>;
+}
+
+/**
+ * Compute a data-bound block's EFFECTIVE source: its base `source` plus any
+ * `params` whose named selector currently has a value, appended as URL-encoded
+ * query params. Returns the base source unchanged when there are no params or
+ * no selections yet. usePluginData keys on this string, so a selection change
+ * re-fetches the block.
+ */
+function useEffectiveSource(baseSource: string, params?: SourceParam[]): string {
+  const md = useMasterDetail();
+  if (!params || params.length === 0 || md === null) return baseSource;
+  const qs = params
+    .map((p) => {
+      const v = md.selections[p.from];
+      return v !== undefined && v !== '' ? `${encodeURIComponent(p.param)}=${encodeURIComponent(v)}` : null;
+    })
+    .filter((x): x is string => x !== null)
+    .join('&');
+  if (qs === '') return baseSource;
+  return baseSource + (baseSource.includes('?') ? '&' : '?') + qs;
+}
+
+// WC-532 A7: the master selector — a dropdown fed from an owned collection
+// whose selection is published into the shared master-detail context.
+function SelectorRenderer({ block }: { block: SelectorBlock }) {
+  const md = useMasterDetail();
+  const state = usePluginData<Array<Record<string, unknown>>>(
+    block.source,
+    (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
+  );
+  const current = md?.selections[block.name] ?? '';
+  const options =
+    state.status === 'ready'
+      ? state.data.flatMap((row) => {
+          const rawValue = row[block.valueField];
+          const rawLabel = row[block.labelField];
+          if (rawValue === undefined || rawValue === null) return [];
+          return [{
+            value: String(rawValue),
+            label: rawLabel === undefined || rawLabel === null ? String(rawValue) : String(rawLabel),
+          }];
+        })
+      : [];
+
+  return (
+    <div className="space-y-1.5" data-slot="selector">
+      <label className="text-sm font-medium">{block.label}</label>
+      {state.status === 'error' ? (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground" data-slot="selector-error">
+          <span>Failed to load options.</span>
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>Retry</Button>
+        </div>
+      ) : (
+        <Select value={current} onValueChange={(v) => md?.setSelection(block.name, v)} disabled={state.status === 'loading'}>
+          <SelectTrigger aria-label={block.label} data-slot="selector-trigger">
+            <SelectValue placeholder={state.status === 'loading' ? 'Loading…' : (block.placeholder ?? `Select ${block.label}`)} />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
+
 // ---- SP2 data-bound renderers (WC-231) ----
 
 /**
@@ -595,14 +721,83 @@ function CodeRenderer({ block }: { block: CodeBlock }) {
  * static `table`. The plugin-facing schema (`block.columns`/`block.pageSize`)
  * is unchanged — only the rendering engine underneath it is.
  */
+// WC-532 A1: substitute `{field}` placeholders in a row-action href/endpoint
+// with the row's values, URL-encoded. A missing field becomes ''. Only the
+// {…} tokens are touched — the surrounding path (already shape-validated by the
+// SDK) is left intact.
+function applyRowTemplate(template: string, row: Record<string, string>): string {
+  return template.replace(/\{([^}]+)\}/g, (_m, key: string) =>
+    encodeURIComponent(row[key] ?? '')
+  );
+}
+
+// WC-532 A1: a single mutating row action (a `{method, endpoint}` RowAction),
+// with an optional confirm dialog. On success it toasts and asks the table to
+// refresh so the mutated row set reflects the change.
+function RowActionButton({
+  action,
+  row,
+  onMutated,
+}: {
+  action: Extract<RowAction, { endpoint: string }>;
+  row: Record<string, string>;
+  onMutated?: () => void;
+}) {
+  const { addToast } = useToast();
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+
+  const run = React.useCallback(() => {
+    setBusy(true);
+    void submitPluginAction(applyRowTemplate(action.endpoint, row), action.method, {}).then((result) => {
+      setBusy(false);
+      setOpen(false);
+      if (result.ok) {
+        addToast('Completed successfully', 'success');
+        onMutated?.();
+      } else {
+        addToast(result.error ?? 'Request failed', 'error');
+      }
+    });
+  }, [action, row, addToast, onMutated]);
+
+  if (typeof action.confirm === 'string' && action.confirm !== '') {
+    return (
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" disabled={busy}>{action.label}</Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{action.label}</AlertDialogTitle>
+            <AlertDialogDescription>{action.confirm}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); run(); }}>{action.label}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+
+  return (
+    <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={run}>{action.label}</Button>
+  );
+}
+
 function InteractiveDataTable({
   columns,
   rows,
   pageSize,
+  rowActions,
+  onMutated,
 }: {
   columns: { key: string; label: string; sortable?: boolean; filterable?: boolean }[];
   rows: Record<string, string>[];
   pageSize?: number;
+  rowActions?: RowAction[];
+  onMutated?: () => void;
 }) {
   const dataTableColumns: DataTableColumn<Record<string, string>>[] = columns.map((col) => ({
     id: col.key,
@@ -612,12 +807,30 @@ function InteractiveDataTable({
     enableColumnFilter: col.filterable === true,
   }));
 
+  const renderRowActions =
+    rowActions && rowActions.length > 0
+      ? (row: Record<string, string>) => (
+          <div className="flex flex-wrap gap-1">
+            {rowActions.map((action, i) =>
+              'href' in action ? (
+                <Button key={i} asChild variant="ghost" size="sm">
+                  <Link href={applyRowTemplate(action.href, row)}>{action.label}</Link>
+                </Button>
+              ) : (
+                <RowActionButton key={i} action={action} row={row} onMutated={onMutated} />
+              )
+            )}
+          </div>
+        )
+      : undefined;
+
   return (
     <SharedDataTable
       columns={dataTableColumns}
       data={rows}
       getRowId={(_row, index) => String(index)}
       pagination={pageSize !== undefined && pageSize > 0 ? { pageSize } : undefined}
+      rowActions={renderRowActions}
     />
   );
 }
@@ -628,7 +841,8 @@ function InteractiveDataTable({
  */
 function DataTableRenderer({ block }: { block: DataTableBlock }) {
   type Rows = Record<string, unknown>[];
-  const state = usePluginData<Rows>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
     return body as Rows;
   });
@@ -702,7 +916,13 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
           <IconRefresh className="size-3.5" aria-hidden />
         </Button>
       </div>
-      <InteractiveDataTable columns={block.columns} rows={rows} pageSize={block.pageSize} />
+      <InteractiveDataTable
+        columns={block.columns}
+        rows={rows}
+        pageSize={block.pageSize}
+        rowActions={block.rowActions}
+        onMutated={state.refresh}
+      />
     </div>
   );
 }
@@ -713,7 +933,8 @@ function DataTableRenderer({ block }: { block: DataTableBlock }) {
  */
 function DataStatRenderer({ block }: { block: DataStatBlock }) {
   type Metric = Record<string, unknown>;
-  const state = usePluginData<Metric>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Metric>(source, (body) => {
     if (typeof body !== 'object' || body === null) return null;
     const obj = body as Record<string, unknown>;
     if (!(block.valueField in obj)) return null;
@@ -901,7 +1122,8 @@ function InteractiveList({
  */
 function DataListRenderer({ block }: { block: DataListBlock }) {
   type Rows = Record<string, unknown>[];
-  const state = usePluginData<Rows>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
     return body as Rows;
   });
@@ -995,7 +1217,8 @@ function DataListRenderer({ block }: { block: DataListBlock }) {
  */
 function ChartRenderer({ block }: { block: ChartBlock }) {
   type Rows = Record<string, unknown>[];
-  const state = usePluginData<Rows>(block.source, (body) => {
+  const source = useEffectiveSource(block.source, block.params);
+  const state = usePluginData<Rows>(source, (body) => {
     if (!Array.isArray(body) || body.length === 0) return null;
     return body as Rows;
   });
@@ -1096,6 +1319,86 @@ function FormRenderer({ block }: { block: FormBlock }) {
   );
 }
 
+// WC-532 A2: a repeatable field-group. Owns an array of row-records under
+// block.name in the enclosing form; each row renders the template children
+// through a row-SCOPED FormScopeProvider so the ordinary input renderers work
+// unchanged (their names resolve against the row, not the outer form). The
+// user can add / remove / reorder rows within [min, max].
+function FieldArrayRenderer({ block }: { block: FieldArrayBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="fieldArray" />;
+
+  const raw = ctx.values[block.name];
+  const rows: FieldArrayValue = Array.isArray(raw) ? raw : [];
+  const min = typeof block.min === 'number' && block.min > 0 ? block.min : 0;
+  const max = typeof block.max === 'number' && block.max > 0 ? block.max : Infinity;
+  const itemLabel = block.itemLabel ?? 'Item';
+
+  const write = (next: FieldArrayValue) => ctx.setValue(block.name, next);
+  const add = () => { if (rows.length < max) write([...rows, {}]); };
+  const remove = (i: number) => { if (rows.length > min) write(rows.filter((_, j) => j !== i)); };
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= rows.length) return;
+    const next = rows.slice();
+    const tmp = next[i]; next[i] = next[j]; next[j] = tmp;
+    write(next);
+  };
+
+  return (
+    <div className="space-y-2" data-slot="field-array">
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-sm font-medium">{block.label}</label>
+        {ctx.errors[block.name] !== undefined && (
+          <p className="text-xs text-destructive" role="alert">{ctx.errors[block.name]}</p>
+        )}
+      </div>
+
+      {rows.map((row, i) => {
+        const rowCtx: FormBlockContextValue = {
+          values: row,
+          setValue: (childName, v) => {
+            // A row holds only scalar/bilingual values — nested arrays (a
+            // fieldArray inside a row) are out of scope and ignored.
+            if (Array.isArray(v)) return;
+            const next = rows.slice();
+            next[i] = { ...next[i], [childName]: v };
+            write(next);
+          },
+          errors: {},
+          isSubmitting: ctx.isSubmitting,
+          submit: ctx.submit,
+        };
+        return (
+          <div key={i} className="space-y-2 rounded-md border border-border p-3" data-slot="field-array-row">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-muted-foreground">{itemLabel} {i + 1}</span>
+              <div className="flex gap-1">
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${itemLabel} ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)}>
+                  <IconChevronUp className="size-3.5" aria-hidden />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${itemLabel} ${i + 1} down`} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
+                  <IconChevronDown className="size-3.5" aria-hidden />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove ${itemLabel} ${i + 1}`} disabled={rows.length <= min} onClick={() => remove(i)}>
+                  <IconTrash className="size-3.5" aria-hidden />
+                </Button>
+              </div>
+            </div>
+            <FormScopeProvider value={rowCtx}>
+              <BlockList blocks={block.children} />
+            </FormScopeProvider>
+          </div>
+        );
+      })}
+
+      <Button type="button" variant="outline" size="sm" disabled={rows.length >= max} onClick={add}>
+        <IconPlus className="me-1 size-4" aria-hidden />Add {itemLabel.toLowerCase()}
+      </Button>
+    </div>
+  );
+}
+
 function TextInputRenderer({ block }: { block: TextInputBlock }) {
   const ctx = useFormBlockContext();
   if (ctx === null) return <UnsupportedBlock type="textInput" />;
@@ -1120,6 +1423,28 @@ function TextAreaRenderer({ block }: { block: TextAreaBlock }) {
     <div className="space-y-1.5">
       <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
       <Textarea id={inputId} value={strValue} rows={block.rows} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+    </div>
+  );
+}
+
+// WC-532 A5: a Markdown-aware textarea that submits Markdown source and shows
+// a live preview (rendered via the same XSS-safe renderer as the markdown block).
+function RichTextInputRenderer({ block }: { block: RichTextInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="richTextInput" />;
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : '';
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <Textarea id={inputId} value={strValue} rows={block.rows ?? 6} onChange={(e) => ctx.setValue(block.name, e.target.value)} aria-label={block.label} />
+      {strValue.trim() !== '' && (
+        <div className="rounded-md border border-border bg-muted/30 p-3" data-slot="richtext-preview">
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Preview</p>
+          {renderMarkdown(strValue)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1240,6 +1565,84 @@ function ColorInputRenderer({ block }: { block: ColorInputBlock }) {
   );
 }
 
+// WC-532 A4: paired AR/EN bilingual text input — reads/writes a {ar?, en?}
+// object in the form value map via the shared BilingualInput.
+function BilingualTextRenderer({ block }: { block: BilingualTextInputBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="bilingualText" />;
+  const inputId = `block-input-${block.name}`;
+  const raw = ctx.values[block.name];
+  const value = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      <BilingualInput
+        id={inputId}
+        value={value}
+        onChange={(next) => ctx.setValue(block.name, next)}
+        arLabel={block.arLabel}
+        enLabel={block.enLabel}
+        required={block.required}
+      />
+    </div>
+  );
+}
+
+// WC-532 A6: a select whose options are fetched from a plugin-owned collection
+// endpoint (usePluginData over `source`), each row mapped {value: valueField,
+// label: labelField}. The value submitted is the chosen valueField string —
+// identical to a static `select` once loaded. Split so the data fetch only
+// runs INSIDE a form: outside one the block degrades and never hits `source`.
+function ReferenceSelectRenderer({ block }: { block: ReferenceSelectBlock }) {
+  const ctx = useFormBlockContext();
+  if (ctx === null) return <UnsupportedBlock type="referenceSelect" />;
+  return <ReferenceSelectField block={block} ctx={ctx} />;
+}
+
+function ReferenceSelectField({ block, ctx }: { block: ReferenceSelectBlock; ctx: FormBlockContextValue }) {
+  const state = usePluginData<Array<Record<string, unknown>>>(
+    block.source,
+    (body) => (Array.isArray(body) ? (body as Array<Record<string, unknown>>) : null)
+  );
+  const inputId = `block-input-${block.name}`;
+  const value = ctx.values[block.name];
+  const strValue = typeof value === 'string' ? value : (block.default ?? '');
+
+  const options =
+    state.status === 'ready'
+      ? state.data.flatMap((row) => {
+          const rawValue = row[block.valueField];
+          const rawLabel = row[block.labelField];
+          if (rawValue === undefined || rawValue === null) return [];
+          return [{
+            value: String(rawValue),
+            label: rawLabel === undefined || rawLabel === null ? String(rawValue) : String(rawLabel),
+          }];
+        })
+      : [];
+
+  return (
+    <div className="space-y-1.5">
+      <InputLabel inputId={inputId} label={block.label} required={block.required} error={ctx.errors[block.name]} />
+      {state.status === 'error' ? (
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-2 text-xs text-muted-foreground" data-slot="reference-select-error">
+          <span>Failed to load options.</span>
+          <Button type="button" variant="outline" size="sm" onClick={state.retry}>Retry</Button>
+        </div>
+      ) : (
+        <Select value={strValue} onValueChange={(v) => ctx.setValue(block.name, v)} disabled={state.status === 'loading'}>
+          <SelectTrigger aria-label={block.label} data-slot="reference-select-trigger">
+            <SelectValue placeholder={state.status === 'loading' ? 'Loading…' : (block.placeholder ?? `Select ${block.label}`)} />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
+
 const INTERACTIVE_BUTTON_VARIANT: Record<NonNullable<SubmitButtonBlock["variant"]>, React.ComponentProps<typeof Button>["variant"]> = {
   primary: "default",
   secondary: "secondary",
@@ -1330,14 +1733,72 @@ function ActionButtonRenderer({ block }: { block: ActionButtonBlock }) {
   );
 }
 
+// ---- WC-532 A3: conditional visibility ----
+
+/**
+ * Normalize a form value / rule operand to a comparable string. Booleans
+ * become `'true'`/`'false'` so a checkbox (`true`) matches `equals: true` and
+ * `equals: 'true'` alike; everything else is `String()`-coerced so a numeric
+ * `equals: 5` matches a form field holding the string `'5'`. Missing → `''`.
+ */
+function normalizeVisibilityOperand(
+  value: string | number | boolean | LocalizedTextValue | FieldArrayValue | undefined
+): string {
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  if (value !== null && typeof value === 'object') {
+    // A bilingualText field (WC-532 A4) holds a {ar,en} object — never a
+    // meaningful scalar equals/in target; normalize to a sentinel that matches
+    // no operand rather than '[object Object]'.
+    return ' object';
+  }
+  return value === undefined ? '' : String(value);
+}
+
+/**
+ * Evaluate a block's optional `visibleWhen` facet against the enclosing form's
+ * live values. Returns true (visible) when there is no facet, when the block is
+ * outside any form (no sibling field to test), or when the rule is malformed —
+ * i.e. it FAILS OPEN so content is never permanently hidden by a missing
+ * context or a bad rule. The SDK validator already rejects malformed rules at
+ * publish time; this is the render-time counterpart.
+ */
+function isBlockVisible(block: Block, form: FormBlockContextValue | null): boolean {
+  const rule = (block as { visibleWhen?: VisibleWhen }).visibleWhen;
+  if (!rule || typeof rule.field !== 'string' || rule.field === '') {
+    return true;
+  }
+  if (form === null) {
+    return true;
+  }
+  const current = normalizeVisibilityOperand(form.values[rule.field]);
+  if (rule.equals !== undefined) {
+    return current === normalizeVisibilityOperand(rule.equals);
+  }
+  if (Array.isArray(rule.in)) {
+    return rule.in.some((v) => current === normalizeVisibilityOperand(v));
+  }
+  return true;
+}
+
 // ---- dispatch: validate per the contract, then render or degrade ----
 
 /**
  * Render one block. Each branch revalidates the node's required props and enum
  * values; an invalid node falls through to the `UnsupportedBlock` placeholder
  * rather than throwing. The `default` arm catches unknown `type`s.
+ *
+ * WC-532 A3: before rendering, a `visibleWhen` facet is evaluated against the
+ * enclosing form — an unmet predicate renders nothing (the block and its
+ * subtree are hidden). This is presentational only; hidden inputs still exist
+ * in the form's value map, and the server remains authoritative on validation.
  */
-function BlockNode({ block }: { block: Block }): React.ReactElement {
+function BlockNode({ block }: { block: Block }): React.ReactElement | null {
+  const form = useFormBlockContext();
+  if (!isBlockVisible(block, form)) {
+    return null;
+  }
   switch (block.type) {
     case 'section':
       return Array.isArray(block.children) ? (
@@ -1465,6 +1926,10 @@ function BlockNode({ block }: { block: Block }): React.ReactElement {
       ) : (
         <UnsupportedBlock type="code" />
       );
+    case 'math':
+      return isNonEmptyString(block.expression) ? <MathRenderer block={block} /> : <UnsupportedBlock type="math" />;
+    case 'markdown':
+      return isNonEmptyString(block.content) ? <MarkdownRenderer block={block} /> : <UnsupportedBlock type="markdown" />;
     case 'dataTable':
       return isNonEmptyString(block.source) && isDataColumnList(block.columns) ? (
         <DataTableRenderer block={block} />
@@ -1493,13 +1958,19 @@ function BlockNode({ block }: { block: Block }): React.ReactElement {
       ) : (
         <UnsupportedBlock type="chart" />
       );
+    case 'selector':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <SelectorRenderer block={block} /> : <UnsupportedBlock type="selector" />;
 
     case 'form':
       return Array.isArray(block.children) && isValidSubmitSpec(block.submit) ? <FormRenderer block={block} /> : <UnsupportedBlock type="form" />;
+    case 'fieldArray':
+      return Array.isArray(block.children) && isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <FieldArrayRenderer block={block} /> : <UnsupportedBlock type="fieldArray" />;
     case 'textInput':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextInputRenderer block={block} /> : <UnsupportedBlock type="textInput" />;
     case 'textArea':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <TextAreaRenderer block={block} /> : <UnsupportedBlock type="textArea" />;
+    case 'richTextInput':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <RichTextInputRenderer block={block} /> : <UnsupportedBlock type="richTextInput" />;
     case 'numberInput':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <NumberInputRenderer block={block} /> : <UnsupportedBlock type="numberInput" />;
     case 'select':
@@ -1514,6 +1985,10 @@ function BlockNode({ block }: { block: Block }): React.ReactElement {
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <FileInputRenderer block={block} /> : <UnsupportedBlock type="fileInput" />;
     case 'colorInput':
       return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <ColorInputRenderer block={block} /> : <UnsupportedBlock type="colorInput" />;
+    case 'bilingualText':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) ? <BilingualTextRenderer block={block} /> : <UnsupportedBlock type="bilingualText" />;
+    case 'referenceSelect':
+      return isNonEmptyString(block.name) && isNonEmptyString(block.label) && isNonEmptyString(block.source) && isNonEmptyString(block.valueField) && isNonEmptyString(block.labelField) ? <ReferenceSelectRenderer block={block} /> : <UnsupportedBlock type="referenceSelect" />;
     case 'submitButton':
       return isNonEmptyString(block.label) ? <SubmitButtonRenderer block={block} /> : <UnsupportedBlock type="submitButton" />;
     case 'actionButton':
@@ -1551,8 +2026,10 @@ function BlockList({ blocks }: { blocks: Block[] }) {
  */
 export function BlockRenderer({ blocks }: { blocks: Block[] }) {
   return (
-    <div className="space-y-4" data-slot="block-renderer">
-      <BlockList blocks={blocks} />
-    </div>
+    <MasterDetailProvider>
+      <div className="space-y-4" data-slot="block-renderer">
+        <BlockList blocks={blocks} />
+      </div>
+    </MasterDetailProvider>
   );
 }

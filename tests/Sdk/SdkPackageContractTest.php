@@ -166,9 +166,11 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.13.0',
+            '1.14.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.13 adds the embed frontend-feature screen and multipart '
+            'SDK 1.14 adds the notification transport contract (NotificationTransport '
+            . '+ NotificationMessage/SendResult value objects, WC-notifications); '
+            . '1.13 adds the embed frontend-feature screen and multipart '
             . 'action file uploads (WC-246/WC-247); 1.12 adds the optional '
             . 'theme-override contribution point '
             . '(PluginThemeInterface, WC-242); 1.11 adds inline sort/filter/pagination '

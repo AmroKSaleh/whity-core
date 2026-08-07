@@ -35,12 +35,31 @@ export interface SchemaObject {
    * hatch instead.
    */
   'x-whity-localized-text'?: boolean;
+  /**
+   * Marks an FK/reference property: instead of a bare number/text input, the
+   * generic form renders a DROPDOWN populated from the `resource` collection —
+   * each row's `valueField` is the submitted value, `labelField` the display
+   * text. Same `x-*` extension rationale as `x-whity-localized-text`. Fields
+   * are optional here so the untrusted spec is validated at read time.
+   */
+  'x-whity-reference'?: { resource?: string; valueField?: string; labelField?: string };
 }
 
 /** The runtime value shape a LocalizedText field's JSON actually carries. */
 export interface LocalizedTextValue {
   ar?: string;
   en?: string;
+  [key: string]: string | undefined;
+}
+
+/** A resolved, validated `x-whity-reference` config. */
+export interface ReferenceConfig {
+  /** Collection endpoint the dropdown options are fetched from (an apiPath). */
+  resource: string;
+  /** Row property whose value is submitted (typically "id"). */
+  valueField: string;
+  /** Row property shown as the option label. */
+  labelField: string;
 }
 
 export interface MediaTypeObject {
@@ -77,7 +96,14 @@ export interface OpenApiSpec {
 }
 
 /** Input control kinds the generic form knows how to render. */
-export type CrudFieldKind = 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'localized-text';
+export type CrudFieldKind =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'checkbox'
+  | 'select'
+  | 'localized-text'
+  | 'reference';
 
 /** A single create/edit form field derived from a request-body schema. */
 export interface CrudField {
@@ -89,6 +115,8 @@ export interface CrudField {
   options?: string[];
   /** Present when the schema declares a maxLength constraint. */
   maxLength?: number;
+  /** Present for `kind: "reference"` — how to populate + submit the dropdown. */
+  reference?: ReferenceConfig;
 }
 
 /** A list-table column derived from the item schema's primitive properties. */
@@ -97,6 +125,8 @@ export interface CrudColumn {
   label: string;
   /** WC-532: the cell value is a {@link LocalizedTextValue}, not a string. */
   isLocalizedText?: boolean;
+  /** Present when the column is an FK — the cell resolves id → label via this. */
+  reference?: ReferenceConfig;
 }
 
 /** Which mutations the spec actually publishes for the resource. */
@@ -210,6 +240,11 @@ function fieldKindOf(prop: SchemaObject): CrudFieldKind | null {
   if (isLocalizedTextSchema(prop)) {
     return 'localized-text';
   }
+  // A reference marker wins over the raw scalar type: an FK integer becomes a
+  // dropdown, not a number input.
+  if (referenceConfigOf(prop) !== null) {
+    return 'reference';
+  }
   if (prop.enum !== undefined && prop.enum.length > 0) {
     return 'select';
   }
@@ -236,6 +271,28 @@ function fieldKindOf(prop: SchemaObject): CrudFieldKind | null {
  */
 function isLocalizedTextSchema(prop: SchemaObject): boolean {
   return prop.type === 'object' && prop['x-whity-localized-text'] === true;
+}
+
+/**
+ * Resolve a property's `x-whity-reference` marker to a validated config, or
+ * null when absent/malformed. The spec is untrusted JSON, so every field is
+ * checked at runtime; an incomplete marker degrades the field to its plain
+ * scalar kind rather than a broken dropdown.
+ */
+function referenceConfigOf(prop: SchemaObject): ReferenceConfig | null {
+  const ref = prop['x-whity-reference'];
+  if (ref === undefined || ref === null) {
+    return null;
+  }
+  const { resource, valueField, labelField } = ref;
+  if (
+    typeof resource === 'string' && resource.length > 0 &&
+    typeof valueField === 'string' && valueField.length > 0 &&
+    typeof labelField === 'string' && labelField.length > 0
+  ) {
+    return { resource, valueField, labelField };
+  }
+  return null;
 }
 
 /** Whether a resolved property is a table-renderable primitive. */
@@ -285,6 +342,12 @@ function fieldsFromOperation(
     if (kind === 'select' && prop.enum !== undefined) {
       field.options = prop.enum.map((value) => String(value));
     }
+    if (kind === 'reference') {
+      const reference = referenceConfigOf(prop);
+      if (reference !== null) {
+        field.reference = reference;
+      }
+    }
     if (prop.maxLength !== undefined) {
       field.maxLength = prop.maxLength;
     }
@@ -326,6 +389,10 @@ function columnsFrom(
     const column: CrudColumn = { key, label: humanizeKey(key) };
     if (isLocalizedTextSchema(prop)) {
       column.isLocalizedText = true;
+    }
+    const reference = referenceConfigOf(prop);
+    if (reference !== null) {
+      column.reference = reference;
     }
     columns.push(column);
   }

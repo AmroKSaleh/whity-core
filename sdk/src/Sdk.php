@@ -56,13 +56,19 @@ namespace Whity\Sdk;
  * 1.13 (`screen: 'embed'` frontend-feature value — the host iframes a
  * plugin's own RBAC-protected GET route with zero host-application edits,
  * WC-246 — plus real multipart file uploads for `screen: 'action'` fields,
- * WC-247).
+ * WC-247) →
+ * 1.14 (notification transport contract: the pluggable
+ * {@see \Whity\Sdk\Notification\NotificationTransport} channel contract plus
+ * the {@see \Whity\Sdk\Notification\NotificationMessage} and
+ * {@see \Whity\Sdk\Notification\SendResult} value objects — one contract for
+ * email/SMS/in-app/push delivery. Core ships the transport registry + a
+ * null/log transport; plugins contribute real ones, WC-notifications).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.13.0';
+    public const VERSION = '1.14.0';
 
     /**
      * Static identity only — never instantiated.

@@ -31,6 +31,7 @@ final class BlockValidator
     private const INPUT_LEAF_TYPES = [
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
+        'bilingualText', 'referenceSelect', 'richTextInput',
     ];
 
     /**
@@ -40,7 +41,8 @@ final class BlockValidator
     private const FORM_ONLY_TYPES = [
         'textInput', 'textArea', 'numberInput', 'select',
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-        'submitButton',
+        'bilingualText', 'referenceSelect', 'richTextInput', 'submitButton',
+        'fieldArray',
     ];
 
     /**
@@ -164,8 +166,10 @@ final class BlockValidator
         }
 
         // SP3 (WC-233): track input names within their enclosing form for
-        // duplicate detection. Only applies to input leaves (not submitButton).
-        if ($inForm && \in_array($type, self::INPUT_LEAF_TYPES, true)) {
+        // duplicate detection. Applies to input leaves (not submitButton) and
+        // to `fieldArray` (WC-532 A2), whose own `name` is the payload key for
+        // its row array and must not collide with a sibling input.
+        if ($inForm && (\in_array($type, self::INPUT_LEAF_TYPES, true) || $type === 'fieldArray')) {
             $nameValue = $node['name'] ?? null;
             if (\is_string($nameValue) && $nameValue !== '') {
                 if (isset($formNames[$nameValue])) {
@@ -204,8 +208,12 @@ final class BlockValidator
             }
 
             /** @var array<mixed> $children */
-            if ($type === 'form') {
-                // A `form` starts a fresh name registry for its subtree.
+            if ($type === 'form' || $type === 'fieldArray') {
+                // A `form` starts a fresh name registry for its subtree; a
+                // `fieldArray` (WC-532 A2) likewise scopes its template's input
+                // names PER ROW, so they neither collide with the outer form nor
+                // with a sibling fieldArray. Its children still require a form
+                // ancestor, so `$inForm` stays true down this branch.
                 $childFormNames = [];
                 self::validateList($children, "{$path}.children", $depth + 1, $count, $errors, $type, true, $childFormNames);
             } else {
@@ -218,7 +226,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -247,7 +255,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -373,6 +381,24 @@ final class BlockValidator
             case 'submitSpec':
                 // SP3 (WC-233): an array with method ∈ ['POST','PUT'] and a valid apiPath endpoint.
                 self::validateSubmitSpec($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'visibilityRule':
+                // WC-532 A3: a presentational `{field, equals|in}` predicate.
+                self::validateVisibilityRule($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'rowActionList':
+                // WC-532 A1: per-row dataTable actions.
+                self::validateRowActionList($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'sourceParamList':
+                // WC-532 A7: master-detail query-param bindings.
+                self::validateSourceParamList($value, $type, $prop, $path, $errors);
 
                 break;
         }
@@ -614,6 +640,193 @@ final class BlockValidator
         ) {
             $errors[] = "{$path}.endpoint: '{$type}.{$prop}.endpoint' must be a relative API path starting with '/api/' "
                 . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
+        }
+    }
+
+    /**
+     * `<dataBound>.params` (WC-532 A7): master-detail query-param bindings.
+     * A list of `{param: non-empty string, from: non-empty string}` where
+     * `param` is the query-param name appended to the block's `source` and
+     * `from` is the name of the `selector` whose current value supplies it.
+     * The base `source` is unchanged (still ownership-checked) — only these
+     * whitelisted params interpolate, URL-encoded, at fetch time on the web.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateSourceParamList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a list of {param, from} objects";
+
+            return;
+        }
+
+        foreach ($value as $i => $item) {
+            if (
+                !\is_array($item)
+                || !isset($item['param']) || !\is_string($item['param']) || $item['param'] === ''
+                || !isset($item['from']) || !\is_string($item['from']) || $item['from'] === ''
+            ) {
+                $errors[] = "{$path}[{$i}]: each '{$type}.{$prop}' entry must be a "
+                    . '{param: non-empty string, from: non-empty string} object';
+            }
+        }
+    }
+
+    /**
+     * `dataTable.rowActions` (WC-532 A1): a list of per-row affordances. Each
+     * entry is `{label: non-empty string}` PLUS exactly one of:
+     *   - `href`: an internal relative path (may carry `{field}` placeholders
+     *     the renderer substitutes from the row) — an internal-nav link, OR
+     *   - `endpoint` (apiPath, `{field}`-templatable) + `method` ∈
+     *     POST|PUT|DELETE — a mutation, with an optional `confirm` prompt.
+     *
+     * Placeholders are validated loosely (the path predicates already permit
+     * `{`/`}`); the renderer URL-encodes each substituted row value. A `{field}`
+     * endpoint that resolves to another plugin's route is a runtime concern the
+     * host's route dispatch still gates — this contract only fixes the shape.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateRowActionList(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || !array_is_list($value) || $value === []) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a non-empty list of row-action objects";
+
+            return;
+        }
+
+        foreach ($value as $i => $item) {
+            $at = "{$path}[{$i}]";
+            if (!\is_array($item)) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must be an object";
+
+                continue;
+            }
+
+            $label = $item['label'] ?? null;
+            if (!\is_string($label) || $label === '') {
+                $errors[] = "{$at}.label: each '{$type}.{$prop}' entry must carry a non-empty 'label'";
+            }
+
+            $hasHref     = \array_key_exists('href', $item);
+            $hasEndpoint = \array_key_exists('endpoint', $item);
+
+            if ($hasHref === $hasEndpoint) {
+                $errors[] = "{$at}: each '{$type}.{$prop}' entry must carry exactly one of 'href' or 'endpoint'";
+
+                continue;
+            }
+
+            if ($hasHref) {
+                $href = $item['href'];
+                if (!\is_string($href) || $href === '' || $href[0] !== '/' || str_starts_with($href, '//')) {
+                    $errors[] = "{$at}.href: '{$type}.{$prop}' href must be an internal path starting with '/' "
+                        . '(absolute and protocol-relative URLs are rejected), got ' . self::describeScalar($href);
+                }
+
+                continue;
+            }
+
+            // endpoint + method (+ optional confirm)
+            $endpoint = $item['endpoint'];
+            if (
+                !\is_string($endpoint)
+                || !str_starts_with($endpoint, '/api/')
+                || str_contains($endpoint, '//')
+                || str_contains($endpoint, '..')
+                || str_contains($endpoint, '\\')
+                || preg_match('/[\s\x00-\x1f\x7f]/', $endpoint) === 1
+            ) {
+                $errors[] = "{$at}.endpoint: '{$type}.{$prop}' endpoint must be a relative API path starting with '/api/' "
+                    . '(no scheme, host, "..", backslash, or whitespace), got ' . self::describeScalar($endpoint);
+            }
+
+            $method = $item['method'] ?? null;
+            if (!\is_string($method) || !\in_array($method, ['POST', 'PUT', 'DELETE'], true)) {
+                $errors[] = "{$at}.method: '{$type}.{$prop}' endpoint action must carry method POST, PUT, or DELETE, got "
+                    . self::describeScalar($method);
+            }
+
+            if (\array_key_exists('confirm', $item) && !\is_string($item['confirm'])) {
+                $errors[] = "{$at}.confirm: '{$type}.{$prop}' confirm must be a string";
+            }
+        }
+    }
+
+    /**
+     * `visibleWhen` (WC-532 A3): a presentational conditional-visibility rule.
+     * An object `{field: non-empty string}` carrying EXACTLY ONE of:
+     *   - `equals`: a scalar the referenced field's value must equal, or
+     *   - `in`: a non-empty list of scalars the value must be one of.
+     *
+     * This is render-time only — the web renderer hides the block when the
+     * predicate is unmet. It carries NO endpoint or path, so unlike `apiPath`
+     * props there is nothing to ownership-check; it can never widen data access
+     * or bypass server-side validation (the server never trusts it).
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validateVisibilityRule(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value) || array_is_list($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be a {field, equals|in} object, got "
+                . get_debug_type($value);
+
+            return;
+        }
+
+        $field = $value['field'] ?? null;
+        if (!\is_string($field) || $field === '') {
+            $errors[] = "{$path}.field: '{$type}.{$prop}.field' must be a non-empty string, got "
+                . self::describeScalar($field);
+        }
+
+        $hasEquals = \array_key_exists('equals', $value);
+        $hasIn     = \array_key_exists('in', $value);
+
+        if ($hasEquals === $hasIn) {
+            // both or neither
+            $errors[] = "{$path}: '{$type}.{$prop}' must carry exactly one of 'equals' or 'in'";
+
+            return;
+        }
+
+        if ($hasEquals && !\is_scalar($value['equals'])) {
+            $errors[] = "{$path}.equals: '{$type}.{$prop}.equals' must be a string, number, or boolean, got "
+                . get_debug_type($value['equals']);
+        }
+
+        if ($hasIn) {
+            $in = $value['in'];
+            if (!\is_array($in) || !array_is_list($in) || $in === []) {
+                $errors[] = "{$path}.in: '{$type}.{$prop}.in' must be a non-empty list of scalars";
+            } else {
+                foreach ($in as $i => $item) {
+                    if (!\is_scalar($item)) {
+                        $errors[] = "{$path}.in[{$i}]: each '{$type}.{$prop}.in' entry must be a string, number, or boolean, got "
+                            . get_debug_type($item);
+                    }
+                }
+            }
         }
     }
 

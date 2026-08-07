@@ -23,10 +23,25 @@ import { apiClient } from '@/lib/api-client';
  * literal is the discriminant.
  */
 
+/**
+ * WC-532 A3: a presentational conditional-visibility predicate. When a block
+ * carrying `visibleWhen` is inside a `form`, the renderer hides it unless the
+ * referenced sibling field matches. Render-time only — it never affects the
+ * submitted payload or server-side validation. Mirrors the SDK
+ * `visibilityRule` prop type; the SDK validator requires exactly one of
+ * `equals` / `in`.
+ */
+export interface VisibleWhen {
+  field: string;
+  equals?: string | number | boolean;
+  in?: (string | number | boolean)[];
+}
+
 /** Container: a labelled vertical grouping of blocks. */
 export interface SectionBlock {
   type: 'section';
   title?: string;
+  visibleWhen?: VisibleWhen;
   children: Block[];
 }
 
@@ -35,6 +50,7 @@ export interface CardBlock {
   type: 'card';
   title?: string;
   description?: string;
+  visibleWhen?: VisibleWhen;
   children: Block[];
 }
 
@@ -150,6 +166,19 @@ export interface CodeBlock {
   content: string;
 }
 
+/** WC-532 A5: a LaTeX expression rendered via KaTeX (inline unless `block`). */
+export interface MathBlock {
+  type: 'math';
+  expression: string;
+  block?: boolean;
+}
+
+/** WC-532 A5: Markdown source rendered by the XSS-safe renderer (with $…$ math). */
+export interface MarkdownBlock {
+  type: 'markdown';
+  content: string;
+}
+
 // ---- SP2 data-bound leaf blocks (WC-231) ----
 
 /**
@@ -162,12 +191,34 @@ export interface CodeBlock {
  * from `source` — none of them trigger a second request or touch any other
  * route.
  */
+/**
+ * WC-532 A1: a per-row affordance in a dataTable's trailing Actions column.
+ * Either an internal-nav `href` or a `{method, endpoint}` mutation — both
+ * templated with `{field}` placeholders substituted from the row at render.
+ */
+export type RowAction =
+  | { label: string; href: string }
+  | { label: string; method: 'POST' | 'PUT' | 'DELETE'; endpoint: string; confirm?: string };
+
+/**
+ * WC-532 A7 (master-detail): binds a query `param` on a data-bound block's
+ * `source` to the current value of the `selector` named `from`. The renderer
+ * appends `?param=<selection>` (URL-encoded) at fetch time; the base `source`
+ * is unchanged (still ownership-checked).
+ */
+export interface SourceParam {
+  param: string;
+  from: string;
+}
+
 export interface DataTableBlock {
   type: 'dataTable';
   source: string;
   columns: { key: string; label: string; sortable?: boolean; filterable?: boolean }[];
   pageSize?: number;
   emptyText?: string;
+  rowActions?: RowAction[];
+  params?: SourceParam[];
 }
 
 /**
@@ -181,6 +232,7 @@ export interface DataStatBlock {
   hintField?: string;
   trendField?: string;
   emptyText?: string;
+  params?: SourceParam[];
 }
 
 /**
@@ -199,6 +251,7 @@ export interface DataListBlock {
   filterable?: boolean;
   pageSize?: number;
   emptyText?: string;
+  params?: SourceParam[];
 }
 
 // ---- SP3 interactive blocks (WC-235) ----
@@ -216,6 +269,21 @@ export interface FormBlock {
   children: Block[];
 }
 
+/**
+ * WC-532 A2: a repeatable field-group (form only). `children` is the per-row
+ * sub-form template; the renderer collects the rows into a JSON array submitted
+ * under `name`. `min`/`max` bound the row count; `itemLabel` names each row.
+ */
+export interface FieldArrayBlock {
+  type: 'fieldArray';
+  name: string;
+  label: string;
+  itemLabel?: string;
+  min?: number;
+  max?: number;
+  children: Block[];
+}
+
 /** Leaf (form only): a single-line text input. */
 export interface TextInputBlock {
   type: 'textInput';
@@ -226,6 +294,7 @@ export interface TextInputBlock {
   default?: string;
   /** When true, renders as type="password". The sentinel value '••••••' is never sent on submit. */
   sensitive?: boolean;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a multi-line text area. */
@@ -236,6 +305,22 @@ export interface TextAreaBlock {
   rows?: number;
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
+}
+
+/**
+ * WC-532 A5: a Markdown-aware multi-line input. Submits Markdown source (a
+ * plain string) like textArea; the renderer shows a live preview via the
+ * XSS-safe renderer.
+ */
+export interface RichTextInputBlock {
+  type: 'richTextInput';
+  name: string;
+  label: string;
+  rows?: number;
+  required?: boolean;
+  default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a numeric input. */
@@ -248,6 +333,7 @@ export interface NumberInputBlock {
   step?: number;
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a single-select dropdown. */
@@ -258,6 +344,7 @@ export interface SelectBlock {
   options: { value: string; label: string }[];
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a boolean checkbox. */
@@ -266,6 +353,7 @@ export interface CheckboxBlock {
   name: string;
   label: string;
   default?: boolean;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a range slider. */
@@ -277,6 +365,7 @@ export interface SliderBlock {
   max: number;
   step?: number;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a date input. */
@@ -286,6 +375,7 @@ export interface DateInputBlock {
   label: string;
   required?: boolean;
   default?: string;
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a file input. Without encoding the content is read as text; with 'base64' it is encoded as a data URI. */
@@ -297,6 +387,7 @@ export interface FileInputBlock {
   required?: boolean;
   /** When 'base64', the file is converted to a data URI via FileReader.readAsDataURL() before submit. */
   encoding?: 'base64';
+  visibleWhen?: VisibleWhen;
 }
 
 /** Leaf (form only): a colour picker. */
@@ -304,6 +395,49 @@ export interface ColorInputBlock {
   type: 'colorInput';
   name: string;
   label: string;
+  default?: string;
+  visibleWhen?: VisibleWhen;
+}
+
+/**
+ * The `{ar?, en?}` value a bilingual field reads and submits — the same
+ * LocalizedText convention the schema-driven CRUD screens use (WC-532).
+ */
+export interface LocalizedTextValue {
+  ar?: string;
+  en?: string;
+  [key: string]: string | undefined;
+}
+
+/**
+ * WC-532 A4: a paired Arabic/English bilingual text input. Renders the shared
+ * RTL/LTR-synced `BilingualInput` and submits a `{ar?, en?}` object under
+ * `name` — matching how CRUD screens render `x-whity-localized-text` fields.
+ */
+export interface BilingualTextInputBlock {
+  type: 'bilingualText';
+  name: string;
+  label: string;
+  required?: boolean;
+  arLabel?: string;
+  enLabel?: string;
+}
+
+/**
+ * WC-532 A6: a foreign-key / reference select. Unlike `select` (static
+ * `options`), it populates its dropdown from a resource COLLECTION fetched from
+ * `source` (an ownership-checked, version-rewritten apiPath). Each row's
+ * `valueField` is the submitted value; `labelField` is the display text.
+ */
+export interface ReferenceSelectBlock {
+  type: 'referenceSelect';
+  name: string;
+  label: string;
+  source: string;
+  valueField: string;
+  labelField: string;
+  required?: boolean;
+  placeholder?: string;
   default?: string;
 }
 
@@ -341,6 +475,23 @@ export interface ChartBlock {
   series: { key: string; label: string; color: 1 | 2 | 3 | 4 | 5 }[];
   xField?: string;
   emptyText?: string;
+  params?: SourceParam[];
+}
+
+/**
+ * WC-532 A7: the master control. A dropdown populated from an owned collection
+ * `source`; its chosen `valueField` value is published under `name` into the
+ * shared master-detail context and consumed by sibling data-bound blocks'
+ * `params`. Not a form input.
+ */
+export interface SelectorBlock {
+  type: 'selector';
+  name: string;
+  label: string;
+  source: string;
+  valueField: string;
+  labelField: string;
+  placeholder?: string;
 }
 
 /**
@@ -367,12 +518,16 @@ export type Block =
   | ButtonBlock
   | IconBlock
   | CodeBlock
+  | MathBlock
+  | MarkdownBlock
   | DataTableBlock
   | DataStatBlock
   | DataListBlock
   | FormBlock
+  | FieldArrayBlock
   | TextInputBlock
   | TextAreaBlock
+  | RichTextInputBlock
   | NumberInputBlock
   | SelectBlock
   | CheckboxBlock
@@ -380,9 +535,12 @@ export type Block =
   | DateInputBlock
   | FileInputBlock
   | ColorInputBlock
+  | BilingualTextInputBlock
+  | ReferenceSelectBlock
   | SubmitButtonBlock
   | ActionButtonBlock
-  | ChartBlock;
+  | ChartBlock
+  | SelectorBlock;
 
 /** A single plugin-contributed UI feature, as published by the backend. */
 export interface PluginFeature {

@@ -59,12 +59,8 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // WC-206: unversioned infrastructure probes (registerUnversioned).
         // Kept undocumented for now — schema to be added in a follow-up task.
         'GET /api/version',
-        // WC-9b87: tenant email-domain policy admin endpoints — OpenAPI schema
-        // declarations to follow in a separate documentation task.
-        'DELETE /api/email-domains/{id}',
-        'GET /api/email-domains',
-        'POST /api/email-domains',
-        'POST /api/email-domains/{id}/verify', // WC-628738f5: DNS-TXT ownership verification; OpenAPI to follow
+        // WC-9b87 / WC-628738f5: tenant email-domain policy admin endpoints are now
+        // declared in CoreApiSchemas::tenantEmailDomainRoutes().
         // WC-e6287 / WC-f3b17bd2: identity-provider admin CRUD, the public
         // enabled-providers list, and connected-accounts management are now
         // declared in CoreApiSchemas::identityRoutes().
@@ -90,6 +86,17 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'GET /api/settings/mail/status',
         'PUT /api/settings/mail/smtp-password',
         'POST /api/settings/mail/test',
+        // WC-jobs-api: generic async-job submission + status API. OpenAPI schema
+        // (JobCreateRequest / JobResponse / JobListResponse components) to follow
+        // in a dedicated documentation task, per the KNOWN_UNDOCUMENTED-first path.
+        'POST /api/jobs',
+        'GET /api/jobs',
+        'GET /api/jobs/{id}',
+        // WC-i18n: public per-domain translation bundle. The sibling language
+        // routes are declared in CoreApiSchemas::languageRoutes(); this one's
+        // response is an open-ended key => string map whose component schema
+        // lands with the translation-management surface.
+        'GET /api/translations/{language_code}/{domain}',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

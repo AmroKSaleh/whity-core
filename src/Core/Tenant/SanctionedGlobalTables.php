@@ -84,6 +84,19 @@ final class SanctionedGlobalTables
         // must be visible to all FrankenPHP workers regardless of which tenant's
         // request they are serving. No tenant_id column.
         'shared_store' => 'Cross-worker atomic counter store (WC-91f2); keys are platform-wide (rate-limit windows, brute-force counters) — no tenant_id column.',
+
+        // WC-password-reset-2fa-recovery (migration 076) — single-use, time-boxed
+        // password-reset tokens for a global profile. A password credential
+        // belongs to a person, not a tenant (mirrors profiles/email_verifications,
+        // ADR 0005); rows join only to the global profiles table. The admin
+        // approval QUEUE is tenant-scoped at query time via a JOIN to
+        // memberships, not via a column on this table.
+        'password_resets' => 'Password-reset tokens for the global profiles identity (WC-password-reset-2fa-recovery); rows join only to profiles — no tenant_id column.',
+
+        // WC-password-reset-2fa-recovery (migration 077) — "lost my 2FA device"
+        // recovery requests for a global profile. Same rationale as
+        // password_resets above: identity is per-person, not per-tenant.
+        'two_factor_recovery_requests' => '2FA-recovery requests for the global profiles identity (WC-password-reset-2fa-recovery); rows join only to profiles — no tenant_id column.',
     ];
 
     /**

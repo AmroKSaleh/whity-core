@@ -1,0 +1,67 @@
+[package]
+name = "whity-tauri-desktop-template"
+version = "0.1.0"
+description = "Whity Tauri desktop boilerplate: @amroksaleh/ui + @amroksaleh/features wired to real local SQLite, plus a worked example of adding a native-crate command (printing)."
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "whity_tauri_desktop_template_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Local persistence for the DemoCatalog pilot feature — "bundled" links a
+# vendored SQLite (no system libsqlite3-dev needed), matching the "just
+# works out of the box" bar this boilerplate is for.
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Stable client-side identity for offline-first sync (WC-desktop-sync): each row
+# gets a UUID at creation so an offline-created record has a durable id that can
+# be reconciled with the server's integer id once it syncs.
+uuid = { version = "1", features = ["v4"] }
+
+# HTTP to the Whity backend for device auth + (later) sync. Done in RUST, not the
+# webview, so the device credential + access token never enter JS. `blocking`
+# keeps the auth commands simple (no async runtime yet — the background sync
+# engine adds tokio later); `rustls-tls` avoids a system OpenSSL/native-tls
+# dependency so the template still "just builds" everywhere.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+# The worked "add a crate for custom functionality" example (see
+# src/commands/printer.rs): cross-platform printer discovery + printing,
+# demonstrating the extension pattern with a real capability the web can't do.
+#
+# Pinned to ~2.3 (not a bare "2") rather than trusting semver here: this
+# template's own verification already caught two breaking API changes within
+# this crate's 2.x line (PrinterJobOptions's shape, PrintersError not
+# implementing Display) before this pin was added — an unpinned major-only
+# constraint would let a future `cargo update` reintroduce a similar break
+# silently.
+printers = "~2.3"
+
+# OS-native secure storage for the long-lived (90-day) device credential
+# (WC-desktop-sync) — the short-lived access token stays in memory only. Each
+# platform gets its native backend: Windows Credential Manager / macOS Keychain /
+# Linux Secret Service. The Linux backend talks to the Secret Service over D-Bus,
+# so a Linux build/run needs libdbus-1 present (see README "Known gaps").
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service"] }

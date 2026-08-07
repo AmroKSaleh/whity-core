@@ -67,6 +67,7 @@ function EmptyState({
     >
       <div
         data-slot="empty-state-icon"
+        aria-hidden="true"
         className="text-muted-foreground [&>svg]:size-8 [&>svg]:stroke-1"
       >
         {icon ?? defaultIcon}

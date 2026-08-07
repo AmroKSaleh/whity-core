@@ -88,19 +88,28 @@ final class CoreApiSchemas
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
             self::meRoutes(),
+            self::meNotificationRoutes(),
+            self::tenantNotificationSettingsRoutes(),
             self::platformOpsRoutes(),
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
+            self::languageRoutes(),
             self::brandingRoutes(),
             self::themeRoutes(),
             self::identityRoutes(),
+            self::meEmailsRoutes(),
+            self::tenantEmailDomainRoutes(),
             self::tenantEntitlementRoutes(),
             self::tenantStorageRoutes(),
             self::planRoutes(),
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
+            self::documentBlockRoutes(),
             self::instanceRoutes(),
-            self::twoFactorPolicyRoutes()
+            self::twoFactorPolicyRoutes(),
+            self::tagRoutes(),
+            self::passwordResetRoutes(),
+            self::twoFactorRecoveryRoutes()
         );
     }
 
@@ -816,6 +825,188 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+            // Self-service analogue of GET /api/audit-logs (audit:read-gated,
+            // see auditRoutes()): no permission gate here — every authenticated
+            // caller may see their OWN activity. actor_user_id is pinned to the
+            // caller server-side (AuditLogApiHandler::listOwn()); there is no
+            // `actor` filter to widen this to another profile's rows.
+            [
+                'method' => 'GET',
+                'path' => '/api/me/audit-logs',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the caller\'s own audit entries (newest first, paginated)',
+                    'tags' => ['me'],
+                    'parameters' => [
+                        self::queryParam('action', 'string', 'Exact action match (e.g. users:create)'),
+                        self::queryParam('target_type', 'string', 'Filter by target type'),
+                        self::queryParam('from', 'string', 'Inclusive ISO-8601 lower bound'),
+                        self::queryParam('to', 'string', 'Inclusive ISO-8601 upper bound'),
+                        self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                        self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    ],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s own audit entries with pagination', 'AuditLogListResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * In-app notification inbox surface (WC-notifications, 6e10d9ea). All routes
+     * are self-scoped to the caller's (tenant, profile) and session-gated with NO
+     * RBAC permission (any authenticated caller reads/mutates only their OWN
+     * inbox), so they carry no requiredRole/requiredPermission — matching the
+     * other /api/me self-service surfaces.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function meNotificationRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/me/notifications',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the caller\'s in-app notifications (newest first, paginated) + unread count',
+                    'tags' => ['notifications'],
+                    'parameters' => [
+                        self::queryParam('unread', 'boolean', 'Restrict to unread notifications when truthy'),
+                        self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                        self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    ],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s inbox with pagination and unread count', 'NotificationListResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/me/notifications/unread-count',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'The caller\'s unread-notification count (inbox badge)',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        200 => self::jsonResponse('The unread count', 'UnreadCountResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/notifications/read-all',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Mark all the caller\'s unread notifications read',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        200 => self::jsonResponse('How many notifications were marked read', 'MarkAllReadResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/notifications/{id:\d+}/read',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Mark one of the caller\'s notifications read (idempotent)',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        204 => ['description' => 'Marked read'],
+                        422 => self::errorResponse('A valid notification id is required'),
+                        404 => self::errorResponse('Notification not found or not owned by the caller'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/me/notification-preferences',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'The caller\'s notification preferences + which types are transactional (locked)',
+                    'tags' => ['notifications'],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s per-(type, channel) toggles', 'NotificationPreferencesResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'PUT',
+                'path' => '/api/me/notification-preferences',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Upsert a batch of the caller\'s notification toggles (transactional types cannot be disabled)',
+                    'tags' => ['notifications'],
+                    'request' => 'NotificationPreferencesUpdateRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s updated preferences', 'NotificationPreferencesResponse'),
+                        422 => self::errorResponse('Invalid preferences, or an attempt to disable a transactional type'),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Per-tenant notification SENDER configuration (WC-notifications, d70c6083).
+     * All routes are settings:manage-gated and tenant-scoped; provider
+     * credentials are write-only (never returned).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tenantNotificationSettingsRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/notification-settings', 'notification_settings:manage', [
+                'summary' => 'List the tenant\'s per-channel sender config (credentials redacted)',
+                'tags' => ['notifications'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s sender config per channel', 'TenantNotificationSettingsListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/notification-settings/{channel}', 'notification_settings:manage', [
+                'summary' => 'Upsert a channel\'s sender config (from/reply-to, transport, provider config)',
+                'tags' => ['notifications'],
+                'request' => 'TenantNotificationSettingsUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated channel sender config', 'TenantNotificationSettingsResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/notification-settings/{channel}/credentials', 'notification_settings:manage', [
+                'summary' => 'Set or clear a channel\'s provider credentials (write-only, encrypted at rest)',
+                'tags' => ['notifications'],
+                'request' => 'NotificationCredentialsRequest',
+                'responses' => [
+                    204 => ['description' => 'Credentials stored or cleared'],
+                    400 => self::errorResponse('Missing credentials field'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/notification-settings/{channel}', 'notification_settings:manage', [
+                'summary' => 'Remove a channel\'s sender config',
+                'tags' => ['notifications'],
+                'responses' => [
+                    204 => ['description' => 'Channel configuration removed'],
+                    404 => self::errorResponse('Channel configuration not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/notification-metrics', 'notifications:manage', [
+                'summary' => 'Notification delivery metrics (counts, failure rate, queue depth, latency)',
+                'tags' => ['notifications'],
+                'responses' => [
+                    200 => self::jsonResponse('The tenant\'s notification delivery metrics', 'NotificationMetricsResponse'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -1018,6 +1209,7 @@ final class CoreApiSchemas
                 'summary' => 'Fetch a package from a trusted plugin store and stage it (lands disabled)',
                 'description' => 'Downloads a plugin package from a store host that MUST be on the '
                     . 'operator `plugins.store_allowed_hosts` allowlist (SSRF control; empty ⇒ disabled), '
+                    . 'and requires the `plugins.store_enabled` master switch (default true) to also be on, '
                     . 'then validates and stages it through the same hardened installer as an upload.',
                 'tags' => ['platform-ops'],
                 'request' => 'InstallFromStoreRequest',
@@ -1034,7 +1226,8 @@ final class CoreApiSchemas
             self::permissionRoute('GET', '/api/plugins/store/allowed', 'plugins:read', [
                 'summary' => 'List the trusted store hosts (for the store-browser UI)',
                 'description' => 'Returns the operator `plugins.store_allowed_hosts` allowlist and whether '
-                    . 'installing from a store is enabled. Read-only; makes no outbound request.',
+                    . 'installing from a store is enabled (both the allowlist AND the `plugins.store_enabled` '
+                    . 'master switch must be on). Read-only; makes no outbound request.',
                 'tags' => ['platform-ops'],
                 'responses' => [
                     200 => self::jsonResponse('Allowed store hosts', 'StoreAllowedHostsResponse'),
@@ -1244,6 +1437,92 @@ final class CoreApiSchemas
     }
 
     /**
+     * Language management and user language preference routes.
+     *
+     * GET /api/v1/languages — public endpoint, returns list of available languages
+     * (no auth required).
+     * GET /api/v1/settings/language — authenticated, returns user's language preference
+     * and list of available languages.
+     * PATCH /api/v1/settings/language — authenticated, updates user's language preference.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function languageRoutes(): array
+    {
+        $languageObject = self::object([
+            'code' => self::str(),
+            'name' => self::str(),
+        ], ['code', 'name']);
+
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/languages',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List available languages (public endpoint)',
+                    'tags' => ['languages'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The list of available languages',
+                            self::object([
+                                'languages' => ['type' => 'array', 'items' => $languageObject],
+                            ], ['languages'])
+                        ),
+                        500 => self::errorResponse('Internal error'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/settings/language',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Get the current user\'s language preference',
+                    'tags' => ['languages'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The user\'s language preference and available languages',
+                            self::object([
+                                'language_code' => self::str(nullable: true),
+                                'available_languages' => ['type' => 'array', 'items' => $languageObject],
+                            ], ['language_code', 'available_languages'])
+                        ),
+                        403 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('User profile not found'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'PATCH',
+                'path' => '/api/settings/language',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Update the current user\'s language preference',
+                    'tags' => ['languages'],
+                    'request' => self::object([
+                        'language_code' => self::str(nullable: true),
+                    ], ['language_code']),
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The updated language preference',
+                            self::object([
+                                'language_code' => self::str(nullable: true),
+                            ], ['language_code'])
+                        ),
+                        400 => self::errorResponse('Invalid request body'),
+                        403 => self::errorResponse('Authentication required'),
+                        422 => self::errorResponse('Invalid language code'),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
     private static function brandingRoutes(): array
@@ -1379,7 +1658,10 @@ final class CoreApiSchemas
         // is an ACTIVE membership; role/ou_id/status come from that membership,
         // email/name from the profile identity. `status` is the membership
         // lifecycle state (active|invited|suspended); the list only returns
-        // 'active' but reads may surface others.
+        // 'active' but reads may surface others. `accountStatus` (WC-user-status)
+        // is the DISTINCT, GLOBAL profile-level active/inactive switch (ADR 0005
+        // §1, migration 083) — deactivating it blocks login for the profile
+        // everywhere it holds a membership, not just in one tenant.
         $user = self::object([
             'id' => self::int(),
             'name' => self::str(),
@@ -1389,6 +1671,7 @@ final class CoreApiSchemas
             'ou_id' => self::int(true),
             'createdAt' => self::str(true),
             'status' => self::str(),
+            'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
         ], ['id', 'name', 'email', 'role', 'tenantId', 'createdAt']);
 
         $permission = self::object([
@@ -1727,6 +2010,49 @@ final class CoreApiSchemas
             ], ['id', 'provider_key', 'linked_at']),
             'MeIdentityListResponse' => self::listEnvelope('MeIdentity'),
 
+            // One of the caller's own email addresses (WC-54fb5c37).
+            'MeEmail' => self::object([
+                'id' => self::int(),
+                'email' => self::str(),
+                'verified' => self::bool(),
+                'isPrimary' => self::bool(),
+                'createdAt' => self::str(),
+            ], ['id', 'email', 'verified', 'isPrimary', 'createdAt']),
+            'MeEmailListResponse' => self::listEnvelope('MeEmail'),
+            'MeEmailResponse' => self::dataEnvelope(SchemaBuilder::ref('MeEmail')),
+            'MeEmailAddRequest' => self::object([
+                'email' => self::str(),
+            ], ['email']),
+
+            // Tenant email-domain policy admin surface (WC-9b87 / WC-628738f5).
+            'DomainVerificationChallenge' => self::object([
+                'record_name' => self::str(),
+                'record_type' => self::str(),
+                'record_value' => self::str(),
+            ], ['record_name', 'record_type', 'record_value']),
+            'TenantEmailDomain' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'domain' => self::str(),
+                'default_role_id' => self::int(),
+                'auto_provision' => self::bool(),
+                'verified_at' => self::str(true),
+                'is_verified' => self::bool(),
+                'created_at' => self::str(),
+                'verification' => SchemaBuilder::ref('DomainVerificationChallenge'),
+            ], ['id', 'tenant_id', 'domain', 'default_role_id', 'auto_provision', 'is_verified', 'created_at']),
+            'TenantEmailDomainListResponse' => self::listEnvelope('TenantEmailDomain'),
+            'TenantEmailDomainResponse' => self::dataEnvelope(SchemaBuilder::ref('TenantEmailDomain')),
+            'TenantEmailDomainVerifyPendingResponse' => self::object([
+                'error' => self::str(),
+                'verification' => SchemaBuilder::ref('DomainVerificationChallenge'),
+            ], ['error', 'verification']),
+            'TenantEmailDomainCreateRequest' => self::object([
+                'domain' => self::str(),
+                'default_role_id' => self::int(),
+                'auto_provision' => self::bool(),
+            ], ['domain', 'default_role_id']),
+
             // ── Operator per-tenant entitlements (WC-ent) ─────────────────────
             // One catalogue entry: how to render + interpret an entitlement.
             'EntitlementCatalogueEntry' => self::object([
@@ -1832,6 +2158,63 @@ final class CoreApiSchemas
                 'enforcement_deadline' => self::int(true),
             ], ['profile_id', 'email', 'enrolled', 'enforcement_deadline']),
             'TwoFactorPolicyStatusResponse' => self::listEnvelope('TwoFactorPolicyStatusEntry'),
+
+            // ── Native taxonomy/tagging (WC-621) ──────────────────────────────
+            // A tag group; `display_name` is the bilingual {ar?, en?} label.
+            'TagGroup' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'key' => self::str(),
+                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'key', 'display_name', 'created_at', 'updated_at']),
+            'TagGroupListResponse' => self::listEnvelope('TagGroup'),
+            'TagGroupDataResponse' => self::dataEnvelope(SchemaBuilder::ref('TagGroup')),
+            'TagGroupCreateRequest' => self::object([
+                'key' => self::str(),
+                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+            ], ['key']),
+            'TagGroupUpdateRequest' => self::object([
+                'key' => self::str(),
+                'display_name' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+            ], []),
+            // A tag inside a group.
+            'Tag' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'group_id' => self::int(),
+                'name' => self::str(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'group_id', 'name', 'created_at', 'updated_at']),
+            'TagListResponse' => self::listEnvelope('Tag'),
+            'TagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Tag')),
+            'TagCreateRequest' => self::object([
+                'group_id' => self::int(),
+                'name' => self::str(),
+            ], ['group_id', 'name']),
+            'TagUpdateRequest' => self::object([
+                'name' => self::str(),
+            ], ['name']),
+            // A polymorphic tag<->entity association.
+            'EntityTagAssociation' => self::object([
+                'entity_type' => self::str(),
+                'entity_id' => self::int(),
+                'tag_id' => self::int(),
+            ], ['entity_type', 'entity_id', 'tag_id']),
+            'EntityTagAssociationRequest' => self::object([
+                'entity_type' => self::str(),
+                'entity_id' => self::int(),
+                'tag_id' => self::int(),
+            ], ['entity_type', 'entity_id', 'tag_id']),
+            'EntityTagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('EntityTagAssociation')),
+            // The GET /api/entity-tags shape is polymorphic: with entity_id it
+            // returns the entity's tags; with tag_id it returns the entities
+            // carrying the tag. Typed as a generic object list.
+            'EntityTagQueryResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+            ], ['data']),
 
             // ── Subscription plans (WC-plans, ADR 0010) ───────────────────────
             // A plan row (list shape — no entitlement bundle).
@@ -1964,6 +2347,51 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
             ], []),
 
+            // Server-side render (ADR 0012 / WC-docdesigner Track 2). `dataRows`
+            // is one flat string=>string map per label/row (omitted or empty ->
+            // a single row from the template's own placeholder samples);
+            // `sheet` is the optional N-up label-sheet tiling layout — both
+            // freeform (mirror the client's DocElement-adjacent JSON shapes
+            // rather than a rigid schema, same "verbatim client JSON" posture
+            // as DocumentTemplate.data itself).
+            'DocumentRenderRequest' => self::object([
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+            ], []),
+
+            // ── Document/label designer blocks (WC-521) ───────────────────────
+            // `data` is the verbatim client DocElement[] fragment (freeform array);
+            // documents reference a block by POINTER (a `blockInstance` element
+            // carrying this block's id), never an inline copy.
+            'DocumentBlock' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+                'is_system' => self::bool(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
+            'DocumentBlockListResponse' => self::listEnvelope('DocumentBlock'),
+            'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
+            // scope/required_permission are optional; setting a shared scope or a
+            // permission tag requires documents:publish (403 otherwise).
+            'DocumentBlockCreateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], ['name', 'data']),
+            'DocumentBlockUpdateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], []),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -1980,6 +2408,8 @@ final class CoreApiSchemas
                 'password' => ['type' => 'string', 'minLength' => 6],
                 'role' => $permissionRef,
                 'ou_id' => self::int(true),
+                // WC-user-status: the admin deactivate/reactivate control.
+                'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
             ], []),
 
             'Permission' => $permission,
@@ -2181,6 +2611,79 @@ final class CoreApiSchemas
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('AuditLogEntry')],
                 'pagination' => SchemaBuilder::ref('Pagination'),
             ], ['data', 'pagination']),
+
+            // ---- In-app notification inbox schemas (WC-notifications, 6e10d9ea) ----
+
+            'NotificationEntry' => self::object([
+                'id' => self::int(),
+                'type' => self::str(),
+                'subject' => self::str(),
+                'body' => self::str(),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'read' => self::bool(),
+                'read_at' => self::str(true),
+                'created_at' => self::str(true),
+            ], ['id', 'type', 'subject', 'body', 'data', 'read', 'read_at', 'created_at']),
+            'NotificationListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationEntry')],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+                'unread_count' => self::int(),
+            ], ['data', 'pagination', 'unread_count']),
+            'UnreadCountResponse' => self::object([
+                'unread_count' => self::int(),
+            ], ['unread_count']),
+            'MarkAllReadResponse' => self::object([
+                'marked' => self::int(),
+            ], ['marked']),
+            'NotificationPreferenceEntry' => self::object([
+                'type' => self::str(),
+                'channel' => self::str(),
+                'enabled' => self::bool(),
+            ], ['type', 'channel', 'enabled']),
+            'NotificationPreferencesResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationPreferenceEntry')],
+                'transactional_prefixes' => ['type' => 'array', 'items' => self::str()],
+            ], ['data', 'transactional_prefixes']),
+            'NotificationPreferencesUpdateRequest' => self::object([
+                'preferences' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationPreferenceEntry')],
+            ], ['preferences']),
+            'TenantNotificationSettingsEntry' => self::object([
+                'channel' => self::str(),
+                'transport' => self::str(true),
+                'from_address' => self::str(true),
+                'from_name' => self::str(true),
+                'reply_to' => self::str(true),
+                'config' => ['type' => 'object', 'additionalProperties' => true],
+                'has_credentials' => self::bool(),
+                'enabled' => self::bool(),
+            ], ['channel', 'config', 'has_credentials', 'enabled']),
+            'TenantNotificationSettingsListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('TenantNotificationSettingsEntry')],
+            ], ['data']),
+            'TenantNotificationSettingsResponse' => self::object([
+                'data' => SchemaBuilder::ref('TenantNotificationSettingsEntry'),
+            ], ['data']),
+            'TenantNotificationSettingsUpdateRequest' => self::object([
+                'transport' => self::str(true),
+                'from_address' => self::str(true),
+                'from_name' => self::str(true),
+                'reply_to' => self::str(true),
+                'config' => ['type' => 'object', 'additionalProperties' => true],
+                'enabled' => self::bool(),
+            ], []),
+            'NotificationCredentialsRequest' => self::object([
+                'credentials' => self::str(true),
+            ], ['credentials']),
+            'NotificationMetrics' => self::object([
+                'total' => self::int(),
+                'by_status' => ['type' => 'object', 'additionalProperties' => ['type' => 'integer']],
+                'queue_depth' => self::int(),
+                'failure_rate' => ['type' => 'number', 'format' => 'float'],
+                'avg_latency_seconds' => ['type' => 'number', 'format' => 'float', 'nullable' => true],
+            ], ['total', 'by_status', 'queue_depth', 'failure_rate', 'avg_latency_seconds']),
+            'NotificationMetricsResponse' => self::object([
+                'data' => SchemaBuilder::ref('NotificationMetrics'),
+            ], ['data']),
 
             // ---- Platform-ops schemas (WC-62133b3f) ----
 
@@ -2457,6 +2960,75 @@ final class CoreApiSchemas
                 'type' => 'object',
                 'additionalProperties' => ['type' => 'string'],
             ]),
+
+            // ── Forgotten-password + 2FA-recovery (WC-password-reset-2fa-recovery) ──
+
+            // Shared by POST /api/auth/password/forgot and POST
+            // /api/auth/2fa-recovery/request — both take only an email.
+            'EmailOnlyRequest' => self::object(['email' => self::str()], ['email']),
+            // Shared by POST /api/auth/2fa-recovery/confirm.
+            'TokenOnlyRequest' => self::object(['token' => self::str()], ['token']),
+            // Shared generic 202 body for both public "request" endpoints above —
+            // deliberately identical whether or not the address has an account.
+            'GenericMessageDataResponse' => self::dataEnvelope(
+                self::object(['message' => self::str()], ['message'])
+            ),
+
+            // POST /api/auth/password/reset — request body.
+            'PasswordResetConfirmRequest' => self::object([
+                'token' => self::str(),
+                'password' => self::str(),
+            ], ['token', 'password']),
+            // POST /api/auth/password/reset — 200 response. `status` is
+            // 'applied' (self-service, no approval required) or
+            // 'awaiting_approval' (staged; an admin must approve it).
+            'PasswordResetConfirmResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['applied', 'awaiting_approval']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
+
+            // POST /api/auth/2fa-recovery/confirm — 200 response. Confirming
+            // only SUBMITS the request into the admin queue — status is always
+            // 'pending' here; nothing on the target profile has changed yet.
+            'TwoFactorRecoveryConfirmResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['pending']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
+
+            // One row of either admin approval queue (password-resets/pending,
+            // 2fa-recovery/pending) — same shape, listed under distinct names so
+            // each endpoint's response schema is self-describing.
+            'PendingPasswordResetItem' => self::object([
+                'id' => self::int(),
+                'profile_id' => self::int(),
+                'email' => self::str(),
+                'display_name' => self::str(),
+                'created_at' => self::str(),
+            ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
+            'PendingPasswordResetListResponse' => self::listEnvelope('PendingPasswordResetItem'),
+            'PendingTwoFactorRecoveryItem' => self::object([
+                'id' => self::int(),
+                'profile_id' => self::int(),
+                'email' => self::str(),
+                'display_name' => self::str(),
+                'created_at' => self::str(),
+            ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
+            'PendingTwoFactorRecoveryListResponse' => self::listEnvelope('PendingTwoFactorRecoveryItem'),
+
+            // Shared 200 response for every id-based approve/reject action across
+            // both queues (password-resets and 2fa-recovery).
+            'ApprovalStatusResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['approved', 'rejected']],
+            ], ['id', 'status'])),
+
+            // POST /api/2fa-recovery/force-reset — the secondary admin-direct
+            // fallback (no prior request): request body + 200 response.
+            'ForceResetRequest' => self::object(['profile_id' => self::int()], ['profile_id']),
+            'ForceResetResponse' => self::dataEnvelope(self::object([
+                'profile_id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['forced']],
+            ], ['profile_id', 'status'])),
         ];
     }
 
@@ -2573,6 +3145,182 @@ final class CoreApiSchemas
             $ssoProviders,
             $meIdentitiesList,
             $meIdentitiesUnlink,
+        ];
+    }
+
+    /**
+     * Authenticated self-service multi-email management (WC-54fb5c37): the
+     * caller lists, adds, resends verification for, promotes, and removes
+     * their own email addresses. Cookie-authenticated by the handler — no
+     * requiredRole/requiredPermission, same pattern as identityRoutes()'s
+     * /api/me/identities surface.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function meEmailsRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/me/emails',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the caller\'s email addresses',
+                    'tags' => ['me'],
+                    'responses' => [
+                        200 => self::jsonResponse('The caller\'s email addresses', 'MeEmailListResponse'),
+                        401 => self::errorResponse('Authentication required'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/emails',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Add a new (unverified) email address for the caller',
+                    'tags' => ['me'],
+                    'request' => 'MeEmailAddRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('The newly added address', 'MeEmailResponse'),
+                        401 => self::errorResponse('Authentication required'),
+                        409 => self::errorResponse('This email address is already registered'),
+                        422 => self::errorResponse('Invalid address, or the maximum number of addresses was reached'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/emails/{id:\d+}/resend-verification',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Resend the verification link for one of the caller\'s addresses',
+                    'tags' => ['me'],
+                    'responses' => [
+                        202 => ['description' => 'Verification email sent'],
+                        400 => self::errorResponse('This email address is already verified'),
+                        401 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('Email address not found'),
+                        429 => self::errorResponse('Too many resend requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/emails/{id:\d+}/set-primary',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Promote one of the caller\'s verified addresses to primary',
+                    'tags' => ['me'],
+                    'responses' => [
+                        200 => self::jsonResponse('The now-primary address', 'MeEmailResponse'),
+                        400 => self::errorResponse('The address must be verified before it can be made primary'),
+                        401 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('Email address not found'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/me/emails/{id:\d+}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Remove one of the caller\'s email addresses',
+                    'tags' => ['me'],
+                    'responses' => [
+                        204 => ['description' => 'Email address removed'],
+                        401 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('Email address not found'),
+                        409 => self::errorResponse('Cannot remove the only or the primary email address'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Tenant email-domain policy admin routes (WC-9b87 / WC-628738f5): manage
+     * which email domains auto-provision/auto-accept memberships into this
+     * tenant. Gated on the `admin` ROLE (requiredRole, not a permission — see
+     * the router.register calls in public/index.php) and tenant-scoped via
+     * TenantContext, so a tenant can only manage its own domain registrations.
+     *
+     * A registered domain never auto-provisions until the tenant proves
+     * ownership via the DNS TXT challenge (POST .../verify) — this closes the
+     * cross-tenant domain-harvesting hole.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tenantEmailDomainRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/email-domains',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the tenant\'s registered email-domain policies',
+                    'tags' => ['email-domains'],
+                    'responses' => [
+                        200 => self::jsonResponse('The tenant\'s domain registrations', 'TenantEmailDomainListResponse'),
+                        400 => self::errorResponse('Tenant context is required'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/email-domains',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Register a new email domain for the tenant',
+                    'tags' => ['email-domains'],
+                    'request' => 'TenantEmailDomainCreateRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('The newly registered (unverified) domain', 'TenantEmailDomainResponse'),
+                        400 => self::errorResponse('Tenant context is required'),
+                        409 => self::errorResponse('This domain is already registered for your tenant'),
+                        422 => self::errorResponse('Invalid domain or missing default_role_id'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/email-domains/{id:\d+}/verify',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Check the DNS TXT challenge and mark the domain verified',
+                    'tags' => ['email-domains'],
+                    'responses' => [
+                        200 => self::jsonResponse('The domain (verified, or still-pending with challenge instructions)', 'TenantEmailDomainResponse'),
+                        400 => self::errorResponse('Tenant context is required or invalid id'),
+                        404 => self::errorResponse('Domain registration not found'),
+                        422 => self::jsonResponse('Ownership not yet verified — publish the returned TXT record and retry', 'TenantEmailDomainVerifyPendingResponse'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'DELETE',
+                'path' => '/api/email-domains/{id:\d+}',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Remove a tenant email-domain registration',
+                    'tags' => ['email-domains'],
+                    'responses' => [
+                        204 => ['description' => 'Domain registration deleted'],
+                        400 => self::errorResponse('Tenant context is required or invalid id'),
+                        404 => self::errorResponse('Domain registration not found'),
+                    ] + self::authErrors(),
+                ],
+            ],
         ];
     }
 
@@ -2706,6 +3454,306 @@ final class CoreApiSchemas
                     204 => ['description' => 'Policy removed'],
                     400 => self::errorResponse('Tenant context is required'),
                     404 => self::errorResponse('Policy not found'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Self-service "forgot password" routes (WC-password-reset-2fa-recovery):
+     * two PUBLIC endpoints (forgot/reset — PasswordResetHandler) plus the
+     * tenant-scoped admin approval queue (PasswordResetApprovalsApiHandler).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function passwordResetRoutes(): array
+    {
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/password/forgot',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Request a password-reset link (public, rate-limited, no enumeration)',
+                    'tags' => ['auth'],
+                    'request' => 'EmailOnlyRequest',
+                    'responses' => [
+                        202 => self::jsonResponse(
+                            'Always the same generic message, regardless of whether the address has an account',
+                            'GenericMessageDataResponse'
+                        ),
+                        422 => self::errorResponse('A valid email address is required'),
+                        429 => self::errorResponse('Too many password-reset requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/password/reset',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Confirm a reset token and set a new password',
+                    'tags' => ['auth'],
+                    'request' => 'PasswordResetConfirmRequest',
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Reset applied immediately, or submitted for admin approval — see `data.status`',
+                            'PasswordResetConfirmResponse'
+                        ),
+                        400 => self::errorResponse('The reset link is invalid or has expired'),
+                        422 => self::errorResponse('Missing token, or password does not meet the policy'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/password-resets/pending', 'password_resets:approve', [
+                'summary' => 'List pending password-reset requests for the caller\'s own tenant',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Requests awaiting approval', 'PendingPasswordResetListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/password-resets/{id:\d+}/approve', 'password_resets:approve', [
+                'summary' => 'Apply the staged password (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approved', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/password-resets/{id:\d+}/reject', 'password_resets:approve', [
+                'summary' => 'Discard the staged password (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * "I lost my 2FA device" recovery-request routes
+     * (WC-password-reset-2fa-recovery): two PUBLIC endpoints (request/confirm —
+     * TwoFactorRecoveryHandler) plus the tenant-scoped admin approval queue and
+     * the secondary admin-direct-force fallback
+     * (TwoFactorRecoveryApprovalsApiHandler).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function twoFactorRecoveryRoutes(): array
+    {
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/2fa-recovery/request',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Request account recovery after losing both password and 2FA device (public, rate-limited, no enumeration)',
+                    'tags' => ['auth'],
+                    'request' => 'EmailOnlyRequest',
+                    'responses' => [
+                        202 => self::jsonResponse(
+                            'Always the same generic message, regardless of whether the address has an account',
+                            'GenericMessageDataResponse'
+                        ),
+                        422 => self::errorResponse('A valid email address is required'),
+                        429 => self::errorResponse('Too many recovery requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/2fa-recovery/confirm',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Confirm the recovery token — CREATES the pending admin-queue entry (clears nothing)',
+                    'tags' => ['auth'],
+                    'request' => 'TokenOnlyRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Submitted for administrator review', 'TwoFactorRecoveryConfirmResponse'),
+                        400 => self::errorResponse('The confirmation link is invalid or has expired'),
+                        422 => self::errorResponse('A confirmation token is required'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/2fa-recovery/pending', 'two_factor_recovery:approve', [
+                'summary' => 'List pending 2FA-recovery requests for the caller\'s own tenant',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Requests awaiting approval', 'PendingTwoFactorRecoveryListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/{id:\d+}/approve', 'two_factor_recovery:approve', [
+                'summary' => 'Clear the target profile\'s 2FA and send a fresh password-reset link (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approved', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending 2FA-recovery request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/{id:\d+}/reject', 'two_factor_recovery:approve', [
+                'summary' => 'Leave the target profile untouched (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending 2FA-recovery request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/force-reset', 'two_factor_recovery:approve', [
+                'summary' => 'Secondary fallback: force-clear a named profile\'s 2FA with no prior request (tenant-scoped)',
+                'tags' => ['auth'],
+                'request' => 'ForceResetRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Forced', 'ForceResetResponse'),
+                    404 => self::errorResponse('No such profile in your tenant'),
+                    422 => self::errorResponse('A valid profile_id is required'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Native taxonomy/tagging routes (WC-621): tenant-scoped CRUD for tag groups
+     * + tags, and a polymorphic tag<->entity association surface. Reads gated on
+     * `tags:read`, writes on `tags:manage`.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function tagRoutes(): array
+    {
+        return [
+            // Tag groups ────────────────────────────────────────────────────
+            self::permissionRoute('GET', '/api/tag-groups', 'tags:read', [
+                'summary' => 'List this tenant\'s tag groups',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    200 => self::jsonResponse('Every tag group for this tenant', 'TagGroupListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/tag-groups', 'tags:manage', [
+                'summary' => 'Create a tag group',
+                'tags' => ['taxonomy'],
+                'request' => 'TagGroupCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created tag group', 'TagGroupDataResponse'),
+                    409 => self::errorResponse('A tag group with this key already exists'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/tag-groups/{id:\d+}', 'tags:read', [
+                'summary' => 'Get a tag group',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    200 => self::jsonResponse('The tag group', 'TagGroupDataResponse'),
+                    404 => self::errorResponse('Tag group not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/tag-groups/{id:\d+}', 'tags:manage', [
+                'summary' => 'Update a tag group',
+                'tags' => ['taxonomy'],
+                'request' => 'TagGroupUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated tag group', 'TagGroupDataResponse'),
+                    404 => self::errorResponse('Tag group not found'),
+                    409 => self::errorResponse('A tag group with this key already exists'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/tag-groups/{id:\d+}', 'tags:manage', [
+                'summary' => 'Delete a tag group (its tags cascade)',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    204 => ['description' => 'Tag group removed'],
+                    404 => self::errorResponse('Tag group not found'),
+                ] + self::authErrors(),
+            ]),
+
+            // Tags ──────────────────────────────────────────────────────────
+            self::permissionRoute('GET', '/api/tags', 'tags:read', [
+                'summary' => 'List this tenant\'s tags, optionally within a group',
+                'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('group_id', 'integer', 'Only tags in this group'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Tags for this tenant', 'TagListResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/tags', 'tags:manage', [
+                'summary' => 'Create a tag in a group',
+                'tags' => ['taxonomy'],
+                'request' => 'TagCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created tag', 'TagDataResponse'),
+                    409 => self::errorResponse('A tag with this name already exists in this group'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/tags/{id:\d+}', 'tags:read', [
+                'summary' => 'Get a tag',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    200 => self::jsonResponse('The tag', 'TagDataResponse'),
+                    404 => self::errorResponse('Tag not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/tags/{id:\d+}', 'tags:manage', [
+                'summary' => 'Rename a tag',
+                'tags' => ['taxonomy'],
+                'request' => 'TagUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated tag', 'TagDataResponse'),
+                    404 => self::errorResponse('Tag not found'),
+                    409 => self::errorResponse('A tag with this name already exists in this group'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/tags/{id:\d+}', 'tags:manage', [
+                'summary' => 'Delete a tag (its associations cascade)',
+                'tags' => ['taxonomy'],
+                'responses' => [
+                    204 => ['description' => 'Tag removed'],
+                    404 => self::errorResponse('Tag not found'),
+                ] + self::authErrors(),
+            ]),
+
+            // Entity-tag associations ───────────────────────────────────────
+            self::permissionRoute('GET', '/api/entity-tags', 'tags:read', [
+                'summary' => 'An entity\'s tags (entity_type+entity_id) or entities carrying a tag (entity_type+tag_id)',
+                'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('entity_type', 'string', 'The opaque plugin-supplied entity type (required)'),
+                    self::queryParam('entity_id', 'integer', 'Return this entity\'s tags'),
+                    self::queryParam('tag_id', 'integer', 'Return entities of entity_type carrying this tag'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Tags of the entity, or entities carrying the tag', 'EntityTagQueryResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/entity-tags', 'tags:manage', [
+                'summary' => 'Attach a tag to an entity (idempotent)',
+                'tags' => ['taxonomy'],
+                'request' => 'EntityTagAssociationRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The association already existed', 'EntityTagDataResponse'),
+                    201 => self::jsonResponse('The tag was attached', 'EntityTagDataResponse'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/entity-tags', 'tags:manage', [
+                'summary' => 'Detach a tag from an entity',
+                'tags' => ['taxonomy'],
+                'request' => 'EntityTagAssociationRequest',
+                'responses' => [
+                    204 => ['description' => 'Association removed'],
+                    404 => self::errorResponse('Association not found'),
+                    422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
         ];
@@ -2897,6 +3945,83 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Template not found or not visible to the caller'),
                 ] + self::authErrors(),
             ]),
+            // Server-side render (ADR 0012 / WC-docdesigner Track 2): calls the
+            // separate `whity_render` service and streams back a PDF. Gated on
+            // documents.render_enabled (503 when the operator has the render
+            // tier turned off) BEFORE any RBAC/tenant work; 503 again if the
+            // render service itself is unreachable/errors — never a raw
+            // exception or a downstream stack trace.
+            self::permissionRoute('POST', '/api/document-templates/{id:\d+}/render', 'documents:render', [
+                'summary' => 'Render a document/label template to PDF',
+                'tags' => ['documents'],
+                'request' => 'DocumentRenderRequest',
+                'responses' => [
+                    200 => ['description' => 'The rendered PDF', 'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]]],
+                    404 => self::errorResponse('Template not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
+                    503 => self::errorResponse('Rendering is disabled on this instance, or the render service is unavailable'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Document/label designer block routes (WC-521). Tenant-scoped, RBAC-gated
+     * CRUD; list/get are additionally row-filtered server-side by scope +
+     * required_permission, publishing needs documents:publish, and delete is
+     * refused (409) while a template still holds a live blockInstance pointer
+     * at the block (reference-integrity guard).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentBlockRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/document-blocks', 'documents:read', [
+                'summary' => 'List document/label blocks visible to the caller',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The blocks the caller may see (RBAC-filtered)', 'DocumentBlockListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-blocks', 'documents:write', [
+                'summary' => 'Create a document/label block',
+                'tags' => ['documents'],
+                'request' => 'DocumentBlockCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created block', 'DocumentBlockResponse'),
+                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-blocks/{id:\d+}', 'documents:read', [
+                'summary' => 'Get a document/label block',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The block', 'DocumentBlockResponse'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-blocks/{id:\d+}', 'documents:write', [
+                'summary' => 'Update a document/label block',
+                'tags' => ['documents'],
+                'request' => 'DocumentBlockUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated block', 'DocumentBlockResponse'),
+                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-blocks/{id:\d+}', 'documents:write', [
+                'summary' => 'Delete a document/label block',
+                'tags' => ['documents'],
+                'responses' => [
+                    204 => ['description' => 'Block deleted'],
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                    409 => self::errorResponse('Cannot delete a block that is still referenced by a template'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -2933,13 +4058,16 @@ final class CoreApiSchemas
     }
 
     /**
+     * @param string|array<string, mixed> $component A registered component NAME
+     *        (rendered as a `$ref`), or an inline JSON-Schema fragment (e.g. from
+     *        {@see self::object()}) for a response with no named component.
      * @return array<string, mixed>
      */
-    private static function jsonResponse(string $description, string $component): array
+    private static function jsonResponse(string $description, string|array $component): array
     {
         return [
             'description' => $description,
-            'content' => ['application/json' => ['schema' => SchemaBuilder::ref($component)]],
+            'content' => ['application/json' => ['schema' => is_string($component) ? SchemaBuilder::ref($component) : $component]],
         ];
     }
 

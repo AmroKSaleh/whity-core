@@ -69,10 +69,11 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   )
 }
 
-function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+function TableHead({ className, scope = "col", ...props }: React.ComponentProps<"th"> & { scope?: "col" | "row" | "colgroup" | "rowgroup" }) {
   return (
     <th
       data-slot="table-head"
+      scope={scope}
       className={cn(
         "h-10 whitespace-nowrap px-4 text-start align-middle text-xs font-medium uppercase tracking-wider text-muted-foreground [&:has([role=checkbox])]:pe-0",
         className

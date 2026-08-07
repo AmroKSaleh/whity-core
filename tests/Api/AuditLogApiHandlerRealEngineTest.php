@@ -234,6 +234,68 @@ final class AuditLogApiHandlerRealEngineTest extends TestCase
         $this->assertSame('audit:read', $body['details']['required']);
     }
 
+    // ==================== Self-service: listOwn() ====================
+
+    public function testListOwnReturnsOnlyTheCallersOwnRows(): void
+    {
+        $this->seedRow(1, 10, 'auth.login', null, null);
+        $this->seedRow(1, 11, 'auth.login', null, null);
+
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->listOwn($this->authedRequest('/api/me/audit-logs', 10));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total']);
+        $this->assertSame(10, $body['data'][0]['actorUserId']);
+    }
+
+    public function testListOwnIgnoresAnActorQueryParamAttemptingToWidenScope(): void
+    {
+        $this->seedRow(1, 10, 'auth.login', null, null);
+        $this->seedRow(1, 11, 'role.created', 'role', 5);
+
+        // A caller cannot use the admin endpoint's `actor` filter to read
+        // another profile's rows through the self-service route.
+        $_GET = ['actor' => '11'];
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->listOwn($this->authedRequest('/api/me/audit-logs', 10));
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total']);
+        $this->assertSame(10, $body['data'][0]['actorUserId']);
+    }
+
+    public function testListOwnNeverGatedOnAuditReadPermission(): void
+    {
+        $this->seedRow(1, 10, 'auth.login', null, null);
+
+        TenantContext::setTenantId(1);
+        // handler(false) denies audit:read — listOwn() must not care.
+        $response = $this->handler(false)->listOwn($this->authedRequest('/api/me/audit-logs', 10));
+
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function testListOwnScopesToTenantToo(): void
+    {
+        $this->seedRow(1, 10, 'auth.login', null, null);
+        $this->seedRow(2, 10, 'auth.login', null, null); // same actor id, other tenant
+
+        TenantContext::setTenantId(1);
+        $response = $this->handler()->listOwn($this->authedRequest('/api/me/audit-logs', 10));
+
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame(1, $body['pagination']['total']);
+    }
+
+    public function testListOwnUnresolvedTenantContextFailsClosed(): void
+    {
+        $response = $this->handler()->listOwn($this->authedRequest('/api/me/audit-logs', 10));
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
     // ==================== Helpers ====================
 
     /**

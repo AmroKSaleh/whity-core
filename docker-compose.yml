@@ -54,6 +54,13 @@ services:
       # The dev default below is for local use only; outside APP_ENV=development the app fails fast
       # if this is unset/empty (mirroring JWT_SECRET). Override in production with a strong secret.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+      # Document/label designer server-side render tier (ADR 0012). In-network
+      # base URL of the opt-in `render` compose service below; only reachable
+      # (and only ever called) when documents.render_enabled is ALSO true — see
+      # SettingsRegistry. RENDER_SHARED_SECRET must match the render service's
+      # own value (dev default below is for local use only, like JWT_SECRET).
+      RENDER_SERVICE_URL: ${RENDER_SERVICE_URL:-http://render:8130}
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-dev_render_shared_secret_change_in_production}
       CADDY_GLOBAL_OPTIONS: "auto_https off"
       SERVER_NAME: ":80"
       SERVER_ROOT: "public/"
@@ -120,6 +127,114 @@ services:
           php public/index.php revoked-tokens:cleanup || echo "[cron] cleanup failed (will retry next cycle)";
           sleep 86400;
         done
+
+  # Durable async job worker (WC-627). Runs the queue:work loop that reserves
+  # and processes jobs from the `jobs` table. The command loops internally and
+  # recycles (clean exit) on its memory ceiling / --max-runtime, so
+  # `restart: unless-stopped` respawns a fresh process — bounding memory in the
+  # persistent worker. Opt-in (like `cron`): `docker compose --profile queue up`.
+  # Scale with `--scale queue-worker=N` — each claims distinct jobs (Postgres
+  # FOR UPDATE SKIP LOCKED). Kept out of the DEFAULT stack for the same reason as
+  # cron (a long-running loop breaks `docker compose up --wait`). Staging/prod
+  # run the same command under their orchestrator (see docs/wiki/Cron-Operations.md).
+  queue-worker:
+    image: whity-core:dev
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    working_dir: /app
+    profiles:
+      - queue
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        echo "[queue-worker] durable job worker started";
+        php public/index.php queue:work --max-runtime=3600 || echo "[queue-worker] exited (code $$?); restarting";
+
+  # Cron-tick scheduler (WC-scheduler). Runs the schedule:run loop that, once per
+  # minute, enqueues every DUE scheduled_jobs row onto the queue and prunes
+  # retained completed jobs. Exactly-once-per-minute ACROSS workers via the
+  # shared-store tick lock, so running MULTIPLE replicas (or one alongside
+  # staging/prod) never double-fires. Opt-in (like `cron`/`queue`):
+  # `docker compose --profile scheduler up`. Recycles on --max-runtime so
+  # `restart: unless-stopped` respawns a fresh process. Kept out of the DEFAULT
+  # stack (a long-running loop breaks `docker compose up --wait`).
+  scheduler:
+    image: whity-core:dev
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    working_dir: /app
+    profiles:
+      - scheduler
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        echo "[scheduler] cron-tick scheduler started";
+        php public/index.php schedule:run --max-runtime=3600 || echo "[scheduler] exited (code $$?); restarting";
+
+  # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
+  # Track 2): Node + Puppeteer/headless Chromium loading the SAME React
+  # renderer the browser preview uses (print-document.tsx) so exported PDFs
+  # stay pixel-parity with the designer, not a second hand-rolled renderer.
+  # Deliberately OPT-IN (like `cron`/`queue`/`scheduler`): render load is
+  # bursty/seasonal (a whole cohort's labels exported at once) and Chromium is
+  # heavy, so a minimal sovereign deploy omits this profile entirely and the
+  # core render endpoint degrades to a clean 503 when it is absent. The core
+  # service ALSO gates on the documents.render_enabled setting (default off)
+  # independent of whether this container happens to be running — run
+  # `docker compose --profile render up` to include it. RENDER_SHARED_SECRET
+  # MUST match the frankenphp service's value above.
+  render:
+    build:
+      context: .
+      dockerfile: render-service/Dockerfile
+    image: whity-render:dev
+    container_name: whity_render
+    environment:
+      PORT: "8130"
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-dev_render_shared_secret_change_in_production}
+    ports:
+      - "${RENDER_PORT_HOST:-8130}:8130"
+    profiles:
+      - render
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8130/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # Local SMTP sink for email testing (WC-email). Mailpit captures every message
   # the app sends so nothing leaves the machine — SMTP on :1025, a web inbox on

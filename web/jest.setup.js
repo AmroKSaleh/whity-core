@@ -1,5 +1,15 @@
 // jest.setup.js
 import '@testing-library/jest-dom';
+import { TextEncoder, TextDecoder } from 'node:util';
+
+// jsdom ships no TextEncoder/TextDecoder; react-qr-code (rendered by the 2FA
+// setup wizard) needs TextEncoder to encode the QR payload.
+if (typeof global.TextEncoder === 'undefined') {
+  global.TextEncoder = TextEncoder;
+}
+if (typeof global.TextDecoder === 'undefined') {
+  global.TextDecoder = TextDecoder;
+}
 
 // Polyfill ResizeObserver — jsdom has no layout engine so it never implements
 // this, but Radix's popover-family primitives (Tooltip/Popover/.../Arrow) use

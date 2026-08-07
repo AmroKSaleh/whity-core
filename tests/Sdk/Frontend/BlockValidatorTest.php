@@ -301,10 +301,10 @@ final class BlockValidatorTest extends TestCase
         // SP1 display types + SP2 data-bound types + SP3 interactive types
         // (WC-233) + SP4 chart type (WC-240)
         $expected = [
-            'actionButton', 'alert', 'badge', 'button', 'card', 'chart', 'checkbox', 'code',
+            'actionButton', 'alert', 'badge', 'bilingualText', 'button', 'card', 'chart', 'checkbox', 'code',
             'colorInput', 'dataList', 'dataStat', 'dataTable', 'dateInput', 'divider',
-            'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list',
-            'numberInput', 'row', 'section', 'select', 'slider', 'stat', 'submitButton',
+            'fieldArray', 'fileInput', 'form', 'grid', 'heading', 'icon', 'keyValue', 'list', 'markdown', 'math',
+            'numberInput', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput',
         ];
         sort($expected);
@@ -1098,7 +1098,7 @@ final class BlockValidatorTest extends TestCase
         foreach ([
             'form', 'textInput', 'textArea', 'numberInput', 'select',
             'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
-            'submitButton', 'actionButton',
+            'bilingualText', 'referenceSelect', 'richTextInput', 'submitButton', 'actionButton',
         ] as $expectedType) {
             $this->assertContains($expectedType, $types, "'{$expectedType}' must be in BlockContract::types()");
         }
@@ -1109,8 +1109,646 @@ final class BlockValidatorTest extends TestCase
         $this->assertTrue(BlockContract::isContainer('form'));
         foreach (['textInput', 'textArea', 'numberInput', 'select', 'checkbox',
                   'slider', 'dateInput', 'fileInput', 'colorInput',
+                  'bilingualText', 'referenceSelect', 'richTextInput',
                   'submitButton', 'actionButton'] as $leaf) {
             $this->assertFalse(BlockContract::isContainer($leaf), "'{$leaf}' must be a leaf");
         }
+    }
+
+    // ==================== WC-532 A3: visibleWhen conditional visibility ====================
+
+    /**
+     * An input with `visibleWhen: {field, equals}` and a section with
+     * `visibleWhen: {field, in}` both validate inside a form.
+     */
+    public function testVisibleWhenEqualsAndInAreValid(): void
+    {
+        $tree = [
+            [
+                'type'   => 'form',
+                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+                'children' => [
+                    ['type' => 'select', 'name' => 'kind', 'label' => 'Kind', 'options' => [
+                        ['value' => 'person', 'label' => 'Person'],
+                        ['value' => 'org', 'label' => 'Organisation'],
+                    ]],
+                    // shown only when kind === 'org'
+                    [
+                        'type'        => 'textInput',
+                        'name'        => 'orgName',
+                        'label'       => 'Organisation name',
+                        'visibleWhen' => ['field' => 'kind', 'equals' => 'org'],
+                    ],
+                    // a whole section shown when kind ∈ {person, org}
+                    [
+                        'type'        => 'section',
+                        'title'       => 'Details',
+                        'visibleWhen' => ['field' => 'kind', 'in' => ['person', 'org']],
+                        'children'    => [
+                            ['type' => 'textInput', 'name' => 'note', 'label' => 'Note'],
+                        ],
+                    ],
+                    ['type' => 'submitButton', 'label' => 'Save'],
+                ],
+            ],
+        ];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    /**
+     * `visibleWhen.equals` accepts a boolean (checkbox-driven visibility).
+     */
+    public function testVisibleWhenEqualsAcceptsBoolean(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                ['type' => 'checkbox', 'name' => 'advanced', 'label' => 'Advanced'],
+                [
+                    'type'        => 'textInput',
+                    'name'        => 'tuning',
+                    'label'       => 'Tuning',
+                    'visibleWhen' => ['field' => 'advanced', 'equals' => true],
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testVisibleWhenMissingFieldIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['equals' => 'x']],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.field', implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenWithBothEqualsAndInIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                [
+                    'type'        => 'textInput',
+                    'name'        => 'a',
+                    'label'       => 'A',
+                    'visibleWhen' => ['field' => 'k', 'equals' => 'x', 'in' => ['x', 'y']],
+                ],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'equals' or 'in'", implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenWithNeitherEqualsNorInIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['field' => 'k']],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'equals' or 'in'", implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenInMustBeNonEmptyListOfScalars(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['field' => 'k', 'in' => []]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.in', implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenEqualsMustBeScalar(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                [
+                    'type'        => 'textInput',
+                    'name'        => 'a',
+                    'label'       => 'A',
+                    'visibleWhen' => ['field' => 'k', 'equals' => ['not', 'a', 'scalar']],
+                ],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('visibleWhen.equals', implode(' | ', $result['errors']));
+    }
+
+    public function testVisibleWhenAsAListNotObjectIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A', 'visibleWhen' => ['field', 'k']],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('{field, equals|in} object', implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A4: bilingualText input ====================
+
+    public function testBilingualTextInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                [
+                    'type'     => 'bilingualText',
+                    'name'     => 'displayName',
+                    'label'    => 'Display name',
+                    'required' => true,
+                    'arLabel'  => 'الاسم',
+                    'enLabel'  => 'Name',
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testBilingualTextAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'bilingualText', 'name' => 'x', 'label' => 'X'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'bilingualText' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    public function testBilingualTextMissingNameIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'bilingualText', 'label' => 'X'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result['errors']));
+    }
+
+    public function testDuplicateBilingualTextNameWithinFormIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'bilingualText', 'name' => 'dup', 'label' => 'A'],
+                ['type' => 'textInput', 'name' => 'dup', 'label' => 'B'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'dup'", implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A6: referenceSelect input ====================
+
+    public function testReferenceSelectInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                [
+                    'type'       => 'referenceSelect',
+                    'name'       => 'ownerId',
+                    'label'      => 'Owner',
+                    'source'     => '/api/uikit/people',
+                    'valueField' => 'id',
+                    'labelField' => 'name',
+                    'required'   => true,
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testReferenceSelectAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X',
+             'source' => '/api/x/rows', 'valueField' => 'id', 'labelField' => 'name'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'referenceSelect' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    public function testReferenceSelectMissingSourceIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X',
+                 'valueField' => 'id', 'labelField' => 'name'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'source'", implode(' | ', $result['errors']));
+    }
+
+    public function testReferenceSelectSourceUsesTheApiPathRule(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X',
+                 'source' => 'https://evil.example/api/x', 'valueField' => 'id', 'labelField' => 'name'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a relative API path', implode(' | ', $result['errors']));
+    }
+
+    public function testReferenceSelectMissingValueOrLabelFieldIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'referenceSelect', 'name' => 'x', 'label' => 'X', 'source' => '/api/x/rows'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString("missing required prop 'valueField'", $joined);
+        $this->assertStringContainsString("missing required prop 'labelField'", $joined);
+    }
+
+    // ==================== WC-532 A1: dataTable rowActions ====================
+
+    public function testDataTableWithHrefAndEndpointRowActionsIsValid(): void
+    {
+        $tree = [[
+            'type'    => 'dataTable',
+            'source'  => '/api/uikit/demo/rows',
+            'columns' => [['key' => 'name', 'label' => 'Name']],
+            'rowActions' => [
+                ['label' => 'View', 'href' => '/plugins/uikit/{name}'],
+                ['label' => 'Archive', 'method' => 'POST', 'endpoint' => '/api/uikit/items/{name}/archive', 'confirm' => 'Archive this row?'],
+                ['label' => 'Delete', 'method' => 'DELETE', 'endpoint' => '/api/uikit/items/{name}'],
+            ],
+        ]];
+
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testRowActionMissingLabelIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['href' => '/x/1']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('non-empty \'label\'', implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionWithBothHrefAndEndpointIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X', 'href' => '/x', 'endpoint' => '/api/x', 'method' => 'POST']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'href' or 'endpoint'", implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionWithNeitherHrefNorEndpointIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("exactly one of 'href' or 'endpoint'", implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionEndpointWithBadMethodIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X', 'endpoint' => '/api/x/1', 'method' => 'GET']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('method POST, PUT, or DELETE', implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionEndpointMustBeApiPath(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [['label' => 'X', 'endpoint' => 'https://evil.example/api/x', 'method' => 'POST']],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a relative API path', implode(' | ', $result['errors']));
+    }
+
+    public function testRowActionsMustBeNonEmptyList(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'dataTable', 'source' => '/api/x/rows',
+            'columns' => [['key' => 'a', 'label' => 'A']],
+            'rowActions' => [],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('non-empty list of row-action objects', implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A5: math / markdown / richTextInput ====================
+
+    public function testMathAndMarkdownDisplayBlocksAreValid(): void
+    {
+        $tree = [
+            ['type' => 'math', 'expression' => 'e^{i\\pi}+1=0', 'block' => true],
+            ['type' => 'markdown', 'content' => "## Title\n\n**bold** and \$a^2\$"],
+        ];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testMathMissingExpressionIsRejected(): void
+    {
+        $result = BlockValidator::validate([['type' => 'math', 'block' => true]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'expression'", implode(' | ', $result['errors']));
+    }
+
+    public function testMarkdownMissingContentIsRejected(): void
+    {
+        $result = BlockValidator::validate([['type' => 'markdown']]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'content'", implode(' | ', $result['errors']));
+    }
+
+    public function testMathAndMarkdownAreLeafDisplayBlocks(): void
+    {
+        // Display blocks: valid at the top level (NOT form-only) and leaves.
+        $this->assertFalse(BlockContract::isContainer('math'));
+        $this->assertFalse(BlockContract::isContainer('markdown'));
+        $this->assertContains('math', BlockContract::types());
+        $this->assertContains('markdown', BlockContract::types());
+    }
+
+    public function testRichTextInputInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                ['type' => 'richTextInput', 'name' => 'notes', 'label' => 'Notes', 'rows' => 4, 'required' => true],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testRichTextInputAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'richTextInput', 'name' => 'x', 'label' => 'X'],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'richTextInput' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    public function testRichTextInputMissingNameIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'richTextInput', 'label' => 'X'],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result['errors']));
+    }
+
+    // ==================== WC-532 A2: fieldArray ====================
+
+    public function testFieldArrayWithTemplateInsideFormIsValid(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
+            'children' => [
+                [
+                    'type'  => 'fieldArray',
+                    'name'  => 'lineItems',
+                    'label' => 'Line items',
+                    'itemLabel' => 'Line',
+                    'max'   => 5,
+                    'children' => [
+                        ['type' => 'textInput', 'name' => 'description', 'label' => 'Description'],
+                        ['type' => 'numberInput', 'name' => 'qty', 'label' => 'Quantity'],
+                    ],
+                ],
+                ['type' => 'submitButton', 'label' => 'Save'],
+            ],
+        ]];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testFieldArrayIsAContainerAndInTheWhitelist(): void
+    {
+        $this->assertTrue(BlockContract::isContainer('fieldArray'));
+        $this->assertContains('fieldArray', BlockContract::types());
+    }
+
+    public function testFieldArrayAtTopLevelIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'fieldArray', 'name' => 'x', 'label' => 'X', 'children' => [
+                ['type' => 'textInput', 'name' => 'a', 'label' => 'A'],
+            ]],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'fieldArray' is only valid inside a 'form'", implode(' | ', $result['errors']));
+    }
+
+    /**
+     * A fieldArray SCOPES its template names per row: a child named 'label' may
+     * reuse a name that also appears in the OUTER form (or another fieldArray)
+     * without a duplicate-name error — the name is row-local.
+     */
+    public function testFieldArrayTemplateNamesAreScopedNotGlobal(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'],
+                ['type' => 'fieldArray', 'name' => 'rows', 'label' => 'Rows', 'children' => [
+                    ['type' => 'textInput', 'name' => 'title', 'label' => 'Row title'],
+                ]],
+                ['type' => 'fieldArray', 'name' => 'more', 'label' => 'More', 'children' => [
+                    ['type' => 'textInput', 'name' => 'title', 'label' => 'More title'],
+                ]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+        // 'title' appears in the outer form and inside BOTH fieldArrays — all fine.
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testFieldArrayNameCollidingWithSiblingInputIsRejected(): void
+    {
+        $tree = [[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'textInput', 'name' => 'dup', 'label' => 'Dup'],
+                ['type' => 'fieldArray', 'name' => 'dup', 'label' => 'Dup array', 'children' => [
+                    ['type' => 'textInput', 'name' => 'a', 'label' => 'A'],
+                ]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]];
+        $result = BlockValidator::validate($tree);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'dup'", implode(' | ', $result['errors']));
+    }
+
+    public function testFieldArrayMissingNameIsRejected(): void
+    {
+        $result = BlockValidator::validate([[
+            'type'   => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/y'],
+            'children' => [
+                ['type' => 'fieldArray', 'label' => 'X', 'children' => [
+                    ['type' => 'textInput', 'name' => 'a', 'label' => 'A'],
+                ]],
+                ['type' => 'submitButton', 'label' => 'Go'],
+            ],
+        ]]);
+        $result2 = $result;
+        $this->assertFalse($result2['ok']);
+        $this->assertStringContainsString("missing required prop 'name'", implode(' | ', $result2['errors']));
+    }
+
+    // ==================== WC-532 A7: selector + data-bound params ====================
+
+    public function testSelectorAndDataTableParamsMasterDetailIsValid(): void
+    {
+        $tree = [
+            ['type' => 'selector', 'name' => 'team', 'label' => 'Team',
+             'source' => '/api/x/teams', 'valueField' => 'id', 'labelField' => 'name'],
+            ['type' => 'dataTable', 'source' => '/api/x/members',
+             'columns' => [['key' => 'n', 'label' => 'N']],
+             'params' => [['param' => 'teamId', 'from' => 'team']]],
+        ];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
+    }
+
+    public function testSelectorIsALeafInTheWhitelistWithOwnedSourceRule(): void
+    {
+        $this->assertFalse(BlockContract::isContainer('selector'));
+        $this->assertContains('selector', BlockContract::types());
+        // Its source uses the shared apiPath rule (ownership-checked at load).
+        $result = BlockValidator::validate([
+            ['type' => 'selector', 'name' => 's', 'label' => 'S',
+             'source' => 'https://evil.example/api/x', 'valueField' => 'id', 'labelField' => 'name'],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('must be a relative API path', implode(' | ', $result['errors']));
+    }
+
+    public function testSelectorMissingValueOrLabelFieldIsRejected(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'selector', 'name' => 's', 'label' => 'S', 'source' => '/api/x/rows'],
+        ]);
+        $this->assertFalse($result['ok']);
+        $joined = implode(' | ', $result['errors']);
+        $this->assertStringContainsString("missing required prop 'valueField'", $joined);
+        $this->assertStringContainsString("missing required prop 'labelField'", $joined);
+    }
+
+    public function testDataBoundParamsEntryMustHaveParamAndFrom(): void
+    {
+        $result = BlockValidator::validate([
+            ['type' => 'dataTable', 'source' => '/api/x/rows',
+             'columns' => [['key' => 'a', 'label' => 'A']],
+             'params' => [['param' => 'x']]],
+        ]);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('{param: non-empty string, from: non-empty string}', implode(' | ', $result['errors']));
+    }
+
+    public function testDataStatChartAndDataListAllAcceptParams(): void
+    {
+        $tree = [
+            ['type' => 'dataStat', 'source' => '/api/x/m', 'label' => 'M', 'valueField' => 'v',
+             'params' => [['param' => 'p', 'from' => 'sel']]],
+            ['type' => 'dataList', 'source' => '/api/x/l', 'itemField' => 'name',
+             'params' => [['param' => 'p', 'from' => 'sel']]],
+            ['type' => 'chart', 'source' => '/api/x/c', 'chartType' => 'bar',
+             'series' => [['key' => 'k', 'label' => 'K', 'color' => 1]],
+             'params' => [['param' => 'p', 'from' => 'sel']]],
+        ];
+        $this->assertSame(['ok' => true, 'errors' => []], BlockValidator::validate($tree));
     }
 }

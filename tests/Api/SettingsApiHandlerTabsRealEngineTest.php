@@ -109,6 +109,47 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
         return $profileId;
     }
 
+    /**
+     * Seed a profile with an active membership holding a role of the EXACT
+     * given name (distinct from {@see seedProfileWithPermissions()}'s
+     * throwaway-named roles) — needed to exercise requiredRole gating, which
+     * checks the effective role NAME, not a permission.
+     */
+    private function seedProfileWithRoleName(int $tenantId, string $roleName): int
+    {
+        // `roles.name` is globally UNIQUE and the migrated schema may already
+        // seed a role named e.g. 'admin' — find-or-create rather than assume
+        // a fresh insert.
+        $existing = $this->pdo->prepare('SELECT id FROM roles WHERE name = ?');
+        $existing->execute([$roleName]);
+        $roleId = $existing->fetchColumn();
+
+        if ($roleId === false) {
+            $roleStmt = $this->pdo->prepare(
+                "INSERT INTO roles (name, created_at) VALUES (?, datetime('now'))"
+            );
+            $roleStmt->execute([$roleName]);
+            $roleId = (int) $this->pdo->lastInsertId();
+        } else {
+            $roleId = (int) $roleId;
+        }
+
+        $profileStmt = $this->pdo->prepare(
+            "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
+                 two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+             VALUES ('tabs-role-test', 'x', 0, 0, 0, datetime('now'), datetime('now'))"
+        );
+        $profileStmt->execute();
+        $profileId = (int) $this->pdo->lastInsertId();
+
+        $this->pdo->prepare(
+            'INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+             VALUES (?, ?, ?, NULL, \'active\', datetime(\'now\'))'
+        )->execute([$profileId, $tenantId, $roleId]);
+
+        return $profileId;
+    }
+
     private function requestAs(int $profileId, int $tenantId): Request
     {
         TenantContext::setTenantId($tenantId);
@@ -182,7 +223,27 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
 
         $tabs = $this->tabIds($this->handler->tabs($this->requestAs($profileId, 0)));
 
-        $this->assertSame(['general', 'branding', 'signup', 'email', 'storage'], $tabs);
+        $this->assertSame(['general', 'branding', 'signup', 'email', 'storage', 'feature-flags'], $tabs);
+    }
+
+    public function testFeatureFlagsTabIsHiddenForSettingsManageInARegularTenant(): void
+    {
+        // settings:manage in a REGULAR tenant must not reveal Feature flags —
+        // it is a system-tenant resource, exactly like Sign-up/Email/Storage.
+        $regularTenantProfile = $this->seedProfileWithPermissions(
+            $this->tenantId,
+            [CorePermissions::SETTINGS_MANAGE]
+        );
+        $regularTabs = $this->tabIds($this->handler->tabs($this->requestAs($regularTenantProfile, $this->tenantId)));
+        $this->assertNotContains('feature-flags', $regularTabs);
+    }
+
+    public function testFeatureFlagsTabIsVisibleForSettingsManageInTheSystemTenant(): void
+    {
+        // settings:manage in the SYSTEM tenant (0) does unlock it.
+        $systemProfile = $this->seedProfileWithPermissions(0, [CorePermissions::SETTINGS_MANAGE]);
+        $systemTabs = $this->tabIds($this->handler->tabs($this->requestAs($systemProfile, 0)));
+        $this->assertContains('feature-flags', $systemTabs);
     }
 
     public function testSecurityManageShowsOnlySecurityTab(): void
@@ -192,6 +253,29 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
         $tabs = $this->tabIds($this->handler->tabs($this->requestAs($profileId, $this->tenantId)));
 
         $this->assertSame(['security'], $tabs);
+    }
+
+    public function testAdminRoleSeesTheEmailDomainsTab(): void
+    {
+        $profileId = $this->seedProfileWithRoleName($this->tenantId, 'admin');
+
+        $tabs = $this->tabIds($this->handler->tabs($this->requestAs($profileId, $this->tenantId)));
+
+        // Not assertSame against the full list: the migrated schema may seed
+        // the 'admin' role with other permission grants too (e.g. the 013
+        // grant-migration pattern) — this test's concern is only the new
+        // requiredRole gate, not the exact permission set 'admin' happens to
+        // hold elsewhere.
+        $this->assertContains('email-domains', $tabs, 'A profile whose effective role is named admin must see the Email domains tab.');
+    }
+
+    public function testNonAdminRoleDoesNotSeeTheEmailDomainsTab(): void
+    {
+        $profileId = $this->seedProfileWithRoleName($this->tenantId, 'a-role-that-is-not-admin');
+
+        $tabs = $this->tabIds($this->handler->tabs($this->requestAs($profileId, $this->tenantId)));
+
+        $this->assertNotContains('email-domains', $tabs, 'A non-admin role must not see the Email domains tab.');
     }
 
     public function testUnresolvedTenantContextRefusesWith403(): void

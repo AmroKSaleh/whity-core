@@ -122,6 +122,79 @@ final class TenantOwnedTables
         // user-scoped rows an admin sets to require 2FA enrollment. Every query
         // binds tenant_id so a policy can never leak across tenants.
         'two_factor_policies' => '061_create_two_factor_policies.php',
+
+        // WC-621 — native taxonomy/tagging subsystem (migration 063): tag groups,
+        // tags, and polymorphic entity<->tag associations. All three carry
+        // tenant_id NOT NULL; every query binds tenant_id so tags never leak
+        // across tenants. `entity_tags.tenant_id` is denormalised from the tag's
+        // tenant to keep the predicate + reverse-lookup index on one row.
+        'tag_groups'  => '063_create_taxonomy_tables.php',
+        'tags'        => '063_create_taxonomy_tables.php',
+        'entity_tags' => '063_create_taxonomy_tables.php',
+
+        // WC-queue — durable async job queue (migration 065). Each job carries
+        // the tenant_id that enqueued it, restored into TenantContext before its
+        // handler runs. The QUEUE mechanics (reserve/complete/fail/reclaim) run
+        // as system infra across tenants and are annotated @tenant-guard-ignore
+        // in JobRepository; the tenant_id column is what makes that restore, and
+        // an eventual tenant-scoped jobs API, correct.
+        'jobs' => '065_create_jobs.php',
+
+        // WC-event-spine (#154) — durable event spine (migration 066). Both
+        // tables carry tenant_id NOT NULL: `domain_events` is the append-only
+        // per-tenant log; `event_outbox` denormalises the event's tenant so the
+        // relay can scope/keep tenant on one row. The RELAY runs as system infra
+        // ACROSS tenants (reserve/mark/reclaim annotated @tenant-guard-ignore in
+        // DomainEventStore); append stamps tenant_id from the trusted caller, and
+        // each relayed event's origin tenant is restored into TenantContext
+        // before any tenant-scoped handler runs — the same model as `jobs`.
+        'domain_events' => '066_create_domain_events.php',
+        'event_outbox'  => '066_create_domain_events.php',
+
+        // WC-scheduler (#a934420e) — the cron-tick scheduled_jobs registry
+        // (migration 069). Tenant-scoped CRUD binds tenant_id; the schedule:run
+        // tick claims due rows ACROSS tenants (system infra, @tenant-guard-ignore
+        // in ScheduledJobRepository) and stamps each enqueue with the row's
+        // origin tenant — the same model as `jobs`.
+        'scheduled_jobs' => '069_create_scheduled_jobs.php',
+
+        // WC-notifications (#d89dcc2c) — the notification persistence spine
+        // (migration 070). `notifications` is the tenant-scoped message/inbox row;
+        // `notification_deliveries` is its per-channel attempt log, with the
+        // tenant DENORMALISED from the parent notification so the sweep index and
+        // predicate guard sit on one row (the same pattern as `event_outbox` /
+        // `entity_tags`). Tenant-scoped reads/writes bind tenant_id in
+        // NotificationRepository; the eventual relay sweep runs as system infra
+        // across tenants (annotated @tenant-guard-ignore in its own slice).
+        'notifications'           => '070_create_notifications.php',
+        'notification_deliveries' => '070_create_notifications.php',
+
+        // WC-notifications (#c56a6455) — per-user notification preferences
+        // (migration 071). One (tenant, profile, type, channel) toggle; every
+        // read/write binds tenant_id (+ profile_id for self-scoping). The
+        // dispatcher's NotificationPreferenceResolver consults it to filter a
+        // recipient's channels (transactional types always bypass).
+        'user_notification_preferences' => '071_create_user_notification_preferences.php',
+
+        // WC-notifications (#2aa3411a) — notification templates (migration 072).
+        // tenant_id 0 = the global default core set; > 0 = a tenant override.
+        // Resolution binds tenant_id (a caller reads its own overrides + the
+        // global 0 set); a regular tenant writes only its own rows — the same
+        // global-vs-tenant asymmetry as base roles.
+        'notification_templates' => '072_create_notification_templates.php',
+
+        // WC-notifications (#d70c6083) — per-tenant sender configuration
+        // (migration 073). from/reply-to, transport selection, non-secret config,
+        // and the ENCRYPTED provider credentials (write-only over the API). Every
+        // read/write binds tenant_id so a tenant only sees/edits its own sender.
+        'tenant_notification_settings' => '073_create_tenant_notification_settings.php',
+
+        // WC-i18n — per-tenant translation overrides (migration 081).
+        // Translations are global-scoped (tenant_id NULL = system defaults) but
+        // also support tenant-specific overrides (tenant_id > 0). Every query
+        // accessing tenant overrides binds tenant_id so a tenant only sees/edits
+        // its own customizations; system defaults are accessible globally.
+        'translations' => '081_create_language_tables.php',
     ];
 
     /**
