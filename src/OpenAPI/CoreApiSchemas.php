@@ -93,6 +93,7 @@ final class CoreApiSchemas
             self::platformOpsRoutes(),
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
+            self::languageRoutes(),
             self::brandingRoutes(),
             self::themeRoutes(),
             self::identityRoutes(),
@@ -103,9 +104,12 @@ final class CoreApiSchemas
             self::planRoutes(),
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
+            self::documentBlockRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
-            self::tagRoutes()
+            self::tagRoutes(),
+            self::passwordResetRoutes(),
+            self::twoFactorRecoveryRoutes()
         );
     }
 
@@ -1205,6 +1209,7 @@ final class CoreApiSchemas
                 'summary' => 'Fetch a package from a trusted plugin store and stage it (lands disabled)',
                 'description' => 'Downloads a plugin package from a store host that MUST be on the '
                     . 'operator `plugins.store_allowed_hosts` allowlist (SSRF control; empty ⇒ disabled), '
+                    . 'and requires the `plugins.store_enabled` master switch (default true) to also be on, '
                     . 'then validates and stages it through the same hardened installer as an upload.',
                 'tags' => ['platform-ops'],
                 'request' => 'InstallFromStoreRequest',
@@ -1221,7 +1226,8 @@ final class CoreApiSchemas
             self::permissionRoute('GET', '/api/plugins/store/allowed', 'plugins:read', [
                 'summary' => 'List the trusted store hosts (for the store-browser UI)',
                 'description' => 'Returns the operator `plugins.store_allowed_hosts` allowlist and whether '
-                    . 'installing from a store is enabled. Read-only; makes no outbound request.',
+                    . 'installing from a store is enabled (both the allowlist AND the `plugins.store_enabled` '
+                    . 'master switch must be on). Read-only; makes no outbound request.',
                 'tags' => ['platform-ops'],
                 'responses' => [
                     200 => self::jsonResponse('Allowed store hosts', 'StoreAllowedHostsResponse'),
@@ -1431,6 +1437,92 @@ final class CoreApiSchemas
     }
 
     /**
+     * Language management and user language preference routes.
+     *
+     * GET /api/v1/languages — public endpoint, returns list of available languages
+     * (no auth required).
+     * GET /api/v1/settings/language — authenticated, returns user's language preference
+     * and list of available languages.
+     * PATCH /api/v1/settings/language — authenticated, updates user's language preference.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function languageRoutes(): array
+    {
+        $languageObject = self::object([
+            'code' => self::str(),
+            'name' => self::str(),
+        ], ['code', 'name']);
+
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/languages',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List available languages (public endpoint)',
+                    'tags' => ['languages'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The list of available languages',
+                            self::object([
+                                'languages' => ['type' => 'array', 'items' => $languageObject],
+                            ], ['languages'])
+                        ),
+                        500 => self::errorResponse('Internal error'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/settings/language',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Get the current user\'s language preference',
+                    'tags' => ['languages'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The user\'s language preference and available languages',
+                            self::object([
+                                'language_code' => self::str(nullable: true),
+                                'available_languages' => ['type' => 'array', 'items' => $languageObject],
+                            ], ['language_code', 'available_languages'])
+                        ),
+                        403 => self::errorResponse('Authentication required'),
+                        404 => self::errorResponse('User profile not found'),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'PATCH',
+                'path' => '/api/settings/language',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Update the current user\'s language preference',
+                    'tags' => ['languages'],
+                    'request' => self::object([
+                        'language_code' => self::str(nullable: true),
+                    ], ['language_code']),
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The updated language preference',
+                            self::object([
+                                'language_code' => self::str(nullable: true),
+                            ], ['language_code'])
+                        ),
+                        400 => self::errorResponse('Invalid request body'),
+                        403 => self::errorResponse('Authentication required'),
+                        422 => self::errorResponse('Invalid language code'),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
     private static function brandingRoutes(): array
@@ -1566,7 +1658,10 @@ final class CoreApiSchemas
         // is an ACTIVE membership; role/ou_id/status come from that membership,
         // email/name from the profile identity. `status` is the membership
         // lifecycle state (active|invited|suspended); the list only returns
-        // 'active' but reads may surface others.
+        // 'active' but reads may surface others. `accountStatus` (WC-user-status)
+        // is the DISTINCT, GLOBAL profile-level active/inactive switch (ADR 0005
+        // §1, migration 083) — deactivating it blocks login for the profile
+        // everywhere it holds a membership, not just in one tenant.
         $user = self::object([
             'id' => self::int(),
             'name' => self::str(),
@@ -1576,6 +1671,7 @@ final class CoreApiSchemas
             'ou_id' => self::int(true),
             'createdAt' => self::str(true),
             'status' => self::str(),
+            'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
         ], ['id', 'name', 'email', 'role', 'tenantId', 'createdAt']);
 
         $permission = self::object([
@@ -2251,6 +2347,51 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
             ], []),
 
+            // Server-side render (ADR 0012 / WC-docdesigner Track 2). `dataRows`
+            // is one flat string=>string map per label/row (omitted or empty ->
+            // a single row from the template's own placeholder samples);
+            // `sheet` is the optional N-up label-sheet tiling layout — both
+            // freeform (mirror the client's DocElement-adjacent JSON shapes
+            // rather than a rigid schema, same "verbatim client JSON" posture
+            // as DocumentTemplate.data itself).
+            'DocumentRenderRequest' => self::object([
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+            ], []),
+
+            // ── Document/label designer blocks (WC-521) ───────────────────────
+            // `data` is the verbatim client DocElement[] fragment (freeform array);
+            // documents reference a block by POINTER (a `blockInstance` element
+            // carrying this block's id), never an inline copy.
+            'DocumentBlock' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+                'is_system' => self::bool(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
+            'DocumentBlockListResponse' => self::listEnvelope('DocumentBlock'),
+            'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
+            // scope/required_permission are optional; setting a shared scope or a
+            // permission tag requires documents:publish (403 otherwise).
+            'DocumentBlockCreateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], ['name', 'data']),
+            'DocumentBlockUpdateRequest' => self::object([
+                'name' => self::str(),
+                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+            ], []),
+
             'User' => $user,
             'UserListResponse' => self::paginatedListEnvelope('User'),
             'UserResponse' => self::dataEnvelope(SchemaBuilder::ref('User')),
@@ -2267,6 +2408,8 @@ final class CoreApiSchemas
                 'password' => ['type' => 'string', 'minLength' => 6],
                 'role' => $permissionRef,
                 'ou_id' => self::int(true),
+                // WC-user-status: the admin deactivate/reactivate control.
+                'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
             ], []),
 
             'Permission' => $permission,
@@ -2817,6 +2960,75 @@ final class CoreApiSchemas
                 'type' => 'object',
                 'additionalProperties' => ['type' => 'string'],
             ]),
+
+            // ── Forgotten-password + 2FA-recovery (WC-password-reset-2fa-recovery) ──
+
+            // Shared by POST /api/auth/password/forgot and POST
+            // /api/auth/2fa-recovery/request — both take only an email.
+            'EmailOnlyRequest' => self::object(['email' => self::str()], ['email']),
+            // Shared by POST /api/auth/2fa-recovery/confirm.
+            'TokenOnlyRequest' => self::object(['token' => self::str()], ['token']),
+            // Shared generic 202 body for both public "request" endpoints above —
+            // deliberately identical whether or not the address has an account.
+            'GenericMessageDataResponse' => self::dataEnvelope(
+                self::object(['message' => self::str()], ['message'])
+            ),
+
+            // POST /api/auth/password/reset — request body.
+            'PasswordResetConfirmRequest' => self::object([
+                'token' => self::str(),
+                'password' => self::str(),
+            ], ['token', 'password']),
+            // POST /api/auth/password/reset — 200 response. `status` is
+            // 'applied' (self-service, no approval required) or
+            // 'awaiting_approval' (staged; an admin must approve it).
+            'PasswordResetConfirmResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['applied', 'awaiting_approval']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
+
+            // POST /api/auth/2fa-recovery/confirm — 200 response. Confirming
+            // only SUBMITS the request into the admin queue — status is always
+            // 'pending' here; nothing on the target profile has changed yet.
+            'TwoFactorRecoveryConfirmResponse' => self::dataEnvelope(self::object([
+                'status' => ['type' => 'string', 'enum' => ['pending']],
+                'message' => self::str(),
+            ], ['status', 'message'])),
+
+            // One row of either admin approval queue (password-resets/pending,
+            // 2fa-recovery/pending) — same shape, listed under distinct names so
+            // each endpoint's response schema is self-describing.
+            'PendingPasswordResetItem' => self::object([
+                'id' => self::int(),
+                'profile_id' => self::int(),
+                'email' => self::str(),
+                'display_name' => self::str(),
+                'created_at' => self::str(),
+            ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
+            'PendingPasswordResetListResponse' => self::listEnvelope('PendingPasswordResetItem'),
+            'PendingTwoFactorRecoveryItem' => self::object([
+                'id' => self::int(),
+                'profile_id' => self::int(),
+                'email' => self::str(),
+                'display_name' => self::str(),
+                'created_at' => self::str(),
+            ], ['id', 'profile_id', 'email', 'display_name', 'created_at']),
+            'PendingTwoFactorRecoveryListResponse' => self::listEnvelope('PendingTwoFactorRecoveryItem'),
+
+            // Shared 200 response for every id-based approve/reject action across
+            // both queues (password-resets and 2fa-recovery).
+            'ApprovalStatusResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['approved', 'rejected']],
+            ], ['id', 'status'])),
+
+            // POST /api/2fa-recovery/force-reset — the secondary admin-direct
+            // fallback (no prior request): request body + 200 response.
+            'ForceResetRequest' => self::object(['profile_id' => self::int()], ['profile_id']),
+            'ForceResetResponse' => self::dataEnvelope(self::object([
+                'profile_id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => ['forced']],
+            ], ['profile_id', 'status'])),
         ];
     }
 
@@ -3248,6 +3460,163 @@ final class CoreApiSchemas
     }
 
     /**
+     * Self-service "forgot password" routes (WC-password-reset-2fa-recovery):
+     * two PUBLIC endpoints (forgot/reset — PasswordResetHandler) plus the
+     * tenant-scoped admin approval queue (PasswordResetApprovalsApiHandler).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function passwordResetRoutes(): array
+    {
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/password/forgot',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Request a password-reset link (public, rate-limited, no enumeration)',
+                    'tags' => ['auth'],
+                    'request' => 'EmailOnlyRequest',
+                    'responses' => [
+                        202 => self::jsonResponse(
+                            'Always the same generic message, regardless of whether the address has an account',
+                            'GenericMessageDataResponse'
+                        ),
+                        422 => self::errorResponse('A valid email address is required'),
+                        429 => self::errorResponse('Too many password-reset requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/password/reset',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Confirm a reset token and set a new password',
+                    'tags' => ['auth'],
+                    'request' => 'PasswordResetConfirmRequest',
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Reset applied immediately, or submitted for admin approval — see `data.status`',
+                            'PasswordResetConfirmResponse'
+                        ),
+                        400 => self::errorResponse('The reset link is invalid or has expired'),
+                        422 => self::errorResponse('Missing token, or password does not meet the policy'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/password-resets/pending', 'password_resets:approve', [
+                'summary' => 'List pending password-reset requests for the caller\'s own tenant',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Requests awaiting approval', 'PendingPasswordResetListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/password-resets/{id:\d+}/approve', 'password_resets:approve', [
+                'summary' => 'Apply the staged password (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approved', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/password-resets/{id:\d+}/reject', 'password_resets:approve', [
+                'summary' => 'Discard the staged password (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending password-reset request found for that id'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * "I lost my 2FA device" recovery-request routes
+     * (WC-password-reset-2fa-recovery): two PUBLIC endpoints (request/confirm —
+     * TwoFactorRecoveryHandler) plus the tenant-scoped admin approval queue and
+     * the secondary admin-direct-force fallback
+     * (TwoFactorRecoveryApprovalsApiHandler).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function twoFactorRecoveryRoutes(): array
+    {
+        return [
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/2fa-recovery/request',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Request account recovery after losing both password and 2FA device (public, rate-limited, no enumeration)',
+                    'tags' => ['auth'],
+                    'request' => 'EmailOnlyRequest',
+                    'responses' => [
+                        202 => self::jsonResponse(
+                            'Always the same generic message, regardless of whether the address has an account',
+                            'GenericMessageDataResponse'
+                        ),
+                        422 => self::errorResponse('A valid email address is required'),
+                        429 => self::errorResponse('Too many recovery requests'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/auth/2fa-recovery/confirm',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Confirm the recovery token — CREATES the pending admin-queue entry (clears nothing)',
+                    'tags' => ['auth'],
+                    'request' => 'TokenOnlyRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Submitted for administrator review', 'TwoFactorRecoveryConfirmResponse'),
+                        400 => self::errorResponse('The confirmation link is invalid or has expired'),
+                        422 => self::errorResponse('A confirmation token is required'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/2fa-recovery/pending', 'two_factor_recovery:approve', [
+                'summary' => 'List pending 2FA-recovery requests for the caller\'s own tenant',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Requests awaiting approval', 'PendingTwoFactorRecoveryListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/{id:\d+}/approve', 'two_factor_recovery:approve', [
+                'summary' => 'Clear the target profile\'s 2FA and send a fresh password-reset link (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Approved', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending 2FA-recovery request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/{id:\d+}/reject', 'two_factor_recovery:approve', [
+                'summary' => 'Leave the target profile untouched (tenant-scoped)',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Rejected', 'ApprovalStatusResponse'),
+                    404 => self::errorResponse('No pending 2FA-recovery request found for that id'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/2fa-recovery/force-reset', 'two_factor_recovery:approve', [
+                'summary' => 'Secondary fallback: force-clear a named profile\'s 2FA with no prior request (tenant-scoped)',
+                'tags' => ['auth'],
+                'request' => 'ForceResetRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Forced', 'ForceResetResponse'),
+                    404 => self::errorResponse('No such profile in your tenant'),
+                    422 => self::errorResponse('A valid profile_id is required'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
      * Native taxonomy/tagging routes (WC-621): tenant-scoped CRUD for tag groups
      * + tags, and a polymorphic tag<->entity association surface. Reads gated on
      * `tags:read`, writes on `tags:manage`.
@@ -3576,6 +3945,83 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Template not found or not visible to the caller'),
                 ] + self::authErrors(),
             ]),
+            // Server-side render (ADR 0012 / WC-docdesigner Track 2): calls the
+            // separate `whity_render` service and streams back a PDF. Gated on
+            // documents.render_enabled (503 when the operator has the render
+            // tier turned off) BEFORE any RBAC/tenant work; 503 again if the
+            // render service itself is unreachable/errors — never a raw
+            // exception or a downstream stack trace.
+            self::permissionRoute('POST', '/api/document-templates/{id:\d+}/render', 'documents:render', [
+                'summary' => 'Render a document/label template to PDF',
+                'tags' => ['documents'],
+                'request' => 'DocumentRenderRequest',
+                'responses' => [
+                    200 => ['description' => 'The rendered PDF', 'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]]],
+                    404 => self::errorResponse('Template not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
+                    503 => self::errorResponse('Rendering is disabled on this instance, or the render service is unavailable'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * Document/label designer block routes (WC-521). Tenant-scoped, RBAC-gated
+     * CRUD; list/get are additionally row-filtered server-side by scope +
+     * required_permission, publishing needs documents:publish, and delete is
+     * refused (409) while a template still holds a live blockInstance pointer
+     * at the block (reference-integrity guard).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentBlockRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/document-blocks', 'documents:read', [
+                'summary' => 'List document/label blocks visible to the caller',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The blocks the caller may see (RBAC-filtered)', 'DocumentBlockListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-blocks', 'documents:write', [
+                'summary' => 'Create a document/label block',
+                'tags' => ['documents'],
+                'request' => 'DocumentBlockCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created block', 'DocumentBlockResponse'),
+                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-blocks/{id:\d+}', 'documents:read', [
+                'summary' => 'Get a document/label block',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The block', 'DocumentBlockResponse'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-blocks/{id:\d+}', 'documents:write', [
+                'summary' => 'Update a document/label block',
+                'tags' => ['documents'],
+                'request' => 'DocumentBlockUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated block', 'DocumentBlockResponse'),
+                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-blocks/{id:\d+}', 'documents:write', [
+                'summary' => 'Delete a document/label block',
+                'tags' => ['documents'],
+                'responses' => [
+                    204 => ['description' => 'Block deleted'],
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                    409 => self::errorResponse('Cannot delete a block that is still referenced by a template'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -3612,13 +4058,16 @@ final class CoreApiSchemas
     }
 
     /**
+     * @param string|array<string, mixed> $component A registered component NAME
+     *        (rendered as a `$ref`), or an inline JSON-Schema fragment (e.g. from
+     *        {@see self::object()}) for a response with no named component.
      * @return array<string, mixed>
      */
-    private static function jsonResponse(string $description, string $component): array
+    private static function jsonResponse(string $description, string|array $component): array
     {
         return [
             'description' => $description,
-            'content' => ['application/json' => ['schema' => SchemaBuilder::ref($component)]],
+            'content' => ['application/json' => ['schema' => is_string($component) ? SchemaBuilder::ref($component) : $component]],
         ];
     }
 

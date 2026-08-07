@@ -134,6 +134,12 @@
       "lightHex": "#737373",
       "darkHex": "#a1a1a1"
     },
+    "overlay": {
+      "light": "oklch(0 0 0 / 45%)",
+      "dark": "oklch(0 0 0 / 45%)",
+      "lightHex": "#00000073",
+      "darkHex": "#00000073"
+    },
     "popover": {
       "light": "oklch(1 0 0)",
       "dark": "oklch(0.205 0 0)",

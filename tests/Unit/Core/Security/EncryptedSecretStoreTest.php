@@ -132,4 +132,36 @@ final class EncryptedSecretStoreTest extends TestCase
         ]);
         self::assertSame('secret', $store->decrypt($store->encrypt('secret')));
     }
+
+    /**
+     * WC-security-audit: fromEnv() must reject a short current key outside
+     * development, the same >= 32 char convention TotpService::resolveEncryptionKey()
+     * enforces for the identical ENCRYPTION_KEY env var. Before this fix the
+     * two consumers of ENCRYPTION_KEY had diverged: this store only rejected
+     * an EMPTY key (via the constructor), never a short one.
+     */
+    public function testFromEnvRejectsShortKeyOutsideDevelopment(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('at least 32 characters');
+
+        EncryptedSecretStore::fromEnv([
+            'ENCRYPTION_KEY' => 'too-short',
+            'APP_ENV'        => 'production',
+        ]);
+    }
+
+    /**
+     * Development is unaffected: a short key still works there (matches
+     * TotpService::resolveEncryptionKey()'s dev carve-out).
+     */
+    public function testFromEnvAcceptsShortKeyInDevelopment(): void
+    {
+        $store = EncryptedSecretStore::fromEnv([
+            'ENCRYPTION_KEY' => 'short',
+            'APP_ENV'        => 'development',
+        ]);
+
+        self::assertSame('secret', $store->decrypt($store->encrypt('secret')));
+    }
 }

@@ -11,6 +11,7 @@ import {
   IconQrcode,
   IconSquare,
   IconLine,
+  IconMathFunction,
   IconChevronUp,
   IconChevronDown,
   IconTrash,
@@ -29,6 +30,7 @@ const ADD_ITEMS: ReadonlyArray<{ type: ElementType; label: string; Icon: typeof 
   { type: 'qr', label: 'QR code', Icon: IconQrcode },
   { type: 'rect', label: 'Rectangle', Icon: IconSquare },
   { type: 'line', label: 'Line', Icon: IconLine },
+  { type: 'math', label: 'Math', Icon: IconMathFunction },
 ];
 
 function elementLabel(el: DocElement): string {
@@ -47,6 +49,8 @@ function elementLabel(el: DocElement): string {
       return 'Rectangle';
     case 'line':
       return 'Line';
+    case 'math':
+      return el.expression || 'Math';
     case 'blockInstance':
       return 'Block';
     default:

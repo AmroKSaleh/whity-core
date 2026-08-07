@@ -82,9 +82,12 @@ class MigrationsApiHandler
     public function rollback(Request $request): Response
     {
         try {
+            // id is the tiebreaker: a batch run() records many migrations with
+            // (near-)identical executed_at values, and rolling back the wrong
+            // one would corrupt schema state.
             $stmt = $this->db->getPdo()->prepare('
                 SELECT migration_name FROM core_schema_migrations
-                ORDER BY executed_at DESC LIMIT 1
+                ORDER BY executed_at DESC, id DESC LIMIT 1
             ');
             $stmt->execute();
             $last = $stmt->fetch();

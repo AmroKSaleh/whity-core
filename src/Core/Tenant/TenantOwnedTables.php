@@ -188,6 +188,13 @@ final class TenantOwnedTables
         // and the ENCRYPTED provider credentials (write-only over the API). Every
         // read/write binds tenant_id so a tenant only sees/edits its own sender.
         'tenant_notification_settings' => '073_create_tenant_notification_settings.php',
+
+        // WC-i18n — per-tenant translation overrides (migration 081).
+        // Translations are global-scoped (tenant_id NULL = system defaults) but
+        // also support tenant-specific overrides (tenant_id > 0). Every query
+        // accessing tenant overrides binds tenant_id so a tenant only sees/edits
+        // its own customizations; system defaults are accessible globally.
+        'translations' => '081_create_language_tables.php',
     ];
 
     /**

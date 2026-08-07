@@ -411,13 +411,26 @@ test.describe('Document & Label Designer', () => {
     await page.getByTestId('doc-add-text').click();
     await page.getByTestId('doc-save-block').click();
 
+    // Blocks now persist tenant-wide on the backend (WC-515) rather than in
+    // per-test localStorage, so other blocks this same admin/tenant saved in
+    // EARLIER tests of this file may still exist. Within the Personal group
+    // the newest-saved block sorts first (listForTenant ORDER BY updated_at
+    // DESC), so `.first()` reliably resolves to the block THIS test just
+    // created — but only until it moves groups; pin its own stable
+    // data-testid (keyed on the block's id, unaffected by a scope change) up
+    // front so the post-publish assertion targets the same element rather
+    // than whichever OTHER personal-scope block (from an earlier test) now
+    // happens to render first in the Personal group.
     const userScope = '[data-testid^="doc-block-scope-"]:not([data-testid^="doc-block-scope-sys-"])';
     const scope = page.locator(userScope).first();
     await expect(scope).toHaveValue('personal');
+    const testId = await scope.getAttribute('data-testid');
+    expect(testId).toBeTruthy();
+    const thisBlockScope = page.getByTestId(testId ?? '');
 
     // Publish it tenant-wide; the choice sticks (it moves under the Tenant group).
-    await scope.selectOption('tenant');
-    await expect(page.locator(userScope).first()).toHaveValue('tenant');
+    await thisBlockScope.selectOption('tenant');
+    await expect(thisBlockScope).toHaveValue('tenant');
   });
 
   test('text typography: line height is configurable and applied to the text box', async ({ page }) => {
