@@ -24,7 +24,7 @@ Domain logic ships as **plugins** dropped into `/plugins/` — discovered, loade
 - **Operational safety** — graceful worker recycling on a configurable memory ceiling, `/api/health` endpoint reporting worker/memory/DB status (200 healthy, 503 degraded).
 - **Design system** — OKLCH design tokens (light + dark, white-label-overridable per tenant) generated from a single source to CSS, JSON, and Dart; shadcn/Radix component library on Tailwind v4.
 - **OpenAPI** — schema generated from the routing layer for client/type generation.
-- **Tested** — 700+ PHPUnit tests (with real-engine SQLite coverage for data-layer logic), PHPStan, and a 67-flow Playwright E2E suite.
+- **Tested** — 3695+ PHPUnit tests (with real-engine SQLite coverage for data-layer logic), PHPStan, and 162 Playwright E2E tests.
 
 ## Architecture
 
@@ -55,7 +55,7 @@ See **[docs/wiki/Architecture.md](docs/wiki/Architecture.md)** for the full requ
 | Web client | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4, shadcn/Radix UI |
 | Design tokens | OKLCH → CSS / JSON / Dart (generated) |
 | 2FA | `spomky-labs/otphp` (TOTP) |
-| Mobile / Desktop | Flutter (Dart) · Electron — *planned* |
+| Mobile / Desktop | Flutter (Dart) — design tokens only (`flutter/whity_tokens`) · Tauri (Rust) — reference desktop template with offline-first sync, delivered (`templates/tauri-desktop`) |
 
 ## Quick start
 
@@ -136,16 +136,36 @@ whity-core/
 
 ## Testing
 
-```bash
-# PHP (CI parity) — run in a php:8.4 container
-docker run --rm -v "$PWD:/app" -w /app php:8.4-cli php vendor/bin/phpunit
-docker run --rm -v "$PWD:/app" -w /app php:8.4-cli php vendor/bin/phpstan analyse src tests
+The PHP toolchain lives only in Docker (there is no `php` on a typical Windows
+dev box), so `scripts/ci-local.sh` runs the GitHub-Actions PHP jobs locally,
+step for step, in a Linux container that carries the same PHP 8.4 + extension
+set + `pcov` the workflow uses.
 
-# Web E2E (against a running stack)
-cd web && npm run test:e2e
+```bash
+scripts/ci-local.sh phpstan        # just PHPStan (~2 min warm) — the usual culprit
+scripts/ci-local.sh unit           # the "Unit, static analysis & plugin smoke (SQLite)" job:
+                                   #   phpunit+coverage, coverage floor, OpenAPI drift,
+                                   #   phpstan, plugin smoke, tenant guards
+scripts/ci-local.sh pg             # the "Migrations + Integration + Security on real
+                                   #   PostgreSQL" job, against a throwaway Postgres
+scripts/ci-local.sh all --clean    # both, against a pristine export of HEAD
+
+# Web (runs natively, no container needed)
+cd web && npx tsc --noEmit && npx jest
+cd web && npm run test:e2e         # E2E, against a running stack
 ```
 
-CI runs PHPUnit + PHPStan on every PR (`.github/workflows/automated-tests.yml`).
+Pass `--clean` before pushing: it runs against a `git archive` of HEAD, so
+untracked-but-gitignored files (e.g. a local `plugins/PluginStore/`) cannot
+add errors CI will never see. `--fresh` rebuilds the image and drops the
+cached `vendor/` + PHPStan volumes.
+
+`scripts/ci-local.sh` mirrors `.github/workflows/automated-tests.yml` — when
+that workflow changes, update the script in the same PR. A local runner that
+has drifted from CI is worse than none, because it reports confident false
+greens.
+
+CI runs these same jobs plus Playwright E2E on every PR.
 
 ## Documentation
 
@@ -153,14 +173,14 @@ CI runs PHPUnit + PHPStan on every PR (`.github/workflows/automated-tests.yml`).
 - [Permission System](docs/wiki/PERMISSION_SYSTEM.md) · [Tenant Isolation](docs/wiki/TENANT_ISOLATION.md) · [Hook System](docs/wiki/HOOK_SYSTEM.md)
 - [Plugin Development](docs/wiki/Plugin-Development.md) — build a plugin (with the `HelloWorld` example)
 - [Design System](docs/wiki/Design-System-Overview.md) · [Component Library](docs/wiki/Component-Library.md) · [UI Patterns](docs/wiki/UI-Patterns.md)
-- [Installation](docs/wiki/Installation.md) · [CLI Reference](docs/wiki/CLI_REFERENCE.md) · [Deployment Guide](docs/wiki/DEPLOYMENT_GUIDE.md)
+- [Installation](docs/wiki/Installation.md) · [CLI Reference](docs/wiki/CLI_REFERENCE.md) · [Deployment Guide](docs/wiki/DEPLOYMENT_GUIDE.md) · [Go-Live Checklist](docs/wiki/Go-Live-Checklist.md) — the project's own pass/fail gate for what's still outstanding before a production launch
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)
 
 ## Roadmap
 
-Core platform — **delivered**: FrankenPHP runtime, plugin hot-loading + lifecycle, RBAC (registry, hierarchy, OU inheritance), multi-tenant isolation, 2FA, design system, developer docs, and an E2E test suite.
+Core platform — **delivered**: FrankenPHP runtime, plugin hot-loading + lifecycle, RBAC (registry, hierarchy, OU inheritance), multi-tenant isolation, feature flagging system, 2FA, design system, developer docs, an E2E test suite, the organizational-unit hierarchy visualizer (tree + graph views in the OU Management Hub), self-service user profile management, and the family-relations module (Persons/Relations graph — [ADR 0002](docs/adr/0002-family-relations-management.md)).
 
-Under consideration: organizational-unit hierarchy visualizer, user profile management, family-relations module, and the Flutter/Electron clients. See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
+Under consideration: a maintained first-party mobile client — Flutter currently ships only the design-tokens package (`flutter/whity_tokens`) for downstream apps to consume, not a Whity-authored mobile UI. Desktop is no longer planned as Electron: `templates/tauri-desktop` already delivers a working Tauri (Rust) reference app with offline-first sync. See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
 
 Embedding an n8n workflow engine was **deferred, not adopted** — [ADR 0008](docs/adr/0008-defer-n8n-external-automation-surface.md) reframes automation around MCP (any orchestrator that speaks MCP, including n8n, can already call every permission-gated API route).
 

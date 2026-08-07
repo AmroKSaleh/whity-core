@@ -1,7 +1,128 @@
 import type { DocTemplate } from '@/lib/documents/types';
-import { isDocTemplate, migrateTemplate, newElement } from '@/lib/documents/storage';
+import { api } from '@/lib/api/client';
+import {
+  deleteSaved,
+  isDocTemplate,
+  listSaved,
+  migrateTemplate,
+  newElement,
+  saveTemplate,
+} from '@/lib/documents/storage';
+
+jest.mock('@/lib/api/client', () => ({
+  api: { GET: jest.fn(), POST: jest.fn(), PATCH: jest.fn(), DELETE: jest.fn() },
+}));
+
+const mockGet = api.GET as unknown as jest.Mock;
+const mockPost = api.POST as unknown as jest.Mock;
+const mockPatch = api.PATCH as unknown as jest.Mock;
+const mockDelete = api.DELETE as unknown as jest.Mock;
 
 const PAGE = { widthMm: 100, heightMm: 100, marginMm: 0, background: '#ffffff' };
+
+const V2_TEMPLATE = { version: 2, name: 'Invoice', page: PAGE, placeholders: [], pages: [{ id: 'p1', elements: [] }] };
+
+function templateRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 42,
+    tenant_id: 1,
+    name: 'Invoice',
+    data: V2_TEMPLATE,
+    scope: 'personal',
+    is_system: false,
+    created_by: 7,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-02T00:00:00Z',
+    ...overrides,
+  };
+}
+
+describe('listSaved — API-backed template list', () => {
+  beforeEach(() => {
+    mockGet.mockReset();
+  });
+
+  it('maps API rows to SavedTemplate, migrating v1→v2 on read', async () => {
+    mockGet.mockResolvedValue({
+      data: { data: [templateRow({ data: { version: 1, name: 'Legacy', page: PAGE, placeholders: [], elements: [] } })] },
+      response: { status: 200, ok: true },
+    });
+
+    const list = await listSaved();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: '42', name: 'Invoice', updatedAt: '2026-01-02T00:00:00Z' });
+    expect(list[0].data.version).toBe(2);
+    expect(list[0].data.pages).toHaveLength(1);
+  });
+
+  it('skips a row whose data fails template validation instead of crashing', async () => {
+    mockGet.mockResolvedValue({
+      data: { data: [templateRow({ data: { garbage: true } })] },
+      response: { status: 200, ok: true },
+    });
+
+    await expect(listSaved()).resolves.toEqual([]);
+  });
+
+  it('throws when the API call fails', async () => {
+    mockGet.mockResolvedValue({ data: undefined, response: { status: 500, ok: false } });
+
+    await expect(listSaved()).rejects.toThrow();
+  });
+});
+
+describe('saveTemplate — create vs. update', () => {
+  beforeEach(() => {
+    mockPost.mockReset();
+    mockPatch.mockReset();
+  });
+
+  it('POSTs (create) when no id is given', async () => {
+    mockPost.mockResolvedValue({ data: { data: templateRow({ id: 99 }) }, error: undefined, response: { ok: true } });
+
+    const id = await saveTemplate(V2_TEMPLATE as unknown as DocTemplate);
+
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/document-templates', {
+      body: { name: 'Invoice', data: V2_TEMPLATE },
+    });
+    expect(id).toBe('99');
+  });
+
+  it('PATCHes (update) when an id is given', async () => {
+    mockPatch.mockResolvedValue({ data: { data: templateRow({ id: 42 }) }, error: undefined, response: { ok: true } });
+
+    const id = await saveTemplate(V2_TEMPLATE as unknown as DocTemplate, '42');
+
+    expect(mockPatch).toHaveBeenCalledWith('/api/v1/document-templates/{id}', {
+      params: { path: { id: 42 } },
+      body: { name: 'Invoice', data: V2_TEMPLATE },
+    });
+    expect(id).toBe('42');
+  });
+
+  it('throws the server error message on failure', async () => {
+    mockPost.mockResolvedValue({ data: undefined, error: { error: 'name is required' }, response: { ok: false } });
+
+    await expect(saveTemplate(V2_TEMPLATE as unknown as DocTemplate)).rejects.toThrow('name is required');
+  });
+});
+
+describe('deleteSaved', () => {
+  it('DELETEs by id and resolves on success', async () => {
+    mockDelete.mockReset();
+    mockDelete.mockResolvedValue({ error: undefined, response: { ok: true } });
+
+    await expect(deleteSaved('42')).resolves.toBeUndefined();
+    expect(mockDelete).toHaveBeenCalledWith('/api/v1/document-templates/{id}', { params: { path: { id: 42 } } });
+  });
+
+  it('throws on failure (e.g. not found)', async () => {
+    mockDelete.mockReset();
+    mockDelete.mockResolvedValue({ error: { error: 'Template not found' }, response: { ok: false } });
+
+    await expect(deleteSaved('42')).rejects.toThrow('Template not found');
+  });
+});
 
 describe('template validation + migration', () => {
   it('accepts a legacy v1 template', () => {

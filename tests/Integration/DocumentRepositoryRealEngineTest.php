@@ -145,4 +145,63 @@ final class DocumentRepositoryRealEngineTest extends TestCase
         self::assertSame(0, $this->blocks->delete($id, self::TENANT_B));
         self::assertNotNull($this->blocks->findById($id, self::TENANT_A));
     }
+
+    // ── block reference-integrity guard (WC-521) ──────────────────────────────
+
+    /**
+     * The delete-guard scan: a template holding a live `blockInstance` pointer
+     * at the block id is detected — on Postgres via the jsonb_path_exists()
+     * branch, on SQLite via the fetch+decode+scan fallback. Same answer either
+     * engine (the DocumentBlocksApiHandlerRealEngineTest 409/204 tests exercise
+     * this same method through the handler; this pins the repository method
+     * directly, tenant-scoped).
+     */
+    public function testReferencesBlockDetectsALiveBlockInstancePointer(): void
+    {
+        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]);
+
+        // No template references it yet.
+        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
+
+        $this->templates->create(self::TENANT_A, [
+            'name' => 'Invoice',
+            'data' => [
+                'version' => 2,
+                'pages' => [[
+                    'id' => 'p1',
+                    'elements' => [
+                        ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $blockId],
+                    ],
+                ]],
+            ],
+        ]);
+
+        self::assertTrue($this->templates->referencesBlock($blockId, self::TENANT_A), 'a live blockInstance pointer must be detected');
+
+        // Tenant-scoped: the same block id is never "referenced" from another
+        // tenant's point of view, even if that tenant happens to hold a
+        // template pointing at the same numeric id (a different block, really).
+        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_B));
+    }
+
+    public function testReferencesBlockIsFalseWhenNoTemplatePointsAtIt(): void
+    {
+        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Unreferenced', 'data' => [['id' => 'e1', 'type' => 'image']]]);
+
+        // A template exists, but its blockInstance points at a different id.
+        $this->templates->create(self::TENANT_A, [
+            'name' => 'Invoice',
+            'data' => [
+                'version' => 2,
+                'pages' => [[
+                    'id' => 'p1',
+                    'elements' => [
+                        ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) ($blockId + 999)],
+                    ],
+                ]],
+            ],
+        ]);
+
+        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
+    }
 }

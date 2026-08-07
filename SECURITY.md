@@ -124,7 +124,10 @@ Log all permission denials and data modifications with user, tenant, IP, timesta
 
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 - [PHP Security](https://www.php.net/manual/en/security.php)
+- [Threat Model](docs/wiki/Threat-Model.md) — STRIDE analysis from an internal adversarial security audit
+- [Pen-Test Scoping Brief](docs/wiki/Pen-Test-Scoping-Brief.md)
+- [Go-Live Checklist](docs/wiki/Go-Live-Checklist.md) — the security-hardening gate run before any production deployment
 
 ---
 
-*Last updated: 2026-06-05*
+*Last updated: 2026-08-05*
