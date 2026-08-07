@@ -8,318 +8,651 @@
       "type": "registry:ui",
       "title": "Access Denied",
       "description": "Full-bleed permission-denied placeholder with icon, title and description.",
-      "dependencies": ["@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/access-denied.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/access-denied.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/badge",
+        "@whity/button",
+        "@whity/input"
+      ]
     },
     {
       "name": "alert",
       "type": "registry:ui",
       "title": "Alert",
       "description": "Callout for user attention with variant styles.",
-      "dependencies": ["class-variance-authority"],
-      "files": [{ "path": "../packages/ui/src/alert.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "class-variance-authority"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/alert.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "alert-dialog",
       "type": "registry:ui",
       "title": "Alert Dialog",
       "description": "Interruptive confirmation dialog (e.g. destructive-action confirm).",
-      "dependencies": ["radix-ui"],
-      "registryDependencies": ["@whity/button"],
-      "files": [{ "path": "../packages/ui/src/alert-dialog.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui"
+      ],
+      "registryDependencies": [
+        "@whity/button"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/alert-dialog.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "badge",
       "type": "registry:ui",
       "title": "Badge",
       "description": "Small status descriptor with variant styles.",
-      "dependencies": ["class-variance-authority", "radix-ui"],
-      "files": [{ "path": "../packages/ui/src/badge.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "class-variance-authority",
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/badge.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "bilingual-input",
       "type": "registry:ui",
       "title": "Bilingual Input",
       "description": "Paired Arabic/English text input rendering both fields as one composite value.",
-      "registryDependencies": ["@whity/input", "@whity/badge"],
-      "files": [{ "path": "../packages/ui/src/bilingual-input.tsx", "type": "registry:ui" }]
+      "registryDependencies": [
+        "@whity/input",
+        "@whity/badge"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/bilingual-input.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "data-table",
       "type": "registry:ui",
       "title": "Data Table",
       "description": "Controlled, presentational data table (TanStack Table) with sorting, filtering, selection, and pagination.",
-      "dependencies": ["@tanstack/react-table", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/data-table.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react",
+        "@tanstack/react-table"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/data-table.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/button",
+        "@whity/dropdown-menu",
+        "@whity/empty-state",
+        "@whity/input",
+        "@whity/pagination",
+        "@whity/skeleton",
+        "@whity/table"
+      ]
     },
     {
       "name": "date-picker",
       "type": "registry:ui",
       "title": "Date Picker",
       "description": "Custom interactive month/year calendar popover date picker primitive.",
-      "dependencies": ["@tabler/icons-react"],
-      "registryDependencies": ["@whity/popover"],
-      "files": [{ "path": "../packages/ui/src/date-picker.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/popover",
+        "@whity/tooltip"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/date-picker.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "top-nav",
       "type": "registry:ui",
       "title": "Top Navigation",
       "description": "Sticky top navigation bar with command palette search trigger, notifications, theme/language toggles, and user profile menu.",
-      "dependencies": ["@tabler/icons-react"],
-      "registryDependencies": ["@whity/dropdown-menu", "@whity/tooltip"],
-      "files": [{ "path": "../packages/ui/src/top-nav.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/dropdown-menu",
+        "@whity/tooltip"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/top-nav.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "color-picker",
       "type": "registry:ui",
       "title": "Color Picker",
       "description": "Custom interactive color picker with preset swatches, hex input, and spectrum picker.",
-      "dependencies": ["@tabler/icons-react"],
-      "registryDependencies": ["@whity/popover"],
-      "files": [{ "path": "../packages/ui/src/color-picker.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/popover",
+        "@whity/tooltip"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/color-picker.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "breadcrumb",
       "type": "registry:ui",
       "title": "Breadcrumb",
       "description": "Controlled, presentational breadcrumb trail (items array).",
-      "dependencies": ["@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/breadcrumb.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/breadcrumb.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "button",
       "type": "registry:ui",
       "title": "Button",
       "description": "Button with variants, sizes and icon support.",
-      "dependencies": ["class-variance-authority", "radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/button.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "class-variance-authority",
+        "radix-ui",
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/button.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "card",
       "type": "registry:ui",
       "title": "Card",
       "description": "Container with header, content and footer sections.",
-      "files": [{ "path": "../packages/ui/src/card.tsx", "type": "registry:ui" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/card.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "chart",
       "type": "registry:ui",
       "title": "Chart",
       "description": "Bar/line/area/pie chart wired to the --chart-1..5 design tokens.",
-      "dependencies": ["recharts"],
-      "files": [{ "path": "../packages/ui/src/chart.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "recharts"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/chart.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "checkbox",
       "type": "registry:ui",
       "title": "Checkbox",
       "description": "Tri-state (checked/unchecked/indeterminate) checkbox.",
-      "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/checkbox.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui",
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/checkbox.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "collapsible",
       "type": "registry:ui",
       "title": "Collapsible",
       "description": "Accessible expand/collapse primitive (Root/Trigger/Content), unstyled.",
-      "dependencies": ["radix-ui"],
-      "files": [{ "path": "../packages/ui/src/collapsible.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/collapsible.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "dialog",
       "type": "registry:ui",
       "title": "Dialog",
       "description": "Modal dialog over the page content.",
-      "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "registryDependencies": ["@whity/button"],
-      "files": [{ "path": "../packages/ui/src/dialog.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui",
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/button"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/dialog.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "dropdown-menu",
       "type": "registry:ui",
       "title": "Dropdown Menu",
       "description": "Menu of actions opened from a trigger.",
-      "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/dropdown-menu.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui",
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/dropdown-menu.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "empty-state",
       "type": "registry:ui",
       "title": "Empty State",
       "description": "Empty/error placeholder with icon, title, description and action slots.",
-      "dependencies": ["class-variance-authority", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/empty-state.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "class-variance-authority",
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/empty-state.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "form",
       "type": "registry:ui",
       "title": "Form",
       "description": "react-hook-form wiring with accessible field primitives.",
-      "dependencies": ["@radix-ui/react-label", "@radix-ui/react-slot", "react-hook-form"],
-      "files": [{ "path": "../packages/ui/src/form.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui",
+        "react-hook-form"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/form.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "input",
       "type": "registry:ui",
       "title": "Input",
       "description": "Styled text input.",
-      "files": [{ "path": "../packages/ui/src/input.tsx", "type": "registry:ui" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/input.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/color-picker",
+        "@whity/date-picker",
+        "@whity/slider",
+        "@whity/time-picker",
+        "@whity/tooltip"
+      ]
     },
     {
       "name": "locked-screen",
       "type": "registry:ui",
       "title": "Locked Screen",
       "description": "Full-bleed lock placeholder (e.g. plan/entitlement gate) with icon, title and description.",
-      "dependencies": ["@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/locked-screen.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/locked-screen.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "math-text",
       "type": "registry:ui",
       "title": "Math Text",
       "description": "Renders inline/block KaTeX math from a string containing $...$/$$...$$ segments.",
-      "dependencies": ["katex"],
-      "files": [{ "path": "../packages/ui/src/math-text.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "katex"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/math-text.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "pagination",
       "type": "registry:ui",
       "title": "Pagination",
       "description": "Routing-agnostic prev/next pagination control.",
-      "dependencies": ["@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/pagination.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/pagination.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/button"
+      ]
     },
     {
       "name": "popover",
       "type": "registry:ui",
       "title": "Popover",
       "description": "Generic floating panel anchored to a trigger (Root/Trigger/Content/Anchor).",
-      "dependencies": ["radix-ui"],
-      "files": [{ "path": "../packages/ui/src/popover.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/popover.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "radio-group",
       "type": "registry:ui",
       "title": "Radio Group",
       "description": "Accessible radio-button group.",
-      "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/radio-group.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui",
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/radio-group.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "select",
       "type": "registry:ui",
       "title": "Select",
       "description": "Listbox-style select with keyboard navigation.",
-      "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/select.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui",
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/select.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "separator",
       "type": "registry:ui",
       "title": "Separator",
       "description": "Horizontal/vertical divider line.",
-      "dependencies": ["radix-ui"],
-      "files": [{ "path": "../packages/ui/src/separator.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/separator.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "sheet",
       "type": "registry:ui",
       "title": "Sheet",
       "description": "Slide-in panel anchored to a screen edge.",
-      "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "registryDependencies": ["@whity/button"],
-      "files": [{ "path": "../packages/ui/src/sheet.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui",
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/button"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/sheet.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "skeleton",
       "type": "registry:ui",
       "title": "Skeleton",
       "description": "Loading placeholder block.",
-      "files": [{ "path": "../packages/ui/src/skeleton.tsx", "type": "registry:ui" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/skeleton.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "slider",
       "type": "registry:ui",
       "title": "Slider",
       "description": "Accessible range/slider primitive with value badge, labels and tooltips.",
-      "dependencies": ["radix-ui", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/slider.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react",
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/slider.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/tooltip"
+      ]
     },
     {
       "name": "spinner",
       "type": "registry:ui",
       "title": "Spinner",
       "description": "Loading indicator announced to assistive tech.",
-      "dependencies": ["class-variance-authority", "@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/spinner.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "class-variance-authority",
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/spinner.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "switch",
       "type": "registry:ui",
       "title": "Switch",
       "description": "Accessible on/off toggle switch.",
-      "dependencies": ["radix-ui"],
-      "files": [{ "path": "../packages/ui/src/switch.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/switch.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "switcher",
       "type": "registry:ui",
       "title": "Switcher",
       "description": "Generic scope switcher (dropdown or static label) shared by tenant/team switching and similar 'act as X' controls.",
-      "dependencies": ["@tabler/icons-react"],
-      "registryDependencies": ["@whity/dropdown-menu"],
-      "files": [{ "path": "../packages/ui/src/switcher.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/dropdown-menu"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/switcher.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "table",
       "type": "registry:ui",
       "title": "Table",
       "description": "Plain presentational table primitives (Table/Header/Body/Row/Head/Cell/Caption).",
-      "files": [{ "path": "../packages/ui/src/table.tsx", "type": "registry:ui" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/table.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "tabs",
       "type": "registry:ui",
       "title": "Tabs",
       "description": "Tabbed sections with variant styles.",
-      "dependencies": ["class-variance-authority", "radix-ui"],
-      "files": [{ "path": "../packages/ui/src/tabs.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "class-variance-authority",
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/tabs.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "tag-input",
       "type": "registry:ui",
       "title": "Tag Input",
       "description": "Multi-value tag picker built on Select + Badge.",
-      "dependencies": ["@tabler/icons-react"],
-      "registryDependencies": ["@whity/select", "@whity/badge"],
-      "files": [{ "path": "../packages/ui/src/tag-input.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/select",
+        "@whity/badge"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/tag-input.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "textarea",
       "type": "registry:ui",
       "title": "Textarea",
       "description": "Styled multi-line text input.",
-      "files": [{ "path": "../packages/ui/src/textarea.tsx", "type": "registry:ui" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/textarea.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "time-picker",
       "type": "registry:ui",
       "title": "Time Picker",
       "description": "Custom interactive hour/minute scroll column time picker primitive with 12h/24h support.",
-      "dependencies": ["@tabler/icons-react"],
-      "registryDependencies": ["@whity/popover"],
-      "files": [{ "path": "../packages/ui/src/time-picker.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "registryDependencies": [
+        "@whity/popover",
+        "@whity/tooltip"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/time-picker.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "toast",
       "type": "registry:ui",
       "title": "Toast",
       "description": "Toast notifications: provider context plus the rendering container.",
-      "dependencies": ["@tabler/icons-react"],
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
       "files": [
-        { "path": "components/ui/toast-container.tsx", "type": "registry:ui" },
-        { "path": "lib/toast-context.tsx", "type": "registry:lib" }
+        {
+          "path": "components/ui/toast-container.tsx",
+          "type": "registry:ui"
+        },
+        {
+          "path": "lib/toast-context.tsx",
+          "type": "registry:lib"
+        }
       ]
     },
     {
@@ -327,8 +660,15 @@
       "type": "registry:ui",
       "title": "Tooltip",
       "description": "Accessible hover/focus tooltip (Provider/Root/Trigger/Content).",
-      "dependencies": ["radix-ui"],
-      "files": [{ "path": "../packages/ui/src/tooltip.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "radix-ui"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/tooltip.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "admin-header",
@@ -344,12 +684,13 @@
       ]
     },
     {
-      "name": "data-table",
+      "name": "admin-data-table",
       "type": "registry:component",
-      "title": "Data Table",
+      "title": "Admin Data Table",
       "description": "Generic sortable data table with loading skeletons and row actions.",
-      "dependencies": ["@tabler/icons-react"],
-      "registryDependencies": ["@whity/skeleton"],
+      "dependencies": [
+        "@amroksaleh/ui"
+      ],
       "files": [
         {
           "path": "components/admin/data-table.tsx",
@@ -376,89 +717,167 @@
       "type": "registry:lib",
       "title": "Theme Mode Contract",
       "description": "Framework-agnostic light/dark/system contract (.dark class, storage key, FOUC init script) shared across clients.",
-      "files": [{ "path": "../packages/ui/src/theme-mode.ts", "type": "registry:lib" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/theme-mode.ts",
+          "type": "registry:lib"
+        }
+      ]
     },
     {
       "name": "app-sidebar",
       "type": "registry:ui",
       "title": "App Sidebar",
       "description": "Presentational app-shell sidebar: collapsible desktop rail + mobile slide-over, driven by a plain nav-groups data prop, with independent optional tenant/team switcher slots (no data fetching, no hardcoded items).",
-      "dependencies": ["@tabler/icons-react"],
-      "files": [{ "path": "../packages/ui/src/app-sidebar.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/app-sidebar.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "page-header",
       "type": "registry:ui",
       "title": "Page Header",
       "description": "Presentational page header with title, description, breadcrumb and action slots.",
-      "files": [{ "path": "../packages/ui/src/page-header.tsx", "type": "registry:ui" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/page-header.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "page-shell",
       "type": "registry:ui",
       "title": "Page Shell",
       "description": "Presentational application-frame layout: sidebar + optional top bar + scrollable content region.",
-      "files": [{ "path": "../packages/ui/src/page-shell.tsx", "type": "registry:ui" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/page-shell.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "documents-types",
       "type": "registry:lib",
       "title": "Document Designer Types",
       "description": "Framework-agnostic model (elements, pages, templates) for the document/label designer.",
-      "files": [{ "path": "../packages/ui/src/documents/types.ts", "type": "registry:lib" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/types.ts",
+          "type": "registry:lib"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/documents-sheet"
+      ]
     },
     {
       "name": "documents-blocks",
       "type": "registry:lib",
       "title": "Document Designer Blocks",
       "description": "Pure reusable-block model + resolution helpers (DocBlock, instance resolution) for the document/label designer.",
-      "registryDependencies": ["@whity/documents-types"],
-      "files": [{ "path": "../packages/ui/src/documents/blocks.ts", "type": "registry:lib" }]
+      "registryDependencies": [
+        "@whity/documents-types"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/blocks.ts",
+          "type": "registry:lib"
+        }
+      ]
     },
     {
       "name": "documents-sheet",
       "type": "registry:lib",
       "title": "Document Designer Sheet Layout",
       "description": "Pure N-up label-sheet grid/cell math for the document/label designer.",
-      "files": [{ "path": "../packages/ui/src/documents/sheet.ts", "type": "registry:lib" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/sheet.ts",
+          "type": "registry:lib"
+        }
+      ]
     },
     {
       "name": "documents-geometry",
       "type": "registry:lib",
       "title": "Document Designer Geometry",
       "description": "Pure drag/alignment snapping helpers for the document designer canvas.",
-      "files": [{ "path": "../packages/ui/src/documents/geometry.ts", "type": "registry:lib" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/geometry.ts",
+          "type": "registry:lib"
+        }
+      ]
     },
     {
       "name": "documents-interpolation",
       "type": "registry:lib",
       "title": "Document Designer Interpolation",
       "description": "Pure {{placeholder}} token interpolation + bound-value resolution helpers for the document/label designer.",
-      "files": [{ "path": "../packages/ui/src/documents/interpolation.ts", "type": "registry:lib" }]
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/interpolation.ts",
+          "type": "registry:lib"
+        }
+      ]
     },
     {
       "name": "barcode-svg",
       "type": "registry:ui",
       "title": "Barcode SVG",
       "description": "Renders a barcode or QR/matrix code as crisp SVG via bwip-js, scaled to fill its container.",
-      "dependencies": ["bwip-js"],
-      "files": [{ "path": "../packages/ui/src/documents/barcode-svg.tsx", "type": "registry:ui" }]
+      "dependencies": [
+        "bwip-js"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/barcode-svg.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "element-content",
       "type": "registry:ui",
       "title": "Element Content",
       "description": "Renders the visual content of one document/label-designer element: text (with optional rich-text bold/italic runs), math (KaTeX), image, barcode, QR, rect or line.",
-      "registryDependencies": ["@whity/math-text", "@whity/barcode-svg", "@whity/documents-types", "@whity/documents-interpolation"],
-      "files": [{ "path": "../packages/ui/src/documents/element-content.tsx", "type": "registry:ui" }]
+      "registryDependencies": [
+        "@whity/math-text",
+        "@whity/barcode-svg",
+        "@whity/documents-types",
+        "@whity/documents-interpolation"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/element-content.tsx",
+          "type": "registry:ui"
+        }
+      ]
     },
     {
       "name": "element-layer",
       "type": "registry:ui",
       "title": "Element Layer",
       "description": "Renders a positioned, z-ordered list of document/label-designer elements, resolving block-instance references to their block's elements.",
-      "registryDependencies": ["@whity/element-content", "@whity/documents-types", "@whity/documents-blocks"],
-      "files": [{ "path": "../packages/ui/src/documents/element-layer.tsx", "type": "registry:ui" }]
+      "registryDependencies": [
+        "@whity/element-content",
+        "@whity/documents-types",
+        "@whity/documents-blocks"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/documents/element-layer.tsx",
+          "type": "registry:ui"
+        }
+      ]
     }
   ]
 }
