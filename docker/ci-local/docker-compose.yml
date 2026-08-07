@@ -1,0 +1,56 @@
+# Local mirror of the two PHP jobs in .github/workflows/automated-tests.yml.
+#
+# Run it through scripts/ci-local.sh, not directly — that script sets the same
+# env the workflow sets per step, and running the wrong env against the wrong
+# job silently changes what is tested (PHPUNIT_PG_DSN makes
+# SchemaFromMigrations::make() use real Postgres instead of the SQLite path).
+#
+# SAFETY: `pg` below is a THROWAWAY database on its own compose project, its own
+# volume, and no published host port. It is deliberately NOT the staging
+# postgres — an unfiltered `vendor/bin/phpunit` drops and recreates schemas, and
+# pointing that at a live DB is how whity_core lost every table once already.
+name: whity-ci-local
+
+services:
+  ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      pg:
+        condition: service_healthy
+    volumes:
+      # The repo (or a clean worktree of it — see ci-local.sh --clean).
+      - ${CI_LOCAL_REPO:-../..}:/app
+      # Keep vendor/ OUT of the host checkout: the Windows working copy is
+      # shared with other sessions, and a Linux-installed vendor tree landing
+      # in it causes confusing diffs. A named volume also survives reruns, so
+      # `composer install` is a no-op after the first run.
+      - vendor:/app/vendor
+      # PHPStan's result cache (tmpDir in phpstan.neon) — the workflow caches
+      # this too; without it every run is a cold ~60s analyse.
+      - phpstan-cache:/app/.phpstan-cache
+    working_dir: /app
+    # Overridden by ci-local.sh; harmless default so `compose run ci` is usable.
+    command: ["php", "-v"]
+
+  pg:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: whity_core
+      POSTGRES_USER: whity
+      POSTGRES_PASSWORD: whity_dev
+    # No `ports:` on purpose — nothing on the host can reach this, so it can
+    # never be confused with the staging database on 5433.
+    tmpfs:
+      # Ephemeral: a wiped DB between runs is the point, and it is much faster.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whity -d whity_core"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  vendor:
+  phpstan-cache:
