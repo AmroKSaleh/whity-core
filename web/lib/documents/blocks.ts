@@ -1,108 +1,123 @@
-import type { BlockInstanceElement, DocElement } from './types';
+import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
+import type { DocElement } from './types';
+import { api } from '@/lib/api/client';
+import type { components } from '@/lib/api/schema';
+
+export type { BlockScope, DocBlock } from '@amroksaleh/ui/documents/blocks';
+export { BLOCK_SCOPES, blocksById, makeBlockFromElements, resolveInstance } from '@amroksaleh/ui/documents/blocks';
 
 /**
- * Reusable blocks (Gutenberg synced-pattern model) for the document designer.
+ * Persistence for reusable document/label-designer blocks (kept here in
+ * `web/`, not in the portable `@amroksaleh/ui` package). The block MODEL
+ * (`DocBlock`, `BlockScope`) and the pure resolution helpers (`blocksById`,
+ * `makeBlockFromElements`, `resolveInstance`) live in
+ * `@amroksaleh/ui/documents/blocks` (re-exported above) so the rendering path
+ * (`element-layer.tsx`) can depend on them without pulling in this module's
+ * API-backed persistence.
  *
- * A block is a named group of elements stored ONCE; documents reference it by id
- * via a `blockInstance` element (a pointer). Resolving an instance offsets the
- * block's elements to the instance position, so editing the block updates every
- * instance. MVP persistence is localStorage (personal scope); a tenant-scoped
- * backend store + tenant-wide publishing is the follow-up (Tasker ca1d8c03).
+ * Backed by the tenant-scoped, RBAC-gated `/api/v1/document-blocks` CRUD API
+ * (WC-521) via the typed OpenAPI client, the same convention used throughout
+ * `app/(protected)/admin/*`. `listBlocks`/`saveBlock`/`deleteBlock` THROW on
+ * failure so the caller (document-designer.tsx) can catch and toast — this
+ * module has no UI/toast context of its own.
+ *
+ * A block's `data` column is JUST the DocElement[] fragment (no `w`/`h`) —
+ * see DocumentBlockRepository/CoreApiSchemas. `w`/`h` are a client-side
+ * concern: recomputed on load from the elements' bounding box, exactly as
+ * `makeBlockFromElements` derives them when a block is first authored (a
+ * small amount of deliberate author-chosen padding beyond the tightest
+ * bounding box, e.g. a header block's box being a touch taller than its text,
+ * is not preserved across a reload — cosmetic only, not a content loss).
  */
 
-/**
- * Visibility tier of a block. `personal` = the creator's own library; `tenant`
- * = published to everyone in the tenant; `global` = operator-wide. Only personal
- * is meaningful in the localStorage MVP; tenant/global become real once the
- * tenant-scoped backend store + RBAC (who may publish) land (Tasker ca1d8c03).
- */
-export type BlockScope = 'system' | 'personal' | 'tenant' | 'global';
+type DocumentBlockRow = components['schemas']['DocumentBlock'];
 
-export const BLOCK_SCOPES: ReadonlyArray<{ id: BlockScope; label: string }> = [
-  { id: 'system', label: 'System' },
-  { id: 'personal', label: 'Personal' },
-  { id: 'tenant', label: 'Tenant-wide' },
-  { id: 'global', label: 'Global' },
-];
+const KNOWN_SCOPES = ['system', 'personal', 'tenant', 'global'] as const;
 
-export interface DocBlock {
-  id: string;
-  name: string;
-  scope: BlockScope;
-  /** Intrinsic size (bounding box of the block's elements), in millimetres. */
-  w: number;
-  h: number;
-  elements: DocElement[];
+function isDocElement(value: unknown): value is DocElement {
+  if (!value || typeof value !== 'object') return false;
+  const e = value as Record<string, unknown>;
+  return typeof e.id === 'string' && typeof e.type === 'string';
 }
 
-const STORE_KEY = 'whity.doc.blocks.v1';
-
-function uid(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `block-${Math.random().toString(36).slice(2)}`;
+function isElementList(value: unknown): value is DocElement[] {
+  return Array.isArray(value) && value.every(isDocElement);
 }
 
-export function listBlocks(): DocBlock[] {
-  if (typeof localStorage === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    // Back-compat: blocks saved before scoping default to personal.
-    return (parsed as DocBlock[]).map((b) => ({ ...b, scope: b.scope ?? 'personal' }));
-  } catch {
-    return [];
+/** Bounding box of a set of elements, in millimetres. */
+function boundingBoxOf(elements: DocElement[]): { w: number; h: number } {
+  if (elements.length === 0) return { w: 40, h: 40 };
+  const minX = Math.min(...elements.map((e) => e.x));
+  const minY = Math.min(...elements.map((e) => e.y));
+  const maxX = Math.max(...elements.map((e) => e.x + e.w));
+  const maxY = Math.max(...elements.map((e) => e.y + e.h));
+  return { w: maxX - minX, h: maxY - minY };
+}
+
+/** Map an API row to the designer's DocBlock shape. Returns null for a row
+ *  whose `data` fails basic element-list validation (defensive — a
+ *  corrupt/foreign row must not crash the whole designer). */
+function toDocBlock(row: DocumentBlockRow): DocBlock | null {
+  if (!isElementList(row.data)) return null;
+  const scope = (KNOWN_SCOPES as readonly string[]).includes(row.scope) ? (row.scope as DocBlock['scope']) : 'personal';
+  return { id: String(row.id), name: row.name, scope, ...boundingBoxOf(row.data), elements: row.data };
+}
+
+/** The blocks visible to the caller (server-side RBAC-filtered). Throws on a
+ *  network/API failure; the caller catches and toasts. */
+export async function listBlocks(): Promise<DocBlock[]> {
+  const { data, response } = await api.GET('/api/v1/document-blocks');
+  if (data === undefined) {
+    throw new Error(`Failed to load blocks (${response.status})`);
   }
+  return data.data.reduce<DocBlock[]>((out, row) => {
+    const b = toDocBlock(row);
+    if (b) out.push(b);
+    return out;
+  }, []);
 }
 
-/** Upsert a block by id; returns its id. */
-export function saveBlock(block: DocBlock): string {
-  const list = listBlocks();
-  const idx = list.findIndex((b) => b.id === block.id);
-  if (idx >= 0) list[idx] = block;
-  else list.unshift(block);
-  localStorage.setItem(STORE_KEY, JSON.stringify(list));
-  return block.id;
+/** Upsert a block. `block.id` disambiguates create vs. update: every id this
+ *  module hands back (from create()/listBlocks()) is a stringified numeric
+ *  backend id, while a freshly-authored block not yet saved carries a
+ *  non-numeric client id (`makeBlockFromElements` mints a
+ *  `crypto.randomUUID()`) — so a purely-numeric id means "update", anything
+ *  else means "create". Returns the block's id (a fresh numeric id,
+ *  stringified, on create). Throws on failure. */
+export async function saveBlock(block: DocBlock): Promise<string> {
+  const body = {
+    name: block.name,
+    data: block.elements as unknown as Record<string, unknown>[],
+    scope: block.scope,
+  };
+
+  if (/^\d+$/.test(block.id)) {
+    const { data, error, response } = await api.PATCH('/api/v1/document-blocks/{id}', {
+      params: { path: { id: Number(block.id) } },
+      body,
+    });
+    if (error !== undefined || !response.ok || data === undefined) {
+      throw new Error(error?.error ?? 'Failed to save block');
+    }
+    return String(data.data.id);
+  }
+
+  const { data, error, response } = await api.POST('/api/v1/document-blocks', { body });
+  if (error !== undefined || !response.ok || data === undefined) {
+    throw new Error(error?.error ?? 'Failed to save block');
+  }
+  return String(data.data.id);
 }
 
-export function deleteBlock(id: string): void {
-  localStorage.setItem(STORE_KEY, JSON.stringify(listBlocks().filter((b) => b.id !== id)));
-}
-
-/** Index blocks by id for O(1) lookup during render. */
-export function blocksById(list: DocBlock[]): Record<string, DocBlock> {
-  const out: Record<string, DocBlock> = {};
-  for (const b of list) out[b.id] = b;
-  return out;
-}
-
-/**
- * Build a block from a set of elements: normalise them to a (0,0) origin and
- * record the bounding-box size. Any block instances in the selection are
- * dropped (no nesting in the MVP). Returns null if nothing usable remains.
- */
-export function makeBlockFromElements(name: string, els: DocElement[]): DocBlock | null {
-  const flat = els.filter((e) => e.type !== 'blockInstance');
-  if (flat.length === 0) return null;
-  const minX = Math.min(...flat.map((e) => e.x));
-  const minY = Math.min(...flat.map((e) => e.y));
-  const maxX = Math.max(...flat.map((e) => e.x + e.w));
-  const maxY = Math.max(...flat.map((e) => e.y + e.h));
-  const elements = flat.map((e) => ({ ...e, x: e.x - minX, y: e.y - minY }));
-  return { id: uid(), name: name.trim() || 'Block', scope: 'personal', w: maxX - minX, h: maxY - minY, elements };
-}
-
-/**
- * Resolve a block instance to positioned elements for rendering: the block's
- * (origin-normalised) elements offset to the instance's top-left. Returns [] if
- * the referenced block is missing (deleted). Non-interactive — the instance
- * itself is the single movable/selectable unit on the page.
- */
-export function resolveInstance(
-  instance: BlockInstanceElement,
-  block: DocBlock | undefined
-): DocElement[] {
-  if (!block) return [];
-  return block.elements.map((e) => ({ ...e, x: e.x + instance.x, y: e.y + instance.y }));
+/** Delete a block. Throws on failure (including the backend's 409
+ *  reference-integrity guard when a template still holds a live
+ *  `blockInstance` pointer at this block — surfaced via the thrown error's
+ *  message). */
+export async function deleteBlock(id: string): Promise<void> {
+  const { error, response } = await api.DELETE('/api/v1/document-blocks/{id}', {
+    params: { path: { id: Number(id) } },
+  });
+  if (error !== undefined || !response.ok) {
+    throw new Error(error?.error ?? 'Failed to delete block');
+  }
 }

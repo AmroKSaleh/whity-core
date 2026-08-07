@@ -58,11 +58,24 @@ final class EncryptedSecretStore
      * comma-separated `id=key` list — those keys can DECRYPT but are never used to
      * encrypt.
      *
+     * The current key is subject to {@see EncryptionKeyGuard} (WC-security-audit):
+     * outside `APP_ENV=development` it must be present and >= 32 chars, the
+     * same convention {@see \Whity\Auth\TotpService::resolveEncryptionKey()}
+     * enforces for the very same env var — this store used to read
+     * `ENCRYPTION_KEY` independently and skip that check entirely. RETIRED
+     * keys are not re-checked here: they were validated when they were
+     * current, and rejecting them now would break decrypting data at rest
+     * during a key rotation.
+     *
      * @param array<string, mixed> $env Environment map (e.g. $_ENV).
+     * @throws \RuntimeException If the current key is missing/too short outside development.
      */
     public static function fromEnv(array $env): self
     {
+        $appEnv = (string) ($env['APP_ENV'] ?? 'production');
         $currentKey = (string) ($env['ENCRYPTION_KEY'] ?? '');
+        EncryptionKeyGuard::assertValid($currentKey === '' ? null : $currentKey, $appEnv);
+
         $currentKeyId = (string) ($env['ENCRYPTION_KEY_ID'] ?? '');
         if ($currentKeyId === '') {
             $currentKeyId = 'v1';

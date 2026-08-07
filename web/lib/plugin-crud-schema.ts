@@ -49,6 +49,7 @@ export interface SchemaObject {
 export interface LocalizedTextValue {
   ar?: string;
   en?: string;
+  [key: string]: string | undefined;
 }
 
 /** A resolved, validated `x-whity-reference` config. */

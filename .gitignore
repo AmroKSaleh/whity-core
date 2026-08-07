@@ -23,6 +23,7 @@ docs/*
 /.phpstan-cache/
 
 .claude/
+.tasker/
 .playwright-mcp/
 tests/Local/
 docker-compose.override.yml

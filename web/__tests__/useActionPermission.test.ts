@@ -22,17 +22,28 @@ const mockedUseCapabilities = capabilities.useCapabilities as jest.MockedFunctio
 >;
 
 /**
- * Builds a `useCapabilities` return value whose `hasPermission` honours both
- * the loading flag (fail-closed) and a fixed set of granted slugs.
+ * Builds a `useCapabilities` return value whose has/hasAny/hasAll/hasPermission
+ * all honour both the loading flag (fail-closed) and a fixed set of granted
+ * slugs.
  */
 function makeCapabilities(granted: string[], loading = false): UseCapabilitiesResult {
+  const has = (slug: string): boolean => {
+    if (loading) return false;
+    return granted.includes(slug);
+  };
   return {
     permissions: loading ? [] : granted,
     loading,
-    hasPermission: (slug: string): boolean => {
+    has,
+    hasAny: (slugs: readonly string[]): boolean => {
       if (loading) return false;
-      return granted.includes(slug);
+      return slugs.some((slug) => granted.includes(slug));
     },
+    hasAll: (slugs: readonly string[]): boolean => {
+      if (loading) return false;
+      return slugs.every((slug) => granted.includes(slug));
+    },
+    hasPermission: has,
   };
 }
 

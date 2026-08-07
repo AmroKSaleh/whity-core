@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -10,14 +10,7 @@ import { useDirection } from '@/lib/direction-context';
 import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from '@amroksaleh/ui/dropdown-menu';
+import { Switcher } from '@amroksaleh/ui/switcher';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
@@ -28,8 +21,6 @@ import {
   IconDashboard,
   IconUserCog,
   IconBuilding,
-  IconChevronDown,
-  IconCheck,
   IconLanguage,
   IconSun,
   IconMoon,
@@ -68,8 +59,7 @@ function resolveIcon(name: string | undefined): Icon {
 }
 
 // ---------------------------------------------------------------------------
-// TenantSwitcher — renders a dropdown when the profile has 2+ active
-// memberships, or a plain label when there is only one (or zero).
+// TenantSwitcher — uses the shared Switcher primitive from @amroksaleh/ui.
 // ---------------------------------------------------------------------------
 
 interface TenantSwitcherProps {
@@ -87,124 +77,42 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
   const { addToast } = useToast();
   const [isSwitching, setIsSwitching] = useState(false);
 
-  const activeMembership = memberships.find((m) => m.tenant_id === activeTenantId);
-  const displayName = activeMembership?.tenant_name ?? 'No tenant';
+  const items = useMemo(
+    () => memberships.map((m) => ({ id: String(m.tenant_id), label: m.tenant_name })),
+    [memberships],
+  );
 
   const handleSwitch = useCallback(
-    async (tenantId: number) => {
+    (idStr: string) => {
+      const tenantId = Number(idStr);
       if (tenantId === activeTenantId || isSwitching) return;
       setIsSwitching(true);
-      try {
-        await switchTenant(tenantId);
-        await refreshNav();
-      } catch (err) {
-        // A 403/401/network failure must not vanish silently: switchTenant()
-        // rejects, the current tenant is unchanged, and we surface it. Prefer
-        // the server's message when present, else a stable fallback.
-        const message = err instanceof Error ? err.message : 'Couldn’t switch tenant';
-        addToast(message, 'error');
-      } finally {
-        setIsSwitching(false);
-      }
+      void (async () => {
+        try {
+          await switchTenant(tenantId);
+          await refreshNav();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Couldn’t switch tenant';
+          addToast(message, 'error');
+        } finally {
+          setIsSwitching(false);
+        }
+      })();
     },
     [activeTenantId, isSwitching, switchTenant, refreshNav, addToast],
   );
 
-  // 0 or 1 membership — static label only.
-  if (memberships.length < 2) {
-    if (collapsed) {
-      return (
-        <div
-          className="flex justify-center px-2 py-2 bg-background rounded-lg"
-          title={displayName}
-          aria-label={`Current tenant: ${displayName}`}
-        >
-          <IconBuilding size={20} className="text-muted-foreground shrink-0" />
-        </div>
-      );
-    }
-    return (
-      <div className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg">
-        <IconBuilding size={20} className="shrink-0 text-muted-foreground" />
-        <span className="min-w-0">
-          <span className="block text-xs text-muted-foreground">Tenant</span>
-          <span className="block text-sm font-medium truncate">{displayName}</span>
-        </span>
-      </div>
-    );
-  }
-
-  // 2+ memberships — dropdown.
-  if (collapsed) {
-    return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            className="flex justify-center px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors w-full"
-            title={`Switch tenant (current: ${displayName})`}
-            aria-label={`Switch tenant, current: ${displayName}`}
-            disabled={isSwitching}
-          >
-            <IconBuilding size={20} className="text-muted-foreground shrink-0" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="right" align="end">
-          <DropdownMenuLabel>Switch tenant</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {memberships.map((m) => (
-            <DropdownMenuItem
-              key={m.tenant_id}
-              onSelect={() => { void handleSwitch(m.tenant_id); }}
-              disabled={isSwitching}
-            >
-              {m.tenant_id === activeTenantId && (
-                <IconCheck size={14} className="me-1 shrink-0" />
-              )}
-              <span className="truncate">{m.tenant_name}</span>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    );
-  }
-
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          className="flex items-center gap-2 px-2 py-2 bg-background rounded-lg hover:bg-background/70 transition-colors w-full text-start"
-          aria-label={`Switch tenant, current: ${displayName}`}
-          disabled={isSwitching}
-        >
-          <IconBuilding size={20} className="shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs text-muted-foreground">Tenant</span>
-            <span className="block text-sm font-medium truncate">{displayName}</span>
-          </span>
-          <IconChevronDown
-            size={14}
-            className="shrink-0 text-muted-foreground ms-auto"
-            aria-hidden
-          />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start">
-        <DropdownMenuLabel>Switch tenant</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {memberships.map((m) => (
-          <DropdownMenuItem
-            key={m.tenant_id}
-            onSelect={() => { void handleSwitch(m.tenant_id); }}
-            disabled={isSwitching}
-          >
-            {m.tenant_id === activeTenantId && (
-              <IconCheck size={14} className="me-1 shrink-0" />
-            )}
-            <span className="truncate">{m.tenant_name}</span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <Switcher
+      items={items}
+      activeId={activeTenantId !== undefined ? String(activeTenantId) : undefined}
+      onChange={handleSwitch}
+      icon={<IconBuilding size={20} />}
+      switchLabel="Tenant"
+      emptyLabel="No tenant"
+      collapsed={collapsed}
+      disabled={isSwitching}
+    />
   );
 }
 

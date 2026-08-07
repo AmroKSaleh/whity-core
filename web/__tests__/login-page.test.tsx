@@ -934,3 +934,34 @@ describe('LoginPage - 2FA Flow', () => {
     expect(setupCall?.[1]?.headers?.Authorization).toBe('Bearer enroll.jwt.token');
   });
 });
+
+describe('LoginPage - forgot-password / account-recovery links (WC-password-reset-2fa-recovery)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (useRouter as jest.Mock).mockReturnValue(mockRouter);
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 401 });
+  });
+
+  test('renders links to forgot-password and account-recovery on the login form', async () => {
+    render(
+      <AuthProvider>
+        <ToastProvider>
+          <LoginPage />
+        </ToastProvider>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Sign in to your account/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('link', { name: /forgot password\?/i })).toHaveAttribute(
+      'href',
+      '/forgot-password'
+    );
+    expect(screen.getByRole('link', { name: /recover your account/i })).toHaveAttribute(
+      'href',
+      '/account-recovery'
+    );
+  });
+});

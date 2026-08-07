@@ -387,6 +387,353 @@ final class OusApiHandlerRealEngineTest extends TestCase
         );
     }
 
+    // ==================== CRUD basics (migrated from the mocked-PDO unit test) ====================
+    //
+    // The tests below were migrated from the mocked-PDO tests/Unit/Api/OusApiHandlerTest.php
+    // onto this real-engine fixture, preserving their original intent/assertions. A
+    // createMock(PDO) returns whatever a test stubs regardless of the SQL the handler
+    // actually issues, so these never proved the real SELECT/INSERT/UPDATE/DELETE
+    // statements behaved as asserted; they now run against the genuine seeded schema.
+
+    /**
+     * list() returns only the current tenant's OUs (5 in the fixture: 10, 11, 12,
+     * 13, 14), never tenant 2's OU 30.
+     */
+    public function testListOusReturnsCurrentTenantOnly(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/ous'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertCount(5, $data);
+        foreach ($data as $ou) {
+            $this->assertSame(1, (int) $ou['tenant_id']);
+        }
+    }
+
+    /**
+     * A valid create persists the OU, dispatches the creating/created hooks, and
+     * returns 201 with the new row.
+     */
+    public function testCreateWithValidDataDispatchesHooksAndReturns201(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $hooks = $this->createMock(HookManager::class);
+        $hooks->expects($this->atLeastOnce())->method('dispatch')->willReturnArgument(1);
+        $hooks->expects($this->atLeastOnce())->method('dispatchAsync');
+
+        $handler = new OusApiHandler($this->pdo, $hooks);
+        $response = $handler->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Marketing',
+            'parent_id' => null,
+            'description' => 'Marketing team',
+        ])));
+
+        $this->assertSame(201, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('Marketing', $data['name']);
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query(
+                "SELECT COUNT(*) FROM organizational_units WHERE name = 'Marketing' AND tenant_id = 1"
+            )->fetchColumn()
+        );
+    }
+
+    /**
+     * An over-long name (VARCHAR(255)) is rejected with a clean 422 before any
+     * DB write, rather than surfacing as a Postgres 22001 -> 500 (input hardening).
+     */
+    public function testCreateRejectsOverLongNameWith422(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => str_repeat('a', 256),
+            'description' => 'ok',
+        ])));
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('name', json_decode($response->getBody(), true)['details']['field']);
+    }
+
+    /**
+     * An over-long description (unbounded TEXT column) is capped at the
+     * application layer so a single field cannot absorb the full 1 MiB body.
+     */
+    public function testCreateRejectsOverLongDescriptionWith422(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Engineering Ops',
+            'description' => str_repeat('a', 10001),
+        ])));
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('description', json_decode($response->getBody(), true)['details']['field']);
+    }
+
+    /**
+     * A missing `name` is rejected with 400 before any DB write.
+     */
+    public function testCreateWithMissingNameReturns400(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'parent_id' => null,
+        ])));
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertStringContainsString('name', strtolower(json_decode($response->getBody(), true)['error']));
+    }
+
+    /**
+     * Creating an OU whose name already exists IN THE SAME TENANT is rejected
+     * (409); OU 10 ("Engineering") already exists for tenant 1.
+     */
+    public function testCreateWithDuplicateNameInTenantReturns409(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Engineering',
+        ])));
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertArrayHasKey('error', json_decode($response->getBody(), true));
+    }
+
+    /**
+     * Creating an OU whose parent_id belongs to ANOTHER tenant is rejected with
+     * 403 and nothing is written; OU 30 belongs to tenant 2.
+     */
+    public function testCreateWithCrossTenantParentReturns403(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->create(new Request('POST', '/api/ous', [], (string) json_encode([
+            'name' => 'Sub',
+            'parent_id' => 30,
+        ])));
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query("SELECT COUNT(*) FROM organizational_units WHERE name = 'Sub'")->fetchColumn()
+        );
+    }
+
+    /**
+     * get() returns the OU together with its direct children; OU 10
+     * (Engineering) has children 11 (Backend) and 13 (Frontend).
+     */
+    public function testGetReturnsOuWithParentAndChildren(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->get(new Request('GET', '/api/ous/10'), ['id' => 10]);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $data = json_decode($response->getBody(), true)['data'];
+        $this->assertNull($data['parent_id']);
+        // ATTR_STRINGIFY_FETCHES is on for this fixture (mirrors PostgreSQL), so
+        // raw fetched ids come back as strings; cast before comparing.
+        $childIds = array_map('intval', array_column($data['children'], 'id'));
+        sort($childIds);
+        $this->assertSame([11, 13], $childIds);
+    }
+
+    /**
+     * A GET for an OU belonging to a different tenant is not found (404).
+     */
+    public function testGetOfForeignOuReturns404(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->get(new Request('GET', '/api/ous/30'), ['id' => 30]);
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * Renaming an OU regenerates the slug from the new name and persists both.
+     */
+    public function testUpdateChangesNameAndSlug(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/ous/14', [], (string) json_encode(['name' => 'Sales Ops'])),
+            ['id' => 14]
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
+        $row = $this->pdo->query("SELECT name, slug FROM organizational_units WHERE id = 14")->fetch(PDO::FETCH_ASSOC);
+        $this->assertSame('Sales Ops', $row['name']);
+        $this->assertSame('sales-ops', $row['slug']);
+    }
+
+    /**
+     * Updating an OU that belongs to a different tenant is rejected with 403
+     * (existence is not disclosed) and the row is left untouched.
+     */
+    public function testUpdateOfForeignOuReturns403(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->update(
+            new Request('PATCH', '/api/ous/30', [], (string) json_encode(['name' => 'Hijacked'])),
+            ['id' => 30]
+        );
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertSame(
+            'Other',
+            $this->pdo->query('SELECT name FROM organizational_units WHERE id = 30')->fetchColumn()
+        );
+    }
+
+    /**
+     * Deleting a leaf OU with no children and no active members succeeds (204)
+     * and the row is removed; OU 14 (Sales) is a childless, memberless root.
+     */
+    public function testDeleteReturns204OnSuccess(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->delete(new Request('DELETE', '/api/ous/14'), ['id' => 14]);
+
+        $this->assertSame(204, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM organizational_units WHERE id = 14')->fetchColumn()
+        );
+    }
+
+    /**
+     * Deleting an OU that still has children is rejected (409) and the row
+     * survives; OU 10 (Engineering) has children 11 and 13.
+     */
+    public function testDeleteWithChildrenReturns409(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->delete(new Request('DELETE', '/api/ous/10'), ['id' => 10]);
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertStringContainsString('child', strtolower(json_decode($response->getBody(), true)['error']));
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM organizational_units WHERE id = 10')->fetchColumn()
+        );
+    }
+
+    /**
+     * Deleting an OU with an ACTIVE assigned member is rejected (409); OU 14
+     * (Sales, a childless root) gets one active member seeded for this test.
+     */
+    public function testDeleteWithAssignedMembersReturns409(): void
+    {
+        $this->seedUser(600, 1, 'member@example.com', 'user', 14);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->delete(new Request('DELETE', '/api/ous/14'), ['id' => 14]);
+
+        $this->assertSame(409, $response->getStatusCode());
+        $this->assertStringContainsString('member', strtolower(json_decode($response->getBody(), true)['error']));
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query('SELECT COUNT(*) FROM organizational_units WHERE id = 14')->fetchColumn()
+        );
+    }
+
+    /**
+     * Assigning a role to an OU id that does not exist at all (not merely a
+     * foreign one) is rejected with 404.
+     */
+    public function testAssignRoleToNonExistentOuReturns404(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->assignRole(
+            new Request('POST', '/api/ous/999/roles', [], (string) json_encode(['role_id' => 100])),
+            ['id' => 999]
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * Assigning the SAME role twice is rejected on the second attempt (409, the
+     * ou_role_assignments UNIQUE constraint) and only one row is persisted.
+     */
+    public function testAssignRoleDuplicateReturns409(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+        $handler = $this->handler();
+
+        $first = $handler->assignRole(
+            new Request('POST', '/api/ous/10/roles', [], (string) json_encode(['role_id' => 100])),
+            ['id' => 10]
+        );
+        $this->assertSame(201, $first->getStatusCode());
+
+        $second = $handler->assignRole(
+            new Request('POST', '/api/ous/10/roles', [], (string) json_encode(['role_id' => 100])),
+            ['id' => 10]
+        );
+
+        $this->assertSame(409, $second->getStatusCode());
+        $this->assertSame(
+            1,
+            (int) $this->pdo->query(
+                'SELECT COUNT(*) FROM ou_role_assignments WHERE ou_id = 10 AND role_id = 100'
+            )->fetchColumn()
+        );
+    }
+
+    /**
+     * removeRole() on an assignment that does not exist returns 404.
+     */
+    public function testRemoveRoleFromNonExistentAssignmentReturns404(): void
+    {
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->removeRole(
+            new Request('DELETE', '/api/ous/10/roles/100'),
+            ['ouId' => 10, 'roleId' => 100]
+        );
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /**
+     * removeRole() deletes an existing assignment and returns 204.
+     */
+    public function testRemoveRoleReturns204(): void
+    {
+        $this->assignRoleRow(1, 10, 100);
+
+        MockRequestFactory::setTestTenant(1);
+        $response = $this->handler()->removeRole(
+            new Request('DELETE', '/api/ous/10/roles/100'),
+            ['ouId' => 10, 'roleId' => 100]
+        );
+
+        $this->assertSame(204, $response->getStatusCode());
+        $this->assertSame(
+            0,
+            (int) $this->pdo->query(
+                'SELECT COUNT(*) FROM ou_role_assignments WHERE ou_id = 10 AND role_id = 100'
+            )->fetchColumn()
+        );
+    }
+
     // ==================== Helpers ====================
 
     private function handler(): OusApiHandler

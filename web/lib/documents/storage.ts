@@ -1,15 +1,23 @@
 import type { DocElement, DocPage, DocTemplate, ElementType, PageSpec, Placeholder } from './types';
 import { DEFAULT_TEXT_STYLE, newPageId } from './presets';
+import { api } from '@/lib/api/client';
+import type { components } from '@/lib/api/schema';
 
 /**
- * Client-side template persistence + helpers for the document designer.
+ * Template persistence + helpers for the document designer.
  *
- * MVP persistence is browser localStorage plus JSON export/import. A backend
- * `document_templates` table + API (tenant-scoped, RBAC-gated) is the intended
- * durable store — a coordination point flagged in the PR, not built here.
+ * Backed by the tenant-scoped, RBAC-gated `/api/v1/document-templates` CRUD
+ * API (WC-515) via the typed OpenAPI client — the same calling convention used
+ * throughout `app/(protected)/admin/*` (see e.g. the delegations page):
+ * `api.GET/POST/PATCH/DELETE(...)` returning `{ data, error, response }`,
+ * never thrown, with callers branching on the result. `listSaved`/
+ * `saveTemplate`/`deleteSaved` THROW on failure (network error, non-2xx) so
+ * the CALLER (document-designer.tsx) can catch and surface a toast, exactly
+ * like every other admin page's data-fetching function — this module has no
+ * UI/toast context of its own to report through.
  */
 
-const STORE_KEY = 'whity.doc.templates.v1';
+type DocumentTemplateRow = components['schemas']['DocumentTemplate'];
 
 export interface SavedTemplate {
   id: string;
@@ -18,28 +26,32 @@ export interface SavedTemplate {
   data: DocTemplate;
 }
 
+/** Map an API row to the designer's SavedTemplate shape, migrating v1→v2 on
+ *  read. Returns null for a row whose `data` fails basic template-shape
+ *  validation (defensive — a corrupt/foreign row must not crash the whole
+ *  designer, just be skipped from the saved list). */
+function toSavedTemplate(row: DocumentTemplateRow): SavedTemplate | null {
+  if (!isDocTemplate(row.data)) return null;
+  return {
+    id: String(row.id),
+    name: row.name,
+    updatedAt: row.updated_at,
+    data: migrateTemplate(row.data),
+  };
+}
+
 function uid(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `id-${Math.random().toString(36).slice(2)}`;
 }
 
-/** Substitute `{{key}}` tokens from `data` (missing keys → empty string). */
-export function interpolate(text: string, data: Record<string, string>): string {
-  return text.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m, key: string) => data[key] ?? '');
-}
-
-/** The effective value for a bindable element: bound placeholder wins, else fallback. */
-export function resolveBound(
-  binding: string | undefined,
-  fallback: string,
-  data: Record<string, string>
-): string {
-  if (binding && data[binding] !== undefined && data[binding] !== '') {
-    return data[binding];
-  }
-  return fallback;
-}
+// `interpolate`/`resolveBound` were pure (no localStorage) and moved to
+// `@amroksaleh/ui/documents/interpolation` (WC doc-designer-ui-extraction) so
+// the relocated `element-content.tsx` renderer can use them without pulling in
+// this module's localStorage-backed persistence. Re-exported here for
+// backward compatibility since this module used to own them.
+export { interpolate, resolveBound } from '@amroksaleh/ui/documents/interpolation';
 
 /** Build the sample-data map from a template's placeholders. */
 export function sampleDataOf(template: DocTemplate): Record<string, string> {
@@ -68,6 +80,8 @@ export function newElement(type: ElementType, els: DocElement[]): DocElement {
       return { ...base, type, w: 40, h: 20, fill: '#eef2ff', stroke: '#4f46e5', strokeWidth: 0.3, radius: 1 };
     case 'line':
       return { ...base, type, w: 50, h: 0.5, stroke: '#111111', strokeWidth: 0.5 };
+    case 'math':
+      return { ...base, type, w: 40, h: 14, expression: 'x^2 + y^2 = z^2', block: true };
     default: {
       const _exhaustive: never = type;
       throw new Error(`Unknown element type: ${String(_exhaustive)}`);
@@ -75,33 +89,53 @@ export function newElement(type: ElementType, els: DocElement[]): DocElement {
   }
 }
 
-export function listSaved(): SavedTemplate[] {
-  if (typeof localStorage === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    // Migrate persisted templates to the current shape on read.
-    return (parsed as SavedTemplate[]).map((s) => ({ ...s, data: migrateTemplate(s.data) }));
-  } catch {
-    return [];
+/** The templates visible to the caller (server-side RBAC-filtered — see
+ *  DocumentAccessPolicy), newest first. Throws on a network/API failure; the
+ *  caller (document-designer.tsx) catches and toasts. */
+export async function listSaved(): Promise<SavedTemplate[]> {
+  const { data, response } = await api.GET('/api/v1/document-templates');
+  if (data === undefined) {
+    throw new Error(`Failed to load templates (${response.status})`);
   }
+  return data.data.reduce<SavedTemplate[]>((out, row) => {
+    const t = toSavedTemplate(row);
+    if (t) out.push(t);
+    return out;
+  }, []);
 }
 
-/** Upsert a template into the saved list; returns its id. */
-export function saveTemplate(data: DocTemplate, id?: string): string {
-  const list = listSaved();
-  const theId = id ?? uid();
-  const entry: SavedTemplate = { id: theId, name: data.name, updatedAt: new Date().toISOString(), data };
-  const idx = list.findIndex((s) => s.id === theId);
-  if (idx >= 0) list[idx] = entry;
-  else list.unshift(entry);
-  localStorage.setItem(STORE_KEY, JSON.stringify(list));
-  return theId;
+/** Create (no `id`) or update (existing `id`) a template; returns its id
+ *  (the id round-trips through PATCH; a fresh backend id comes back on
+ *  create). Throws on failure. */
+export async function saveTemplate(data: DocTemplate, id?: string): Promise<string> {
+  const body = { name: data.name, data: data as unknown as Record<string, unknown> };
+
+  if (id !== undefined) {
+    const { data: updated, error, response } = await api.PATCH('/api/v1/document-templates/{id}', {
+      params: { path: { id: Number(id) } },
+      body,
+    });
+    if (error !== undefined || !response.ok || updated === undefined) {
+      throw new Error(error?.error ?? 'Failed to save template');
+    }
+    return String(updated.data.id);
+  }
+
+  const { data: created, error, response } = await api.POST('/api/v1/document-templates', { body });
+  if (error !== undefined || !response.ok || created === undefined) {
+    throw new Error(error?.error ?? 'Failed to save template');
+  }
+  return String(created.data.id);
 }
 
-export function deleteSaved(id: string): void {
-  localStorage.setItem(STORE_KEY, JSON.stringify(listSaved().filter((s) => s.id !== id)));
+/** Delete a saved template. Throws on failure. */
+export async function deleteSaved(id: string): Promise<void> {
+  const { error, response } = await api.DELETE('/api/v1/document-templates/{id}', {
+    params: { path: { id: Number(id) } },
+  });
+  if (error !== undefined || !response.ok) {
+    throw new Error(error?.error ?? 'Failed to delete template');
+  }
 }
 
 /** Minimal structural validation of a template (accepts legacy v1 and v2). */

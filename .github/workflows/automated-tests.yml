@@ -45,6 +45,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      render_service: ${{ steps.filter.outputs.render_service }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -72,6 +73,18 @@ jobs:
             frontend:
               - 'web/**'
               - 'public/openapi.json'
+              - '.github/workflows/automated-tests.yml'
+            # ADR 0012: the render service bundles this exact source slice
+            # in from the rest of the monorepo (see
+            # render-service/scripts/build-harness.js) — a change there can
+            # break the harness bundle even without touching render-service/
+            # itself.
+            render_service:
+              - 'render-service/**'
+              - 'web/components/documents/**'
+              - 'web/lib/documents/**'
+              - 'packages/ui/src/documents/**'
+              - 'packages/ui/src/math-text.tsx'
               - '.github/workflows/automated-tests.yml'
 
   test:
@@ -281,6 +294,132 @@ jobs:
   # not a correctness gate; PRs still run SQLite + real-Postgres + PHPStan +
   # Playwright here. A mutation-coverage regression surfaces on the next
   # scheduled run after merge.
+
+  render-service:
+    name: Render microservice (build, unit tests, real Puppeteer smoke)
+    needs: changes
+    if: needs.changes.outputs.render_service == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: render-service/package-lock.json
+
+      # A standalone Node project (own lockfile) — deliberately NOT part of the
+      # root npm workspace (it shares no runtime code with web/, only bundles
+      # web/packages/ui SOURCE in at build time; see scripts/build-harness.js).
+      - name: Install dependencies
+        working-directory: render-service
+        run: npm ci
+
+      # Bundles web/components/documents/print-document.tsx + packages/ui/src
+      # in from source — the single most likely thing to break when either
+      # side changes independently, and the cheapest to check (no Docker).
+      - name: Build the render harness bundle
+        working-directory: render-service
+        run: npm run build:harness
+
+      - name: Run unit tests (Puppeteer mocked)
+        working-directory: render-service
+        run: npm test
+
+      # The real proof (ADR 0012): build the actual Docker image (system
+      # Chromium + Arabic fonts baked in) and exercise a genuine Puppeteer
+      # render — not just "it compiles". Mirrors the task's local verification
+      # recipe so CI enforces the same bar every PR.
+      - name: Build the whity_render Docker image
+        run: docker build -f render-service/Dockerfile -t whity-render:ci .
+
+      - name: Run a throwaway whity_render container
+        run: |
+          docker run -d --name whity_render_ci \
+            -e RENDER_SHARED_SECRET=ci_render_shared_secret_min_32_chars_zz \
+            -p 18130:8130 \
+            whity-render:ci
+
+      - name: Wait for the container to become healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18130/health > /dev/null; then
+              echo "healthy after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "render service never became healthy"
+          docker logs whity_render_ci || true
+          exit 1
+
+      # A real render round-trip: text + a math element (KaTeX) + a barcode +
+      # Arabic text (the hard cross-cutting RTL requirement). Structural/smoke
+      # checks only (per the task brief, exact golden-image pixel diffing is
+      # too fragile across environments): valid non-trivial PDF bytes with
+      # multiple distinct embedded font subsets (real text/math/barcode
+      # content was actually shaped, not a blank page). Arabic legibility
+      # itself (not tofu) was verified manually with a real screenshot — see
+      # the PR description — rather than by grepping for a font family name in
+      # the PDF, which turned out NOT to be a reliable signal: a manual check
+      # showed Chromium can embed a correctly-shaped Arabic glyph subset under
+      # a font resource name that does not literally contain "Arabic".
+      - name: Real render smoke test (text + math + barcode + Arabic)
+        run: |
+          cat > /tmp/render-payload.json <<'PAYLOAD'
+          {
+            "template": {
+              "version": 2,
+              "page": { "widthMm": 100, "heightMm": 60, "marginMm": 2, "background": "#ffffff" },
+              "placeholders": [],
+              "pages": [
+                {
+                  "id": "p1",
+                  "elements": [
+                    { "id": "t1", "type": "text", "x": 2, "y": 2, "w": 96, "h": 12, "rotation": 0, "z": 1,
+                      "text": "مرحبا بالعالم",
+                      "style": { "fontSize": 18, "fontWeight": "normal", "fontStyle": "normal", "align": "center", "vAlign": "middle", "color": "#000000", "direction": "rtl" } },
+                    { "id": "m1", "type": "math", "x": 2, "y": 16, "w": 60, "h": 14, "rotation": 0, "z": 2,
+                      "expression": "E = mc^2", "block": false },
+                    { "id": "b1", "type": "barcode", "x": 2, "y": 32, "w": 60, "h": 20, "rotation": 0, "z": 3,
+                      "symbology": "code128", "value": "WC-DOCDESIGNER-1", "showText": true }
+                  ]
+                }
+              ]
+            },
+            "dataRows": [{}]
+          }
+          PAYLOAD
+          curl -fsS -X POST http://127.0.0.1:18130/render \
+            -H 'Content-Type: application/json' \
+            -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' \
+            --data @/tmp/render-payload.json \
+            -o /tmp/render-output.pdf
+
+          test -s /tmp/render-output.pdf
+          head -c 5 /tmp/render-output.pdf | grep -q '%PDF-'
+
+          # A real (non-blank) render embeds several distinct font subsets —
+          # one for the body text, one for the KaTeX math glyphs, at least.
+          font_count=$(grep -a -c 'BaseFont' /tmp/render-output.pdf || true)
+          echo "embedded BaseFont occurrences: ${font_count}"
+          test "${font_count}" -ge 2
+
+          size=$(stat -c%s /tmp/render-output.pdf)
+          echo "PDF size: ${size} bytes"
+          test "${size}" -gt 5000
+
+      - name: Container logs (always, for debugging)
+        if: always()
+        run: docker logs whity_render_ci || true
+
+      - name: Tear down the throwaway container
+        if: always()
+        run: docker rm -f whity_render_ci || true
 
   web:
     name: Frontend types, tests & generated-artifact drift

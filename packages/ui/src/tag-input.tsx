@@ -75,7 +75,7 @@ export function TagInput({
                   type="button"
                   aria-label={`Remove ${option.label}`}
                   onClick={() => removeTag(option.value)}
-                  className="rounded-full p-0.5 hover:bg-muted-foreground/20"
+                  className="rounded-full p-0.5 outline-none hover:bg-muted-foreground/20 focus-visible:ring-2 focus-visible:ring-ring/30"
                 >
                   <IconX className="size-2.5" />
                 </button>
