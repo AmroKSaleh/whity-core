@@ -1,0 +1,43 @@
+# Per-Dockerfile ignore override for render-service/Dockerfile (BuildKit's
+# "<dockerfile>.dockerignore takes precedence over the root .dockerignore"
+# convention) — this image needs a completely different, much smaller slice
+# of the monorepo than the PHP core image (see root .dockerignore), so it
+# gets its own ruleset from scratch rather than punching holes in that one.
+#
+# Cherry-picking a deeply nested path back in after an exclude-everything `*`
+# requires re-including EVERY ancestor directory one level at a time (the same
+# limitation .gitignore has: a file cannot be re-included if a parent
+# directory is itself excluded) — hence the repeated dir/!dir/dir-star/!...
+# ladders below, verified empirically against this Docker/BuildKit version.
+
+*
+
+# render-service's own files (its own node_modules/dist are rebuilt fresh
+# inside the image, never copied in from the host).
+!render-service
+render-service/*
+!render-service/package.json
+!render-service/package-lock.json
+!render-service/src
+!render-service/harness
+!render-service/scripts
+
+# The portable renderer this service bundles in from source (unchanged) —
+# see scripts/build-harness.js for exactly which files matter.
+!web
+web/*
+!web/components
+!web/lib
+
+web/components/*
+!web/components/documents
+
+web/lib/*
+!web/lib/documents
+
+!packages
+packages/*
+!packages/ui
+
+packages/ui/*
+!packages/ui/src

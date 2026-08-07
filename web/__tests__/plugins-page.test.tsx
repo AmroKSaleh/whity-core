@@ -102,10 +102,14 @@ function mockPluginList(plugins: PluginRow[]): void {
 }
 
 function setCapabilities(perms: string[]): void {
+  const has = (slug: string) => perms.includes(slug);
   mockUseCapabilities.mockReturnValue({
     permissions: perms,
     loading: false,
-    hasPermission: (slug: string) => perms.includes(slug),
+    has,
+    hasAny: (slugs: readonly string[]) => slugs.some(has),
+    hasAll: (slugs: readonly string[]) => slugs.every(has),
+    hasPermission: has,
   });
 }
 

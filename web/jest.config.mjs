@@ -18,6 +18,11 @@ const customJestConfig = {
     // which the hoist emptied.)
   },
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
+  // packages/features ships browser-side logic (the i18n cache and hooks) but
+  // has no runner of its own, so its __tests__ would sit inert next to the
+  // source. Scan it from here — this is the only Jest project in the repo, and
+  // an untested test file is worse than no test file.
+  roots: ['<rootDir>', '<rootDir>/../packages/features/src'],
 };
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

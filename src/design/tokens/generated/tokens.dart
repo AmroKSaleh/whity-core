@@ -48,6 +48,7 @@ class AppTokens {
     'sidebarAccentForeground': Color(0xFF171717),
     'sidebarBorder': Color(0xFFE5E5E5),
     'sidebarRing': Color(0xFF0961BB),
+    'overlay': Color(0x73000000),
   };
 
   // Dark mode colors
@@ -93,6 +94,7 @@ class AppTokens {
     'sidebarAccentForeground': Color(0xFFFAFAFA),
     'sidebarBorder': Color(0x1AFFFFFF),
     'sidebarRing': Color(0xFF59A0F9),
+    'overlay': Color(0x73000000),
   };
 
   // Font families

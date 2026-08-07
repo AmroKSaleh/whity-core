@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Notification;
 
 use Psr\Log\LoggerInterface;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Notification\Jobs\SendNotificationDeliveryJob;
 use Whity\Core\Queue\QueueService;
@@ -46,6 +47,7 @@ final class NotificationDispatcher
     private NotificationRenderer $renderer;
     private ?LoggerInterface $logger;
     private ?NotificationPreferenceResolver $preferences;
+    private ?AuditLoggerInterface $audit;
 
     public function __construct(
         NotificationRepository $repo,
@@ -53,7 +55,8 @@ final class NotificationDispatcher
         QueueService $queue,
         ?NotificationRenderer $renderer = null,
         ?LoggerInterface $logger = null,
-        ?NotificationPreferenceResolver $preferences = null
+        ?NotificationPreferenceResolver $preferences = null,
+        ?AuditLoggerInterface $audit = null
     ) {
         $this->repo = $repo;
         $this->transports = $transports;
@@ -61,6 +64,7 @@ final class NotificationDispatcher
         $this->renderer = $renderer ?? new PassthroughRenderer();
         $this->logger = $logger;
         $this->preferences = $preferences;
+        $this->audit = $audit;
     }
 
     /**
@@ -168,6 +172,7 @@ final class NotificationDispatcher
 
         if (!$this->transports->has($channel)) {
             $this->repo->markDeliveryFailed($deliveryId, 'no transport registered for channel: ' . $channel);
+            $this->auditOutcome('failed', $tenantId, $notificationId, $deliveryId, $channel, $type, ['reason' => 'no_transport_at_dispatch']);
 
             return;
         }
@@ -201,6 +206,36 @@ final class NotificationDispatcher
                 'idempotency_key' => 'notif-delivery:' . $deliveryId,
             ]
         );
+        $this->auditOutcome('queued', $tenantId, $notificationId, $deliveryId, $channel, $type);
+    }
+
+    /**
+     * Record a NON-PII audit entry for a delivery's dispatch-time outcome. Only
+     * routing metadata (notification id, channel, type) + a coarse reason — NEVER
+     * the recipient, subject, body, or data, any of which may hold PII. Fail-soft
+     * (a null audit logger, or AuditLogger's own swallowed errors).
+     *
+     * @param array<string, mixed> $extra
+     */
+    private function auditOutcome(
+        string $status,
+        int $tenantId,
+        int $notificationId,
+        int $deliveryId,
+        string $channel,
+        string $type,
+        array $extra = []
+    ): void {
+        $this->audit?->record('notification.delivery.' . $status, [
+            'tenant_id'   => $tenantId,
+            'target_type' => 'notification_delivery',
+            'target_id'   => $deliveryId,
+            'metadata'    => array_merge([
+                'notification_id' => $notificationId,
+                'channel'         => $channel,
+                'type'            => $type,
+            ], $extra),
+        ]);
     }
 
     /**

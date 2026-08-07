@@ -74,6 +74,12 @@ final class SettingsApiHandler
         // instead of requiredPermission.
         ['id' => 'email-domains', 'href' => '/admin/settings/email-domains', 'label' => 'Email domains', 'requiredRole' => 'admin'],
         ['id' => 'storage', 'href' => '/admin/settings/storage', 'label' => 'Storage', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
+        // Feature Flags (WC-feature-flags-settings-page): a generic admin
+        // surface over the registry's curated FEATURE_FLAG_KEYS boolean
+        // settings (see SettingsRegistry::isFeatureFlag()). The underlying
+        // data is global-only, so this mirrors Sign-up/Email/Storage's gate
+        // exactly: settings:manage AND the system tenant only.
+        ['id' => 'feature-flags', 'href' => '/admin/settings/feature-flags', 'label' => 'Feature flags', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
         ['id' => 'security', 'href' => '/admin/settings/security', 'label' => 'Security', 'requiredPermission' => CorePermissions::SECURITY_MANAGE],
     ];
 

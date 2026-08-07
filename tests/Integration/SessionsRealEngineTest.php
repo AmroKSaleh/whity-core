@@ -174,6 +174,40 @@ final class SessionsRealEngineTest extends TestCase
         );
     }
 
+    public function testListExposesAFriendlyDeviceLabelNotJustTheRawUserAgent(): void
+    {
+        // Regression: the Settings "Sessions & devices" page used to render the
+        // raw User-Agent string verbatim ("very generic large strings" — user
+        // complaint). SessionService::listForProfile computes a friendly
+        // `device` label via DeviceLabel::fromUserAgent; this proves it reaches
+        // callers of the API handler (SessionsSettings.tsx consumes it as the
+        // primary display string).
+        $pid = $this->seedProfile('ua@example.com');
+        $svc = new SessionService($this->pdo);
+        $svc->start(
+            $pid,
+            1,
+            'ACCESS-UA',
+            'REFRESH-UA',
+            '2099-01-01 00:00:00',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '1.2.3.4'
+        );
+
+        // listForProfile() is what SessionsApiHandler::list() returns verbatim
+        // as the API's `sessions` payload, so proving it here proves the API
+        // contract SessionsSettings.tsx consumes.
+        $sessions = $svc->listForProfile($pid, 1, null);
+
+        self::assertCount(1, $sessions);
+        self::assertSame('Chrome on Windows', $sessions[0]['device']);
+        self::assertStringContainsString(
+            'AppleWebKit',
+            (string) $sessions[0]['user_agent'],
+            'raw UA is still available (secondary/tooltip use), just not the primary label.'
+        );
+    }
+
     public function testSessionEndpointsRequireAuthentication(): void
     {
         self::assertSame(401, $this->sessionsHandler()->list(new Request('GET', '/api/me/sessions'))->getStatusCode());

@@ -39,6 +39,7 @@ function LockedScreen({
     >
       <div
         data-slot="locked-screen-icon"
+        aria-hidden="true"
         className="mb-4 rounded-full bg-muted p-4 text-muted-foreground [&>svg]:size-12"
       >
         {icon ?? <IconLock />}

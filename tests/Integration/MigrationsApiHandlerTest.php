@@ -36,6 +36,9 @@ use Whity\Sdk\Http\Response;
  *  5. Per-migration rollback targeting (#194): rollback always removes the most
  *     recently executed migration (by executed_at DESC); applying N migrations and
  *     rolling back removes them in strict reverse order.
+ *  6. Deterministic tiebreak on shared executed_at (#366): when multiple migration
+ *     records share the exact same executed_at (a same-second batch run()), rollback
+ *     must break the tie by id DESC rather than picking an arbitrary row.
  *
  * Fixture migration file names use the "mah_" infix
  * (MigrationsApiHandlerTest-specific) to avoid PHP "cannot redeclare class" fatals
@@ -661,6 +664,54 @@ PHP;
         self::assertNotFalse($stmt);
         $remaining = $stmt->fetchAll(PDO::FETCH_COLUMN);
         self::assertSame(['001_mah_create_delt'], $remaining);
+    }
+
+    /**
+     * Regression test for #366: rollback() must break ties on `id` when
+     * multiple migrations share the same `executed_at` (e.g. a batch run()
+     * that completes within the same wall-clock second — SQLite's NOW() UDF
+     * has second precision, and rapid sequential inserts on PostgreSQL can
+     * also collide). Without the `id DESC` tiebreaker, `ORDER BY executed_at
+     * DESC LIMIT 1` picks an arbitrary row among ties instead of the last one
+     * actually applied.
+     */
+    public function testRollbackWithSharedExecutedAtBreaksTiesById(): void
+    {
+        $this->ensureMigrationsTable();
+        $this->writeMigration('001_mah_create_kapp');
+        $this->writeMigration('002_mah_create_lamb');
+        $this->writeMigration('003_mah_create_mu');
+
+        // All three rows share the exact same executed_at, as would happen
+        // when run() applies them within the same second. Explicit
+        // ascending ids reflect insertion (application) order.
+        $sameTimestamp = '2000-01-01 00:00:01';
+        $rows = [
+            [1, '001_mah_create_kapp'],
+            [2, '002_mah_create_lamb'],
+            [3, '003_mah_create_mu'],
+        ];
+        foreach ($rows as [$id, $name]) {
+            $this->pdo->prepare(
+                'INSERT OR IGNORE INTO core_schema_migrations
+                 (id, migration_name, executed_at, execution_time_ms)
+                 VALUES (?, ?, ?, ?)'
+            )->execute([$id, $name, $sameTimestamp, 0]);
+        }
+
+        // Rollback must target 003_mah_create_mu (highest id == last applied),
+        // never 001 or 002, despite the tied executed_at values.
+        $handler = new MigrationsApiHandler($this->db, $this->migrationDir);
+        $resp    = $handler->rollback(new Request('POST', '/api/migrations/rollback'));
+
+        self::assertSame(200, $resp->getStatusCode());
+        $body = json_decode($resp->getBody(), true);
+        self::assertStringContainsString('003_mah_create_mu', $body['data']['message']);
+
+        $stmt = $this->pdo->query('SELECT migration_name FROM core_schema_migrations ORDER BY migration_name');
+        self::assertNotFalse($stmt);
+        $remaining = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        self::assertSame(['001_mah_create_kapp', '002_mah_create_lamb'], $remaining);
     }
 
     /**

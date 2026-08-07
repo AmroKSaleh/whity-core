@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '@/lib/documents/types';
 import { BARCODE_SYMBOLOGIES } from '@/lib/documents/types';
+import { applyPlainTextEdit, runsToPlainText, toggleRunFormat } from '@/lib/documents/rich-text';
 import { generateSequence, type SequenceConfig } from '@/lib/documents/batch';
 import { parseDelimited, parseJsonRows } from '@/lib/documents/csv';
 import { SHEET_PRESETS, cellsPerSheet, sheetCount, type SheetSpec } from '@/lib/documents/sheet';
@@ -10,7 +11,8 @@ import { PAGE_PRESETS } from '@/lib/documents/presets';
 import { Input } from '@amroksaleh/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
 import { Button } from '@amroksaleh/ui/button';
-import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { MathText } from '@amroksaleh/ui/math-text';
+import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight, IconBold, IconItalic } from '@tabler/icons-react';
 
 const SELECT_CLASS =
   'h-7 w-full min-w-0 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30';
@@ -181,10 +183,28 @@ function ElementTab({
   placeholders: Placeholder[];
   onChange: (patch: Partial<DocElement>) => void;
 }) {
+  const textRef = useRef<HTMLTextAreaElement>(null);
   if (!selected) {
     return <p className="text-xs text-muted-foreground">Select an element on the canvas to edit it.</p>;
   }
   const el = selected;
+
+  // Bold/italic toolbar: reads the textarea's current selection and toggles the
+  // format over that range, promoting the element to the runs model on first use
+  // (see `toggleRunFormat` — a no-op without an active selection).
+  const applyFormat = (key: 'bold' | 'italic') => {
+    if (el.type !== 'text' && el.type !== 'dynamicText') return;
+    const ta = textRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart ?? 0;
+    const end = ta.selectionEnd ?? 0;
+    if (start >= end) return;
+    const plain = el.type === 'text' ? el.text : el.template;
+    const runs = toggleRunFormat(el.runs, plain, start, end, key);
+    const flat = runsToPlainText(runs);
+    onChange(el.type === 'text' ? { text: flat, runs } : { template: flat, runs });
+  };
+
   const bindingOptions = (
     <>
       <option value="">(no binding)</option>
@@ -218,11 +238,39 @@ function ElementTab({
       {(el.type === 'text' || el.type === 'dynamicText') && (
         <>
           <Field label={el.type === 'text' ? 'Text' : 'Template (use {{placeholder}})'}>
+            <div className="mb-1 flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Bold selection"
+                data-testid="doc-text-bold"
+                onClick={() => applyFormat('bold')}
+              >
+                <IconBold className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Italic selection"
+                data-testid="doc-text-italic"
+                onClick={() => applyFormat('italic')}
+              >
+                <IconItalic className="h-3.5 w-3.5" />
+              </Button>
+              <span className="text-[10px] text-muted-foreground">Select text, then Bold/Italic</span>
+            </div>
             <textarea
+              ref={textRef}
               data-testid="doc-text-value"
               className={`${SELECT_CLASS} h-16 py-1`}
               value={el.type === 'text' ? el.text : el.template}
-              onChange={(e) => onChange(el.type === 'text' ? { text: e.target.value } : { template: e.target.value })}
+              onChange={(e) => {
+                const newPlain = e.target.value;
+                const oldPlain = el.type === 'text' ? el.text : el.template;
+                const runs = applyPlainTextEdit(el.runs, oldPlain, newPlain);
+                const patch = el.type === 'text' ? { text: newPlain } : { template: newPlain };
+                onChange(runs ? { ...patch, runs } : patch);
+              }}
             />
           </Field>
           {el.type === 'dynamicText' && placeholders.length > 0 && (
@@ -329,6 +377,28 @@ function ElementTab({
         <>
           <Color label="Color" value={el.stroke} onChange={(v) => onChange({ stroke: v })} />
           <Num label="Thickness (mm)" value={el.h} step={0.1} onChange={(v) => onChange({ h: Math.max(0.1, v) })} />
+        </>
+      )}
+
+      {el.type === 'math' && (
+        <>
+          <Field label="LaTeX expression">
+            <textarea
+              data-testid="doc-math-expression"
+              className={`${SELECT_CLASS} h-16 py-1 font-mono`}
+              value={el.expression}
+              onChange={(e) => onChange({ expression: e.target.value })}
+              placeholder="e.g. \frac{a}{b} + \sqrt{x^2 + y^2}"
+            />
+          </Field>
+          <ToggleRow
+            label="Display (block) math"
+            checked={el.block ?? false}
+            onChange={(v) => onChange({ block: v })}
+          />
+          <div className="rounded-md border border-border bg-muted/20 p-2" data-testid="doc-math-preview">
+            <MathText expression={el.expression} block={el.block} errorColor="#e11d48" />
+          </div>
         </>
       )}
     </>
