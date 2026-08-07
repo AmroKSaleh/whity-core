@@ -20,6 +20,7 @@ class CliRunner
         'queue:work' => 'Whity\Cli\Commands\QueueWorkCommand',
         'schedule:run' => 'Whity\Cli\Commands\ScheduleRunCommand',
         'scale:seed' => 'Whity\Cli\Commands\ScaleSeedCommand',
+        'health:watch' => 'Whity\Cli\Commands\HealthWatchCommand',
     ];
 
     /**
@@ -78,7 +79,8 @@ class CliRunner
         echo "  totp       TOTP secret maintenance (reencrypt legacy secrets)\n";
         echo "  queue:work Run the durable async job worker loop\n";
         echo "  schedule:run Run the cron-tick scheduler (exactly-once per minute across workers)\n";
-        echo "  scale:seed Bulk-insert a parameterized, deterministic large-scale multi-tenant dataset\n\n";
+        echo "  scale:seed Bulk-insert a parameterized, deterministic large-scale multi-tenant dataset\n";
+        echo "  health:watch Sample service health for the public /status page (runs outside the app)\n\n";
         echo "Use 'whity-cli <command> --help' for more information on a specific command.\n";
     }
 }

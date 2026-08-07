@@ -203,6 +203,57 @@ services:
         echo "[scheduler] cron-tick scheduler started";
         php public/index.php schedule:run --max-runtime=3600 || echo "[scheduler] exited (code $$?); restarting";
 
+  # Service-health collector behind the public /status page (WC-status-page).
+  #
+  # Runs as its OWN container, and that is the whole point. An in-app probe can
+  # measure the database, queue and scheduler, but it can never record the app
+  # being DOWN — if frankenphp is not serving, nothing inside it runs and the
+  # last sample just goes stale. This deployment already lost three days to
+  # exactly that: the web tier and tunnel were dead and the only thing that
+  # could have noticed was the thing that was down.
+  #
+  # So this process probes the internal components AND fetches WHITY_PUBLIC_URL
+  # over real HTTP from outside the app, writing straight to Postgres — so it
+  # keeps recording while the app tier is unreachable. It shares the image (one
+  # build, one migration set) but not frankenphp's fate.
+  #
+  # NOT a substitute for an off-host check: if the host or Docker dies, so does
+  # this. Pair it with a Cloudflare health check against the public URL.
+  #
+  # Not in a profile: a monitor you have to remember to enable is a monitor that
+  # is off on the day you need it.
+  health-watch:
+    image: whity-core:dev
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
+      JWT_SECRET: ${JWT_SECRET:-dev_secret_key_change_in_production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-dev_encryption_key_change_in_production}
+      # Probed over HTTP from outside the app. Defaults to the local frankenphp
+      # service; set it to the PUBLIC origin in staging/production so the check
+      # exercises the tunnel and web tier too, which is where the outage was.
+      WHITY_PUBLIC_URL: ${WHITY_PUBLIC_URL:-http://frankenphp}
+      WHITY_RENDER_URL: ${WHITY_RENDER_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        echo "[health-watch] service-health collector started";
+        php public/index.php health:watch --interval=60 || echo "[health-watch] exited (code $$?); restarting";
+
   # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
   # Track 2): Node + Puppeteer/headless Chromium loading the SAME React
   # renderer the browser preview uses (print-document.tsx) so exported PDFs
