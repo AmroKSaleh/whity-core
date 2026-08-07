@@ -184,7 +184,19 @@ test.describe('Plugin upload + RBAC visibility (WC-221)', () => {
 
     // Drive the delegate in its OWN context (this spec runs admin-authenticated
     // by default). A fresh UI login picks up the live plugins:read delegation.
-    const context = await browser.newContext();
+    //
+    // storageState MUST be forced empty: a manually-created context inherits
+    // the project's `use.storageState`, which here is the stored ADMIN
+    // session. With admin cookies already present, /login redirects straight
+    // to /dashboard, the form never renders, and the wait for the POST
+    // /api/v1/login response hangs until the 45s test timeout — the whole test
+    // having never authenticated as the delegate at all. (baseURL comes along
+    // for the same reason, so the relative goto()s below resolve.)
+    // settings-2fa.spec.ts and profile.spec.ts use the same idiom.
+    const context = await browser.newContext({
+      baseURL,
+      storageState: { cookies: [], origins: [] },
+    });
     const page = await context.newPage();
     try {
       const login = new LoginPage(page);

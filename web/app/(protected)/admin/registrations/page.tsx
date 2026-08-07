@@ -6,6 +6,7 @@ import { useToast } from '@/lib/toast-context';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
+import { ApprovalGatingTabs } from '@/components/admin/approval-gating-tabs';
 import { Button } from '@amroksaleh/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
@@ -22,6 +23,11 @@ import { IconCheck, IconInbox, IconX } from '@tabler/icons-react';
  * caller even if they hold the permission). The endpoints are untyped (not in
  * the generated OpenAPI client), so they are called via fetch with the CSRF
  * header, matching the registration page.
+ *
+ * This is the "Signup" tab of the unified Approval Gating admin surface
+ * (WC-password-reset-2fa-recovery) — folded in unchanged alongside the new
+ * Password reset / 2FA auth reset tabs, see
+ * web/components/admin/approval-gating-tabs.tsx.
  */
 const REGISTRATIONS_APPROVE = 'registrations:approve';
 const SYSTEM_TENANT_ID = 0;
@@ -127,29 +133,33 @@ export default function PendingRegistrationsPage() {
   // backend (which 403s any other caller).
   if (!isSystemTenant || !canApprove) {
     return (
-      <AccessDenied
-        data-testid="registrations-access-denied"
-        description={
-          <>
-            Pending registrations can only be reviewed from the system tenant. Your
-            tenant&rsquo;s settings are on the{' '}
-            <Link href="/admin/settings" className="font-medium underline">
-              Website Settings
-            </Link>{' '}
-            page.
-          </>
-        }
-        action={
-          <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
-          </Button>
-        }
-      />
+      <div className="space-y-6 max-w-4xl mx-auto px-4 md:px-0 pb-16">
+        <ApprovalGatingTabs active="signup" />
+        <AccessDenied
+          data-testid="registrations-access-denied"
+          description={
+            <>
+              Pending registrations can only be reviewed from the system tenant. Your
+              tenant&rsquo;s settings are on the{' '}
+              <Link href="/admin/settings" className="font-medium underline">
+                Website Settings
+              </Link>{' '}
+              page.
+            </>
+          }
+          action={
+            <Button onClick={() => window.history.back()} variant="outline">
+              Go Back
+            </Button>
+          }
+        />
+      </div>
     );
   }
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto px-4 md:px-0 pb-16">
+      <ApprovalGatingTabs active="signup" />
       <AdminHeader
         title="Pending Registrations"
         description="Review and approve new self-service workspace sign-ups before their owners can sign in."

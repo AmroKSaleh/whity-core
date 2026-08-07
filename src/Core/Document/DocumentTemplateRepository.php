@@ -63,15 +63,16 @@ final class DocumentTemplateRepository
 
     /**
      * @param array{name: string, data: array<string,mixed>, scope?: string,
-     *              required_permission?: ?string, is_system?: bool, created_by?: ?int} $rec
+     *              required_permission?: ?string, is_system?: bool, created_by?: ?int,
+     *              starter_key?: ?string} $rec
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_templates
-                 (tenant_id, name, data, scope, required_permission, is_system, created_by, created_at, updated_at)
-             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, NOW(), NOW())'
+                 (tenant_id, name, data, scope, required_permission, is_system, created_by, starter_key, created_at, updated_at)
+             VALUES (:tenant_id, :name, :data, :scope, :required_permission, :is_system, :created_by, :starter_key, NOW(), NOW())'
         );
         $stmt->execute([
             ':tenant_id'           => $tenantId,
@@ -81,9 +82,32 @@ final class DocumentTemplateRepository
             ':required_permission' => $rec['required_permission'] ?? null,
             ':is_system'           => ($rec['is_system'] ?? false) ? 1 : 0,
             ':created_by'          => $rec['created_by'] ?? null,
+            ':starter_key'         => $rec['starter_key'] ?? null,
         ]);
 
         return (int) $this->db->lastInsertId();
+    }
+
+    /**
+     * The seeder-only "which starters has this tenant already got" lookup
+     * (WC-515 REMAINING #3): the non-null `starter_key`s already present for
+     * the tenant, across BOTH user-visible and any other rows — a stable
+     * identity distinct from the (user-renameable) `name`, so the seeder can
+     * insert-if-missing per starter without duplicating or clobbering a row a
+     * user has since edited. Seeder-internal; not part of the public API
+     * response shape (see {@see DocumentRecordTrait::normalizeRow}).
+     *
+     * @return list<string>
+     */
+    public function starterKeysForTenant(int $tenantId): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT starter_key FROM document_templates WHERE tenant_id = :tenant_id AND starter_key IS NOT NULL'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        /** @var list<string> */
+        return array_map(strval(...), $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**
@@ -137,5 +161,93 @@ final class DocumentTemplateRepository
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
 
         return $stmt->rowCount();
+    }
+
+    /**
+     * The block delete-guard (WC-521): whether ANY template in the tenant still
+     * holds a live `blockInstance` pointer ({type:'blockInstance', blockId}) at
+     * $blockId, anywhere in its `data` JSON (any page/element, at any depth —
+     * this deliberately does not assume the exact pages/elements shape, so it
+     * stays correct across template-schema changes). Callers use this to REFUSE
+     * deleting a referenced block rather than silently orphaning the pointer.
+     *
+     * Two engines, one answer:
+     *  - Postgres: a `jsonb_path_exists` recursive-descent (`.**`) scan done
+     *    entirely in the database — efficient, no need to fetch template bodies.
+     *  - SQLite (the default unit-test engine): the `data` column is plain TEXT
+     *    (see SchemaFromMigrations' JSONB->TEXT translation) and SQLite's JSON
+     *    functions differ from Postgres's jsonpath, so rows are fetched and the
+     *    decoded tree is walked in PHP instead. Same semantics, same answer.
+     */
+    public function referencesBlock(int $blockId, int $tenantId): bool
+    {
+        if ($this->driver() === 'pgsql') {
+            // The parameter is cast explicitly (::text) because it is only ever
+            // consumed inside jsonb_build_object()'s variadic "any" signature —
+            // Postgres cannot infer a bound parameter's type from a polymorphic
+            // argument position and raises "indeterminate datatype" (42P18)
+            // without the cast.
+            $stmt = $this->db->prepare(
+                "SELECT EXISTS (
+                     SELECT 1 FROM document_templates
+                      WHERE tenant_id = :tenant_id
+                        AND jsonb_path_exists(
+                            data,
+                            '\$.** ? (@.type == \"blockInstance\" && @.blockId == \$bid)',
+                            jsonb_build_object('bid', :block_id::text)
+                        )
+                 ) AS referenced"
+            );
+            $stmt->execute([':tenant_id' => $tenantId, ':block_id' => (string) $blockId]);
+
+            return (bool) $stmt->fetchColumn();
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT data FROM document_templates WHERE tenant_id = :tenant_id'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        $needle = (string) $blockId;
+        while (($raw = $stmt->fetchColumn()) !== false) {
+            $decoded = json_decode((string) $raw, true);
+            if (is_array($decoded) && self::treeReferencesBlock($decoded, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Recursively walk a decoded template JSON tree for a blockInstance element
+     * pointing at $needle (the block id, as a string — the client's blockId
+     * field is a string, {@see web/lib/documents/types.ts}).
+     *
+     * @param array<int|string, mixed> $node
+     */
+    private static function treeReferencesBlock(array $node, string $needle): bool
+    {
+        if (
+            ($node['type'] ?? null) === 'blockInstance'
+            && array_key_exists('blockId', $node)
+            && (string) $node['blockId'] === $needle
+        ) {
+            return true;
+        }
+        foreach ($node as $value) {
+            if (is_array($value) && self::treeReferencesBlock($value, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function driver(): string
+    {
+        $name = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
+
+        return is_string($name) ? $name : '';
     }
 }

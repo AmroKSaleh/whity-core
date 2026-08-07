@@ -47,9 +47,14 @@ export type AddToast = ReturnType<typeof useToast>['addToast'];
  * One registry descriptor as published by the backend settings endpoints.
  * `options` accompanies `type:"enum"` (the allowed values); it is optional so a
  * backend that has not yet added enum support degrades to a text input.
+ * `isFlag` mirrors `options`' shape: present (and always `true`) only for keys
+ * {@see SettingsRegistry::isFeatureFlag()} curates as a "feature flag" — see
+ * the Feature Flags tab (`feature-flags/page.tsx`), which filters the registry
+ * on this field alone rather than a hardcoded key list.
  */
 export type RegistryEntry = components['schemas']['SettingsRegistryEntry'] & {
   options?: string[];
+  isFlag?: boolean;
 };
 
 /**
@@ -165,6 +170,10 @@ export const FIELD_META: Record<string, FieldMeta> = {
     label: 'Workspace invitation email',
     help: 'Email people when they are invited to a workspace.',
   },
+  'plugins.store_enabled': {
+    label: 'Plugin marketplace',
+    help: 'Allow installing plugins from a trusted external store. A non-empty plugins.store_allowed_hosts allowlist is also required — this switch lets an operator disable the whole integration without losing that host list.',
+  },
 };
 
 export interface SectionDef {
@@ -269,6 +278,16 @@ export function groupRegistry(registry: readonly RegistryEntry[]): RegistrySecti
   }
 
   return sections;
+}
+
+/**
+ * The registry entries curated as feature flags — the `isFlag` marker set by
+ * the backend ({@see SettingsRegistry::FEATURE_FLAG_KEYS}), NOT a hardcoded
+ * client-side key list, so a new flag added server-side appears here with
+ * zero frontend changes. Order follows the registry's own declaration order.
+ */
+export function featureFlagEntries(registry: readonly RegistryEntry[]): RegistryEntry[] {
+  return registry.filter((entry) => entry.isFlag === true);
 }
 
 /** Turn a raw key (`storage.s3.public_base_url`) into a readable label. */

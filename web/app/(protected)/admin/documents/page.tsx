@@ -8,9 +8,11 @@ import { DocumentDesigner } from '@/components/documents/document-designer';
  * labels, docs and sheets. Templates carry placeholders bound to company logos,
  * dynamic text and barcodes/QR codes.
  *
- * MVP: any authenticated user; templates persist to the browser + JSON
- * export/import. TODO(WC-doceditor / backend): a tenant-scoped `document_templates`
- * table + API and a `documents:manage` permission gate.
+ * Access is gated on the granular documents:read/write/publish/render
+ * permissions (see CorePermissions), enforced server-side by
+ * DocumentTemplatesApiHandler; the nav entry mirrors documents:read. This page
+ * itself does no direct data-fetching (that lives in DocumentDesigner and its
+ * supporting hooks), so there is no client-side 403 handling to add here.
  */
 export default function DocumentsPage() {
   return (

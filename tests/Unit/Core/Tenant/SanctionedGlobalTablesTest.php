@@ -72,10 +72,15 @@ final class SanctionedGlobalTablesTest extends TestCase
         // 7 (WC-235): email_verifications — verification tokens for the globally-
         // unique profile_emails. 8 (WC-7ad4): external_identities — federated
         // (SSO/OIDC) account links to global profiles; identity is per-person,
-        // not per-tenant. Both reviewed as legitimately global (rows join only to
-        // global tables, no tenant_id).
+        // not per-tenant. 9-10 (WC-password-reset-2fa-recovery): password_resets
+        // and two_factor_recovery_requests — tokens/requests for the global
+        // profiles identity; a password credential and a 2FA device belong to a
+        // person, not a tenant (rows join only to profiles). The admin approval
+        // QUEUE for both is tenant-scoped at query time via a JOIN to
+        // memberships, not via a column on either table. All reviewed as
+        // legitimately global (rows join only to global tables, no tenant_id).
         self::assertLessThanOrEqual(
-            8,
+            10,
             count(SanctionedGlobalTables::all()),
             'The sanctioned global-table allowlist should stay minimal; review any growth.'
         );
