@@ -7,6 +7,7 @@ uses tag-based releases (see the `v*` tags in the repository).
 ## [Unreleased]
 
 ### Added
+- i18n admin management: `languages:manage` (create/update a language, system-tenant only) and `translations:manage` (create/update/delete a translation row) — `POST`/`PATCH /api/languages`, `GET`/`POST /api/translations`, `PATCH`/`DELETE /api/translations/{id}`. A translation row's tenant scope follows the System-Tenant Context convention: a regular tenant writes only its own override (a global/foreign row is 404), the system tenant writes only the system default (a per-tenant override is 422).
 - Plugin marketplace: `whity-plugin-store` (in the companion `whity-plugins` repository) — a token-gated catalog server other Whity Core deployments can browse and install from.
 - `POST /api/plugins/install-from-store` — fetch a plugin package from a trusted, allowlisted store and install it through the same hardened pipeline as a manual upload (SSRF-guarded).
 - Admin **Plugin Store** page (`/admin/plugins/store`) — browse, search, and install plugins from a trusted store, with a token-mint convenience action.

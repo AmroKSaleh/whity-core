@@ -201,6 +201,20 @@ final class CorePermissions
     // PASSWORD_RESETS_APPROVE above, not system-tenant-restricted.
     public const TWO_FACTOR_RECOVERY_APPROVE = 'two_factor_recovery:approve';
 
+    // i18n admin management (WC-583): languages are a GLOBAL catalogue (no
+    // tenant_id column at all), so create/update/enable/disable is a PLATFORM
+    // capability — necessary but not sufficient, the handler additionally
+    // requires the caller to be acting in the system tenant (id 0), mirroring
+    // ENTITLEMENTS_MANAGE/PLANS_MANAGE (a regular tenant admin must never be
+    // able to disable a language for the whole install). translations:manage
+    // gates create/update/delete of a translation ROW; the row's scope
+    // (system default, tenant_id NULL, vs a tenant override, tenant_id>0)
+    // follows the caller — the system tenant writes/deletes only system
+    // defaults, a regular tenant writes/deletes only its OWN override, the
+    // same asymmetry as base roles (WC-110) and global settings (WC-224).
+    public const LANGUAGES_MANAGE = 'languages:manage';
+    public const TRANSLATIONS_MANAGE = 'translations:manage';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -257,6 +271,8 @@ final class CorePermissions
             self::NOTIFICATION_SETTINGS_MANAGE,
             self::PASSWORD_RESETS_APPROVE,
             self::TWO_FACTOR_RECOVERY_APPROVE,
+            self::LANGUAGES_MANAGE,
+            self::TRANSLATIONS_MANAGE,
         ];
     }
 }

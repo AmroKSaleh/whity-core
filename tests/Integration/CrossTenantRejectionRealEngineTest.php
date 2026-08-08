@@ -2005,6 +2005,134 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertSame('A-BLOB', $aCreds['credentials_encrypted'], "tenant A's credentials survive");
     }
 
+    // ==================== translations (WC-583) ====================
+    //
+    // A translation row's tenant scope is NULL (the GLOBAL system default,
+    // shared by every tenant) or a tenant id (that tenant's own override) —
+    // TranslationRepository's update()/delete() take an EXPECTED tenant id so
+    // the mutating statement itself, not merely TranslationsApiHandler's guard
+    // read, rejects a foreign/global id (WC-190 defense-in-depth). 'en' is
+    // seeded by migration 082 (SeedBaseLanguages), which SchemaFromMigrations
+    // applies along with every other migration.
+
+    public function testTranslationUpdateRejectsForeignTenantAndRowIsUntouched(): void
+    {
+        $repo = new \Whity\Core\i18n\TranslationRepository($this->pdo);
+        $languageId = $this->englishLanguageId();
+
+        $bRow = $repo->create($languageId, 'common', 'greeting', 'B-Hello', self::TENANT_B);
+        self::assertNotNull($bRow, 'fixture: Tenant B override must be created');
+
+        $updated = $repo->update($bRow->id, 'hijacked', self::TENANT_A);
+
+        self::assertFalse($updated, "Tenant A's update must touch zero rows for Tenant B's override");
+        self::assertSame(
+            'B-Hello',
+            $repo->findById($bRow->id)?->translation,
+            "Tenant B's override must be byte-for-byte untouched after the rejected update"
+        );
+    }
+
+    /**
+     * WC-583 (System-Tenant Context asymmetry): a REGULAR tenant must never be
+     * able to write the GLOBAL system-default row (tenant_id NULL) — the
+     * scoped UPDATE (expectedTenantId = Tenant A) can never match a NULL row.
+     */
+    public function testTranslationUpdateRejectsRegularTenantTargetingSystemDefault(): void
+    {
+        $repo = new \Whity\Core\i18n\TranslationRepository($this->pdo);
+        $languageId = $this->englishLanguageId();
+
+        $systemRow = $repo->create($languageId, 'common', 'farewell', 'Bye', null);
+        self::assertNotNull($systemRow, 'fixture: system default must be created');
+
+        $updated = $repo->update($systemRow->id, 'hijacked', self::TENANT_A);
+
+        self::assertFalse($updated, 'A regular tenant must never be able to write the system-default row');
+        self::assertSame('Bye', $repo->findById($systemRow->id)?->translation, 'The system default must be untouched');
+    }
+
+    /**
+     * WC-583 (System-Tenant Context asymmetry, the other direction): the
+     * SYSTEM tenant's scoped write (expectedTenantId = null) can never match a
+     * per-tenant override row — mirrors PATCH /api/settings rejecting the
+     * system tenant with 422 at the handler layer; here the REPOSITORY
+     * predicate itself is what proves the isolation.
+     */
+    public function testTranslationUpdateRejectsSystemTenantTargetingTenantOverride(): void
+    {
+        $repo = new \Whity\Core\i18n\TranslationRepository($this->pdo);
+        $languageId = $this->englishLanguageId();
+
+        $aRow = $repo->create($languageId, 'common', 'welcome', 'A-Welcome', self::TENANT_A);
+        self::assertNotNull($aRow, "fixture: Tenant A's override must be created");
+
+        $updated = $repo->update($aRow->id, 'hijacked', null);
+
+        self::assertFalse($updated, "The system tenant's write must never reach a per-tenant override row");
+        self::assertSame('A-Welcome', $repo->findById($aRow->id)?->translation, "Tenant A's override must be untouched");
+    }
+
+    public function testTranslationDeleteRejectsForeignTenantAndRowSurvives(): void
+    {
+        $repo = new \Whity\Core\i18n\TranslationRepository($this->pdo);
+        $languageId = $this->englishLanguageId();
+
+        $bRow = $repo->create($languageId, 'common', 'goodbye', 'B-Bye', self::TENANT_B);
+        self::assertNotNull($bRow);
+
+        $deleted = $repo->delete($bRow->id, self::TENANT_A);
+
+        self::assertFalse($deleted, "A cross-tenant delete must touch zero rows");
+        self::assertNotNull($repo->findById($bRow->id), "Tenant B's override must survive a cross-tenant delete attempt");
+
+        // The legitimate same-scope delete succeeds.
+        self::assertTrue($repo->delete($bRow->id, self::TENANT_B), "Tenant B's own delete must succeed");
+        self::assertNull($repo->findById($bRow->id));
+    }
+
+    public function testTranslationScopedListsNeverLeakAForeignTenantsOverride(): void
+    {
+        $repo = new \Whity\Core\i18n\TranslationRepository($this->pdo);
+        $languageId = $this->englishLanguageId();
+
+        $repo->create($languageId, 'common', 'only_a', 'A-only', self::TENANT_A);
+        $repo->create($languageId, 'common', 'only_b', 'B-only', self::TENANT_B);
+
+        $aOverrides = $repo->findAllTenantOverrides($languageId, self::TENANT_A)['common'] ?? [];
+        $bOverrides = $repo->findAllTenantOverrides($languageId, self::TENANT_B)['common'] ?? [];
+
+        self::assertArrayHasKey('only_a', $aOverrides);
+        self::assertArrayNotHasKey('only_b', $aOverrides, "Tenant B's override must never appear in Tenant A's scoped list");
+        self::assertArrayHasKey('only_b', $bOverrides);
+        self::assertArrayNotHasKey('only_a', $bOverrides, "Tenant A's override must never appear in Tenant B's scoped list");
+    }
+
+    /**
+     * WC-583: two tenants may each own an override for the SAME key
+     * independently — the UNIQUE(language_id, domain, key, tenant_id)
+     * constraint scopes uniqueness PER tenant, not globally.
+     */
+    public function testTranslationCreateRejectsDuplicateInOwnScopeButAllowsAnotherTenantsOverride(): void
+    {
+        $repo = new \Whity\Core\i18n\TranslationRepository($this->pdo);
+        $languageId = $this->englishLanguageId();
+
+        self::assertNotNull($repo->create($languageId, 'common', 'dup', 'A-First', self::TENANT_A));
+
+        $duplicate = $repo->create($languageId, 'common', 'dup', 'A-Second', self::TENANT_A);
+        self::assertNull($duplicate, 'A duplicate (language, domain, key) within the SAME tenant scope must be rejected');
+
+        $bCreate = $repo->create($languageId, 'common', 'dup', 'B-First', self::TENANT_B);
+        self::assertNotNull($bCreate, "Tenant B's own override for the same key must be independent of Tenant A's");
+    }
+
+    /** The 'en' language id seeded by migration 082 (SeedBaseLanguages). */
+    private function englishLanguageId(): int
+    {
+        return (int) $this->pdo->query("SELECT id FROM languages WHERE code = 'en'")->fetchColumn();
+    }
+
     /**
      * In-memory SQLite with the full production schema (via migrations) seeded
      * with disjoint Tenant A / Tenant B rows.

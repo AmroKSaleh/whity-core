@@ -92,11 +92,6 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'POST /api/jobs',
         'GET /api/jobs',
         'GET /api/jobs/{id}',
-        // WC-i18n: public per-domain translation bundle. The sibling language
-        // routes are declared in CoreApiSchemas::languageRoutes(); this one's
-        // response is an open-ended key => string map whose component schema
-        // lands with the translation-management surface.
-        'GET /api/translations/{language_code}/{domain}',
         // WC-status-page: the public service-status feed. Its response is a
         // nested components/incidents document whose OpenAPI components land
         // with the status-page documentation task, per the
