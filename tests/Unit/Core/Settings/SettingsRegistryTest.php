@@ -37,7 +37,13 @@ final class SettingsRegistryTest extends TestCase
              'billing.enforcement_default', 'billing.grace_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
-             'documents.render_max_pages', 'documents.render_max_template_bytes'],
+             'documents.render_max_pages', 'documents.render_max_template_bytes',
+             // WC-error-tracking. The DSN is deliberately absent: it is a
+             // credential, stored encrypted under a reserved key, never exposed
+             // through the settings surface this list describes.
+             'error_tracking.enabled', 'error_tracking.provider',
+             'error_tracking.environment', 'error_tracking.notify_admins',
+             'error_tracking.retention_days'],
             SettingsRegistry::keys()
         );
     }
@@ -195,7 +201,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(45, $describe);
+        self::assertCount(50, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
