@@ -155,6 +155,11 @@ class EnforceTenantIsolation
         // (to render the UI in the correct language during login). The settings
         // endpoint (/api/v1/settings/language) remains authenticated for updates.
         '/api/v1/languages',
+        // WC-status-page: the public service-status feed behind /status. Public for
+        // the same reason /api/health is — a reader who cannot sign in is exactly
+        // the reader asking whether the service is down. Exposes component states
+        // and uptime only, never deployment internals.
+        '/api/v1/status',
     ];
 
     /**

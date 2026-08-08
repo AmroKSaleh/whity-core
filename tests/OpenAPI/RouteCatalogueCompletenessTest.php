@@ -97,6 +97,11 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // response is an open-ended key => string map whose component schema
         // lands with the translation-management surface.
         'GET /api/translations/{language_code}/{domain}',
+        // WC-status-page: the public service-status feed. Its response is a
+        // nested components/incidents document whose OpenAPI components land
+        // with the status-page documentation task, per the
+        // KNOWN_UNDOCUMENTED-first path this file establishes.
+        'GET /api/status',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

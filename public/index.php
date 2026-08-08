@@ -96,6 +96,16 @@ if ($isCli && isset($argv[1])) {
         exit($scheduleRunCommand->execute($argv));
     }
 
+    // WC-status-page: the service-health collector behind /status. Runs as its
+    // own container so it keeps recording while the app tier is unreachable —
+    // the one failure an in-app probe structurally cannot observe.
+    if ($command === 'health:watch') {
+        $healthWatchCommand = new \Whity\Cli\Commands\HealthWatchCommand();
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'health:watch' command
+        exit($healthWatchCommand->execute($argv));
+    }
+
     echo "Unknown command: {$command}\n";
     echo "Available commands:\n";
     echo "  generate:openapi           Generate OpenAPI 3.0 schema\n";
@@ -105,6 +115,7 @@ if ($isCli && isset($argv[1])) {
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
+    echo "  health:watch               Sample service health for the public /status page\n";
     exit(1);
 }
 
@@ -1002,6 +1013,19 @@ $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'l
 // $bootTimestamp drives the reported worker uptime.
 $healthHandler = new HealthApiHandler($db, $bootTimestamp);
 $router->registerUnversioned('GET', '/api/health', [$healthHandler, 'handle']);
+
+// WC-status-page: the public service-status surface behind /status. Registered
+// versioned (bare path — the router prepends /v1) and, like /api/health,
+// deliberately unauthenticated: the people who most need to know whether the
+// service is up are the ones who cannot sign in. It only READS the
+// health_samples time series written by `health:watch`, so it stays cheap and
+// cannot add load during an incident.
+$statusHandler = new \Whity\Api\StatusApiHandler(
+    new \Whity\Core\Health\StatusReport(
+        new \Whity\Core\Health\HealthSampleRepository($db->getPdo())
+    )
+);
+$router->register('GET', '/api/status', [$statusHandler, 'get'], null);
 
 // WC-206: unversioned version-discovery endpoint. Returns the current API
 // version, the full supported set, and the default. No auth required — it is a
