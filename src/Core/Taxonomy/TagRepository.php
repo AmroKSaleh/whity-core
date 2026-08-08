@@ -124,17 +124,67 @@ final class TagRepository
     }
 
     /**
-     * Delete a tag (its entity associations cascade). Returns false when no row
-     * matched.
+     * How many `entity_tags` associations would be destroyed by deleting this
+     * tag (WC-714 §5). Those rows belong to other plugins' records, so the
+     * delete guard reports this count instead of cascading silently.
      */
-    public function delete(int $tenantId, int $id): bool
+    public function countAssociations(int $tenantId, int $id): int
     {
         $stmt = $this->db->prepare(
-            'DELETE FROM tags WHERE tenant_id = :tenant_id AND id = :id'
+            'SELECT COUNT(*) FROM entity_tags
+             WHERE tenant_id = :tenant_id AND tag_id = :id'
         );
         $stmt->execute([':tenant_id' => $tenantId, ':id' => $id]);
 
-        return $stmt->rowCount() > 0;
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Delete a tag together with its entity associations. Returns false when no
+     * row matched.
+     *
+     * DESTRUCTIVE — every `entity_tags` row referencing this tag goes with it,
+     * and those rows belong to other plugins' records. Callers MUST consult
+     * {@see countAssociations()} first and refuse unless the operator
+     * explicitly forced it; see {@see \Whity\Api\TagsApiHandler::delete()}
+     * (WC-714 §5).
+     *
+     * Both levels are deleted EXPLICITLY inside one transaction rather than via
+     * the `ON DELETE CASCADE` FK — same reasoning as
+     * {@see TagGroupRepository::delete()}: destruction that names itself is
+     * auditable, and SQLite does not enforce the cascade at all unless
+     * `PRAGMA foreign_keys = ON`.
+     */
+    public function delete(int $tenantId, int $id): bool
+    {
+        $ownTransaction = !$this->db->inTransaction();
+        if ($ownTransaction) {
+            $this->db->beginTransaction();
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                'DELETE FROM entity_tags WHERE tenant_id = :tenant_id AND tag_id = :id'
+            );
+            $stmt->execute([':tenant_id' => $tenantId, ':id' => $id]);
+
+            $stmt = $this->db->prepare(
+                'DELETE FROM tags WHERE tenant_id = :tenant_id AND id = :id'
+            );
+            $stmt->execute([':tenant_id' => $tenantId, ':id' => $id]);
+            $deleted = $stmt->rowCount() > 0;
+
+            if ($ownTransaction) {
+                $this->db->commit();
+            }
+
+            return $deleted;
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
     }
 
     private static function isUniqueViolation(\PDOException $e): bool

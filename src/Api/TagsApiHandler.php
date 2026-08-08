@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use Whity\Auth\RoleChecker;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -30,12 +31,18 @@ final class TagsApiHandler
     private TagRepository $tags;
     private TagGroupRepository $groups;
     private RoleChecker $roleChecker;
+    private ?AuditLoggerInterface $auditLogger;
 
-    public function __construct(TagRepository $tags, TagGroupRepository $groups, RoleChecker $roleChecker)
-    {
+    public function __construct(
+        TagRepository $tags,
+        TagGroupRepository $groups,
+        RoleChecker $roleChecker,
+        ?AuditLoggerInterface $auditLogger = null
+    ) {
         $this->tags = $tags;
         $this->groups = $groups;
         $this->roleChecker = $roleChecker;
+        $this->auditLogger = $auditLogger;
     }
 
     public function list(Request $request): Response
@@ -145,6 +152,15 @@ final class TagsApiHandler
     }
 
     /**
+     * Delete a tag.
+     *
+     * DESTRUCTIVE-DELETE GUARD (WC-714 §5) — the same guard as
+     * {@see TagGroupsApiHandler::delete()}, one level shallower: every
+     * `entity_tags` row referencing this tag is cascaded away, and those rows
+     * belong to other plugins' records. Refuse with 409 while associations
+     * exist, reporting the count; proceed only on an explicit `?force=true`,
+     * and record the forced destruction in the audit log.
+     *
      * @param array<string, string> $params
      */
     public function delete(Request $request, array $params): Response
@@ -153,13 +169,57 @@ final class TagsApiHandler
         if ($auth instanceof Response) {
             return $auth;
         }
-        [$tenantId] = $auth;
+        [$tenantId, $callerId] = $auth;
 
-        if (!$this->tags->delete($tenantId, (int) ($params['id'] ?? 0))) {
+        $id = (int) ($params['id'] ?? 0);
+
+        $tag = $this->tags->find($tenantId, $id);
+        if ($tag === null) {
             return Response::error('Tag not found', 404);
         }
 
+        $associations = $this->tags->countAssociations($tenantId, $id);
+        $forced = self::isForced($request);
+
+        if ($associations > 0 && !$forced) {
+            return Response::error(
+                'Cannot delete a tag while ' . $associations . ' entity association(s) still reference it. '
+                . 'Retry with ?force=true to delete them as well.',
+                409,
+                ['associations' => $associations]
+            );
+        }
+
+        if (!$this->tags->delete($tenantId, $id)) {
+            return Response::error('Tag not found', 404);
+        }
+
+        $this->auditLogger?->record('taxonomy.tag.deleted', [
+            'tenant_id'     => $tenantId,
+            'actor_user_id' => $callerId,
+            'target_type'   => 'tag',
+            'target_id'     => $id,
+            'metadata'      => [
+                'name'                 => $tag['name'],
+                'group_id'             => $tag['group_id'],
+                'forced'               => $forced,
+                'associations_deleted' => $associations,
+            ],
+        ]);
+
         return Response::json([], 204);
+    }
+
+    /**
+     * Was the destructive delete explicitly forced (`?force=true`)? Read from
+     * the query string, never a DELETE body — see
+     * {@see TagGroupsApiHandler::isForced()} for the reasoning.
+     */
+    private static function isForced(Request $request): bool
+    {
+        $force = self::queryParams($request)['force'] ?? '';
+
+        return $force === 'true' || $force === '1';
     }
 
     private static function intOrZero(mixed $value): int

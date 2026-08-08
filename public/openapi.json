@@ -5456,6 +5456,112 @@
                 ]
             }
         },
+        "/api/v1/entity-tags/all": {
+            "delete": {
+                "operationId": "delete_api_v1_entity_tags_all",
+                "summary": "Detach every tag from one entity",
+                "tags": [
+                    "taxonomy"
+                ],
+                "parameters": [
+                    {
+                        "name": "entity_type",
+                        "in": "query",
+                        "required": false,
+                        "description": "The opaque plugin-supplied entity type (required)",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "entity_id",
+                        "in": "query",
+                        "required": false,
+                        "description": "The entity whose associations are removed (required)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The associations removed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/EntityTagDetachAllResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/example/hello": {
             "get": {
                 "operationId": "get_api_v1_example_hello",
@@ -14653,6 +14759,15 @@
                         "schema": {
                             "type": "integer"
                         }
+                    },
+                    {
+                        "name": "force",
+                        "in": "query",
+                        "required": false,
+                        "description": "Delete the group even though entity associations reference its tags",
+                        "schema": {
+                            "type": "boolean"
+                        }
                     }
                 ],
                 "responses": {
@@ -14691,6 +14806,16 @@
                     },
                     "405": {
                         "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Entity associations still reference this group's tags; retry with force=true",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -15151,6 +15276,15 @@
                         "schema": {
                             "type": "integer"
                         }
+                    },
+                    {
+                        "name": "force",
+                        "in": "query",
+                        "required": false,
+                        "description": "Delete the tag even though entity associations reference it",
+                        "schema": {
+                            "type": "boolean"
+                        }
                     }
                 ],
                 "responses": {
@@ -15189,6 +15323,16 @@
                     },
                     "405": {
                         "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Entity associations still reference this tag; retry with force=true",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -18735,6 +18879,36 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "EntityTagDetachAllResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/EntityTagDetachAllResult"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "EntityTagDetachAllResult": {
+                "type": "object",
+                "properties": {
+                    "entity_type": {
+                        "type": "string"
+                    },
+                    "entity_id": {
+                        "type": "integer"
+                    },
+                    "removed": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "entity_type",
+                    "entity_id",
+                    "removed"
                 ]
             },
             "EntityTagQueryResponse": {

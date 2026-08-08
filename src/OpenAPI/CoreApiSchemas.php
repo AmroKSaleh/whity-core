@@ -2378,6 +2378,14 @@ final class CoreApiSchemas
             'EntityTagQueryResponse' => self::object([
                 'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
             ], ['data']),
+            // The result of the WC-714 §6 record-delete cleanup hook: which
+            // entity was cleaned and how many associations that removed.
+            'EntityTagDetachAllResult' => self::object([
+                'entity_type' => self::str(),
+                'entity_id' => self::int(),
+                'removed' => self::int(),
+            ], ['entity_type', 'entity_id', 'removed']),
+            'EntityTagDetachAllResponse' => self::dataEnvelope(SchemaBuilder::ref('EntityTagDetachAllResult')),
 
             // ── Subscription plans (WC-plans, ADR 0010) ───────────────────────
             // A plan row (list shape — no entitlement bundle).
@@ -3828,10 +3836,18 @@ final class CoreApiSchemas
             ]),
             self::permissionRoute('DELETE', '/api/tag-groups/{id:\d+}', 'tags:manage', [
                 'summary' => 'Delete a tag group (its tags cascade)',
+                'description' => 'Refuses with 409 while any entity association still references one of the group\'s '
+                    . 'tags, reporting the affected counts, because the FK cascade would otherwise silently destroy '
+                    . 'associations belonging to other plugins. Pass force=true to delete them as well; a forced '
+                    . 'delete is recorded in the audit log.',
                 'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('force', 'boolean', 'Delete the group even though entity associations reference its tags'),
+                ],
                 'responses' => [
                     204 => ['description' => 'Tag group removed'],
                     404 => self::errorResponse('Tag group not found'),
+                    409 => self::errorResponse('Entity associations still reference this group\'s tags; retry with force=true'),
                 ] + self::authErrors(),
             ]),
 
@@ -3878,10 +3894,17 @@ final class CoreApiSchemas
             ]),
             self::permissionRoute('DELETE', '/api/tags/{id:\d+}', 'tags:manage', [
                 'summary' => 'Delete a tag (its associations cascade)',
+                'description' => 'Refuses with 409 while entity associations still reference the tag, reporting the '
+                    . 'affected count. Pass force=true to delete them as well; a forced delete is recorded in the '
+                    . 'audit log.',
                 'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('force', 'boolean', 'Delete the tag even though entity associations reference it'),
+                ],
                 'responses' => [
                     204 => ['description' => 'Tag removed'],
                     404 => self::errorResponse('Tag not found'),
+                    409 => self::errorResponse('Entity associations still reference this tag; retry with force=true'),
                 ] + self::authErrors(),
             ]),
 
@@ -3916,6 +3939,22 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Association removed'],
                     404 => self::errorResponse('Association not found'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/entity-tags/all', 'tags:manage', [
+                'summary' => 'Detach every tag from one entity',
+                'description' => 'The cleanup hook a plugin calls from its own record-delete path. entity_tags carries '
+                    . 'no FK to the tagged record, so associations outlive it — and a later record reusing the same '
+                    . 'entity_id would silently inherit them. Returns the number of associations removed; 0 is a '
+                    . 'successful no-op.',
+                'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('entity_type', 'string', 'The opaque plugin-supplied entity type (required)'),
+                    self::queryParam('entity_id', 'integer', 'The entity whose associations are removed (required)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The associations removed', 'EntityTagDetachAllResponse'),
                     422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
