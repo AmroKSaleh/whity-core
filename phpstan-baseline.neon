@@ -503,6 +503,11 @@ parameters:
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 2
+			path: tests/Api/LanguagesApiHandlerTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 2
 			path: tests/Api/MeCapabilitiesApiHandlerRealEngineTest.php
 
 		-
@@ -564,6 +569,11 @@ parameters:
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 14
 			path: tests/Api/TenantsApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Api/TranslationsApiHandlerTest.php
 
 		-
 			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
@@ -842,7 +852,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 47
+			count: 48
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
 
 		-

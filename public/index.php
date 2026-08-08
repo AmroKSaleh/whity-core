@@ -1182,19 +1182,36 @@ try {
 
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
-$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
+$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry, $languageRepository, $roleChecker);
 $router->register('GET',   '/api/languages',         [$languagesHandler, 'list'],          null);
 $router->register('GET',   '/api/settings/language', [$languagesHandler, 'getLanguage'],   null);
 $router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchLanguage'], null);
+// WC-583: admin language management. languages:manage is necessary but not
+// sufficient — the handler additionally requires the SYSTEM tenant (id 0),
+// since languages carry no tenant_id column at all (see LanguagesApiHandler
+// class docblock).
+$router->register('POST',  '/api/languages',        [$languagesHandler, 'create'], null, null, CorePermissions::LANGUAGES_MANAGE);
+$router->register('PATCH', '/api/languages/{id:\d+}', [$languagesHandler, 'update'], null, null, CorePermissions::LANGUAGES_MANAGE);
 
-// Translations API handler — public endpoint for fetching translated strings
-// before a session exists (the login screen needs its own language).
+// Translations API handler — GET /api/translations/{language_code}/{domain} is
+// a public endpoint for fetching translated strings before a session exists
+// (the login screen needs its own language). WC-583 adds admin CRUD over
+// individual translation rows, gated on translations:manage: GET /api/translations
+// (raw rows for a language+domain, admin listing), POST (create), PATCH/DELETE
+// /api/translations/{id} (update/delete) — tenant-scoped per the System-Tenant
+// Context convention (see TranslationsApiHandler class docblock).
 $translationsHandler = new \Whity\Api\TranslationsApiHandler(
     $languageRepository,
     $translationRepository,
-    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+    new \Whity\Core\Tenant\StaticTenantContextAdapter(),
+    $roleChecker,
+    $languageRegistry
 );
-$router->register('GET', '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
+$router->register('GET',    '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
+$router->register('GET',    '/api/translations',            [$translationsHandler, 'adminList'], null, null, CorePermissions::TRANSLATIONS_MANAGE);
+$router->register('POST',   '/api/translations',            [$translationsHandler, 'create'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
+$router->register('PATCH',  '/api/translations/{id:\d+}',   [$translationsHandler, 'update'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
+$router->register('DELETE', '/api/translations/{id:\d+}',   [$translationsHandler, 'delete'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
 
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved

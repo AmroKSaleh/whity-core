@@ -94,6 +94,7 @@ final class CoreApiSchemas
             self::familyRelationsRoutes(),
             self::settingsRoutes(),
             self::languageRoutes(),
+            self::translationManagementRoutes(),
             self::brandingRoutes(),
             self::themeRoutes(),
             self::identityRoutes(),
@@ -1519,6 +1520,106 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+            // WC-583: admin language management. languages:manage is necessary
+            // but not sufficient — the handler additionally requires the SYSTEM
+            // tenant (id 0), since languages carry no tenant_id column at all.
+            self::permissionRoute('POST', '/api/languages', 'languages:manage', [
+                'summary' => 'Create a language (admin, system tenant only)',
+                'tags' => ['languages'],
+                'request' => 'LanguageCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created language', 'LanguageDataResponse'),
+                    403 => self::errorResponse('Restricted to the system tenant'),
+                    409 => self::errorResponse('A language with this code already exists'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/languages/{id:\d+}', 'languages:manage', [
+                'summary' => 'Update a language\'s name and/or enabled status (admin, system tenant only)',
+                'tags' => ['languages'],
+                'request' => 'LanguageUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated language', 'LanguageDataResponse'),
+                    403 => self::errorResponse('Restricted to the system tenant'),
+                    404 => self::errorResponse('Language not found'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * i18n admin management of translation rows (WC-583). Reads and writes are
+     * gated on `translations:manage`; the row's tenant scope (system default vs
+     * tenant override) follows the caller — see TranslationsApiHandler's class
+     * docblock for the full System-Tenant Context write-access rule (404 vs 422).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function translationManagementRoutes(): array
+    {
+        return [
+            // The public per-domain bundle (resolved fallback chain) — was
+            // KNOWN_UNDOCUMENTED pending this task; now declared.
+            [
+                'method' => 'GET',
+                'path' => '/api/translations/{language_code}/{domain}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Get resolved translations for a language + domain (public)',
+                    'tags' => ['languages'],
+                    'responses' => [
+                        200 => self::jsonResponse('The resolved key => translation map', 'TranslationBundleResponse'),
+                        400 => self::errorResponse('Missing or invalid language_code/domain parameter'),
+                        404 => self::errorResponse('Language not found or is disabled'),
+                        500 => self::errorResponse('Internal error'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/translations', 'translations:manage', [
+                'summary' => 'List raw translation rows for a language + domain (admin)',
+                'tags' => ['languages'],
+                'parameters' => [
+                    self::queryParam('language_code', 'string', 'The language code (required)'),
+                    self::queryParam('domain', 'string', 'The translation domain (required)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('System-default and tenant-override rows, per key', 'TranslationAdminListResponse'),
+                    400 => self::errorResponse('Missing/invalid language_code or domain'),
+                    404 => self::errorResponse('Language not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/translations', 'translations:manage', [
+                'summary' => 'Create a translation row (admin)',
+                'tags' => ['languages'],
+                'request' => 'TranslationCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created translation', 'TranslationDataResponse'),
+                    404 => self::errorResponse('Language not found'),
+                    409 => self::errorResponse('A translation for this key already exists in this scope'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/translations/{id:\d+}', 'translations:manage', [
+                'summary' => 'Update a translation row\'s text (admin)',
+                'tags' => ['languages'],
+                'request' => 'TranslationUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated translation', 'TranslationDataResponse'),
+                    404 => self::errorResponse('Translation not found'),
+                    422 => self::errorResponse('Validation failed, or the system tenant targeted a per-tenant override'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/translations/{id:\d+}', 'translations:manage', [
+                'summary' => 'Delete a translation row (admin)',
+                'tags' => ['languages'],
+                'responses' => [
+                    204 => ['description' => 'Translation deleted'],
+                    404 => self::errorResponse('Translation not found'),
+                    422 => self::errorResponse('The system tenant targeted a per-tenant override'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -2158,6 +2259,68 @@ final class CoreApiSchemas
                 'enforcement_deadline' => self::int(true),
             ], ['profile_id', 'email', 'enrolled', 'enforcement_deadline']),
             'TwoFactorPolicyStatusResponse' => self::listEnvelope('TwoFactorPolicyStatusEntry'),
+
+            // ── i18n admin management (WC-583) ────────────────────────────────
+            // A language row (admin shape — the public GET /api/languages list
+            // returns only {code, name}, declared inline in languageRoutes()).
+            'Language' => self::object([
+                'id' => self::int(),
+                'code' => self::str(),
+                'name' => self::str(),
+                'enabled' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'code', 'name', 'enabled', 'created_at', 'updated_at']),
+            'LanguageDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Language')),
+            'LanguageCreateRequest' => self::object([
+                'code' => self::str(),
+                'name' => self::str(),
+                'enabled' => self::bool(),
+            ], ['code', 'name']),
+            'LanguageUpdateRequest' => self::object([
+                'name' => self::str(),
+                'enabled' => self::bool(),
+            ], []),
+            // A translation row. tenant_id is nullable: NULL = system default,
+            // an integer = the owning tenant's override.
+            'Translation' => self::object([
+                'id' => self::int(),
+                'language_id' => self::int(),
+                'domain' => self::str(),
+                'key' => self::str(),
+                'translation' => self::str(),
+                'tenant_id' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'language_id', 'domain', 'key', 'translation', 'tenant_id', 'created_at', 'updated_at']),
+            'TranslationDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Translation')),
+            'TranslationCreateRequest' => self::object([
+                'language_code' => self::str(),
+                'domain' => self::str(),
+                'key' => self::str(),
+                'translation' => self::str(),
+            ], ['language_code', 'domain', 'key', 'translation']),
+            'TranslationUpdateRequest' => self::object([
+                'translation' => self::str(),
+            ], ['translation']),
+            // GET /api/v1/translations (admin) row shape: the system-default and
+            // this tenant's override shown SIDE BY SIDE for one key (never merged).
+            'TranslationRowRef' => self::object([
+                'id' => self::int(),
+                'translation' => self::str(),
+            ], ['id', 'translation']),
+            'TranslationAdminRow' => self::object([
+                'key' => self::str(),
+                'system_default' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('TranslationRowRef')]],
+                'tenant_override' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('TranslationRowRef')]],
+            ], ['key', 'system_default', 'tenant_override']),
+            'TranslationAdminListResponse' => self::listEnvelope('TranslationAdminRow'),
+            // GET /api/v1/translations/{language_code}/{domain} (public bundle):
+            // an open-ended key => translated-string map (the resolved fallback
+            // chain), not a fixed shape.
+            'TranslationBundleResponse' => self::object([
+                'translations' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+            ], ['translations']),
 
             // ── Native taxonomy/tagging (WC-621) ──────────────────────────────
             // A tag group; `display_name` is the bilingual {ar?, en?} label.
