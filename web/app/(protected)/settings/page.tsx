@@ -6,6 +6,7 @@ import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { SessionsSettings } from '@/components/SessionsSettings';
 import { DevicesSettings } from '@/components/DevicesSettings';
 import { EmailAddressesSettings } from '@/components/EmailAddressesSettings';
+import { LanguageSwitcher } from '@amroksaleh/features/i18n';
 import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
@@ -34,6 +35,21 @@ export default function SettingsPage() {
           </div>
 
           <ProfileForm />
+        </CardContent>
+      </Card>
+
+      {/* Language (WHIT-582) — independent of interface direction (RTL/LTR),
+          which lives in the sidebar; see lib/direction-context.tsx. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Language</CardTitle>
+          <CardDescription>Choose the language used across the interface</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LanguageSwitcher
+            variant="dropdown"
+            className="h-9 w-full max-w-xs rounded-md border border-input bg-input/20 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          />
         </CardContent>
       </Card>
 

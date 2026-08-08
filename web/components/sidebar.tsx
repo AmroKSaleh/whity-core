@@ -11,6 +11,7 @@ import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Switcher } from '@amroksaleh/ui/switcher';
+import { LanguageSwitcher } from '@amroksaleh/features/i18n';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
@@ -22,6 +23,7 @@ import {
   IconUserCog,
   IconBuilding,
   IconLanguage,
+  IconWorld,
   IconSun,
   IconMoon,
 } from '@tabler/icons-react';
@@ -344,6 +346,24 @@ export function Sidebar() {
             activeTenantId={user?.tenant_id}
             collapsed={isCollapsed && !isMobile}
           />
+          {/*
+            Interface language (WHIT-582) — deliberately independent of the
+            direction toggle below: switching language does NOT flip `dir`
+            (see lib/direction-context.tsx), so a right-to-left reader can
+            still run the UI in English LTR and vice versa.
+          */}
+          {(!isCollapsed || isMobile) && (
+            <div
+              className="flex w-full items-center gap-2 rounded-lg border border-input bg-input/20 px-3 py-2"
+              data-testid="language-switcher"
+            >
+              <IconWorld size={20} className="shrink-0 text-muted-foreground" />
+              <LanguageSwitcher
+                variant="dropdown"
+                className="h-7 min-w-0 flex-1 cursor-pointer border-0 bg-transparent text-sm font-medium text-foreground outline-none"
+              />
+            </div>
+          )}
           {/* Interface direction (LTR / RTL) — Arabic support (WC-rtl). */}
           <Button
             onClick={toggleDirection}
