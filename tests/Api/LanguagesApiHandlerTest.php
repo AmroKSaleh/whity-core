@@ -375,6 +375,58 @@ final class LanguagesApiHandlerTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
     }
 
+    // ==================== admin: GET /api/v1/admin/languages (WC-583) ====================
+
+    public function testAdminListIncludesDisabledLanguagesWithFullShape(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $arId = (int) $this->pdo->query("SELECT id FROM languages WHERE code = 'ar'")->fetchColumn();
+        $disableRequest = new Request('PATCH', "/api/languages/{$arId}", [], (string) json_encode(['enabled' => false]));
+        $disableRequest->user = (object) ['profile_id' => $this->testProfileId];
+        $this->handler->update($disableRequest, ['id' => (string) $arId]);
+
+        $request = new Request('GET', '/api/admin/languages');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->adminList($request);
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $body = json_decode($response->getBody(), true);
+        $codes = array_column($body['data'], 'code');
+        $this->assertContains('en', $codes);
+        $this->assertContains('ar', $codes, 'a disabled language must still be listed for admins');
+
+        $ar = array_values(array_filter($body['data'], static fn (array $l): bool => $l['code'] === 'ar'))[0];
+        $this->assertFalse($ar['enabled']);
+        $this->assertArrayHasKey('id', $ar);
+        $this->assertArrayHasKey('created_at', $ar);
+        $this->assertArrayHasKey('updated_at', $ar);
+    }
+
+    public function testAdminListWithoutPermissionIsForbidden(): void
+    {
+        $request = new Request('GET', '/api/admin/languages');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->adminList($request);
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    public function testAdminListAsRegularTenantIsForbiddenEvenWithPermission(): void
+    {
+        $this->grantPermission($this->testProfileId, 1, CorePermissions::LANGUAGES_MANAGE);
+        TenantContext::reset();
+        TenantContext::setTenantId(1);
+
+        $request = new Request('GET', '/api/admin/languages');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->adminList($request);
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
     // Helper methods
 
     /**

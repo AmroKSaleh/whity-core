@@ -1545,6 +1545,14 @@ final class CoreApiSchemas
                     422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('GET', '/api/admin/languages', 'languages:manage', [
+                'summary' => 'List every language, including disabled ones (admin, system tenant only)',
+                'tags' => ['languages'],
+                'responses' => [
+                    200 => self::jsonResponse('Every language with its full admin shape', 'LanguageListResponse'),
+                    403 => self::errorResponse('Restricted to the system tenant'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -2272,6 +2280,7 @@ final class CoreApiSchemas
                 'updated_at' => self::str(),
             ], ['id', 'code', 'name', 'enabled', 'created_at', 'updated_at']),
             'LanguageDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Language')),
+            'LanguageListResponse' => self::listEnvelope('Language'),
             'LanguageCreateRequest' => self::object([
                 'code' => self::str(),
                 'name' => self::str(),
