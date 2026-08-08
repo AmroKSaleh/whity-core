@@ -452,6 +452,18 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::AUDIT_READ,
     ];
     $items[] = [
+        'id' => 'errors',
+        'label' => 'Errors',
+        'href' => '/admin/errors',
+        'icon' => 'alert-triangle',
+        'group' => 'admin',
+        'order' => 7,
+        // WC-error-tracking: mirrors GET /api/errors, which is operator-only
+        // (settings:manage + system tenant, enforced in the handler) — so the
+        // nav item gates on the same permission. A tenant admin never sees it.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_MANAGE,
+    ];
+    $items[] = [
         'id' => 'plugins',
         'label' => 'Plugins',
         'href' => '/admin/plugins',
@@ -729,6 +741,42 @@ $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // the encryption key so the mail-settings handler can read + decrypt the
 // out-of-registry encrypted SMTP password.
 $secretStore = \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV);
+
+// WC-error-tracking: UPGRADE the boot-time error tracker now that settings, the
+// secret store and the queue exist.
+//
+// The early construction at the top of this file is env-only on purpose — it has
+// to work before the database is reachable, which is exactly when early-boot
+// failures happen. From here on, an operator's choice in the admin UI takes
+// over: `internal` records into this deployment's own database (no extra
+// infrastructure), `sentry` ships to any Sentry-PROTOCOL backend using the
+// ENCRYPTED DSN. With error tracking disabled this returns to the env behaviour,
+// so a deployment configured purely from the environment is unaffected.
+//
+// Alerts are ENQUEUED, never sent inline: capture runs on the error path, and
+// talking to SMTP there would add latency exactly when the system can least
+// afford it (and a broken mail server would then break error capture too).
+$errorTracker = \Whity\Core\Observability\ErrorTrackerFactory::fromSettings(
+    $db->getPdo(),
+    static fn(string $key): ?string => $globalSettingsRepository->get($key),
+    static fn(string $ciphertext): string => $secretStore->decrypt($ciphertext),
+    $_ENV,
+    static function (int $groupId, string $reason) use ($db): void {
+        try {
+            (new \Whity\Core\Queue\JobRepository($db->getPdo()))->enqueue(
+                0, // system tenant: error tracking is deployment-wide
+                \Whity\Core\Observability\Jobs\NotifyErrorGroupJob::NAME,
+                ['group_id' => $groupId, 'reason' => $reason],
+                // One alert per group per reason, even if two workers capture
+                // the same new error at the same instant.
+                ['idempotency_key' => "error-notify:{$groupId}:{$reason}"]
+            );
+        } catch (\Throwable $e) {
+            // Never let a failed enqueue break the request that errored.
+            error_log('[error-tracking] could not enqueue alert: ' . $e->getMessage());
+        }
+    }
+);
 
 // Payment wall (WC-billing) — registered here (not up with the other middleware)
 // because it depends on $settingsService just constructed above. It is still the
@@ -1157,6 +1205,23 @@ $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlob
 // holding only auth_providers:manage must still see the SSO tab), mirroring
 // /api/navigation's permission-free registration.
 $router->register('GET', '/api/settings/tabs', [$settingsHandler, 'tabs']);
+
+// WC-error-tracking: the built-in error inbox and its write-only DSN. Every
+// route is operator-only (settings:manage + system tenant, enforced in the
+// handler) because error tracking is deployment-wide — it captures errors from
+// every tenant, and errors that belong to no tenant at all.
+$errorsHandler = new \Whity\Api\ErrorsApiHandler(
+    new \Whity\Core\Observability\ErrorGroupRepository($db->getPdo()),
+    $globalSettingsRepository,
+    $secretStore,
+    $roleChecker
+);
+$router->register('GET',   '/api/errors',                      [$errorsHandler, 'list'],   null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('GET',   '/api/errors/{id:\d+}',             [$errorsHandler, 'get'],    null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('PATCH', '/api/errors/{id:\d+}',             [$errorsHandler, 'update'], null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('GET',   '/api/settings/error-tracking',     [$errorsHandler, 'status'], null, null, CorePermissions::SETTINGS_MANAGE);
+// Write-only, like the SMTP password: the DSN is a credential and is never read back.
+$router->register('PUT',   '/api/settings/error-tracking/dsn', [$errorsHandler, 'setDsn'], null, null, CorePermissions::SETTINGS_MANAGE);
 
 // 12. Languages API (WC-i18n). i18n language management and user language preference.
 // GET /api/v1/languages — public endpoint, returns list of available languages (no auth required).

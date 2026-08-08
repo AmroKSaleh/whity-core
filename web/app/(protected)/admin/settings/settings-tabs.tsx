@@ -41,7 +41,8 @@ export type SettingsTabId =
   | 'email-domains'
   | 'storage'
   | 'feature-flags'
-  | 'security';
+  | 'security'
+  | 'error-tracking';
 
 interface SettingsTabsProps {
   active: SettingsTabId;

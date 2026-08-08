@@ -81,6 +81,11 @@ final class SettingsApiHandler
         // exactly: settings:manage AND the system tenant only.
         ['id' => 'feature-flags', 'href' => '/admin/settings/feature-flags', 'label' => 'Feature flags', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
         ['id' => 'security', 'href' => '/admin/settings/security', 'label' => 'Security', 'requiredPermission' => CorePermissions::SECURITY_MANAGE],
+        // Error tracking (WC-error-tracking): operator-level observability —
+        // the error_groups table is instance-wide, not tenant-scoped, and the
+        // DSN is an instance credential. Same gate as Email/Storage:
+        // settings:manage AND the system tenant only.
+        ['id' => 'error-tracking', 'href' => '/admin/settings/error-tracking', 'label' => 'Error tracking', 'requiredPermission' => CorePermissions::SETTINGS_MANAGE, 'systemTenantOnly' => true],
     ];
 
     /**
