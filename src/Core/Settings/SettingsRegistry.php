@@ -457,10 +457,10 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
-        self::ERROR_TRACKING_ENABLED => '0',
+        self::ERROR_TRACKING_ENABLED => 'false',
         self::ERROR_TRACKING_PROVIDER => 'internal',
         self::ERROR_TRACKING_ENVIRONMENT => '',
-        self::ERROR_TRACKING_NOTIFY_ADMINS => '1',
+        self::ERROR_TRACKING_NOTIFY_ADMINS => 'true',
         self::ERROR_TRACKING_RETENTION_DAYS => '90',
     ];
 
