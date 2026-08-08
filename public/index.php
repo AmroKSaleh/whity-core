@@ -573,6 +573,28 @@ $delegationService = new DelegationService($delegationRepository, $baseRoleCheck
 
 $roleChecker = new RoleChecker($db, $permissionRegistry, null, $delegationService);
 
+// 5b. Expose permission RESOLUTION to plugins (WC-712, issue #712).
+//     A route's `requiredPermission` is a flat, one-shot gate: it answers a
+//     single question before the handler runs. A plugin needing a second
+//     decision INSIDE a handler ("may this caller see archived rows?") had no
+//     way to ask the host — plugins receive only a raw PDO — so the only option
+//     was to re-derive the answer in hand-written SQL. Real resolution is not
+//     one join (active-membership gating, OU-ancestor chain, role hierarchy with
+//     cycle/depth guards, live delegations, catalogue validation), so any
+//     re-derivation drifts and the system ends up holding two different answers
+//     to the same authorization question.
+//
+//     Registered under the SDK interface so an out-of-repo plugin can type-hint
+//     it with only whity/plugin-sdk installed, and READ-ONLY (three question
+//     methods; no cache invalidation, no DB handle) so it grants no authority.
+//
+//     It wraps THE SAME delegation-aware $roleChecker the RBAC middleware below
+//     enforces with — passing $baseRoleChecker here instead would make a live
+//     delegation unlock a route-level gate but not a plugin's in-handler check,
+//     reinstating the exact divergence this closes.
+$permissionResolver = new \Whity\Core\RBAC\RoleCheckerPermissionResolver($roleChecker, $permissionRegistry);
+\Whity\register_service(\Whity\Sdk\Rbac\PermissionResolver::class, $permissionResolver); // @phpstan-ignore-line
+
 // 6. Initialize RBAC middleware
 $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
 

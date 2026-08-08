@@ -62,13 +62,20 @@ namespace Whity\Sdk;
  * the {@see \Whity\Sdk\Notification\NotificationMessage} and
  * {@see \Whity\Sdk\Notification\SendResult} value objects — one contract for
  * email/SMS/in-app/push delivery. Core ships the transport registry + a
- * null/log transport; plugins contribute real ones, WC-notifications).
+ * null/log transport; plugins contribute real ones, WC-notifications) →
+ * 1.15 (read-only permission resolution:
+ * {@see \Whity\Sdk\Rbac\PermissionResolver}, the host-registered contract a
+ * plugin resolves from the service container to ask the SAME authorization
+ * question the host's RBAC middleware answers — membership gating, OU-ancestor
+ * inheritance, role hierarchy, live delegations, catalogue validation — instead
+ * of re-deriving it in hand-written SQL and drifting from what is actually
+ * enforced, WC-712).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.14.0';
+    public const VERSION = '1.15.0';
 
     /**
      * Static identity only — never instantiated.
