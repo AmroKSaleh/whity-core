@@ -129,6 +129,51 @@ services:
       - render
     restart: unless-stopped
 
+  # Service-health collector behind the public /status page (WC-status-page).
+  #
+  # In the DEFAULT staging stack, deliberately — unlike the dev compose, where
+  # it is profile-gated so `docker compose up --wait` in the e2e job does not
+  # gate readiness on a long-running loop. Staging is the deployment this
+  # exists for: it lost three days to an outage nobody saw, because the only
+  # thing that could have noticed was the thing that was down. A monitor you
+  # have to remember to enable is a monitor that is off on the day you need it.
+  #
+  # WHITY_PUBLIC_URL must be the PUBLIC origin, not the internal service name:
+  # probing http://frankenphp would exercise only the app container and miss
+  # exactly what broke last time — the web tier and the Cloudflare tunnel in
+  # front of it. Falls back to the local mapping so a bare `up` still collects
+  # something rather than silently probing nothing.
+  health-watch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: whity_staging_health_watch
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+      WHITY_PUBLIC_URL: ${WHITY_PUBLIC_URL:-http://localhost:${APP_PORT_HOST:-8100}}
+      WHITY_RENDER_URL: ${RENDER_SERVICE_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        echo "[health-watch] service-health collector started";
+        php public/index.php health:watch --interval=60 || echo "[health-watch] exited (code $$?); restarting";
+
 volumes:
   # Distinct named volume so staging data never mixes with the dev demo's.
   postgres_data_staging:

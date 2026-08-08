@@ -220,8 +220,16 @@ services:
   # NOT a substitute for an off-host check: if the host or Docker dies, so does
   # this. Pair it with a Cloudflare health check against the public URL.
   #
-  # Not in a profile: a monitor you have to remember to enable is a monitor that
-  # is off on the day you need it.
+  # Profile-gated HERE ONLY, for the same reason `cron`/`queue`/`scheduler` are:
+  # `docker compose up --wait` (the e2e job) errors on a long-running loop
+  # service whether it carries the base image's HTTP healthcheck (reports
+  # "unhealthy") or none at all ("no healthcheck configured"). This file is the
+  # dev/e2e stack, where a status collector has nothing to watch anyway.
+  #
+  # Where it MATTERS it is NOT opt-in: docker-compose.staging.yml runs it in the
+  # default stack, because a monitor you have to remember to enable is a monitor
+  # that is off on the day you need it — which is exactly how this deployment
+  # lost three days.
   health-watch:
     image: whity-core:dev
     environment:
@@ -246,6 +254,8 @@ services:
     volumes:
       - .:/app
     working_dir: /app
+    profiles:
+      - health
     restart: unless-stopped
     command:
       - sh
