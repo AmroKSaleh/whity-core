@@ -14,6 +14,7 @@ use Whity\Core\Tenant\TenantContext;
 use Psr\Log\LoggerInterface;
 use Composer\Semver\Semver;
 use Whity\Sdk\Frontend\Blocks\BlockValidator;
+use Whity\Sdk\Hooks\HookVetoException;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Mcp\Prompts\Prompt;
@@ -3162,6 +3163,19 @@ class PluginLoader
      * continues. On error the original data is returned unchanged so the failing
      * listener cannot corrupt the pipeline.
      *
+     * ONE exception crosses the boundary: {@see HookVetoException} (WC-713).
+     * The isolation above is what makes a broken plugin survivable, but it also
+     * meant a plugin could never say "do not do this" — its objection was logged
+     * and the host carried on regardless. That is exactly wrong for the
+     * `*.deleting` / `*.deleted` cleanup hooks, where the plugin owns rows the
+     * core knows nothing about and has no foreign key to protect them. So a veto
+     * is re-thrown for the dispatching handler to act on (it rolls the delete
+     * back and answers 409), while every other Throwable stays isolated as
+     * before. The lifecycle error counter is deliberately NOT ticked for a veto:
+     * it is a deliberate, correct signal from a HEALTHY plugin, not a fault, and
+     * counting it would trip the 3-strikes breaker and disable a plugin for
+     * doing its job.
+     *
      * @param string $pluginKey The plugin's stable identity (original FQCN).
      * @param callable $callback The raw hook callback.
      * @return callable(array<mixed>, array<mixed>): array<mixed>
@@ -3179,11 +3193,49 @@ class PluginLoader
                 $result = $callback($data, $context);
                 $lifecycle?->recordSuccess();
                 return is_array($result) ? $result : $data;
+            } catch (HookVetoException $e) {
+                // A successful, intentional objection — the plugin ran fine.
+                $lifecycle?->recordSuccess();
+                $this->logVeto($pluginKey, $e);
+                throw $e;
             } catch (Throwable $e) {
                 $this->handlePluginThrowable($pluginKey, $e, 'hook callback');
                 return $data;
             }
         };
+    }
+
+    /**
+     * Record a plugin's deliberate veto (WC-713).
+     *
+     * Logged at INFO, not ERROR: nothing malfunctioned — a plugin exercised the
+     * one sanctioned way to stop a core operation, and the dispatching handler
+     * turns it into a clean 409. It is still worth a line, because "why did that
+     * delete refuse?" is otherwise invisible to an operator.
+     *
+     * @param string $pluginKey The plugin's stable identity (original FQCN).
+     * @param HookVetoException $e The veto raised by the plugin.
+     * @return void
+     */
+    private function logVeto(string $pluginKey, HookVetoException $e): void
+    {
+        $message = sprintf(
+            'Plugin "%s" vetoed "%s": %s',
+            $pluginKey,
+            $e->eventName(),
+            $e->reason()
+        );
+
+        if ($this->logger !== null) {
+            $this->logger->info($message, [
+                'plugin' => $pluginKey,
+                'event' => $e->eventName(),
+                'reason' => $e->reason(),
+                'tenant_id' => TenantContext::getTenantId(),
+            ]);
+        } else {
+            error_log($message);
+        }
     }
 
     /**

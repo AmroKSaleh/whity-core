@@ -13,6 +13,7 @@ use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Sdk\Hooks\HookVetoException;
 use PDO;
 
 /**
@@ -433,26 +434,76 @@ class OusApiHandler
                 );
             }
 
-            // Dispatch filter hook before deleting OU
-            $this->hookManager->dispatch('ou.deleting', [
-                'id' => (int)$id,
-            ]);
+            // WC-713: the `ou.deleting` hook, the DELETE, and the `ou.deleted`
+            // hook run inside ONE transaction. Previously the DELETE committed on
+            // its own and the cleanup hook fired afterwards, so a listener that
+            // failed left the caller with a 500 AND a committed delete — with no
+            // way to veto or undo it. Core tables survive that because they carry
+            // real ON DELETE CASCADE constraints; a PLUGIN's tables have no FK to
+            // organizational_units, so this hook is the only cleanup mechanism
+            // they have and it must be atomic with the row it is cleaning up
+            // after.
+            $ownTransaction = !$this->db->inTransaction();
+            if ($ownTransaction) {
+                $this->db->beginTransaction();
+            }
 
-            // Delete OU
-            $deleteStmt = $this->db->prepare('DELETE FROM organizational_units WHERE id = ? AND tenant_id = ?');
-            $deleteStmt->execute([$id, $tenantId]);
+            try {
+                // Filter hook BEFORE the delete — the row is still readable here,
+                // so this is where a listener reads whatever it needs. It is also
+                // the veto point: HookVetoException aborts with nothing written.
+                $this->hookManager->dispatch('ou.deleting', [
+                    'id' => (int)$id,
+                ]);
 
-            // Dispatch synchronous hook after OU is deleted
-            $this->hookManager->dispatch('ou.deleted', [
-                'id' => (int)$id,
-            ]);
+                // Delete OU
+                $deleteStmt = $this->db->prepare('DELETE FROM organizational_units WHERE id = ? AND tenant_id = ?');
+                $deleteStmt->execute([$id, $tenantId]);
 
-            // Dispatch asynchronous hook for background tasks
+                // Synchronous cleanup hook, still INSIDE the transaction: a
+                // listener that throws takes the delete down with it instead of
+                // orphaning its own rows against a row that is already gone.
+                $this->hookManager->dispatch('ou.deleted', [
+                    'id' => (int)$id,
+                ]);
+
+                if ($ownTransaction) {
+                    $this->db->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownTransaction && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                throw $e;
+            }
+
+            // Durable/async notification only AFTER the delete has COMMITTED, so
+            // the event spine can never announce a deletion that rolled back.
+            // (Deliberately outside the transaction: dispatchAsync is non-critical
+            // by contract — see HookManager — and a failure to persist the event
+            // must not undo an otherwise-successful delete.)
             $this->hookManager->dispatchAsync('ou.deleted.async', [
                 'id' => (int)$id,
             ]);
 
             return Response::json([], 204);
+        } catch (HookVetoException $e) {
+            // A plugin refused the deletion (or its cleanup failed). The
+            // transaction above already rolled back, so the OU still exists —
+            // 409 Conflict, matching the child/member guards. `reason()` is the
+            // plugin's own client-safe text; the raw exception message is never
+            // surfaced (WC-186).
+            error_log(sprintf(
+                '[ous] delete vetoed by a hook listener: tenant_id=%s ou_id=%s event=%s',
+                var_export(TenantContext::getTenantId(), true),
+                var_export($params['id'] ?? null, true),
+                $e->eventName()
+            ));
+            return Response::error(
+                'Cannot delete organizational unit: blocked by an installed plugin',
+                409,
+                ['reason' => $e->reason()]
+            );
         } catch (\Exception $e) {
             error_log('[OusApiHandler] delete failed: ' . $e->getMessage());
             return Response::error('Failed to delete organizational unit', 500);

@@ -13,6 +13,7 @@ use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Sdk\Hooks\HookVetoException;
 use PDO;
 
 /**
@@ -520,28 +521,52 @@ class RolesApiHandler
                 return Response::error('Cannot delete role with active user assignments', 409);
             }
 
-            // Filter hook before delete.
-            $this->hookManager->dispatch('role.deleting', [
-                'id' => (int)$id,
-                'tenant_id' => $tenantId,
-            ]);
+            // WC-713: the `role.deleting` hook, both DELETEs, and the
+            // `role.deleted` hook run inside ONE transaction — see the same
+            // comment on OusApiHandler::delete(). Here it also makes the two
+            // statements below atomic with each other, which they previously
+            // were not: a failure between them left the role's permission grants
+            // deleted but the role itself intact.
+            $ownTransaction = !$this->db->inTransaction();
+            if ($ownTransaction) {
+                $this->db->beginTransaction();
+            }
 
-            // Remove permission grants, then the role itself.
-            // WC-190: every one of these mutating statements carries its own
-            // tenant predicate (scoped via the owning role for the junction
-            // tables and on roles itself), so a cross-tenant id can never delete
-            // another tenant's rows even if the guard SELECT above were bypassed
-            // (defense in depth / TOCTOU).
-            $this->deleteRolePermissionsScoped((int)$id, $tenantId);
-            $this->deleteRoleScoped((int)$id, $tenantId);
+            try {
+                // Filter hook BEFORE the delete — the role and its grants are
+                // still readable here; also the veto point.
+                $this->hookManager->dispatch('role.deleting', [
+                    'id' => (int)$id,
+                    'tenant_id' => $tenantId,
+                ]);
 
-            // Synchronous post-delete hook.
-            $this->hookManager->dispatch('role.deleted', [
-                'id' => (int)$id,
-                'tenant_id' => $tenantId,
-            ]);
+                // Remove permission grants, then the role itself.
+                // WC-190: every one of these mutating statements carries its own
+                // tenant predicate (scoped via the owning role for the junction
+                // tables and on roles itself), so a cross-tenant id can never delete
+                // another tenant's rows even if the guard SELECT above were bypassed
+                // (defense in depth / TOCTOU).
+                $this->deleteRolePermissionsScoped((int)$id, $tenantId);
+                $this->deleteRoleScoped((int)$id, $tenantId);
 
-            // Asynchronous post-delete hook for background tasks.
+                // Synchronous cleanup hook, still INSIDE the transaction: a
+                // listener that throws takes the delete down with it.
+                $this->hookManager->dispatch('role.deleted', [
+                    'id' => (int)$id,
+                    'tenant_id' => $tenantId,
+                ]);
+
+                if ($ownTransaction) {
+                    $this->db->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownTransaction && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                throw $e;
+            }
+
+            // Asynchronous post-delete hook, only AFTER the delete has COMMITTED.
             $this->hookManager->dispatchAsync('role.deleted.async', [
                 'id' => (int)$id,
                 'tenant_id' => $tenantId,
@@ -549,6 +574,8 @@ class RolesApiHandler
 
             // Removing a role alters the hierarchy and effective permission sets;
             // invalidate the worker-level cache so checks reflect the deletion.
+            // Only reached on a COMMITTED delete — a rolled-back one leaves the
+            // cached sets correct, so clearing them there would be pure churn.
             RoleChecker::clearCache();
 
             $this->log('info', 'Role deleted', [
@@ -558,6 +585,22 @@ class RolesApiHandler
             ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Role deleted']], 200);
+        } catch (HookVetoException $e) {
+            // A plugin refused the deletion (or its cleanup failed); the
+            // transaction rolled back, so the role still exists. 409 matches the
+            // active-assignments guard above. `reason()` is the plugin's own
+            // client-safe text — the raw exception message never leaks (WC-186).
+            $this->log('info', 'Role deletion vetoed by a hook listener', [
+                'event' => 'roles.delete_vetoed',
+                'tenant_id' => TenantContext::getTenantId(),
+                'role_id' => (int)($params['id'] ?? 0),
+                'hook_event' => $e->eventName(),
+            ]);
+            return Response::error(
+                'Cannot delete role: blocked by an installed plugin',
+                409,
+                ['reason' => $e->reason()]
+            );
         } catch (\Exception $e) {
             $this->log('error', 'Failed to delete role', [
                 'event' => 'roles.error',
