@@ -25,6 +25,8 @@ use Whity\Http\JsonBody;
  *  - GET /api/v1/settings/language — authenticated, returns user's language preference
  *    and list of available languages
  *  - PATCH /api/v1/settings/language — authenticated, updates user's language preference
+ *  - GET /api/v1/admin/languages — admin: every language INCLUDING disabled
+ *    ones, with id + enabled status (languages:manage, SYSTEM TENANT ONLY)
  *  - POST /api/v1/languages — admin: create a language (languages:manage, SYSTEM
  *    TENANT ONLY — see the class docblock on {@see self::authorizeManage()})
  *  - PATCH /api/v1/languages/{id} — admin: update a language's name and/or
@@ -88,6 +90,39 @@ final class LanguagesApiHandler
             return Response::json(['languages' => array_values($data)], 200);
         } catch (\Throwable $e) {
             error_log('[LanguagesApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch languages', 500);
+        }
+    }
+
+    /**
+     * GET /api/v1/admin/languages — admin: every language, INCLUDING disabled
+     * ones, with the full admin shape (id, code, name, enabled, timestamps).
+     *
+     * SYSTEM TENANT ONLY (see class docblock). The public {@see self::list()}
+     * intentionally omits `id`/disabled rows (it drives the end-user language
+     * switcher); the admin management page needs both to render a toggle and
+     * target a PATCH by id.
+     *
+     * Response: `{ data: [ { id, code, name, enabled, created_at, updated_at }, ... ] }`.
+     */
+    public function adminList(Request $request): Response
+    {
+        $auth = $this->authorizeManage($request);
+        if ($auth instanceof Response) {
+            return $auth;
+        }
+
+        try {
+            $languages = $this->languageRepository->findAll();
+
+            return Response::json([
+                'data' => array_values(array_map(
+                    static fn (Language $language): array => self::languagePayload($language),
+                    $languages
+                )),
+            ], 200);
+        } catch (\Throwable $e) {
+            error_log('[LanguagesApiHandler] adminList failed: ' . $e->getMessage());
             return Response::error('Failed to fetch languages', 500);
         }
     }

@@ -562,6 +562,35 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::MCP_TOKENS_MANAGE,
     ];
     $items[] = [
+        'id' => 'languages',
+        'label' => 'Languages',
+        'href' => '/admin/languages',
+        'icon' => 'language',
+        'group' => 'admin',
+        'order' => 9.6,
+        // WC-583: languages are a GLOBAL catalogue (no tenant_id column at
+        // all) — create/update/enable/disable is a SYSTEM-TENANT-ONLY
+        // PLATFORM capability (mirrors the Feature Flags/Email/Storage
+        // settings tabs), so the nav item itself is hidden from every other
+        // tenant rather than 403ing on click.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::LANGUAGES_MANAGE,
+        'systemTenantOnly' => true,
+    ];
+    $items[] = [
+        'id' => 'translations',
+        'label' => 'Translations',
+        'href' => '/admin/translations',
+        'icon' => 'world',
+        'group' => 'admin',
+        'order' => 9.7,
+        // WC-583: translation rows ARE tenant-scoped (system default vs a
+        // tenant's own override) — unlike Languages above, every tenant
+        // holding translations:manage may reach this page to edit its own
+        // overrides; the page itself branches on the caller's tenant (system
+        // vs regular) for which column is editable.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TRANSLATIONS_MANAGE,
+    ];
+    $items[] = [
         'id' => 'settings',
         'label' => 'Settings',
         'href' => '/settings',
@@ -1257,6 +1286,9 @@ $router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchL
 // class docblock).
 $router->register('POST',  '/api/languages',        [$languagesHandler, 'create'], null, null, CorePermissions::LANGUAGES_MANAGE);
 $router->register('PATCH', '/api/languages/{id:\d+}', [$languagesHandler, 'update'], null, null, CorePermissions::LANGUAGES_MANAGE);
+// Admin listing (id + disabled languages included) for the languages
+// management page — the public list above deliberately omits both.
+$router->register('GET', '/api/admin/languages', [$languagesHandler, 'adminList'], null, null, CorePermissions::LANGUAGES_MANAGE);
 
 // Translations API handler — GET /api/translations/{language_code}/{domain} is
 // a public endpoint for fetching translated strings before a session exists
