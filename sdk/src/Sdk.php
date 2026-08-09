@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.15).
+ * SDK identity (v1.16).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -68,13 +68,20 @@ namespace Whity\Sdk;
  * host now running `*.deleting` → DELETE → `*.deleted` inside one transaction
  * for tenants/OUs/roles, this lets a plugin refuse a deletion — or fail its own
  * cleanup — and have the deletion rolled back rather than silently committed,
- * WC-713).
+ * WC-713) →
+ * 1.16 (read-only permission resolution:
+ * {@see \Whity\Sdk\Rbac\PermissionResolver}, the host-registered contract a
+ * plugin resolves from the service container to ask the SAME authorization
+ * question the host's RBAC middleware answers — membership gating, OU-ancestor
+ * inheritance, role hierarchy, live delegations, catalogue validation — instead
+ * of re-deriving it in hand-written SQL and drifting from what is actually
+ * enforced, WC-712).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.15.0';
+    public const VERSION = '1.16.0';
 
     /**
      * Static identity only — never instantiated.

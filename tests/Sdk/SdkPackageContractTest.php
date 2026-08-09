@@ -166,9 +166,13 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.15.0',
+            '1.16.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.15 adds the hook VETO contract (HookVetoException — the one '
+            'SDK 1.16 adds the read-only permission-resolution contract '
+            . '(Rbac\PermissionResolver, WC-712) so a plugin asks the host the same '
+            . 'authorization question the RBAC middleware answers instead of '
+            . 're-deriving it in hand-written SQL; '
+            . 'SDK 1.15 adds the hook VETO contract (HookVetoException — the one '
             . 'Throwable the host error boundary re-throws, so a plugin can refuse '
             . 'a deletion and have it rolled back, WC-713); '
             . '1.14 adds the notification transport contract (NotificationTransport '
@@ -183,6 +187,39 @@ final class SdkPackageContractTest extends TestCase
             . '(PluginMcpInterface, WC-7abb732f); 1.8 added interactive block types '
             . '(form, inputs, submitButton, actionButton) and the '
             . 'inputName/selectOptions/submitSpec prop-rule kinds (WC-233)'
+        );
+    }
+
+    /**
+     * SDK 1.15 (WC-712): the read-only permission-resolution contract. It must
+     * live in the SDK — not in core — so an out-of-repo plugin, which depends on
+     * whity/plugin-sdk alone, can type-hint the service it resolves from the
+     * host container.
+     */
+    public function testPermissionResolverContractLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\Rbac\PermissionResolver::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Rbac\PermissionResolver::class))->getMethods()
+        );
+        sort($methods);
+
+        // Read-only by construction: three questions, and deliberately no
+        // cache-invalidation or database surface (which is why the host
+        // registers a narrow facade rather than RoleChecker itself).
+        $this->assertSame(['effectivePermissions', 'hasPermission', 'hasRole'], $methods);
+
+        $this->assertSame(
+            'bool',
+            (string) (new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, 'hasPermission'))
+                ->getReturnType()
+        );
+        $this->assertSame(
+            'array',
+            (string) (new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, 'effectivePermissions'))
+                ->getReturnType()
         );
     }
 

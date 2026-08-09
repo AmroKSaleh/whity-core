@@ -247,6 +247,51 @@ Declared permissions are recorded in the `PermissionRegistry` under your plugin
 name as the source. An administrator then assigns them to roles
 (see [PERMISSION_SYSTEM.md](./PERMISSION_SYSTEM.md) for the assignment flow).
 
+#### Checking a permission INSIDE a handler (SDK 1.16)
+
+A route's `requiredPermission` is a flat gate: one question, answered once,
+before your handler runs. When you need a second decision *inside* the handler —
+"may this caller see archived rows?", "may they act on **this** record?" — ask
+the host. Do **not** re-derive it in SQL: real resolution gates on active
+membership, walks the OU ancestor chain and the role hierarchy, unions live
+delegations, and validates the slug against the registry, so any hand-rolled
+version drifts from what is actually enforced and your plugin ends up
+disagreeing with the platform about the same caller.
+
+Resolve the host's read-only resolver from the service container:
+
+```php
+use Whity\Sdk\Rbac\PermissionResolver;
+
+public function archive(Request $request, array $params = []): Response
+{
+    $tenantId = TenantContext::getTenantId();
+    $actor    = $request->user;
+    $profileId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+        ? $actor->profile_id
+        : null;
+
+    if ($tenantId === null || $profileId === null) {
+        return Response::error('Authentication required', 403); // fail closed
+    }
+
+    $rbac = \Whity\app(PermissionResolver::class);
+    if (!$rbac->hasPermission($profileId, $tenantId, 'hello:manage')) {
+        return Response::error('Insufficient permissions', 403);
+    }
+
+    // …
+}
+```
+
+`hasRole()` and `effectivePermissions()` are also available;
+`effectivePermissions()` is exactly the set `hasPermission()` returns `true` for,
+so filtering a result set in one pass can never disagree with a per-row check.
+The contract is read-only — no cache invalidation, no database handle — and it
+grants no authority your plugin does not already have. `\Whity\app()` throws a
+`RuntimeException` if the host never registered a resolver, so an unwired host
+fails closed rather than silently allowing.
+
 ### Hooks
 
 `getHooks()` maps an **event name** to a subscription. A subscription may be:
