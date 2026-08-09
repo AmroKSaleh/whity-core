@@ -185,11 +185,11 @@ if (!$roleChecker->hasPermission($request->user->user_id, 'reports:read', $tenan
 }
 ```
 
-## In-handler resolution for plugins (`PermissionResolver`, SDK 1.15)
+## In-handler resolution for plugins (`PermissionResolver`, SDK 1.16)
 
 The route-level gate is **flat**: it answers one question, once, before the handler runs. A handler that needs a *second* decision — "may this caller see the archived rows?", "may they act on **this** record?" — needs resolution, not a gate.
 
-Core handlers get `RoleChecker` injected directly. Plugins do not: they receive only a raw `\PDO`, so before SDK 1.15 the only option was to re-derive the answer in hand-written SQL. **That is a security defect, not merely duplication.** Real resolution is not one join — it gates on ACTIVE membership, walks the OU ancestor chain, walks the role hierarchy with cycle/depth guards, unions live (non-revoked, OU-scoped) delegations, and validates the slug against the registry. Any partial re-implementation drifts from what the middleware enforces, and the system then holds **two different answers to the same authorization question**.
+Core handlers get `RoleChecker` injected directly. Plugins do not: they receive only a raw `\PDO`, so before SDK 1.16 the only option was to re-derive the answer in hand-written SQL. **That is a security defect, not merely duplication.** Real resolution is not one join — it gates on ACTIVE membership, walks the OU ancestor chain, walks the role hierarchy with cycle/depth guards, unions live (non-revoked, OU-scoped) delegations, and validates the slug against the registry. Any partial re-implementation drifts from what the middleware enforces, and the system then holds **two different answers to the same authorization question**.
 
 The host therefore registers a narrow, read-only resolver in the service container under the SDK interface name:
 
@@ -330,5 +330,5 @@ Because step 1 of `hasPermission()` consults the registry, removing a plugin ins
 - `RbacMiddleware` enforces route requirements against the authoritative store and never trusts JWT role/permission claims.
 - `RolesApiHandler` is tenant-scoped via `roles.tenant_id` (NULL = global), and accepts permission ids or names.
 - **Delegation** (WC-34) lets a role-holder grant a SUBSET of their own effective permissions to a role or user, tenant/OU-scoped and revocable. The HARD invariant — you can never delegate a permission you do not hold — is enforced server-side in `DelegationService`, and live delegations enter `hasPermission()` resolution through the `DelegatedPermissionResolver` wired into `RoleChecker`.
-- **Plugins resolve through the host**, not through their own SQL: `\Whity\app(\Whity\Sdk\Rbac\PermissionResolver::class)` returns a read-only facade over the same delegation-aware `RoleChecker` the middleware enforces with (SDK 1.15, WC-712).
+- **Plugins resolve through the host**, not through their own SQL: `\Whity\app(\Whity\Sdk\Rbac\PermissionResolver::class)` returns a read-only facade over the same delegation-aware `RoleChecker` the middleware enforces with (SDK 1.16, WC-712).
 </content>

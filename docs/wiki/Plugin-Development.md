@@ -247,7 +247,7 @@ Declared permissions are recorded in the `PermissionRegistry` under your plugin
 name as the source. An administrator then assigns them to roles
 (see [PERMISSION_SYSTEM.md](./PERMISSION_SYSTEM.md) for the assignment flow).
 
-#### Checking a permission INSIDE a handler (SDK 1.15)
+#### Checking a permission INSIDE a handler (SDK 1.16)
 
 A route's `requiredPermission` is a flat gate: one question, answered once,
 before your handler runs. When you need a second decision *inside* the handler —

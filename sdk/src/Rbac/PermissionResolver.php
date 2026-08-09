@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk\Rbac;
 
 /**
- * Read-only access to the host's AUTHORITATIVE permission resolution (SDK 1.15).
+ * Read-only access to the host's AUTHORITATIVE permission resolution (SDK 1.16).
  *
  * Why this exists
  * ---------------
