@@ -38,46 +38,25 @@ import {
 } from '@/lib/documents/blocks';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
-import { Input } from '@amroksaleh/ui/input';
-import { Switch } from '@amroksaleh/ui/switch';
+import { PX_PER_MM } from '@/lib/documents/types';
 import {
-  IconDeviceFloppy,
-  IconFileText,
-  IconDownload,
-  IconUpload,
-  IconPrinter,
-  IconEye,
-  IconEyeOff,
-  IconCopy,
-  IconClipboardCopy,
-  IconClipboard,
-  IconScissors,
-  IconZoomIn,
-  IconZoomOut,
-  IconArrowBackUp,
-  IconArrowForwardUp,
   IconPlus,
   IconTrash,
   IconChevronLeft,
   IconChevronRight,
   IconFiles,
-  IconComponents,
-  IconLayoutAlignLeft,
-  IconLayoutAlignCenter,
-  IconLayoutAlignRight,
-  IconLayoutAlignTop,
-  IconLayoutAlignMiddle,
-  IconLayoutAlignBottom,
-  IconArrowsHorizontal,
-  IconArrowsVertical,
+  IconLayoutSidebarRightExpand,
 } from '@tabler/icons-react';
 import { Canvas } from './canvas';
-import { Palette } from './palette';
-import { Inspector } from './inspector';
+import { SideRail, type RailTab } from './side-rail';
 import { PrintDocument } from './print-document';
+import { EditorTopBar, ShortcutsDialog, useModLabel } from './editor-top-bar';
+import type { EditorCommandContext, ZoomAction } from './editor-commands';
 
-const SELECT_CLASS =
-  'h-7 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30';
+/** Zoom bounds + step for the View menu / toolbar zoom controls. */
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 3;
+const ZOOM_STEP = 0.25;
 
 /** Immutably replace the elements of one page within a template. */
 function withPageElements(
@@ -88,8 +67,9 @@ function withPageElements(
   return { ...t, pages: t.pages.map((p, i) => (i === idx ? { ...p, elements: fn(p.elements) } : p)) };
 }
 
-export function DocumentDesigner() {
+export function DocumentDesigner({ onClose }: { onClose?: () => void } = {}) {
   const { addToast } = useToast();
+  const modLabel = useModLabel();
   const [template, setTemplate] = useState<DocTemplate>(() => blankTemplate());
   const [currentPage, setCurrentPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -100,7 +80,23 @@ export function DocumentDesigner() {
   const [showRulers, setShowRulers] = useState(false);
   const [saved, setSaved] = useState<SavedTemplate[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
+  /**
+   * Bumped every time the editor swaps to a different document (New, Open
+   * saved, Import). In-flight async work started against the previous document
+   * compares this to decide whether its result still applies.
+   */
+  const docEpoch = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Which Inspector tab is showing. Owned here (not by the Inspector) so the
+  // menu bar can open a specific one — Page setup…, Placeholders…, Batch….
+  // The single side rail: which tab it shows, and whether it's showing at all.
+  // Collapsing it gives the page the full window — the reason there is only one
+  // rail in the first place (see `side-rail.tsx`).
+  const [railTab, setRailTab] = useState<RailTab>('layers');
+  const [railOpen, setRailOpen] = useState(true);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // The canvas scroll viewport, measured by View ▸ Fit page in window.
+  const viewportRef = useRef<HTMLElement>(null);
 
   // Undo/redo: full-template snapshots. Consecutive same-kind edits (a drag, a
   // burst of typing) coalesce into one step via `commit` (see below).
@@ -312,9 +308,31 @@ export function DocumentDesigner() {
     appendClones(sel);
   }, [commit, appendClones, currentSelection]);
 
+  /**
+   * Delete the selection. Locked elements are skipped (unlock them from the
+   * layers panel or Format ▸ Unlock first) — the ONE implementation shared by
+   * the Delete key and Edit ▸ Delete, so the two can never diverge on that rule.
+   */
+  const deleteSelection = useCallback(() => {
+    const idx = kbRef.current.pageIndex;
+    const movable = currentSelection().filter((e) => !e.locked);
+    if (movable.length === 0) return;
+    const ids = new Set(movable.map((e) => e.id));
+    commit('delete');
+    setTemplate((t) => withPageElements(t, idx, (els) => els.filter((e) => !ids.has(e.id))));
+    setSelectedIds((prev) => prev.filter((id) => !ids.has(id)));
+  }, [commit, currentSelection]);
+
+  const selectAllOnPage = useCallback(() => {
+    const { template: tpl, pageIndex: idx } = kbRef.current;
+    setSelectedIds((tpl.pages[idx]?.elements ?? []).map((e) => e.id));
+  }, []);
+
   // Keyboard: Ctrl/Cmd+Z undo, Ctrl/Cmd+Shift+Z or Ctrl+Y redo (work without a
   // selection); Delete removes, arrows nudge (Shift = 5mm), Escape deselects.
-  // Ignored while typing in a form field (native undo there).
+  // Ignored while typing in a form field (native undo there), and while an open
+  // menu or dialog owns the keyboard — otherwise Escape-to-close-the-menu would
+  // also silently clear the canvas selection the menu was about to act on.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -322,6 +340,9 @@ export function DocumentDesigner() {
         target &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
       ) {
+        return;
+      }
+      if (target?.closest('[role="menu"],[role="dialog"]')) {
         return;
       }
       const mod = e.ctrlKey || e.metaKey;
@@ -358,6 +379,11 @@ export function DocumentDesigner() {
           duplicateSelected();
           return;
         }
+        if (e.key === 'a' || e.key === 'A') {
+          e.preventDefault();
+          selectAllOnPage();
+          return;
+        }
       }
       const { selectedIds: ids, preview: pv, template: tpl, pageIndex: idx } = kbRef.current;
       const els = tpl.pages[idx]?.elements ?? [];
@@ -373,9 +399,7 @@ export function DocumentDesigner() {
       const movableIds = new Set(movable.map((x) => x.id));
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
-        commit('delete');
-        setTemplate((t) => withPageElements(t, idx, (e2) => e2.filter((x) => !movableIds.has(x.id))));
-        setSelectedIds([]);
+        deleteSelection();
         return;
       }
       const step = e.shiftKey ? 5 : 1;
@@ -398,7 +422,17 @@ export function DocumentDesigner() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, commit, copySelected, cutSelected, pasteClipboard, duplicateSelected]);
+  }, [
+    undo,
+    redo,
+    commit,
+    copySelected,
+    cutSelected,
+    pasteClipboard,
+    duplicateSelected,
+    deleteSelection,
+    selectAllOnPage,
+  ]);
 
   const data = useMemo(() => sampleDataOf(template), [template]);
 
@@ -447,6 +481,12 @@ export function DocumentDesigner() {
       setSelectedIds([el.id]);
       return withPageElements(t, pageIndex, (els) => [...els, el]);
     });
+    // Inserting is "I made this, now let me configure it": show the new
+    // element's properties instead of leaving the rail on Layers, where a fresh
+    // text box can't even be typed into. Only on INSERT — a plain selection
+    // change must not yank the tab away from someone reordering layers.
+    setRailTab('element');
+    setRailOpen(true);
   };
 
   const deleteElement = (id: string) => {
@@ -560,6 +600,67 @@ export function DocumentDesigner() {
         return els.map((e) => (e.id === id ? { ...e, z: target } : e));
       })
     );
+  };
+
+  // ── selection-wide variants of the per-element layer actions ──────────────
+  // The layers panel toggles ONE element; Format ▸ Lock / Hide act on the whole
+  // selection. Both flip to the same target value (derived below) so a mixed
+  // selection converges instead of each element independently inverting.
+  const selectionElements = elements.filter((e) => selectedIds.includes(e.id));
+  const selectionLocked = selectionElements.length > 0 && selectionElements.every((e) => e.locked);
+  const selectionHidden = selectionElements.length > 0 && selectionElements.every((e) => e.hidden);
+
+  const setSelectionFlag = (key: 'locked' | 'hidden', value: boolean) => {
+    const ids = new Set(selectedIds);
+    if (ids.size === 0) return;
+    commit(key);
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) =>
+        els.map((e) => (ids.has(e.id) ? ({ ...e, [key]: value } as DocElement) : e))
+      )
+    );
+  };
+
+  /** Move the whole selection to the front or back, preserving its internal
+   *  stacking order (so a group keeps looking the same after arranging). */
+  const arrangeSelection = (dir: 'up' | 'down') => {
+    const ids = new Set(selectedIds);
+    if (ids.size === 0) return;
+    commit('reorder');
+    setTemplate((t) =>
+      withPageElements(t, pageIndex, (els) => {
+        const moving = els.filter((e) => ids.has(e.id)).sort((a, b) => a.z - b.z);
+        if (moving.length === 0) return els;
+        const zs = els.map((e) => e.z);
+        const base = dir === 'up' ? Math.max(...zs) + 1 : Math.min(...zs) - moving.length;
+        const rank = new Map(moving.map((e, i) => [e.id, base + i]));
+        return els.map((e) => (rank.has(e.id) ? { ...e, z: rank.get(e.id)! } : e));
+      })
+    );
+  };
+
+  const clampZoom = (z: number) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Number(z.toFixed(2))));
+
+  const doZoom = (action: ZoomAction) => {
+    if (action === 'reset') {
+      setZoom(1);
+      return;
+    }
+    if (action === 'fit') {
+      // Measure the real scroll viewport rather than the window: the rails and
+      // chrome take a variable slice of it, so only its own box knows what will
+      // actually fit. Subtract its padding (p-6 → 24px each side).
+      const vp = viewportRef.current;
+      if (!vp) return;
+      const availW = vp.clientWidth - 48;
+      const availH = vp.clientHeight - 48;
+      const pageW = template.page.widthMm * PX_PER_MM;
+      const pageH = template.page.heightMm * PX_PER_MM;
+      if (pageW <= 0 || pageH <= 0 || availW <= 0 || availH <= 0) return;
+      setZoom(clampZoom(Math.min(availW / pageW, availH / pageH)));
+      return;
+    }
+    setZoom((z) => clampZoom(action === 'in' ? z + ZOOM_STEP : z - ZOOM_STEP));
   };
 
   // ── reusable blocks ───────────────────────────────────────────────────────
@@ -772,9 +873,18 @@ export function DocumentDesigner() {
   const withSettings = (t: DocTemplate): DocTemplate => ({ ...t, sheet, sequence });
 
   const doSave = async () => {
+    // Which document this save belongs to. If the editor moves on to a
+    // DIFFERENT document while the request is in flight (New, Open saved,
+    // Import), binding the returned id afterwards would leave that new document
+    // secretly pointing at the row we just wrote — and the next Save would
+    // overwrite the saved template with it.
+    const epoch = docEpoch.current;
     try {
       const id = await saveTemplate(withSettings(template), currentId ?? undefined);
-      setCurrentId(id);
+      const stillSameDoc = docEpoch.current === epoch;
+      if (stillSameDoc) {
+        setCurrentId(id);
+      }
       setSaved(await listSaved());
       addToast('Template saved.', 'success');
     } catch (error) {
@@ -787,6 +897,7 @@ export function DocumentDesigner() {
     // it is kept current by the mount effect and every save/delete below.
     const entry = saved.find((s) => s.id === id);
     if (!entry) return;
+    docEpoch.current += 1;
     setTemplate(entry.data);
     setSheet(entry.data.sheet ?? DEFAULT_SHEET);
     setSequence(entry.data.sequence ?? DEFAULT_SEQUENCE);
@@ -813,6 +924,7 @@ export function DocumentDesigner() {
 
   // Load a fresh document (blank or a starter), resetting all editor state.
   const loadFreshTemplate = (t: DocTemplate) => {
+    docEpoch.current += 1;
     setTemplate(t);
     setSheet(t.sheet ?? DEFAULT_SHEET);
     setSequence(t.sequence ?? DEFAULT_SEQUENCE);
@@ -841,6 +953,7 @@ export function DocumentDesigner() {
         return;
       }
       const migrated = migrateTemplate(parsed);
+      docEpoch.current += 1;
       setTemplate(migrated);
       setSheet(migrated.sheet ?? DEFAULT_SHEET);
       setSequence(migrated.sequence ?? DEFAULT_SEQUENCE);
@@ -861,168 +974,228 @@ export function DocumentDesigner() {
     requestAnimationFrame(() => window.print());
   };
 
+  /**
+   * The COMMAND CONTEXT — this component's entire public command surface,
+   * assembled in one place and handed to the chrome. The menu bar, the icon
+   * toolbar and the shortcuts sheet are all rendered from it (see
+   * `editor-commands.tsx`), so adding a command means adding it here and in the
+   * registry, never in three separate pieces of markup.
+   */
+  const ctx: EditorCommandContext = {
+    modLabel,
+    canUndo: past.length > 0,
+    canRedo: future.length > 0,
+    hasClipboard,
+    selectedCount: selectedIds.length,
+    soleSelectedType: selected?.type ?? null,
+    selectionLocked,
+    selectionHidden,
+    pageIndex,
+    pageCount: template.pages.length,
+    elementCount: elements.length,
+    preview,
+    showGrid,
+    showRulers,
+    snap,
+    railOpen,
+    savedTemplates: saved.map((s) => ({ id: s.id, name: s.name })),
+    currentSavedId: currentId,
+    blocks,
+    batchActive,
+    batchIndex: batchClampIndex,
+    batchTotal: rows.length,
+    blockEditing: blockEdit !== null,
+
+    onNew: doNew,
+    onStartFrom: doStartFrom,
+    onOpenSaved: doLoad,
+    onSave: () => void doSave(),
+    onDeleteSaved: () => void doDeleteSaved(),
+    onImport: () => fileRef.current?.click(),
+    onExport: () => exportTemplateJson(withSettings(template)),
+    onPrint: doPrint,
+    onCloseEditor: () => onClose?.(),
+
+    onUndo: undo,
+    onRedo: redo,
+    onCut: cutSelected,
+    onCopy: copySelected,
+    onPaste: pasteClipboard,
+    onDuplicate: duplicateSelected,
+    onDeleteSelection: deleteSelection,
+    onSelectAll: selectAllOnPage,
+
+    onAddElement: addElement,
+    onInsertBlock: insertBlock,
+
+    onAlign: alignSelected,
+    onDistribute: distributeSelected,
+    onArrange: arrangeSelection,
+    onToggleSelectionLock: () => setSelectionFlag('locked', !selectionLocked),
+    onToggleSelectionHidden: () => setSelectionFlag('hidden', !selectionHidden),
+    onSaveAsBlock: () => void saveSelectionAsBlock(),
+    onEditSelectedBlock: () => {
+      if (selected?.type === 'blockInstance') enterBlockEdit(selected.blockId);
+    },
+    onDetachSelectedBlock: () => {
+      if (selected?.type === 'blockInstance') detachInstance(selected.id);
+    },
+
+    onAddPage: addPage,
+    onDuplicatePage: duplicatePage,
+    onDeletePage: deletePage,
+    onMovePage: movePage,
+    onGoToPage: goToPage,
+
+    onTogglePreview: () => setPreview((p) => !p),
+    onSetShowGrid: setShowGrid,
+    onSetShowRulers: setShowRulers,
+    onSetSnap: setSnap,
+    onSetRailOpen: setRailOpen,
+    onZoom: doZoom,
+
+    // A menu item that targets a rail tab must also REVEAL the rail — otherwise
+    // "Page setup…" would silently do nothing while it's collapsed.
+    onOpenInspectorTab: (tab) => {
+      setRailTab(tab);
+      setRailOpen(true);
+    },
+    onClearBatch: clearBatch,
+    onStepBatch: (delta) => setBatchIndex((i) => Math.max(0, Math.min(rows.length - 1, i + delta))),
+
+    onShowShortcuts: () => setShortcutsOpen(true),
+  };
+
   return (
-    <div className="flex flex-col gap-3" data-testid="document-designer">
-      {blockEdit && (
-        <div
-          className="flex items-center gap-2 rounded-lg border border-primary/50 bg-primary/10 px-3 py-2"
-          data-testid="doc-block-edit-banner"
-        >
-          <IconComponents className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium text-primary">Editing block: {blockEdit.name}</span>
-          <span className="ms-auto flex items-center gap-2">
-            <Button size="sm" variant="ghost" data-testid="doc-block-edit-cancel" onClick={() => exitBlockEdit(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" data-testid="doc-block-edit-done" onClick={() => exitBlockEdit(true)}>
-              Done
-            </Button>
-          </span>
-        </div>
-      )}
+    // `h-full min-h-0` + `flex-1 min-h-0` on the body: the editor fills whatever
+    // height its host gives it and the CANVAS is the only thing that scrolls, so
+    // the chrome and status bar stay pinned however tall the document gets.
+    <div className="flex h-full min-h-0 flex-col bg-background" data-testid="document-designer">
+      <EditorTopBar
+        ctx={ctx}
+        name={template.name}
+        onNameChange={(name) => {
+          commit('name');
+          setTemplate((t) => ({ ...t, name }));
+        }}
+        zoom={zoom}
+        blockEdit={blockEdit}
+        onExitBlockEdit={(save) => void exitBlockEdit(save)}
+        batchLabel={batchActive ? `×${rows.length}` : null}
+      />
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2">
-        <Input
-          aria-label="Template name"
-          data-testid="doc-name"
-          value={template.name}
-          onChange={(e) => {
-            commit('name');
-            setTemplate((t) => ({ ...t, name: e.target.value }));
-          }}
-          className="max-w-[16rem]"
-        />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Undo"
-          data-testid="doc-undo"
-          disabled={past.length === 0}
-          onClick={undo}
-        >
-          <IconArrowBackUp className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Redo"
-          data-testid="doc-redo"
-          disabled={future.length === 0}
-          onClick={redo}
-        >
-          <IconArrowForwardUp className="h-4 w-4" />
-        </Button>
-        <span className="mx-1 h-5 w-px bg-border" />
-        <Button variant="outline" size="sm" className="gap-1" onClick={doNew}>
-          <IconFileText className="h-3.5 w-3.5" /> New
-        </Button>
-        <select
-          className={SELECT_CLASS}
-          aria-label="Start from a template"
-          data-testid="doc-start-from"
-          value=""
-          onChange={(e) => e.target.value && doStartFrom(e.target.value)}
-        >
-          <option value="">Start from…</option>
-          {STARTER_TEMPLATES.filter((s) => s.id !== 'blank').map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <Button size="sm" className="gap-1" data-testid="doc-save" onClick={doSave}>
-          <IconDeviceFloppy className="h-3.5 w-3.5" /> Save
-        </Button>
-        {hasClipboard && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1"
-            data-testid="doc-paste"
-            onClick={pasteClipboard}
-          >
-            <IconClipboard className="h-3.5 w-3.5" /> Paste
-          </Button>
-        )}
-        <select
-          className={SELECT_CLASS}
-          aria-label="Load saved template"
-          value=""
-          onChange={(e) => e.target.value && doLoad(e.target.value)}
-        >
-          <option value="">Load…</option>
-          {saved.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        {currentId && (
-          <Button variant="ghost" size="sm" onClick={doDeleteSaved}>
-            Delete saved
-          </Button>
-        )}
-        <span className="mx-1 h-5 w-px bg-border" />
-        <Button variant="outline" size="sm" className="gap-1" onClick={() => exportTemplateJson(withSettings(template))}>
-          <IconDownload className="h-3.5 w-3.5" /> Export
-        </Button>
-        <Button variant="outline" size="sm" className="gap-1" onClick={() => fileRef.current?.click()}>
-          <IconUpload className="h-3.5 w-3.5" /> Import
-        </Button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json,.json"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void onImportFile(f);
-            e.target.value = '';
-          }}
-        />
-        <span className="mx-1 h-5 w-px bg-border" />
-        <Button variant="outline" size="sm" className="gap-1" data-testid="doc-preview-toggle" onClick={() => setPreview((p) => !p)}>
-          {preview ? <IconEyeOff className="h-3.5 w-3.5" /> : <IconEye className="h-3.5 w-3.5" />}
-          {preview ? 'Editing' : 'Preview'}
-        </Button>
-        <Button variant="outline" size="sm" className="gap-1" data-testid="doc-print" onClick={doPrint}>
-          <IconPrinter className="h-3.5 w-3.5" /> Print
-        </Button>
-        {batchActive && (
-          <span
-            className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
-            data-testid="doc-batch-badge"
-            title="Print will render one copy per batch row"
-          >
-            ×{rows.length}
-          </span>
-        )}
+      {/* Hidden JSON picker, opened by File ▸ Import. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        data-testid="doc-import-input"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void onImportFile(f);
+          e.target.value = '';
+        }}
+      />
 
-        <span className="ms-auto flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            Snap <Switch checked={snap} onCheckedChange={setSnap} />
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            Grid <Switch data-testid="doc-grid-toggle" checked={showGrid} onCheckedChange={setShowGrid} />
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            Rulers <Switch data-testid="doc-rulers-toggle" checked={showRulers} onCheckedChange={setShowRulers} />
-          </label>
-          <span className="flex items-center gap-1">
-            <Button variant="ghost" size="icon-sm" aria-label="Zoom out" onClick={() => setZoom((z) => Math.max(0.25, +(z - 0.25).toFixed(2)))}>
-              <IconZoomOut className="h-4 w-4" />
-            </Button>
-            <span className="w-10 text-center text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
-            <Button variant="ghost" size="icon-sm" aria-label="Zoom in" onClick={() => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))}>
-              <IconZoomIn className="h-4 w-4" />
-            </Button>
-          </span>
-        </span>
+      {/* Editor body — the canvas takes everything the rail doesn't. No outer
+          padding or gaps: the page is the subject, so chrome gets borders
+          rather than margins. */}
+      <div className="flex min-h-0 flex-1">
+        <main
+          ref={viewportRef}
+          data-testid="doc-canvas-viewport"
+          className="min-h-0 flex-1 overflow-auto bg-muted/30 p-6"
+        >
+          <Canvas
+            elements={elements}
+            page={template.page}
+            data={activeData}
+            blocks={blocksMap}
+            selectedIds={selectedIds}
+            zoom={zoom}
+            gridMm={snap ? 1 : 0}
+            showGrid={showGrid}
+            showRulers={showRulers}
+            preview={preview}
+            onSelect={selectOne}
+            onChange={patchElement}
+            onChangeMany={changeMany}
+            onEditBlock={enterBlockEdit}
+          />
+        </main>
+
+        {railOpen ? (
+          <SideRail
+            tab={railTab}
+            onTabChange={setRailTab}
+            onCollapse={() => setRailOpen(false)}
+            palette={{
+              elements,
+              selectedIds,
+              blocks,
+              onSelect: selectOne,
+              onReorder: reorder,
+              onToggleLock: toggleLock,
+              onToggleHidden: toggleHidden,
+              onDelete: deleteElement,
+              onInsertBlock: insertBlock,
+              onDeleteBlock: deleteBlockDef,
+              onSetBlockScope: setBlockScope,
+            }}
+            inspector={{
+              template,
+              selected,
+              selectedCount: selectedIds.length,
+              batch: { active: batchActive, index: batchClampIndex, total: rows.length },
+              sheet,
+              sequence,
+              onChangeSelected: (patch) => selectedId && patchElement(selectedId, patch),
+              onChangePage: (patch: Partial<PageSpec>) => {
+                commit('page');
+                setTemplate((t) => ({ ...t, page: { ...t.page, ...patch } }));
+              },
+              onChangePlaceholders: (list: Placeholder[]) => {
+                commit('data');
+                setTemplate((t) => ({ ...t, placeholders: list }));
+              },
+              onGenerateBatch: generateBatch,
+              onLoadBatchRecords: loadBatchRecords,
+              onClearBatch: clearBatch,
+              onBatchIndex: setBatchIndex,
+              onChangeSheet: (patch) => setSheet((s) => ({ ...s, ...patch })),
+              onChangeSequence: (patch) => setSequence((s) => ({ ...s, ...patch })),
+            }}
+          />
+        ) : (
+          // Collapsed: a one-button strip, so the rail is always one click back
+          // and never only findable through the View menu.
+          <div className="flex shrink-0 flex-col border-s border-border bg-card p-1">
+            <button
+              type="button"
+              data-testid="doc-rail-expand"
+              aria-label="Show side panel"
+              title="Show side panel"
+              onClick={() => setRailOpen(true)}
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/40 [&_svg]:size-4"
+            >
+              <IconLayoutSidebarRightExpand className="rtl:rotate-180" />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Page navigator */}
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1.5" data-testid="doc-page-nav">
+      {/* Status bar — page navigation, selection count and the batch row
+          stepper: the "where am I" readouts, kept out of the command chrome
+          above so the toolbar stays commands-only. */}
+      <footer
+        className="flex shrink-0 flex-wrap items-center gap-1.5 border-t border-border bg-card px-2 py-1"
+        data-testid="doc-page-nav"
+      >
+        {/* Page management is hidden while editing a block: a block is a single
+            fragment, so adding or deleting "pages" there is meaningless. */}
+        {!blockEdit && (
+          <>
         <span className="me-1 text-xs font-medium text-muted-foreground">Pages</span>
         {template.pages.map((pg, i) => (
           <button
@@ -1031,18 +1204,25 @@ export function DocumentDesigner() {
             data-testid={`doc-page-tab-${i}`}
             aria-current={i === pageIndex}
             onClick={() => goToPage(i)}
-            className={`h-7 min-w-7 rounded-md border px-2 text-xs tabular-nums ${
-              i === pageIndex ? 'border-primary bg-primary/10 font-medium text-foreground' : 'border-border text-muted-foreground hover:text-foreground'
+            className={`h-6 min-w-6 rounded-md border px-1.5 text-xs tabular-nums ${
+              i === pageIndex
+                ? 'border-primary bg-primary/10 font-medium text-foreground'
+                : 'border-border text-muted-foreground hover:text-foreground'
             }`}
           >
             {i + 1}
           </button>
         ))}
-        <Button variant="outline" size="icon-sm" aria-label="Add page" data-testid="doc-add-page" onClick={addPage}>
+        <Button variant="ghost" size="icon-sm" aria-label="Add page" data-testid="doc-add-page" onClick={addPage}>
           <IconPlus className="h-4 w-4" />
         </Button>
-        <span className="mx-1 h-5 w-px bg-border" />
-        <Button variant="ghost" size="icon-sm" aria-label="Duplicate page" data-testid="doc-duplicate-page" onClick={duplicatePage}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Duplicate page"
+          data-testid="doc-duplicate-page"
+          onClick={duplicatePage}
+        >
           <IconFiles className="h-4 w-4" />
         </Button>
         <Button
@@ -1073,177 +1253,52 @@ export function DocumentDesigner() {
         >
           <IconTrash className="h-4 w-4 text-destructive/80" />
         </Button>
-        <span className="ms-auto text-xs text-muted-foreground">
-          Page {pageIndex + 1} of {template.pages.length}
-        </span>
-      </div>
+          </>
+        )}
 
-      {/* Editor body */}
-      <div className="grid h-[74vh] grid-cols-[13rem_1fr_18rem] gap-3">
-        <aside className="overflow-hidden rounded-lg border border-border bg-card p-3">
-          <Palette
-            elements={elements}
-            selectedIds={selectedIds}
-            blocks={blocks}
-            onAdd={addElement}
-            onSelect={selectOne}
-            onReorder={reorder}
-            onToggleLock={toggleLock}
-            onToggleHidden={toggleHidden}
-            onDelete={deleteElement}
-            onInsertBlock={insertBlock}
-            onDeleteBlock={deleteBlockDef}
-            onSetBlockScope={setBlockScope}
-          />
-        </aside>
-
-        <main className="overflow-auto rounded-lg border border-border bg-muted/30 p-6">
-          <Canvas
-            elements={elements}
-            page={template.page}
-            data={activeData}
-            blocks={blocksMap}
-            selectedIds={selectedIds}
-            zoom={zoom}
-            gridMm={snap ? 1 : 0}
-            showGrid={showGrid}
-            showRulers={showRulers}
-            preview={preview}
-            onSelect={selectOne}
-            onChange={patchElement}
-            onChangeMany={changeMany}
-            onEditBlock={enterBlockEdit}
-          />
-        </main>
-
-        <aside className="overflow-hidden rounded-lg border border-border bg-card p-3">
+        <span className="ms-auto flex items-center gap-3 text-xs text-muted-foreground">
           {selectedIds.length > 0 && (
-            <div className="mb-2 space-y-1.5" data-testid="doc-selected-actions">
-              {selectedIds.length > 1 && (
-                <p className="text-xs font-medium text-primary" data-testid="doc-selection-count">
-                  {selectedIds.length} elements selected
-                </p>
-              )}
-              <div className="flex items-center gap-0.5">
-                <Button variant="outline" size="icon-sm" aria-label="Align left" onClick={() => alignSelected('left')}>
-                  <IconLayoutAlignLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon-sm" aria-label="Align horizontal center" onClick={() => alignSelected('hcenter')}>
-                  <IconLayoutAlignCenter className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon-sm" aria-label="Align right" onClick={() => alignSelected('right')}>
-                  <IconLayoutAlignRight className="h-4 w-4" />
-                </Button>
-                <span className="mx-0.5 h-4 w-px bg-border" />
-                <Button variant="outline" size="icon-sm" aria-label="Align top" onClick={() => alignSelected('top')}>
-                  <IconLayoutAlignTop className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon-sm" aria-label="Align vertical middle" onClick={() => alignSelected('vmiddle')}>
-                  <IconLayoutAlignMiddle className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon-sm" aria-label="Align bottom" onClick={() => alignSelected('bottom')}>
-                  <IconLayoutAlignBottom className="h-4 w-4" />
-                </Button>
-              </div>
-              {selectedIds.length >= 3 && (
-                <div className="flex items-center gap-0.5">
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Distribute horizontally"
-                    data-testid="doc-distribute-h"
-                    onClick={() => distributeSelected('h')}
-                  >
-                    <IconArrowsHorizontal className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Distribute vertically"
-                    data-testid="doc-distribute-v"
-                    onClick={() => distributeSelected('v')}
-                  >
-                    <IconArrowsVertical className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-              <div className="flex items-center gap-0.5">
-                <Button variant="outline" size="icon-sm" aria-label="Copy" data-testid="doc-copy" onClick={copySelected}>
-                  <IconClipboardCopy className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon-sm" aria-label="Cut" data-testid="doc-cut" onClick={cutSelected}>
-                  <IconScissors className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon-sm" aria-label="Duplicate" data-testid="doc-duplicate" onClick={duplicateSelected}>
-                  <IconCopy className="h-4 w-4" />
-                </Button>
-              </div>
-              {selected?.type === 'blockInstance' ? (
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 gap-1"
-                    data-testid="doc-block-edit"
-                    onClick={() => enterBlockEdit(selected.blockId)}
-                  >
-                    <IconComponents className="h-3.5 w-3.5" /> Edit block
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    data-testid="doc-block-detach"
-                    onClick={() => detachInstance(selected.id)}
-                  >
-                    Detach
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-1"
-                  data-testid="doc-save-block"
-                  onClick={saveSelectionAsBlock}
-                >
-                  <IconComponents className="h-3.5 w-3.5" /> Save as block
-                </Button>
-              )}
-              <p className="text-[10px] leading-tight text-muted-foreground">
-                Tip: ⌘/Ctrl+C/X/V copy/cut/paste, ⌘/Ctrl+D duplicate, arrows nudge
-                (Shift = 5mm), Delete removes, Esc deselects.
-              </p>
-            </div>
+            <span className="font-medium text-primary" data-testid="doc-selection-count">
+              {selectedIds.length} selected
+            </span>
           )}
-          <Inspector
-            template={template}
-            selected={selected}
-            selectedCount={selectedIds.length}
-            batch={{ active: batchActive, index: batchClampIndex, total: rows.length }}
-            onChangeSelected={(patch) => selectedId && patchElement(selectedId, patch)}
-            onChangePage={(patch: Partial<PageSpec>) => {
-              commit('page');
-              setTemplate((t) => ({ ...t, page: { ...t.page, ...patch } }));
-            }}
-            onChangePlaceholders={(list: Placeholder[]) => {
-              commit('data');
-              setTemplate((t) => ({ ...t, placeholders: list }));
-            }}
-            sheet={sheet}
-            sequence={sequence}
-            onGenerateBatch={generateBatch}
-            onLoadBatchRecords={loadBatchRecords}
-            onClearBatch={clearBatch}
-            onBatchIndex={setBatchIndex}
-            onChangeSheet={(patch) => setSheet((s) => ({ ...s, ...patch }))}
-            onChangeSequence={(patch) => setSequence((s) => ({ ...s, ...patch }))}
-          />
-        </aside>
-      </div>
+          {batchActive && (
+            <span className="flex items-center gap-1" data-testid="doc-status-batch">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Previous data row"
+                data-testid="doc-status-batch-prev"
+                disabled={batchClampIndex <= 0}
+                onClick={() => setBatchIndex(batchClampIndex - 1)}
+              >
+                <IconChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="tabular-nums">
+                Row {batchClampIndex + 1} / {rows.length}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Next data row"
+                data-testid="doc-status-batch-next"
+                disabled={batchClampIndex >= rows.length - 1}
+                onClick={() => setBatchIndex(batchClampIndex + 1)}
+              >
+                <IconChevronRight className="h-4 w-4" />
+              </Button>
+            </span>
+          )}
+          <span className="tabular-nums">
+            {blockEdit ? 'Editing a reusable block' : `Page ${pageIndex + 1} of ${template.pages.length}`}
+          </span>
+        </span>
+      </footer>
 
       {/* Off-screen, all-pages render used only for printing (per data row). */}
       <PrintDocument template={template} datasets={printDatasets} blocks={blocksMap} sheet={sheet} />
+
+      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} modLabel={modLabel} />
 
       {/* Print stylesheet: hide the app chrome and emit each page at the physical
           @page size with a break between pages. Rendered as a text child (not

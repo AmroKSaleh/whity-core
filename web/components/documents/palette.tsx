@@ -1,17 +1,8 @@
 'use client';
 
-import type { DocElement, ElementType } from '@/lib/documents/types';
+import type { DocElement } from '@/lib/documents/types';
 import { BLOCK_SCOPES, type BlockScope, type DocBlock } from '@/lib/documents/blocks';
-import { Button } from '@amroksaleh/ui/button';
 import {
-  IconTypography,
-  IconVariable,
-  IconPhoto,
-  IconBarcode,
-  IconQrcode,
-  IconSquare,
-  IconLine,
-  IconMathFunction,
   IconChevronUp,
   IconChevronDown,
   IconTrash,
@@ -21,17 +12,6 @@ import {
   IconEye,
   IconEyeOff,
 } from '@tabler/icons-react';
-
-const ADD_ITEMS: ReadonlyArray<{ type: ElementType; label: string; Icon: typeof IconTypography }> = [
-  { type: 'text', label: 'Text', Icon: IconTypography },
-  { type: 'dynamicText', label: 'Dynamic text', Icon: IconVariable },
-  { type: 'image', label: 'Image / logo', Icon: IconPhoto },
-  { type: 'barcode', label: 'Barcode', Icon: IconBarcode },
-  { type: 'qr', label: 'QR code', Icon: IconQrcode },
-  { type: 'rect', label: 'Rectangle', Icon: IconSquare },
-  { type: 'line', label: 'Line', Icon: IconLine },
-  { type: 'math', label: 'Math', Icon: IconMathFunction },
-];
 
 function elementLabel(el: DocElement): string {
   switch (el.type) {
@@ -58,11 +38,17 @@ function elementLabel(el: DocElement): string {
   }
 }
 
+/**
+ * The editor's left rail: the reusable-blocks library and the layers list.
+ *
+ * Inserting elements is NOT here — that moved to the top bar (Insert menu + the
+ * toolbar's insert group) so every command lives in the chrome and the rail is
+ * purely about what is already ON the page.
+ */
 export function Palette({
   elements,
   selectedIds,
   blocks,
-  onAdd,
   onSelect,
   onReorder,
   onToggleLock,
@@ -75,7 +61,6 @@ export function Palette({
   elements: DocElement[];
   selectedIds: string[];
   blocks: DocBlock[];
-  onAdd: (type: ElementType) => void;
   onSelect: (id: string, additive?: boolean) => void;
   onReorder: (id: string, dir: 'up' | 'down') => void;
   onToggleLock: (id: string) => void;
@@ -90,25 +75,6 @@ export function Palette({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Add element</h3>
-        <div className="grid grid-cols-2 gap-1.5">
-          {ADD_ITEMS.map(({ type, label, Icon }) => (
-            <Button
-              key={type}
-              variant="outline"
-              size="sm"
-              className="justify-start gap-1.5"
-              data-testid={`doc-add-${type}`}
-              onClick={() => onAdd(type)}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </Button>
-          ))}
-        </div>
-      </div>
-
       {blocks.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Blocks</h3>
@@ -166,7 +132,7 @@ export function Palette({
         </h3>
         <div className="space-y-1 overflow-y-auto">
           {frontToBack.length === 0 && (
-            <p className="text-xs text-muted-foreground">No elements yet. Add one above.</p>
+            <p className="text-xs text-muted-foreground">No elements yet — add one from the Insert menu.</p>
           )}
           {frontToBack.map((el) => (
             <div

@@ -12,6 +12,7 @@ import { BrandingProvider } from "@/lib/branding-context"
 import { NavigationProvider } from "@/lib/navigation-context"
 import { DirectionProvider } from "@/lib/direction-context"
 import { ThemeModeProvider } from "@/lib/theme-mode-context"
+import { ToastContainer } from "@/components/ui/toast-container"
 import { defaultHandlers, MOCK_BRANDING } from "./mocks"
 
 // Start the MSW worker. Unhandled requests pass through (harmless in SB).
@@ -20,6 +21,9 @@ initialize({ onUnhandledRequest: "bypass" })
 /**
  * Wrap every story in the real provider stack the app mounts in its root
  * layout. Order matters: Navigation reads Auth, so Auth is outermost.
+ * `ToastProvider` only supplies context — `ToastContainer` is what draws the
+ * toasts, so it's mounted as a sibling of the story exactly as `app/layout.tsx`
+ * mounts it, otherwise any toast a story raises would be silently swallowed.
  */
 const withProviders: Decorator = (Story, context) => {
   const isDark = context.globals.theme === "dark"
@@ -34,6 +38,7 @@ const withProviders: Decorator = (Story, context) => {
                   <div className="bg-background text-foreground min-h-svh p-8">
                     <Story />
                   </div>
+                  <ToastContainer />
                 </div>
               </ToastProvider>
             </NavigationProvider>
