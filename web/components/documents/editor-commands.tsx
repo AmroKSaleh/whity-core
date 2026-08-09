@@ -183,7 +183,11 @@ const SHORTCUTS: Record<string, string> = {
   'nudge-fast': 'Shift + Arrows',
 };
 
-const hint = (mod: string, id: string): string | undefined => SHORTCUTS[id]?.replace('%', mod);
+// `%` is the platform-modifier placeholder (Ctrl on Windows/Linux, ⌘ on Mac).
+// Replaced globally: a string-literal `replace` would substitute only the first
+// occurrence, so a template that ever needs the modifier twice would render a
+// stray `%`.
+const hint = (mod: string, id: string): string | undefined => SHORTCUTS[id]?.replace(/%/g, mod);
 
 /** Every shortcut, resolved for the current platform — for the Help sheet. */
 export function listEditorShortcuts(modLabel: string): Array<{ id: string; label: string; keys: string }> {
@@ -205,7 +209,7 @@ export function listEditorShortcuts(modLabel: string): Array<{ id: string; label
   return Object.keys(SHORTCUTS).map((id) => ({
     id,
     label: LABELS[id] ?? id,
-    keys: SHORTCUTS[id].replace('%', modLabel),
+    keys: SHORTCUTS[id].replace(/%/g, modLabel),
   }));
 }
 
