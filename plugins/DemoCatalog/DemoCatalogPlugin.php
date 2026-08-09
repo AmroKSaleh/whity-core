@@ -13,6 +13,7 @@ use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
+use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 
 /**
  * DemoCatalogPlugin (multi-client feature-extraction pilot).
@@ -44,7 +45,7 @@ use Whity\Sdk\PluginRequirementsInterface;
  * resolves it under the `DemoCatalog` namespace prefix (directory name) and
  * auto-discovers it without any manual registration.
  */
-final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface
+final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginResourceTypesInterface
 {
     /**
      * @inheritDoc
@@ -289,6 +290,24 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
             'demo_catalog:view',
             'demo_catalog:manage',
         ];
+    }
+
+    /**
+     * The resource types this plugin owns (WC-712 §2).
+     *
+     * Declared as the BARE slug. The host namespaces it under this plugin's
+     * name, so the canonical type is `democatalog:item` — another plugin
+     * declaring `item` gets its own, and neither can shadow a core type.
+     *
+     * Declaring the type is what makes `resource_role_assignments` usable for
+     * catalogue items: authority can be addressed at ONE item rather than
+     * requiring a private grant table.
+     *
+     * @inheritDoc
+     */
+    public function getResourceTypes(): array
+    {
+        return ['item'];
     }
 
     /**

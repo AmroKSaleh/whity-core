@@ -54,8 +54,18 @@ class ResourceTypeRegistry
 
     private ?HookManager $hookManager = null;
 
-    /** Source name for resource types shipped by core. */
+    /** Source name for resource types shipped by core. Reserved. */
     public const CORE_SOURCE = 'core';
+
+    /**
+     * Separates a plugin's namespace from its slug: `acme:record`.
+     *
+     * A colon, matching the shape #723 already uses for data-type keys. Core
+     * types stay BARE (`ou`) — they are the reserved, unprefixed namespace, and
+     * `ou` is already stored that way in `resource_role_assignments`, so
+     * namespacing plugins does not rewrite data already written.
+     */
+    public const NAMESPACE_SEPARATOR = ':';
 
     /**
      * The organizational unit — the ONE resource type core ships.
@@ -77,20 +87,85 @@ class ResourceTypeRegistry
      * Every type is validated before ANY is stored: a malformed entry aborts the
      * whole registration rather than leaving a half-applied catalogue.
      *
-     * @param string             $source The source (`core` or a plugin name).
-     * @param array<int, string> $types  Slugs, e.g. `['document', 'catalog_item']`.
+     * NAMESPACING. A plugin's types are stored under its own prefix — a plugin
+     * declaring `record` is registered as `acme:record`. Two consequences, both
+     * intended:
      *
-     * @throws InvalidResourceTypeException If any slug is malformed.
+     *  - two plugins declaring `record` get DIFFERENT canonical types, so they
+     *    cannot silently share (or steal) each other's grants;
+     *  - a plugin cannot produce a bare core key, so it cannot SHADOW `ou` or
+     *    any future core type no matter what it declares.
+     *
+     * The prefix comes from the SOURCE, which the loader supplies from
+     * `$plugin->getName()` — never from the plugin's own data. A plugin may
+     * declare any slug it likes; it cannot declare who said it. That is the same
+     * attribution model as {@see PermissionRegistry::register()}.
+     *
+     * `core` is RESERVED: only {@see registerCoreResourceTypes()} may use it, so
+     * a plugin cannot register itself as core and mint bare keys.
+     *
+     * @param string             $source The source (a plugin name; `core` is reserved).
+     * @param array<int, string> $types  Bare slugs, e.g. `['record', 'catalog_item']`.
+     *
+     * @throws InvalidResourceTypeException If any slug is malformed, or a caller
+     *                                      other than core claims the `core` source.
      */
     public function register(string $source, array $types): void
     {
+        if ($source === self::CORE_SOURCE) {
+            throw InvalidResourceTypeException::forReservedSource($source);
+        }
+
+        $prefix = self::sourcePrefix($source);
+        if ($prefix === null) {
+            throw InvalidResourceTypeException::forSource($source);
+        }
+
+        $canonical = [];
         foreach ($types as $type) {
             if (!self::isValidResourceType($type)) {
                 throw InvalidResourceTypeException::forResourceType($type);
             }
+            $canonical[] = $prefix . self::NAMESPACE_SEPARATOR . $type;
         }
 
-        $this->storeAndDispatch($source, array_values($types));
+        $this->storeAndDispatch($source, $canonical);
+    }
+
+    /**
+     * The canonical key a given source's slug resolves to.
+     *
+     * Callers that hold a bare slug and a source (a plugin granting on its own
+     * type) use this rather than concatenating by hand, so the namespacing rule
+     * lives in exactly one place.
+     */
+    public static function canonicalKey(string $source, string $type): string
+    {
+        if ($source === self::CORE_SOURCE) {
+            return $type;
+        }
+
+        $prefix = self::sourcePrefix($source);
+
+        return $prefix === null ? $type : $prefix . self::NAMESPACE_SEPARATOR . $type;
+    }
+
+    /**
+     * Normalise a source name into a slug usable as a namespace prefix.
+     *
+     * Plugin names are PHP-ish (`DemoCatalog`, `Acme\Widgets\Plugin`), so the
+     * last segment is lowercased and non-slug characters collapse to
+     * underscores. Returns null when nothing usable survives, so a nameless
+     * plugin is rejected rather than silently registering unprefixed types.
+     */
+    private static function sourcePrefix(string $source): ?string
+    {
+        $segments = explode('\\', $source);
+        $last = (string) end($segments);
+        $slug = strtolower(preg_replace('/[^A-Za-z0-9_]+/', '_', $last) ?? '');
+        $slug = trim($slug, '_');
+
+        return $slug === '' || !preg_match('/^[a-z]/', $slug) ? null : $slug;
     }
 
     /**

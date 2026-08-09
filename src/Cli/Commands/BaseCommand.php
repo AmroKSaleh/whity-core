@@ -104,8 +104,28 @@ abstract class BaseCommand
         $this->kernel = new HttpKernel($router, $rbacMiddleware);
         $this->kernel->use($tenantIsolationMiddleware);
 
+        // Resource-type catalogue (WC-712 §2), registered as a service exactly as
+        // public/index.php does so a plugin reached through a CLI command sees
+        // the same vocabulary as one reached over HTTP.
+        $resourceTypeRegistry = new \Whity\Core\RBAC\ResourceTypeRegistry($hookManager);
+        $resourceTypeRegistry->registerCoreResourceTypes();
+        \Whity\register_service(\Whity\Core\RBAC\ResourceTypeRegistry::class, $resourceTypeRegistry);
+
         $baseDir = dirname(__DIR__, 3);
-        $pluginLoader = new PluginLoader($baseDir . '/plugins', $router);
+        // The registries are passed HERE, not just constructed above: this loader
+        // previously received neither, so plugin-declared permissions were never
+        // registered in the CLI at all and a route gated on one failed closed —
+        // the same HTTP/CLI divergence WC-712 fixed for the RoleChecker above,
+        // one layer out.
+        $pluginLoader = new PluginLoader(
+            $baseDir . '/plugins',
+            $router,
+            $permissionRegistry,
+            $hookManager,
+            null,
+            null,
+            $resourceTypeRegistry
+        );
         $pluginLoader->load();
 
         // Register API handlers (copied from public/index.php)

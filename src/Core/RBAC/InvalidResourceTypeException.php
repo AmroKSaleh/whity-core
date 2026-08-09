@@ -29,4 +29,32 @@ class InvalidResourceTypeException extends InvalidArgumentException
             . "'resource_type' format (letters, digits, underscores; no colon)"
         );
     }
+
+    /**
+     * A caller other than core tried to register under the reserved `core`
+     * source, which would let it mint UNPREFIXED keys and shadow a core type.
+     *
+     * @param string $source The reserved source that was claimed.
+     */
+    public static function forReservedSource(string $source): self
+    {
+        return new self(
+            "Source '{$source}' is reserved for core resource types; "
+            . 'plugins are namespaced under their own plugin name'
+        );
+    }
+
+    /**
+     * A source name from which no usable namespace prefix could be derived, so
+     * its types would be stored unprefixed and could collide with core.
+     *
+     * @param string $source The unusable source name.
+     */
+    public static function forSource(string $source): self
+    {
+        return new self(
+            "Source '{$source}' yields no usable namespace prefix; a resource "
+            . 'type source must start with a letter'
+        );
+    }
 }
