@@ -209,12 +209,21 @@ class RoleChecker
      * @param int    $tenantId   The resolved tenant id (0 = system tenant).
      * @return bool True if the profile effectively has the permission.
      */
-    public function hasPermissionForProfile(int $profileId, string $permission, int $tenantId): bool
-    {
+    public function hasPermissionForProfile(
+        int $profileId,
+        string $permission,
+        int $tenantId,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): bool {
         if (!$this->registry->exists($permission)) {
             return false;
         }
-        return in_array($permission, $this->getEffectivePermissionsForProfile($profileId, $tenantId), true);
+        return in_array(
+            $permission,
+            $this->getEffectivePermissionsForProfile($profileId, $tenantId, $resourceType, $resourceId),
+            true
+        );
     }
 
     /**
@@ -231,9 +240,13 @@ class RoleChecker
      * @param int $tenantId  The tenant ID for scoping (0 = system tenant).
      * @return array<int, string> Distinct effective role NAMES.
      */
-    public function getEffectiveRolesForProfile(int $profileId, int $tenantId): array
-    {
-        $roleIds = $this->getEffectiveRoleIdsForProfile($profileId, $tenantId);
+    public function getEffectiveRolesForProfile(
+        int $profileId,
+        int $tenantId,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): array {
+        $roleIds = $this->getEffectiveRoleIdsForProfile($profileId, $tenantId, $resourceType, $resourceId);
         if ($roleIds === []) {
             return [];
         }
@@ -266,16 +279,28 @@ class RoleChecker
      * @param int $tenantId  The resolved tenant id (0 = system tenant).
      * @return array<int, string> The effective permission strings.
      */
-    public function getEffectivePermissionsForProfile(int $profileId, int $tenantId): array
-    {
-        $cacheKey = 'p:' . $profileId . ':' . $tenantId . ':' . ($this->delegationResolver !== null ? '1' : '0');
+    public function getEffectivePermissionsForProfile(
+        int $profileId,
+        int $tenantId,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): array {
+        // The resource scope MUST be part of the cache key. Without it a scoped
+        // answer computed for one resource would be served for an unscoped
+        // question (or for a different resource) — silently widening authority,
+        // which is the failure direction this whole seam exists to avoid.
+        $scopeKey = $resourceType !== null && $resourceId !== null
+            ? $resourceType . '#' . $resourceId
+            : '-';
+        $cacheKey = 'p:' . $profileId . ':' . $tenantId . ':'
+            . ($this->delegationResolver !== null ? '1' : '0') . ':' . $scopeKey;
         if (isset(self::$effectiveUserPermissionCache[$cacheKey])) {
             return self::$effectiveUserPermissionCache[$cacheKey];
         }
 
         $permissions = [];
 
-        $effectiveRoleIds = $this->getEffectiveRoleIdsForProfile($profileId, $tenantId);
+        $effectiveRoleIds = $this->getEffectiveRoleIdsForProfile($profileId, $tenantId, $resourceType, $resourceId);
         foreach ($effectiveRoleIds as $roleId) {
             foreach ($this->getEffectivePermissionsForRole($roleId, $tenantId) as $permission) {
                 $permissions[$permission] = true;
@@ -408,8 +433,12 @@ class RoleChecker
      * @param int $tenantId  The tenant ID for scoping.
      * @return array<int, int> Distinct effective role ids.
      */
-    private function getEffectiveRoleIdsForProfile(int $profileId, int $tenantId): array
-    {
+    private function getEffectiveRoleIdsForProfile(
+        int $profileId,
+        int $tenantId,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): array {
         $roleIds = [];
 
         $membership = $this->getMembershipRow($profileId, $tenantId);
@@ -436,7 +465,58 @@ class RoleChecker
             }
         }
 
+        // WC-712 §2: grants addressed at ONE resource. Additive by construction —
+        // a resource grant can only widen authority at that resource, never narrow
+        // it, so the scoped set is always a superset of the unscoped one. Requiring
+        // an active membership first (above) means a resource grant cannot become a
+        // back door into a tenant the profile does not belong to.
+        if ($resourceType !== null && $resourceId !== null) {
+            foreach ($this->getResourceGrantRoleIds($profileId, $tenantId, $resourceType, $resourceId) as $roleId) {
+                $roleIds[$roleId] = true;
+            }
+        }
+
         return array_keys($roleIds);
+    }
+
+    /**
+     * Role ids granted to a profile AT one resource (WC-712 §2).
+     *
+     * Matches both grant shapes in one query:
+     *   - `profile_id IS NULL`      — everyone at this resource holds the role.
+     *   - `profile_id = :profileId` — this profile holds it here specifically.
+     *
+     * Tenant-scoped explicitly rather than through the resource, so a row written
+     * against another tenant's resource id can never be read back here.
+     *
+     * @return array<int, int> Distinct role ids granted at the resource.
+     */
+    private function getResourceGrantRoleIds(
+        int $profileId,
+        int $tenantId,
+        string $resourceType,
+        int $resourceId
+    ): array {
+        $statement = $this->db->query(
+            'SELECT DISTINCT role_id FROM resource_role_assignments
+             WHERE tenant_id = :tenantId
+               AND resource_type = :resourceType
+               AND resource_id = :resourceId
+               AND (profile_id IS NULL OR profile_id = :profileId)',
+            [
+                ':tenantId' => $tenantId,
+                ':resourceType' => $resourceType,
+                ':resourceId' => $resourceId,
+                ':profileId' => $profileId,
+            ]
+        );
+
+        $roleIds = [];
+        foreach ($statement->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $row) {
+            $roleIds[] = (int) $row['role_id'];
+        }
+
+        return $roleIds;
     }
 
     /**
@@ -579,6 +659,18 @@ class RoleChecker
 
     /**
      * Get the role ids directly assigned to a single OU, tenant scoped.
+     *
+     * Still reads `ou_role_assignments`, deliberately. WC-712 §2 introduces the
+     * general `resource_role_assignments` table and the OU is its natural
+     * `resource_type='ou'` case, but FOLDING the OU in is a separate change: it
+     * is a storage migration of a security-critical table that delivers no new
+     * capability, and every OU grant already resolves correctly here. Moving it
+     * belongs in its own reviewable change, not smuggled in beside a feature.
+     *
+     * Note the ancestor walk lives in {@see self::getOuChainRoleIds()}, not in
+     * the storage — inheritance is a property of the OU tree. Generic resource
+     * grants have no ancestry and correctly get none, so the fold is a pure
+     * storage move when it happens.
      *
      * @param int $ouId     The OU id.
      * @param int $tenantId The tenant ID for scoping.

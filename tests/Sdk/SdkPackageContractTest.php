@@ -166,9 +166,15 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.16.0',
+            '1.17.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.16 adds the read-only permission-resolution contract '
+            'SDK 1.17 makes PermissionResolver RESOURCE-SCOPED: optional '
+            . '$resourceType/$resourceId on hasPermission() and '
+            . 'effectivePermissions(), honoured against resource_role_assignments '
+            . 'so a plugin can ask "may this caller act on THIS record?" instead '
+            . 'of keeping a private grant table (WC-712 §2). Additive — omitting '
+            . 'them preserves 1.16 behaviour exactly; '
+            . 'SDK 1.16 adds the read-only permission-resolution contract '
             . '(Rbac\PermissionResolver, WC-712) so a plugin asks the host the same '
             . 'authorization question the RBAC middleware answers instead of '
             . 're-deriving it in hand-written SQL; '
