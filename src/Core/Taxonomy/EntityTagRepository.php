@@ -74,6 +74,39 @@ final class EntityTagRepository
     }
 
     /**
+     * Detach EVERY tag from one entity, returning how many associations were
+     * removed (WC-714 §6).
+     *
+     * `entity_tags` deliberately carries no FK to the tagged record, so nothing
+     * removes these rows when the underlying plugin record is deleted. Left
+     * behind they are not merely garbage: a later record that REUSES the same
+     * `entity_id` under the same `entity_type` silently inherits the dead
+     * record's tags — a correctness bug, not just accumulated cruft. This is
+     * the primitive a plugin calls from its own delete path to close that hole.
+     *
+     * Scoped to one (tenant, entity_type, entity_id) triple, so the blast
+     * radius is exactly one record and no confirmation gate is warranted (in
+     * contrast to the tag/tag-group deletes, whose radius is unbounded and
+     * spans plugins — see {@see TagGroupRepository::delete()}).
+     */
+    public function detachAll(int $tenantId, string $entityType, int $entityId): int
+    {
+        $stmt = $this->db->prepare(
+            'DELETE FROM entity_tags
+             WHERE tenant_id = :tenant_id
+               AND entity_type = :entity_type
+               AND entity_id = :entity_id'
+        );
+        $stmt->execute([
+            ':tenant_id'   => $tenantId,
+            ':entity_type' => $entityType,
+            ':entity_id'   => $entityId,
+        ]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
      * The tags attached to one entity (full tag rows), oldest association first.
      *
      * @return list<array<string, mixed>>

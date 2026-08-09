@@ -197,4 +197,104 @@ final class TaxonomyRepositoryRealEngineTest extends TestCase
         self::assertTrue($this->tags->delete(self::TENANT_A, $tag));
         self::assertSame([], $this->entityTags->tagsForEntity(self::TENANT_A, 'invoice', 42));
     }
+
+    // ── WC-714 §5: counting the blast radius before destroying it ─────────────
+
+    /**
+     * The counts that back the delete guard. They must be exact — the operator
+     * decides whether to force the delete based on this number — and must never
+     * include another tenant's associations.
+     */
+    public function testAssociationCountsReportTheExactBlastRadiusPerTenant(): void
+    {
+        $group = (int) $this->groups->create(self::TENANT_A, 'priority', []);
+        $high = (int) $this->tags->create(self::TENANT_A, $group, 'high');
+        $low = (int) $this->tags->create(self::TENANT_A, $group, 'low');
+
+        // A second group in the same tenant must not be counted.
+        $otherGroup = (int) $this->groups->create(self::TENANT_A, 'department', []);
+        $otherTag = (int) $this->tags->create(self::TENANT_A, $otherGroup, 'sales');
+
+        // Another tenant, same entity_type/entity_id, must not be counted.
+        $groupB = (int) $this->groups->create(self::TENANT_B, 'priority', []);
+        $tagB = (int) $this->tags->create(self::TENANT_B, $groupB, 'high');
+
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 42, $high);
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 43, $high);
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 44, $low);
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 45, $otherTag);
+        $this->entityTags->attach(self::TENANT_B, 'acme:record', 42, $tagB);
+
+        self::assertSame(2, $this->groups->countTags(self::TENANT_A, $group));
+        self::assertSame(3, $this->groups->countAssociations(self::TENANT_A, $group));
+        self::assertSame(2, $this->tags->countAssociations(self::TENANT_A, $high));
+        self::assertSame(1, $this->tags->countAssociations(self::TENANT_A, $low));
+
+        // Tenant B's identical (entity_type, entity_id) is invisible to A.
+        self::assertSame(0, $this->groups->countAssociations(self::TENANT_A, $groupB));
+        self::assertSame(1, $this->groups->countAssociations(self::TENANT_B, $groupB));
+    }
+
+    /**
+     * Deleting a group removes its tags AND their associations explicitly, in
+     * one transaction, without relying on the FK cascade (which SQLite does not
+     * enforce unless `PRAGMA foreign_keys = ON`). Nothing outside the group —
+     * and nothing in another tenant — may be touched.
+     */
+    public function testDeletingAGroupRemovesItsTagsAndAssociationsButNothingElse(): void
+    {
+        $group = (int) $this->groups->create(self::TENANT_A, 'priority', []);
+        $high = (int) $this->tags->create(self::TENANT_A, $group, 'high');
+        $survivorGroup = (int) $this->groups->create(self::TENANT_A, 'department', []);
+        $survivorTag = (int) $this->tags->create(self::TENANT_A, $survivorGroup, 'sales');
+
+        $groupB = (int) $this->groups->create(self::TENANT_B, 'priority', []);
+        $tagB = (int) $this->tags->create(self::TENANT_B, $groupB, 'high');
+
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 42, $high);
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 42, $survivorTag);
+        $this->entityTags->attach(self::TENANT_B, 'acme:record', 42, $tagB);
+
+        self::assertTrue($this->groups->delete(self::TENANT_A, $group));
+
+        self::assertNull($this->groups->find(self::TENANT_A, $group));
+        self::assertNull($this->tags->find(self::TENANT_A, $high));
+
+        // Only the survivor tag remains on the record for tenant A.
+        $remaining = $this->entityTags->tagsForEntity(self::TENANT_A, 'acme:record', 42);
+        self::assertCount(1, $remaining);
+        self::assertSame('sales', $remaining[0]['name']);
+
+        // Tenant B is entirely untouched.
+        self::assertNotNull($this->groups->find(self::TENANT_B, $groupB));
+        self::assertCount(1, $this->entityTags->tagsForEntity(self::TENANT_B, 'acme:record', 42));
+    }
+
+    // ── WC-714 §6: detaching every tag from one entity ────────────────────────
+
+    public function testDetachAllRemovesOneEntitysAssociationsOnly(): void
+    {
+        $group = (int) $this->groups->create(self::TENANT_A, 'priority', []);
+        $high = (int) $this->tags->create(self::TENANT_A, $group, 'high');
+        $low = (int) $this->tags->create(self::TENANT_A, $group, 'low');
+
+        $groupB = (int) $this->groups->create(self::TENANT_B, 'priority', []);
+        $tagB = (int) $this->tags->create(self::TENANT_B, $groupB, 'high');
+
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 42, $high);
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 42, $low);
+        $this->entityTags->attach(self::TENANT_A, 'acme:record', 99, $high);  // other record
+        $this->entityTags->attach(self::TENANT_A, 'other:batch', 42, $high);  // other type
+        $this->entityTags->attach(self::TENANT_B, 'acme:record', 42, $tagB);  // other tenant
+
+        self::assertSame(2, $this->entityTags->detachAll(self::TENANT_A, 'acme:record', 42));
+
+        self::assertSame([], $this->entityTags->tagsForEntity(self::TENANT_A, 'acme:record', 42));
+        self::assertCount(1, $this->entityTags->tagsForEntity(self::TENANT_A, 'acme:record', 99));
+        self::assertCount(1, $this->entityTags->tagsForEntity(self::TENANT_A, 'other:batch', 42));
+        self::assertCount(1, $this->entityTags->tagsForEntity(self::TENANT_B, 'acme:record', 42));
+
+        // Idempotent: a second cleanup pass removes nothing and does not fail.
+        self::assertSame(0, $this->entityTags->detachAll(self::TENANT_A, 'acme:record', 42));
+    }
 }

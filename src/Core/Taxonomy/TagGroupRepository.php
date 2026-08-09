@@ -137,17 +137,114 @@ final class TagGroupRepository
     }
 
     /**
-     * Delete a group (its tags + their entity associations cascade). Returns
-     * false when no row matched.
+     * How many tags this group holds. Used by the delete guard to report the
+     * blast radius BEFORE anything is destroyed (WC-714 §5).
      */
-    public function delete(int $tenantId, int $id): bool
+    public function countTags(int $tenantId, int $id): int
     {
         $stmt = $this->db->prepare(
-            'DELETE FROM tag_groups WHERE tenant_id = :tenant_id AND id = :id'
+            'SELECT COUNT(*) FROM tags
+             WHERE tenant_id = :tenant_id AND group_id = :id'
         );
         $stmt->execute([':tenant_id' => $tenantId, ':id' => $id]);
 
-        return $stmt->rowCount() > 0;
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * How many `entity_tags` associations would be destroyed by deleting this
+     * group — i.e. every association pointing at any tag in the group (WC-714
+     * §5). These rows belong to OTHER plugins' records, so the count is the
+     * number the caller must be shown before the delete is allowed to proceed.
+     *
+     * Both sides bind an explicit tenant predicate: the association's own
+     * `tenant_id` and the tag's, which a tag_id already pins to exactly one
+     * tenant, so the two can never disagree.
+     */
+    public function countAssociations(int $tenantId, int $id): int
+    {
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) FROM entity_tags et
+             JOIN tags t ON t.id = et.tag_id
+             WHERE et.tenant_id = :tenant_id
+               AND t.tenant_id = :tag_tenant_id
+               AND t.group_id = :id'
+        );
+        $stmt->execute([
+            ':tenant_id'     => $tenantId,
+            ':tag_tenant_id' => $tenantId,
+            ':id'            => $id,
+        ]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Delete a group together with its tags and their entity associations.
+     * Returns false when no row matched.
+     *
+     * DESTRUCTIVE — the blast radius spans plugins. Callers MUST consult
+     * {@see countAssociations()} first and refuse unless the operator
+     * explicitly forced it; see {@see \Whity\Api\TagGroupsApiHandler::delete()}
+     * (WC-714 §5).
+     *
+     * The three levels are deleted EXPLICITLY, in dependency order, inside one
+     * transaction — deliberately not left to the `ON DELETE CASCADE` FKs. Two
+     * reasons: (1) an implicit two-level cascade is precisely what made this
+     * destruction invisible in the first place, and code that names what it
+     * destroys is auditable; (2) the cascade is not universally enforced —
+     * SQLite honours FKs only under `PRAGMA foreign_keys = ON`, so on the
+     * test engine the cascade silently did nothing and left `entity_tags`
+     * rows dangling against deleted tags. Explicit deletes behave identically
+     * on every engine. The FK cascades remain as a backstop.
+     */
+    public function delete(int $tenantId, int $id): bool
+    {
+        $ownTransaction = !$this->db->inTransaction();
+        if ($ownTransaction) {
+            $this->db->beginTransaction();
+        }
+
+        try {
+            // 1. Associations pointing at any tag in this group.
+            $stmt = $this->db->prepare(
+                'DELETE FROM entity_tags
+                 WHERE tenant_id = :tenant_id
+                   AND tag_id IN (
+                       SELECT id FROM tags
+                       WHERE tenant_id = :tag_tenant_id AND group_id = :group_id
+                   )'
+            );
+            $stmt->execute([
+                ':tenant_id'     => $tenantId,
+                ':tag_tenant_id' => $tenantId,
+                ':group_id'      => $id,
+            ]);
+
+            // 2. The group's tags.
+            $stmt = $this->db->prepare(
+                'DELETE FROM tags WHERE tenant_id = :tenant_id AND group_id = :group_id'
+            );
+            $stmt->execute([':tenant_id' => $tenantId, ':group_id' => $id]);
+
+            // 3. The group itself.
+            $stmt = $this->db->prepare(
+                'DELETE FROM tag_groups WHERE tenant_id = :tenant_id AND id = :id'
+            );
+            $stmt->execute([':tenant_id' => $tenantId, ':id' => $id]);
+            $deleted = $stmt->rowCount() > 0;
+
+            if ($ownTransaction) {
+                $this->db->commit();
+            }
+
+            return $deleted;
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**

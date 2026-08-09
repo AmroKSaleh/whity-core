@@ -803,6 +803,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/entity-tags/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Detach every tag from one entity */
+        delete: operations["delete_api_v1_entity_tags_all"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/example/hello": {
         parameters: {
             query?: never;
@@ -2679,6 +2696,14 @@ export interface components {
         };
         EntityTagDataResponse: {
             data: components["schemas"]["EntityTagAssociation"];
+        };
+        EntityTagDetachAllResponse: {
+            data: components["schemas"]["EntityTagDetachAllResult"];
+        };
+        EntityTagDetachAllResult: {
+            entity_type: string;
+            entity_id: number;
+            removed: number;
         };
         EntityTagQueryResponse: {
             data: {
@@ -8402,6 +8427,85 @@ export interface operations {
                 };
             };
             /** @description Association not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_entity_tags_all: {
+        parameters: {
+            query?: {
+                /** @description The opaque plugin-supplied entity type (required) */
+                entity_type?: string;
+                /** @description The entity whose associations are removed (required) */
+                entity_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The associations removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityTagDetachAllResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -16116,7 +16220,10 @@ export interface operations {
     };
     delete_api_v1_tag_groups_id: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Delete the group even though entity associations reference its tags */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 id: number;
@@ -16161,6 +16268,15 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Entity associations still reference this group's tags; retry with force=true */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16519,7 +16635,10 @@ export interface operations {
     };
     delete_api_v1_tags_id: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Delete the tag even though entity associations reference it */
+                force?: boolean;
+            };
             header?: never;
             path: {
                 id: number;
@@ -16564,6 +16683,15 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Entity associations still reference this tag; retry with force=true */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

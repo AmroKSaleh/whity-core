@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use Whity\Auth\RoleChecker;
+use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
@@ -29,11 +30,16 @@ final class TagGroupsApiHandler
 
     private TagGroupRepository $groups;
     private RoleChecker $roleChecker;
+    private ?AuditLoggerInterface $auditLogger;
 
-    public function __construct(TagGroupRepository $groups, RoleChecker $roleChecker)
-    {
+    public function __construct(
+        TagGroupRepository $groups,
+        RoleChecker $roleChecker,
+        ?AuditLoggerInterface $auditLogger = null
+    ) {
         $this->groups = $groups;
         $this->roleChecker = $roleChecker;
+        $this->auditLogger = $auditLogger;
     }
 
     public function list(Request $request): Response
@@ -139,6 +145,21 @@ final class TagGroupsApiHandler
     }
 
     /**
+     * Delete a tag group.
+     *
+     * DESTRUCTIVE-DELETE GUARD (WC-714 §5). The FK cascade runs two levels deep
+     * — dropping a group drops all its tags, which drops every `entity_tags`
+     * row referencing them. Those associations belong to OTHER plugins'
+     * records, so an unguarded delete let any holder of `tags:manage` silently
+     * destroy an unbounded amount of other subsystems' data with no warning and
+     * no record of what was lost.
+     *
+     * So: refuse with 409 while associations exist, reporting the exact count,
+     * and proceed only when the caller explicitly passes `?force=true`. A
+     * forced delete is recorded in the audit log with the full blast radius.
+     * This mirrors the refuse-while-dependents-exist guard already used by
+     * {@see DocumentBlocksApiHandler::delete()} and {@see OusApiHandler::delete()}.
+     *
      * @param array<string, string> $params
      */
     public function delete(Request $request, array $params): Response
@@ -147,13 +168,93 @@ final class TagGroupsApiHandler
         if ($auth instanceof Response) {
             return $auth;
         }
-        [$tenantId] = $auth;
+        [$tenantId, $callerId] = $auth;
 
-        if (!$this->groups->delete($tenantId, (int) ($params['id'] ?? 0))) {
+        $id = (int) ($params['id'] ?? 0);
+
+        // Resolve first: a foreign-tenant id must stay indistinguishable from
+        // "does not exist" (404), and the guard below needs the group's key for
+        // the audit record anyway.
+        $group = $this->groups->find($tenantId, $id);
+        if ($group === null) {
             return Response::error('Tag group not found', 404);
         }
 
+        $associations = $this->groups->countAssociations($tenantId, $id);
+        $tagCount = $this->groups->countTags($tenantId, $id);
+        $forced = self::isForced($request);
+
+        if ($associations > 0 && !$forced) {
+            return Response::error(
+                'Cannot delete a tag group while ' . $associations . ' entity association(s) still reference its tags. '
+                . 'Retry with ?force=true to delete them as well.',
+                409,
+                ['tags' => $tagCount, 'associations' => $associations]
+            );
+        }
+
+        if (!$this->groups->delete($tenantId, $id)) {
+            return Response::error('Tag group not found', 404);
+        }
+
+        // Record what was destroyed. A cascading delete is otherwise invisible
+        // to the plugins whose associations it removed.
+        $this->auditLogger?->record('taxonomy.tag_group.deleted', [
+            'tenant_id'     => $tenantId,
+            'actor_user_id' => $callerId,
+            'target_type'   => 'tag_group',
+            'target_id'     => $id,
+            'metadata'      => [
+                'group_key'             => $group['key'],
+                'forced'                => $forced,
+                'tags_deleted'          => $tagCount,
+                'associations_deleted'  => $associations,
+            ],
+        ]);
+
         return Response::json([], 204);
+    }
+
+    /**
+     * Was the destructive delete explicitly forced (`?force=true`)?
+     *
+     * Read from the QUERY STRING rather than a request body: DELETE bodies are
+     * inconsistently supported across HTTP clients and proxies, and a body that
+     * silently fails to parse must never be mistaken for consent to destroy
+     * data. Only the exact tokens `true` and `1` count as consent.
+     */
+    private static function isForced(Request $request): bool
+    {
+        $force = self::queryParams($request)['force'] ?? '';
+
+        return $force === 'true' || $force === '1';
+    }
+
+    /**
+     * Query params from $_GET (production) merged with the path query string
+     * (tests), as string values.
+     *
+     * @return array<string, string>
+     */
+    private static function queryParams(Request $request): array
+    {
+        $query = [];
+        foreach ($_GET as $k => $v) {
+            if (is_string($k) && is_string($v)) {
+                $query[$k] = $v;
+            }
+        }
+        $qs = parse_url($request->getPath(), PHP_URL_QUERY);
+        if (is_string($qs) && $qs !== '') {
+            parse_str($qs, $parsed);
+            foreach ($parsed as $k => $v) {
+                if (is_string($k) && is_string($v)) {
+                    $query[$k] = $v;
+                }
+            }
+        }
+
+        return $query;
     }
 
     /**

@@ -1497,14 +1497,14 @@ $tagGroupRepository = new \Whity\Core\Taxonomy\TagGroupRepository($db->getPdo())
 $tagRepository = new \Whity\Core\Taxonomy\TagRepository($db->getPdo());
 $entityTagRepository = new \Whity\Core\Taxonomy\EntityTagRepository($db->getPdo());
 
-$tagGroupsHandler = new \Whity\Api\TagGroupsApiHandler($tagGroupRepository, $roleChecker);
+$tagGroupsHandler = new \Whity\Api\TagGroupsApiHandler($tagGroupRepository, $roleChecker, $auditLogger);
 $router->register('GET',    '/api/tag-groups',          [$tagGroupsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
 $router->register('POST',   '/api/tag-groups',          [$tagGroupsHandler, 'create'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('GET',    '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'show'],   null, null, CorePermissions::TAGS_READ);
 $router->register('PATCH',  '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'update'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('DELETE', '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'delete'], null, null, CorePermissions::TAGS_MANAGE);
 
-$tagsHandler = new \Whity\Api\TagsApiHandler($tagRepository, $tagGroupRepository, $roleChecker);
+$tagsHandler = new \Whity\Api\TagsApiHandler($tagRepository, $tagGroupRepository, $roleChecker, $auditLogger);
 $router->register('GET',    '/api/tags',          [$tagsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
 $router->register('POST',   '/api/tags',          [$tagsHandler, 'create'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('GET',    '/api/tags/{id:\d+}', [$tagsHandler, 'show'],   null, null, CorePermissions::TAGS_READ);
@@ -1515,6 +1515,9 @@ $entityTagsHandler = new \Whity\Api\EntityTagsApiHandler($entityTagRepository, $
 $router->register('GET',    '/api/entity-tags', [$entityTagsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
 $router->register('POST',   '/api/entity-tags', [$entityTagsHandler, 'attach'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], null, null, CorePermissions::TAGS_MANAGE);
+// WC-714 §6: a plugin's record-delete cleanup hook. Distinct path so a
+// malformed single-detach body can never degrade into "remove everything".
+$router->register('DELETE', '/api/entity-tags/all', [$entityTagsHandler, 'detachAll'], null, null, CorePermissions::TAGS_MANAGE);
 
 // 13b-quater. Generic async-job submission + status API (WC-jobs-api). Wraps the
 // durable queue: POST enqueues an ALLOW-LISTED job for the caller's tenant (with
