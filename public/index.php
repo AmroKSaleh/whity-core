@@ -317,6 +317,21 @@ $hookManager = new HookManager(
 );
 \Whity\register_service(HookManager::class, $hookManager); // @phpstan-ignore-line
 
+// 4c. Resource-type catalogue (WC-712 §2): the vocabulary of which KINDS of
+// record may carry a role grant. Constructed AFTER the hook manager so a
+// registration is announced on the durable spine; the plugin loader below fills
+// it from the plugins actually loaded.
+//
+// Registered as a service so plugins and handlers resolve the SAME instance the
+// loader populated. A second instance would answer "unregistered" for every
+// plugin type and silently refuse grants that are in fact declared.
+//
+// Worker-level state rebuilt per boot, so unloading a plugin removes its types
+// with no unregister API — the property PermissionRegistry already relies on.
+$resourceTypeRegistry = new \Whity\Core\RBAC\ResourceTypeRegistry($hookManager);
+$resourceTypeRegistry->registerCoreResourceTypes();
+\Whity\register_service(\Whity\Core\RBAC\ResourceTypeRegistry::class, $resourceTypeRegistry); // @phpstan-ignore-line
+
 // 4b-bis. Durable async queue (WC-queue): the producer-side QueueService is
 // registered so core services, hooks, and plugins enqueue work into the durable
 // `jobs` table instead of the old log-only Queue stub. The consumer side
@@ -742,7 +757,8 @@ $pluginLoader = new PluginLoader(
     $permissionRegistry,
     $hookManager,
     $logger,
-    new PluginRoleSeeder($db->getPdo(), $logger)
+    new PluginRoleSeeder($db->getPdo(), $logger),
+    $resourceTypeRegistry
 );
 
 // 9b. Initialize deployment manager

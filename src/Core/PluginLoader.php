@@ -8,7 +8,10 @@ use ReflectionClass;
 use Throwable;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\InvalidPermissionException;
+use Whity\Core\RBAC\InvalidResourceTypeException;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\RBAC\ResourceTypeRegistry;
+use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
 use Psr\Log\LoggerInterface;
@@ -77,6 +80,14 @@ class PluginLoader
      * @var PermissionRegistry|null Permission registry instance
      */
     private ?PermissionRegistry $permissionRegistry;
+
+    /**
+     * Optional catalogue of plugin-declared resource types (WC-712 §2).
+     *
+     * Null in hosts that have not wired one; declarations are then skipped
+     * rather than failing, matching how a null permission registry behaves.
+     */
+    private ?ResourceTypeRegistry $resourceTypeRegistry = null;
 
     /**
      * @var HookManager|null Hook manager instance
@@ -272,11 +283,13 @@ class PluginLoader
         ?PermissionRegistry $permissionRegistry = null,
         ?HookManager $hookManager = null,
         ?LoggerInterface $logger = null,
-        ?PluginRoleSeeder $roleSeeder = null
+        ?PluginRoleSeeder $roleSeeder = null,
+        ?ResourceTypeRegistry $resourceTypeRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
         $this->permissionRegistry = $permissionRegistry;
+        $this->resourceTypeRegistry = $resourceTypeRegistry;
         $this->hookManager = $hookManager;
         $this->logger = $logger;
         $this->roleSeeder = $roleSeeder;
@@ -2338,6 +2351,29 @@ class PluginLoader
                 $this->permissionRegistry->register($plugin->getName(), $plugin->getPermissions());
             } catch (InvalidPermissionException $e) {
                 $warningMsg = "Plugin {$pluginKey} declares an invalid permission: " . $e->getMessage();
+                if ($this->logger !== null) {
+                    $this->logger->warning($warningMsg);
+                } else {
+                    error_log($warningMsg);
+                }
+            }
+        }
+
+        // 2a. Register declared RESOURCE TYPES (WC-712 §2). Optional interface:
+        //     a plugin that does not need per-record authority implements
+        //     nothing and is skipped, so this is additive for every existing
+        //     plugin. The source is $plugin->getName() — supplied here, never
+        //     taken from the plugin's own return value — so a plugin cannot
+        //     choose its own namespace, and therefore cannot collide with
+        //     another plugin or shadow a core type.
+        //
+        //     Same per-plugin error boundary as permissions: a malformed slug is
+        //     a logged warning, not a dead host.
+        if ($this->resourceTypeRegistry !== null && $plugin instanceof PluginResourceTypesInterface) {
+            try {
+                $this->resourceTypeRegistry->register($plugin->getName(), $plugin->getResourceTypes());
+            } catch (InvalidResourceTypeException $e) {
+                $warningMsg = "Plugin {$pluginKey} declares an invalid resource type: " . $e->getMessage();
                 if ($this->logger !== null) {
                     $this->logger->warning($warningMsg);
                 } else {

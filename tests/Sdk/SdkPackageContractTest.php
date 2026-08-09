@@ -166,9 +166,13 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.17.0',
+            '1.18.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.17 makes PermissionResolver RESOURCE-SCOPED: optional '
+            'SDK 1.18 adds PluginResourceTypesInterface — the OPTIONAL contract '
+            . 'by which a plugin declares the resource types it owns. The host '
+            . 'namespaces them under the plugin name it supplies, so two plugins '
+            . 'cannot collide and none can shadow a core type (WC-712 §2); '
+            . 'SDK 1.17 makes PermissionResolver RESOURCE-SCOPED: optional '
             . '$resourceType/$resourceId on hasPermission() and '
             . 'effectivePermissions(), honoured against resource_role_assignments '
             . 'so a plugin can ask "may this caller act on THIS record?" instead '

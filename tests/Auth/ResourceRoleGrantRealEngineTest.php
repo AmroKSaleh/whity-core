@@ -38,8 +38,13 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
     private const TENANT_A = 1;
     private const TENANT_B = 2;
 
-    /** A plugin-declared type, deliberately NOT the built-in 'ou'. */
-    private const TYPE_DOCUMENT = 'document';
+    /**
+     * A plugin-declared type, deliberately NOT the built-in 'ou'.
+     *
+     * The CANONICAL (namespaced) key: the plugin declares the bare slug
+     * `document` and the registry stores it under the plugin's namespace.
+     */
+    private const TYPE_DOCUMENT = 'testplugin:document';
     private const DOC_ID = 4242;
 
     private PDO $pdo;
@@ -408,14 +413,75 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         );
     }
 
-    public function testOuIsRegisteredSoTheFoldNeedsNoRegistryChange(): void
+    public function testOuIsRegisteredAsABareCoreType(): void
     {
-        // Core declares 'ou' up front, so the eventual storage fold is a data
-        // move only — no new vocabulary, and plugins can already address OUs.
+        // Core types are the reserved, UNPREFIXED namespace.
         self::assertTrue(
             (new ResourceTypeRegistry())->exists(ResourceTypeRegistry::TYPE_OU),
             "Core must register 'ou' as a resource type."
         );
+    }
+
+    // ==================== Namespacing (collision + shadowing) ====================
+
+    public function testTwoPluginsDeclaringTheSameSlugDoNotCollide(): void
+    {
+        $types = new ResourceTypeRegistry();
+        $types->register('Acme', ['record']);
+        $types->register('Globex', ['record']);
+
+        self::assertTrue($types->exists('acme:record'));
+        self::assertTrue($types->exists('globex:record'));
+        self::assertFalse(
+            $types->exists('record'),
+            'A bare plugin slug must never become a registered type on its own.'
+        );
+    }
+
+    public function testAPluginCannotShadowACoreType(): void
+    {
+        $types = new ResourceTypeRegistry();
+        // A plugin declaring 'ou' gets its OWN namespaced type; core's bare 'ou'
+        // is untouched, so grants written against the OU cannot be intercepted.
+        $types->register('Impostor', [ResourceTypeRegistry::TYPE_OU]);
+
+        self::assertTrue($types->exists('impostor:ou'));
+        self::assertSame(
+            [ResourceTypeRegistry::TYPE_OU],
+            $types->getBySource(ResourceTypeRegistry::CORE_SOURCE),
+            "Core's 'ou' must remain exactly one bare entry owned by core."
+        );
+    }
+
+    public function testAPluginCannotRegisterUnderTheReservedCoreSource(): void
+    {
+        $this->expectException(InvalidResourceTypeException::class);
+
+        (new ResourceTypeRegistry())->register(ResourceTypeRegistry::CORE_SOURCE, ['sneaky']);
+    }
+
+    public function testCanonicalKeyIsTheOnePlaceTheRuleLives(): void
+    {
+        self::assertSame('acme:record', ResourceTypeRegistry::canonicalKey('Acme', 'record'));
+        self::assertSame(
+            'acme_widgets:record',
+            ResourceTypeRegistry::canonicalKey('Acme\\Widgets\\Acme Widgets', 'record'),
+            'A namespaced plugin class must reduce to its last segment, slugified.'
+        );
+        self::assertSame(
+            'ou',
+            ResourceTypeRegistry::canonicalKey(ResourceTypeRegistry::CORE_SOURCE, 'ou'),
+            'Core types stay bare.'
+        );
+    }
+
+    public function testGrantOnAnUnnamespacedPluginSlugIsRejected(): void
+    {
+        // The plugin declared 'document'; granting on the BARE slug must fail,
+        // because the registered type is the namespaced one.
+        $this->expectException(InvalidResourceTypeException::class);
+
+        $this->repository()->grant(self::TENANT_A, 'document', self::DOC_ID, $this->roleId('editor'), null);
     }
 
     // ==================== Helpers ====================
@@ -440,12 +506,20 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
 
     private function repository(): ResourceRoleAssignmentRepository
     {
-        $types = new ResourceTypeRegistry();
-        // A plugin declaring its own resource type — the shared vocabulary #713
-        // and #714 will consume rather than each redefining.
-        $types->register('test_plugin', [self::TYPE_DOCUMENT]);
+        return new ResourceRoleAssignmentRepository($this->pdo, $this->resourceTypes());
+    }
 
-        return new ResourceRoleAssignmentRepository($this->pdo, $types);
+    /**
+     * A registry with one plugin-declared type. Note the plugin declares the
+     * BARE slug and the registry namespaces it, so the canonical type is
+     * `testplugin:document` — which is what {@see self::TYPE_DOCUMENT} holds.
+     */
+    private function resourceTypes(): ResourceTypeRegistry
+    {
+        $types = new ResourceTypeRegistry();
+        $types->register('TestPlugin', ['document']);
+
+        return $types;
     }
 
     private function grantPermissionToRole(string $roleName, string $permission): void
