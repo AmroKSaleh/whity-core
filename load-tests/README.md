@@ -4,6 +4,29 @@ A k6-based load-testing harness for whity-core. **Zero repository dependency** �
 k6 runs from the official `grafana/k6` Docker image; nothing is added to
 `composer.json` or `package.json`.
 
+## Seeding a realistic dataset first (WC-35)
+
+A meaningful load/pagination/graph-rendering test needs more than the
+bootstrap `admin@example.com` / `user@example.com` fixtures. Before pointing
+k6 at a stack, bulk-insert a parameterized, deterministic multi-tenant dataset
+with the `scale:seed` CLI command:
+
+```bash
+# Preview the row counts first — no database writes.
+whity-cli scale:seed --dry-run --tenants=50 --users-per-tenant=200
+
+# Then actually seed it.
+whity-cli scale:seed --tenants=50 --users-per-tenant=200 --scale=2
+```
+
+The same `--seed` (default 42) plus the same shape flags always produce the
+exact same dataset — tenants, OU hierarchies, tenant-scoped roles, users, and
+a family-relations graph of persons/edges — so results are reproducible
+across runs and machines; re-running with identical flags is idempotent
+(nothing is duplicated). See `whity-cli scale:seed --help`, or
+`src/Database/ScaleSeeder/ScaleSeederConfig.php` for the full flag list and
+defaults.
+
 ## Contents
 
 | File | Purpose |

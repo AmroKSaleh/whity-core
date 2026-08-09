@@ -7,12 +7,16 @@ uses tag-based releases (see the `v*` tags in the repository).
 ## [Unreleased]
 
 ### Added
+- Plugin SDK 1.16 — `Whity\Sdk\Rbac\PermissionResolver`: a read-only contract, registered in the service container by both the HTTP and CLI entry points, that lets a plugin ask the host for an authorization decision *inside* a handler instead of re-deriving it in hand-written SQL. It wraps the same delegation-aware `RoleChecker` the RBAC middleware enforces with, so the two can never give different answers to the same question. See [`docs/wiki/PERMISSION_SYSTEM.md`](docs/wiki/PERMISSION_SYSTEM.md).
+- i18n admin management: `languages:manage` (create/update a language, system-tenant only) and `translations:manage` (create/update/delete a translation row) — `POST`/`PATCH /api/languages`, `GET`/`POST /api/translations`, `PATCH`/`DELETE /api/translations/{id}`. A translation row's tenant scope follows the System-Tenant Context convention: a regular tenant writes only its own override (a global/foreign row is 404), the system tenant writes only the system default (a per-tenant override is 422).
 - Plugin marketplace: `whity-plugin-store` (in the companion `whity-plugins` repository) — a token-gated catalog server other Whity Core deployments can browse and install from.
 - `POST /api/plugins/install-from-store` — fetch a plugin package from a trusted, allowlisted store and install it through the same hardened pipeline as a manual upload (SSRF-guarded).
 - Admin **Plugin Store** page (`/admin/plugins/store`) — browse, search, and install plugins from a trusted store, with a token-mint convenience action.
 - `plugins.store_allowed_hosts` global setting — the operator allowlist gating which store hosts are trusted for install-from-store.
 
 ### Fixed
+- The CLI kernel enforced a **different authorization policy** from the HTTP API: `BaseCommand::setupKernel()` built its `RoleChecker` without a delegation resolver, so a permission held only through a live, non-revoked delegation opened a route over HTTP and was invisible over the CLI. It now mirrors `public/index.php` exactly (delegation-unaware *bounding* checker for the no-transitive-re-delegation invariant; delegation-aware checker for enforcement).
+- `\Whity\app()` raised an `\ArgumentCountError` — an `\Error`, so uncatchable via the documented `catch (\Exception)` — when asked for an unregistered service whose constructor takes arguments, turning a plugin's guarded lookup into a 500. It now reflects first and throws a catchable `\RuntimeException` naming the unwired service; auto-instantiation stays limited to concrete, argument-free classes so the container can never improvise a security service.
 - `EnforceTenantIsolation` now exposes a narrow, anchored exemption for the plugin store's public read routes (catalog browse, registry index, token-gated download) without loosening any other route.
 - Query-string parameters read via `parse_url($request->getPath(), PHP_URL_QUERY)` were silently empty at runtime (FrankenPHP strips the query from the request path) in `PersonsApiHandler` and the tenant-isolation query-based declared-target check; both now read `$_GET` as the runtime source.
 - The Plugin Store admin page now surfaces the actual backend error message on a failed install or browse, instead of one generic message for every failure reason.

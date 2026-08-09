@@ -21,19 +21,27 @@ import { IconDeviceDesktop, IconDeviceDesktopOff } from '@tabler/icons-react';
 /**
  * WC-f-sessions-table: interactive session management on the Settings page.
  *
- * Lists the user's active login sessions (GET /api/v1/me/sessions) with user
- * agent, IP, and last-active time, flagging the current one. Each other session
- * can be signed out individually (DELETE /api/v1/me/sessions/{id}); a single
- * action signs out all other sessions (DELETE /api/v1/me/sessions). A stronger
- * "everywhere including devices" action (POST /api/v1/me/logout-others, WC-b)
- * additionally revokes native-device credentials via the token-epoch bump.
+ * Lists the user's active login sessions (GET /api/v1/me/sessions) with a
+ * friendly device label, IP, and last-active time, flagging the current one.
+ * Each other session can be signed out individually (DELETE
+ * /api/v1/me/sessions/{id}); a single action signs out all other sessions
+ * (DELETE /api/v1/me/sessions). A stronger "everywhere including devices"
+ * action (POST /api/v1/me/logout-others, WC-b) additionally revokes
+ * native-device credentials via the token-epoch bump.
  *
- * Native-device enrollments themselves are managed on their own list (#409);
- * this surface is interactive logins only ("two lists").
+ * The primary label is `device` — a "Chrome on Windows"-style string the
+ * backend already computes from the raw User-Agent via DeviceLabel::
+ * fromUserAgent() (WC-b3330495) — not the raw `user_agent` itself, which is
+ * kept only as a hover tooltip for anyone who wants the exact UA string.
+ *
+ * Native-device enrollments themselves are managed on their own separate list
+ * (see DevicesSettings, #409); this surface is interactive logins only ("two
+ * lists").
  */
 interface Session {
   id: number;
   user_agent: string | null;
+  device?: string;
   ip_address: string | null;
   created_at: string;
   last_seen_at: string;
@@ -161,8 +169,11 @@ export function SessionsSettings() {
               <div className="min-w-0 flex items-start gap-3">
                 <IconDeviceDesktop className="w-5 h-5 mt-0.5 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {session.user_agent || 'Unknown device'}
+                  <p
+                    className="text-sm font-medium text-foreground truncate"
+                    title={session.user_agent || undefined}
+                  >
+                    {session.device || 'Unknown device'}
                     {session.current && (
                       <Badge className="ms-2 align-middle" data-testid="session-current-badge">
                         This device

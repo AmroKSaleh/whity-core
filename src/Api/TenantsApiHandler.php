@@ -12,6 +12,7 @@ use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 use Whity\Http\PaginationParams;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Sdk\Hooks\HookVetoException;
 use PDO;
 
 /**
@@ -444,26 +445,67 @@ class TenantsApiHandler
                 return Response::error('Cannot delete tenant with ' . $result['count'] . ' member(s)', 409);
             }
 
-            // Dispatch filter hook before deleting tenant
-            $this->hookManager->dispatch('tenant.deleting', [
-                'id' => (int)$id,
-            ]);
+            // WC-713: the `tenant.deleting` hook, the DELETE, and the
+            // `tenant.deleted` hook run inside ONE transaction — see the same
+            // comment on OusApiHandler::delete(). Deleting a tenant cascades
+            // across 32 core FK constraints; a plugin's own tenant-scoped tables
+            // carry NO such FK, so the synchronous hook is their only cleanup
+            // mechanism and it must be atomic with the tenant row itself.
+            $ownTransaction = !$this->db->inTransaction();
+            if ($ownTransaction) {
+                $this->db->beginTransaction();
+            }
 
-            // Delete tenant
-            $deleteStmt = $this->db->prepare('DELETE FROM tenants WHERE id = ?');
-            $deleteStmt->execute([$id]);
+            try {
+                // Filter hook BEFORE the delete — the row (and everything that
+                // cascades off it) is still readable here, so this is where a
+                // listener reads what it needs, and where it may veto.
+                $this->hookManager->dispatch('tenant.deleting', [
+                    'id' => (int)$id,
+                ]);
 
-            // Dispatch synchronous hook after tenant is deleted
-            $this->hookManager->dispatch('tenant.deleted', [
-                'id' => (int)$id,
-            ]);
+                // Delete tenant
+                $deleteStmt = $this->db->prepare('DELETE FROM tenants WHERE id = ?');
+                $deleteStmt->execute([$id]);
 
-            // Dispatch asynchronous hook for background tasks
+                // Synchronous cleanup hook, still INSIDE the transaction: a
+                // listener that throws takes the delete down with it.
+                $this->hookManager->dispatch('tenant.deleted', [
+                    'id' => (int)$id,
+                ]);
+
+                if ($ownTransaction) {
+                    $this->db->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownTransaction && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                throw $e;
+            }
+
+            // Durable/async notification only AFTER the delete has COMMITTED.
             $this->hookManager->dispatchAsync('tenant.deleted.async', [
                 'id' => (int)$id,
             ]);
 
             return Response::json(['data' => ['id' => (int)$id, 'message' => 'Tenant deleted']], 200);
+        } catch (HookVetoException $e) {
+            // A plugin refused the deletion (or its cleanup failed); the
+            // transaction rolled back, so the tenant still exists. 409 matches
+            // the active-members guard above. `reason()` is the plugin's own
+            // client-safe text — the raw exception message never leaks (WC-186).
+            error_log(sprintf(
+                '[tenants] delete vetoed by a hook listener: tenant_id=%s target_tenant_id=%s event=%s',
+                var_export(TenantContext::getTenantId(), true),
+                var_export($params['id'] ?? null, true),
+                $e->eventName()
+            ));
+            return Response::error(
+                'Cannot delete tenant: blocked by an installed plugin',
+                409,
+                ['reason' => $e->reason()]
+            );
         } catch (SystemTenantProtectedException $e) {
             error_log(sprintf(
                 '[tenants] blocked system tenant deletion: tenant_id=%s, detail=%s',

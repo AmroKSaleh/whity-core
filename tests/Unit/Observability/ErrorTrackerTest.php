@@ -11,6 +11,7 @@ use Whity\Core\Observability\ErrorContext;
 use Whity\Core\Observability\ErrorTracker;
 use Whity\Core\Observability\ErrorTrackerFactory;
 use Whity\Core\Observability\NullErrorTracker;
+use Whity\Core\Observability\SentryErrorTracker;
 
 /**
  * Unit tests for the error-tracker seam (WC-d): context gathering, the no-op
@@ -78,11 +79,22 @@ final class ErrorTrackerTest extends TestCase
         self::assertInstanceOf(NullErrorTracker::class, ErrorTrackerFactory::fromEnv(['SENTRY_DSN' => '  ']));
     }
 
-    public function testFactoryFailsSafeToNullWhenDsnSetButNoProviderInstalled(): void
+    public function testFactoryReturnsSentryTrackerWhenDsnIsConfigured(): void
     {
-        // No concrete provider class exists yet, so a configured DSN must fail
-        // safe to the no-op tracker rather than fatal.
+        // Was: 'fails safe to Null because no provider is installed'. The
+        // provider now EXISTS (WC-error-tracking), so a configured DSN must
+        // actually activate it — the old expectation encoded a missing feature,
+        // not a desired behaviour.
         $tracker = ErrorTrackerFactory::fromEnv(['ERROR_TRACKER_DSN' => 'https://key@example.test/1']);
-        self::assertInstanceOf(NullErrorTracker::class, $tracker);
+        self::assertInstanceOf(SentryErrorTracker::class, $tracker);
+    }
+
+    public function testFactoryStaysInertWhenTheDsnIsUnusable(): void
+    {
+        // A malformed DSN must never fatal on the error path: the tracker is
+        // constructed but inert, and capture is a silent no-op.
+        $tracker = ErrorTrackerFactory::fromEnv(['ERROR_TRACKER_DSN' => 'not-a-dsn']);
+        $tracker->captureException(new \RuntimeException('boom'));
+        self::assertInstanceOf(SentryErrorTracker::class, $tracker);
     }
 }

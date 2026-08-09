@@ -41,6 +41,19 @@ export const TAGS_READ = 'tags:read';
 export const TAGS_MANAGE = 'tags:manage';
 
 /**
+ * i18n admin management (WC-583). LANGUAGES_MANAGE is a PLATFORM capability —
+ * the backend additionally requires the caller to be acting in the SYSTEM
+ * tenant (id 0), since languages carry no tenant_id column at all. A regular
+ * tenant may still hold this permission (it inherits the shared global
+ * `admin` role) but every write 403s outside the system tenant — gate the UI
+ * on `isSystemTenant` too (see admin/languages/page.tsx).
+ * TRANSLATIONS_MANAGE is tenant-scoped: any tenant holding it may create/
+ * update/delete its OWN translation rows.
+ */
+export const LANGUAGES_MANAGE = 'languages:manage';
+export const TRANSLATIONS_MANAGE = 'translations:manage';
+
+/**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.
  *
  * Returns `[]` for any shape that does not match `{ data: { permissions:

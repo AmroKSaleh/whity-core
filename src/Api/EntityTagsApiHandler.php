@@ -17,10 +17,11 @@ use Whity\Http\JsonBody;
  * Tenant-scoped, RBAC-gated management of the polymorphic tag<->entity
  * association (WC-621).
  *
- *  - POST   /api/entity-tags  {entity_type, entity_id, tag_id}  — attach (idempotent)
- *  - DELETE /api/entity-tags  {entity_type, entity_id, tag_id}  — detach
- *  - GET    /api/entity-tags?entity_type=T&entity_id=E          — the entity's tags
- *  - GET    /api/entity-tags?entity_type=T&tag_id=X             — entities of type T carrying tag X
+ *  - POST   /api/entity-tags      {entity_type, entity_id, tag_id}  — attach (idempotent)
+ *  - DELETE /api/entity-tags      {entity_type, entity_id, tag_id}  — detach one
+ *  - DELETE /api/entity-tags/all?entity_type=T&entity_id=E          — detach ALL of one entity's tags
+ *  - GET    /api/entity-tags?entity_type=T&entity_id=E              — the entity's tags
+ *  - GET    /api/entity-tags?entity_type=T&tag_id=X                 — entities of type T carrying tag X
  *
  * `entity_type` is an opaque plugin-supplied string (no FK), so any resource is
  * taggable. Reads require `tags:read`, writes require `tags:manage`. Attaching
@@ -88,6 +89,62 @@ final class EntityTagsApiHandler
         }
 
         return Response::json([], 204);
+    }
+
+    /**
+     * Detach EVERY tag from one entity — the cleanup hook a plugin calls from
+     * its own record-delete path (WC-714 §6).
+     *
+     * `entity_tags` intentionally carries no FK to the tagged record, so core is
+     * never told when a plugin record disappears and its associations survive
+     * it. That is not merely leaked garbage: a later record REUSING the same
+     * `entity_id` under the same `entity_type` silently inherits the dead
+     * record's tags. This route is how a plugin closes that hole.
+     *
+     * Deliberately a DISTINCT path (`/api/entity-tags/all`) rather than an
+     * argument-shape variant of `DELETE /api/entity-tags`: overloading the
+     * single-detach route would mean a request whose body failed to parse
+     * degrades into "remove everything", which is exactly the silent
+     * data-destruction failure mode this changeset exists to remove.
+     *
+     * Returns 200 with the number of associations removed (0 is a normal,
+     * successful no-op — a record that carried no tags), so a caller can log
+     * what its cleanup actually did.
+     */
+    public function detachAll(Request $request): Response
+    {
+        $auth = $this->authorize($request, CorePermissions::TAGS_MANAGE);
+        if ($auth instanceof Response) {
+            return $auth;
+        }
+        [$tenantId] = $auth;
+
+        $query = self::queryParams($request);
+
+        $entityType = trim((string) ($query['entity_type'] ?? ''));
+        if ($entityType === '' || mb_strlen($entityType) > self::MAX_ENTITY_TYPE_LENGTH) {
+            return Response::error('entity_type is required and must be at most 128 characters', 422);
+        }
+
+        if (!isset($query['entity_id']) || !ctype_digit((string) $query['entity_id']) || (int) $query['entity_id'] <= 0) {
+            return Response::error('entity_id is required and must be a positive integer', 422);
+        }
+        $entityId = (int) $query['entity_id'];
+
+        $removed = $this->repo->detachAll($tenantId, $entityType, $entityId);
+
+        // Not audit-logged, unlike the tag/tag-group force-deletes: this is a
+        // routine, plugin-initiated cleanup whose blast radius is exactly the
+        // one record the plugin already owns and is deleting. Recording it would
+        // flood audit_log during bulk deletes without describing anything the
+        // operator did not already intend.
+        return Response::json([
+            'data' => [
+                'entity_type' => $entityType,
+                'entity_id'   => $entityId,
+                'removed'     => $removed,
+            ],
+        ]);
     }
 
     public function list(Request $request): Response

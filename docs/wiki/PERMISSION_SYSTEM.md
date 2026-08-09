@@ -185,6 +185,42 @@ if (!$roleChecker->hasPermission($request->user->user_id, 'reports:read', $tenan
 }
 ```
 
+## In-handler resolution for plugins (`PermissionResolver`, SDK 1.16)
+
+The route-level gate is **flat**: it answers one question, once, before the handler runs. A handler that needs a *second* decision — "may this caller see the archived rows?", "may they act on **this** record?" — needs resolution, not a gate.
+
+Core handlers get `RoleChecker` injected directly. Plugins do not: they receive only a raw `\PDO`, so before SDK 1.16 the only option was to re-derive the answer in hand-written SQL. **That is a security defect, not merely duplication.** Real resolution is not one join — it gates on ACTIVE membership, walks the OU ancestor chain, walks the role hierarchy with cycle/depth guards, unions live (non-revoked, OU-scoped) delegations, and validates the slug against the registry. Any partial re-implementation drifts from what the middleware enforces, and the system then holds **two different answers to the same authorization question**.
+
+The host therefore registers a narrow, read-only resolver in the service container under the SDK interface name:
+
+```php
+use Whity\Sdk\Rbac\PermissionResolver;
+
+$rbac = \Whity\app(PermissionResolver::class);
+
+if (!$rbac->hasPermission($profileId, $tenantId, 'demo_catalog:manage')) {
+    return Response::error('Insufficient permissions', 403);
+}
+
+// One pass instead of a check per row:
+$caps = $rbac->effectivePermissions($profileId, $tenantId);
+```
+
+| Method | Answers |
+| --- | --- |
+| `hasPermission(int $profileId, int $tenantId, string $permission): bool` | Does this profile effectively hold this permission in this tenant? |
+| `hasRole(int $profileId, int $tenantId, string $role): bool` | Is this role in the profile's effective role set (membership role + OU/ancestor-OU roles)? |
+| `effectivePermissions(int $profileId, int $tenantId): list<string>` | The full effective permission set. |
+
+Properties that make it safe to hand to plugin code:
+
+- **Same instance the middleware uses.** The implementation (`Whity\Core\RBAC\RoleCheckerPermissionResolver`) wraps the *delegation-aware* `RoleChecker` that `RbacMiddleware` enforces with, in both `public/index.php` and the CLI kernel. A live delegation therefore unlocks an in-handler check exactly as it unlocks a route gate.
+- **Read only.** Three question methods and nothing else — no `clearCache()`, no `\PDO`. Registering `RoleChecker` itself would have exposed both. It grants no authority a plugin lacks; it only lets the plugin ask the question *correctly*.
+- **`effectivePermissions()` is exactly the set `hasPermission()` answers `true` for.** `RoleChecker::getEffectivePermissionsForProfile()` deliberately returns the *raw* set (the document designer stores arbitrary tenant-defined tags in the same column); the resolver filters it through the registry so the two methods can never disagree. Passing the raw set straight through would have recreated the very divergence the contract exists to close.
+- **Fails closed.** `\Whity\app()` throws a `RuntimeException` when a service is not registered, and only ever auto-instantiates a concrete, argument-free class. It will never improvise a security service — an auto-built `RoleChecker` with a different database handle, an empty registry or no delegation resolver would answer differently from the middleware.
+
+There are intentionally **no** `$resourceType` / `$resourceId` parameters yet. Role grants are currently addressable only to a tenant or an OU, so a resource argument would be accepted and then silently ignored — the caller would believe it had a record-scoped answer while holding the tenant-wide one. That fails *open*. Resource-scoped overloads are additive and arrive with the polymorphic grant table (issue #712 §2).
+
 ## Roles API + tenant scoping
 
 `RolesApiHandler` (`src/Api/RolesApiHandler.php`) provides full role CRUD, scoped by the nullable `roles.tenant_id` column (migration 018):
@@ -294,4 +330,5 @@ Because step 1 of `hasPermission()` consults the registry, removing a plugin ins
 - `RbacMiddleware` enforces route requirements against the authoritative store and never trusts JWT role/permission claims.
 - `RolesApiHandler` is tenant-scoped via `roles.tenant_id` (NULL = global), and accepts permission ids or names.
 - **Delegation** (WC-34) lets a role-holder grant a SUBSET of their own effective permissions to a role or user, tenant/OU-scoped and revocable. The HARD invariant — you can never delegate a permission you do not hold — is enforced server-side in `DelegationService`, and live delegations enter `hasPermission()` resolution through the `DelegatedPermissionResolver` wired into `RoleChecker`.
+- **Plugins resolve through the host**, not through their own SQL: `\Whity\app(\Whity\Sdk\Rbac\PermissionResolver::class)` returns a read-only facade over the same delegation-aware `RoleChecker` the middleware enforces with (SDK 1.16, WC-712).
 </content>

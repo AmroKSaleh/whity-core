@@ -312,6 +312,76 @@ final class MembershipRbacMutationTest extends TestCase
     }
 
     // =========================================================================
+    // getEffectivePermissionsForProfile() — worker-level cache key isolation
+    // =========================================================================
+
+    /**
+     * The resolved-permission cache key must include the TENANT id: the same
+     * profile with DIFFERENT roles in two tenants must get two independent
+     * cache entries. Kills a mutant that drops the ':' . $tenantId segment
+     * from the cache key concatenation, which would let the FIRST tenant's
+     * resolution leak into the second lookup for the same profile.
+     */
+    public function testEffectivePermissionCacheKeyDoesNotCollideAcrossTenants(): void
+    {
+        // Dedicated, permission-empty roles so this test controls the exact
+        // effective set (the seeded 'admin'/'viewer' roles carry a large
+        // pre-seeded permission set of their own, which would mask a collision).
+        $roleA = $this->seedRole('cache-role-a');
+        $roleB = $this->seedRole('cache-role-b');
+
+        $profile = $this->seedProfile('cachekey-tenant@example.com');
+        $this->addMembershipWithRoleId($profile, self::TENANT_A, $roleA);
+        $this->addMembershipWithRoleId($profile, self::TENANT_B, $roleB);
+        $this->grantPermissionToRoleId($roleA, 'users:delete');
+        $this->grantPermissionToRoleId($roleB, 'users:read');
+
+        $tenantAPerms = $this->checker->getEffectivePermissionsForProfile($profile, self::TENANT_A);
+        $tenantBPerms = $this->checker->getEffectivePermissionsForProfile($profile, self::TENANT_B);
+
+        self::assertSame(
+            ['users:delete'],
+            $tenantAPerms,
+            'Tenant A resolution must reflect role A.'
+        );
+        self::assertSame(
+            ['users:read'],
+            $tenantBPerms,
+            'Tenant B resolution must reflect role B — not be poisoned by the ' .
+            'Tenant A cache entry for the same profile.'
+        );
+    }
+
+    /**
+     * The resolved-permission cache key must include the PROFILE id: two
+     * different profiles with different roles in the SAME tenant must get
+     * independent cache entries. Kills a mutant that drops the profileId
+     * segment from the cache key concatenation.
+     */
+    public function testEffectivePermissionCacheKeyDoesNotCollideAcrossProfiles(): void
+    {
+        $roleA = $this->seedRole('cache-role-c');
+        $roleB = $this->seedRole('cache-role-d');
+
+        $profileA = $this->seedProfile('cachekey-a@example.com');
+        $profileB = $this->seedProfile('cachekey-b@example.com');
+        $this->addMembershipWithRoleId($profileA, self::TENANT_A, $roleA);
+        $this->addMembershipWithRoleId($profileB, self::TENANT_A, $roleB);
+        $this->grantPermissionToRoleId($roleA, 'users:delete');
+        $this->grantPermissionToRoleId($roleB, 'users:read');
+
+        $permsA = $this->checker->getEffectivePermissionsForProfile($profileA, self::TENANT_A);
+        $permsB = $this->checker->getEffectivePermissionsForProfile($profileB, self::TENANT_A);
+
+        self::assertSame(['users:delete'], $permsA);
+        self::assertSame(
+            ['users:read'],
+            $permsB,
+            'A different profile in the same tenant must not read the first profile\'s cached permissions.'
+        );
+    }
+
+    // =========================================================================
     // DelegationService.delegate() — subset-invariant gate boundaries
     // =========================================================================
 
@@ -604,6 +674,43 @@ final class MembershipRbacMutationTest extends TestCase
         $this->pdo->prepare(
             'INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, datetime(\'now\'))'
         )->execute([$this->roleId($roleName), $permId]);
+    }
+
+    /**
+     * Seed a brand-new, permission-empty role and return its id. Used by the
+     * cache-key isolation tests, which need full control over the effective
+     * set (the pre-seeded 'admin'/'viewer' roles already carry a large
+     * default permission set of their own).
+     */
+    private function seedRole(string $name): int
+    {
+        $this->pdo->prepare(
+            "INSERT INTO roles (name, description, tenant_id, created_at) VALUES (?, '', NULL, datetime('now'))"
+        )->execute([$name]);
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function addMembershipWithRoleId(int $profileId, int $tenantId, int $roleId): int
+    {
+        $this->pdo->prepare(
+            "INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at)
+             VALUES (?, ?, ?, 'active', datetime('now'))"
+        )->execute([$profileId, $tenantId, $roleId]);
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function grantPermissionToRoleId(int $roleId, string $permission): void
+    {
+        $this->pdo->prepare(
+            'INSERT OR IGNORE INTO permissions (name, created_at) VALUES (?, datetime(\'now\'))'
+        )->execute([$permission]);
+        $stmt = $this->pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+        $stmt->execute([$permission]);
+        $permId = (int) $stmt->fetchColumn();
+
+        $this->pdo->prepare(
+            'INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, datetime(\'now\'))'
+        )->execute([$roleId, $permId]);
     }
 
     private function insertDelegation(int $tenantId, int $grantorProfileId, string $granteeType, int $granteeId, string $permission): void

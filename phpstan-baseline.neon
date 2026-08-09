@@ -502,12 +502,22 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Api/LanguagesApiHandlerTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
 			count: 2
 			path: tests/Api/MeCapabilitiesApiHandlerRealEngineTest.php
 
 		-
+			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Api/OusApiHandlerRealEngineTest.php
+
+		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 9
+			count: 17
 			path: tests/Api/OusApiHandlerRealEngineTest.php
 
 		-
@@ -557,8 +567,13 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 7
+			count: 14
 			path: tests/Api/TenantsApiHandlerRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 1
+			path: tests/Api/TranslationsApiHandlerTest.php
 
 		-
 			message: "#^Cannot call method fetch\\(\\) on PDOStatement\\|false\\.$#"
@@ -567,7 +582,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 24
+			count: 29
 			path: tests/Api/UsersApiHandlerRealEngineTest.php
 
 		-
@@ -746,6 +761,16 @@ parameters:
 			path: tests/Database/MigrationSchemaTest.php
 
 		-
+			message: "#^Cannot call method fetchAll\\(\\) on PDOStatement\\|false\\.$#"
+			count: 3
+			path: tests/Database/ScaleSeeder/ScaleSeederRealEngineTest.php
+
+		-
+			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
+			count: 13
+			path: tests/Database/ScaleSeeder/ScaleSeederRealEngineTest.php
+
+		-
 			message: "#^Method class@anonymous/tests/Http/HttpKernelTest\\.php\\:367\\:\\:__construct\\(\\) has parameter \\$executionOrder with no value type specified in iterable type array\\.$#"
 			count: 1
 			path: tests/Http/HttpKernelTest.php
@@ -827,7 +852,7 @@ parameters:
 
 		-
 			message: "#^Cannot call method fetchColumn\\(\\) on PDOStatement\\|false\\.$#"
-			count: 47
+			count: 48
 			path: tests/Integration/CrossTenantRejectionRealEngineTest.php
 
 		-
@@ -909,21 +934,6 @@ parameters:
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Sdk\\\\Http\\\\Response constructor expects string, string\\|false given\\.$#"
 			count: 1
 			path: tests/Integration/RbacRouteEnforcementTest.php
-
-		-
-			message: "#^Else branch is unreachable because ternary operator condition is always true\\.$#"
-			count: 1
-			path: tests/Integration/RefreshTokenReuseDetectionTest.php
-
-		-
-			message: "#^Method Tests\\\\Integration\\\\RefreshTokenReuseDetectionTest\\:\\:getAuditLogEntries\\(\\) return type has no value type specified in iterable type array\\.$#"
-			count: 1
-			path: tests/Integration/RefreshTokenReuseDetectionTest.php
-
-		-
-			message: "#^Offset 'jti' does not exist on array\\<string, mixed\\>\\|null\\.$#"
-			count: 4
-			path: tests/Integration/RefreshTokenReuseDetectionTest.php
 
 		-
 			message: "#^Parameter \\#2 \\$body of class Whity\\\\Core\\\\Response constructor expects string, string\\|false given\\.$#"
@@ -1179,66 +1189,6 @@ parameters:
 			message: "#^Parameter \\#3 \\$subject of function preg_replace expects array\\|string, string\\|null given\\.$#"
 			count: 1
 			path: tests/Support/TestFixtureBuilder.php
-
-		-
-			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
-			count: 20
-			path: tests/Unit/Api/OusApiHandlerTest.php
-
-		-
-			message: "#^Call to an undefined method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:expects\\(\\)\\.$#"
-			count: 2
-			path: tests/Unit/Api/OusApiHandlerTest.php
-
-		-
-			message: "#^Call to an undefined method Whity\\\\Core\\\\Hooks\\\\HookManager\\:\\:method\\(\\)\\.$#"
-			count: 2
-			path: tests/Unit/Api/OusApiHandlerTest.php
-
-		-
-			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
-			count: 12
-			path: tests/Unit/Api/OusApiHandlerTest.php
-
-		-
-			message: "#^Call to an undefined method PDO\\:\\:expects\\(\\)\\.$#"
-			count: 3
-			path: tests/Unit/Api/PermissionsApiHandlerTest.php
-
-		-
-			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
-			count: 2
-			path: tests/Unit/Api/PermissionsApiHandlerTest.php
-
-		-
-			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
-			count: 5
-			path: tests/Unit/Api/TenantsApiHandlerTest.php
-
-		-
-			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
-			count: 9
-			path: tests/Unit/Api/UsersApiHandlerTest.php
-
-		-
-			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
-			count: 10
-			path: tests/Unit/Api/UsersApiHandlerTest.php
-
-		-
-			message: "#^Call to an undefined method PDO\\:\\:method\\(\\)\\.$#"
-			count: 7
-			path: tests/Unit/Auth/AuthHandlerTest.php
-
-		-
-			message: "#^Call to an undefined method Whity\\\\Auth\\\\TokenValidator\\:\\:method\\(\\)\\.$#"
-			count: 7
-			path: tests/Unit/Auth/AuthHandlerTest.php
-
-		-
-			message: "#^Parameter \\#4 \\$body of class Whity\\\\Core\\\\Request constructor expects string, string\\|false given\\.$#"
-			count: 9
-			path: tests/Unit/Auth/AuthHandlerTest.php
 
 		-
 			message: "#^Property Tests\\\\Unit\\\\Auth\\\\BackupCodesServiceTest\\:\\:\\$mockDb has no type specified\\.$#"

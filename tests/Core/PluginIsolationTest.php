@@ -9,6 +9,7 @@ use Whity\Core\PluginLoader;
 use Whity\Core\PluginState;
 use Whity\Core\Router;
 use Whity\Core\Request;
+use Whity\Sdk\Hooks\HookVetoException;
 use Whity\Sdk\Http\Response;
 use Whity\Core\Hooks\HookManager;
 
@@ -201,6 +202,41 @@ class PluginIsolationTest extends TestCase
     }
 
     /**
+     * WC-713: the ONE exception the error boundary must NOT swallow.
+     *
+     * The isolation proven by the test above is what makes a broken plugin
+     * survivable — but applied to `*.deleting`/`*.deleted` it also meant a plugin
+     * could never say "do not delete this": its objection was logged and the host
+     * deleted the row anyway. {@see HookVetoException} is the sanctioned way to
+     * object, so it is re-thrown for the dispatching handler to turn into a 409.
+     */
+    public function testHookVetoExceptionCrossesTheErrorBoundary(): void
+    {
+        $hookManager = new HookManager();
+        $this->writeVetoingHookPlugin('HookVeto', 'demo.deleting');
+
+        $loader = new PluginLoader($this->tempDir, $this->router, null, $hookManager);
+        $loader->load();
+
+        try {
+            $hookManager->dispatch('demo.deleting', ['id' => 7]);
+            $this->fail('A HookVetoException must propagate out of dispatch(), not be swallowed.');
+        } catch (HookVetoException $e) {
+            $this->assertSame('demo.deleting', $e->eventName());
+            $this->assertSame('still in use', $e->reason());
+        }
+
+        // A veto is a HEALTHY plugin doing its job, so it must not count towards
+        // the 3-strikes breaker that would disable the plugin.
+        $lifecycle = $loader->getLifecycle('Whity\\Plugins\\HookVeto');
+        if ($lifecycle === null) {
+            $this->fail('The vetoing plugin must have been loaded and given a lifecycle.');
+        }
+        $this->assertSame(0, $lifecycle->getConsecutiveErrors());
+        $this->assertSame(PluginState::Active, $lifecycle->getState());
+    }
+
+    /**
      * Composition with hot-reload: reloading a failed plugin whose file changed
      * resets its lifecycle to a fresh active state.
      */
@@ -340,6 +376,40 @@ class {$class} implements PluginInterface
             throw new \\RuntimeException('toggled failure');
         }
         return Response::json(['ok' => true]);
+    }
+}
+PHP;
+        file_put_contents($this->tempDir . '/' . $class . '.php', $code);
+    }
+
+    /**
+     * A plugin whose hook VETOES rather than fails (WC-713) — the counterpart to
+     * {@see writeThrowingHookPlugin()}, which throws a plain RuntimeException.
+     */
+    private function writeVetoingHookPlugin(string $class, string $event): void
+    {
+        $code = <<<PHP
+<?php
+
+namespace Whity\\Plugins;
+
+use Whity\\Sdk\\PluginInterface;
+use Whity\\Sdk\\Hooks\\HookVetoException;
+
+class {$class} implements PluginInterface
+{
+    public function getName(): string { return '{$class}'; }
+    public function getVersion(): string { return '1.0.0'; }
+    public function getRoutes(): array { return []; }
+    public function getPermissions(): array { return []; }
+    public function getHooks(): array
+    {
+        return ['{$event}' => [\$this, 'onEvent']];
+    }
+    public function getMigrations(): array { return []; }
+    public function onEvent(array \$data, array \$context): array
+    {
+        throw HookVetoException::forEvent('{$event}', 'still in use');
     }
 }
 PHP;

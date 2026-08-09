@@ -6,8 +6,12 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\I18nAdminTestSeed;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\LanguagesApiHandler;
+use Whity\Auth\RoleChecker;
+use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\i18n\LanguageRegistry;
 use Whity\Core\i18n\LanguageRepository;
@@ -32,26 +36,29 @@ final class LanguagesApiHandlerTest extends TestCase
     private PDO $pdo;
     private LanguagesApiHandler $handler;
     private LanguageRegistry $languageRegistry;
+    private LanguageRepository $languageRepository;
     private int $testProfileId;
 
     protected function setUp(): void
     {
+        RoleChecker::clearCache();
         TenantContext::reset();
         TenantContext::setTenantId(0); // System tenant
 
         $this->pdo = SchemaFromMigrations::make();
 
         // Initialize language registry
-        $languageRepository = new LanguageRepository($this->pdo);
+        $this->languageRepository = new LanguageRepository($this->pdo);
         $translationRepository = new TranslationRepository($this->pdo);
         $this->languageRegistry = new LanguageRegistry(
-            $languageRepository,
+            $this->languageRepository,
             $translationRepository,
             new StaticTenantContextAdapter(),
         );
         $this->languageRegistry->boot();
 
-        $this->handler = new LanguagesApiHandler($this->pdo, $this->languageRegistry);
+        $roleChecker = new RoleChecker(I18nAdminTestSeed::wrap($this->pdo), new PermissionRegistry());
+        $this->handler = new LanguagesApiHandler($this->pdo, $this->languageRegistry, $this->languageRepository, $roleChecker);
 
         // Create a test profile for authenticated tests
         $this->testProfileId = $this->createTestProfile();
@@ -60,6 +67,7 @@ final class LanguagesApiHandlerTest extends TestCase
     protected function tearDown(): void
     {
         TenantContext::reset();
+        RoleChecker::clearCache();
     }
 
     /**
@@ -248,7 +256,204 @@ final class LanguagesApiHandlerTest extends TestCase
         $this->assertSame('en', $rows[1]['language_code']);
     }
 
+    // ==================== admin: POST /api/v1/languages (WC-583) ====================
+
+    public function testCreateLanguageAsSystemTenantWithPermissionSucceeds(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode(['code' => 'fr', 'name' => 'Français']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame('fr', $body['data']['code']);
+        $this->assertSame('Français', $body['data']['name']);
+        $this->assertTrue($body['data']['enabled'], 'enabled defaults to true when omitted');
+    }
+
+    public function testCreateLanguageWithoutPermissionIsForbidden(): void
+    {
+        // No grant for $this->testProfileId — RbacMiddleware would already
+        // block this in production; the handler re-checks as defence in depth.
+        $request = new Request('POST', '/api/languages', [], (string) json_encode(['code' => 'fr', 'name' => 'Français']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    /**
+     * WC-583: languages carry no tenant_id column at all, so create/update is
+     * restricted to the SYSTEM tenant even for a caller holding
+     * languages:manage in a regular tenant (mirrors ENTITLEMENTS_MANAGE/
+     * PLANS_MANAGE's system-tenant-only PLATFORM-capability gate).
+     */
+    public function testCreateLanguageAsRegularTenantIsForbiddenEvenWithPermission(): void
+    {
+        $this->grantPermission($this->testProfileId, 1, CorePermissions::LANGUAGES_MANAGE);
+        TenantContext::reset();
+        TenantContext::setTenantId(1);
+
+        $request = new Request('POST', '/api/languages', [], (string) json_encode(['code' => 'fr', 'name' => 'Français']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(403, $response->getStatusCode());
+        $this->assertStringContainsString('system tenant', (string) $response->getBody());
+    }
+
+    public function testCreateLanguageRejectsDuplicateCode(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode(['code' => 'en', 'name' => 'English (again)']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(409, $response->getStatusCode());
+    }
+
+    public function testCreateLanguageRejectsInvalidCode(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode(['code' => '???', 'name' => 'Nope']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(422, $response->getStatusCode());
+    }
+
+    // ==================== admin: PATCH /api/v1/languages/{id} (WC-583) ====================
+
+    public function testUpdateLanguageTogglesEnabled(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $languageId = (int) $this->pdo->query("SELECT id FROM languages WHERE code = 'ar'")->fetchColumn();
+
+        $request = new Request('PATCH', "/api/languages/{$languageId}", [], (string) json_encode(['enabled' => false]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->update($request, ['id' => (string) $languageId]);
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $body = json_decode($response->getBody(), true);
+        $this->assertFalse($body['data']['enabled']);
+
+        $stmt = $this->pdo->prepare('SELECT enabled FROM languages WHERE id = ?');
+        $stmt->execute([$languageId]);
+        $this->assertEquals(0, $stmt->fetchColumn());
+    }
+
+    public function testUpdateLanguageNotFoundReturns404(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('PATCH', '/api/languages/999999', [], (string) json_encode(['enabled' => false]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->update($request, ['id' => '999999']);
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    public function testUpdateLanguageAsRegularTenantIsForbiddenEvenWithPermission(): void
+    {
+        $this->grantPermission($this->testProfileId, 1, CorePermissions::LANGUAGES_MANAGE);
+        TenantContext::reset();
+        TenantContext::setTenantId(1);
+        $languageId = (int) $this->pdo->query("SELECT id FROM languages WHERE code = 'ar'")->fetchColumn();
+
+        $request = new Request('PATCH', "/api/languages/{$languageId}", [], (string) json_encode(['enabled' => false]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->update($request, ['id' => (string) $languageId]);
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    // ==================== admin: GET /api/v1/admin/languages (WC-583) ====================
+
+    public function testAdminListIncludesDisabledLanguagesWithFullShape(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $arId = (int) $this->pdo->query("SELECT id FROM languages WHERE code = 'ar'")->fetchColumn();
+        $disableRequest = new Request('PATCH', "/api/languages/{$arId}", [], (string) json_encode(['enabled' => false]));
+        $disableRequest->user = (object) ['profile_id' => $this->testProfileId];
+        $this->handler->update($disableRequest, ['id' => (string) $arId]);
+
+        $request = new Request('GET', '/api/admin/languages');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->adminList($request);
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $body = json_decode($response->getBody(), true);
+        $codes = array_column($body['data'], 'code');
+        $this->assertContains('en', $codes);
+        $this->assertContains('ar', $codes, 'a disabled language must still be listed for admins');
+
+        $ar = array_values(array_filter($body['data'], static fn (array $l): bool => $l['code'] === 'ar'))[0];
+        $this->assertFalse($ar['enabled']);
+        $this->assertArrayHasKey('id', $ar);
+        $this->assertArrayHasKey('created_at', $ar);
+        $this->assertArrayHasKey('updated_at', $ar);
+    }
+
+    public function testAdminListWithoutPermissionIsForbidden(): void
+    {
+        $request = new Request('GET', '/api/admin/languages');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->adminList($request);
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
+    public function testAdminListAsRegularTenantIsForbiddenEvenWithPermission(): void
+    {
+        $this->grantPermission($this->testProfileId, 1, CorePermissions::LANGUAGES_MANAGE);
+        TenantContext::reset();
+        TenantContext::setTenantId(1);
+
+        $request = new Request('GET', '/api/admin/languages');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->adminList($request);
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
     // Helper methods
+
+    /**
+     * Grant a permission to $profileId via a fresh role + active membership in
+     * $tenantId (0 = system tenant). Mirrors Tests\Support\I18nAdminTestSeed's
+     * grant pattern, scoped to whatever profile/tenant a given test needs.
+     */
+    private function grantPermission(int $profileId, int $tenantId, string $permission): void
+    {
+        $roleId = 90000 + $profileId;
+        $this->pdo->prepare(
+            'INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES (?, ?, ?, ?, NOW())'
+        )->execute([$roleId, 'lang-test-role-' . $roleId, '', $tenantId]);
+
+        $this->pdo->prepare('INSERT OR IGNORE INTO permissions (name, description, created_at) VALUES (?, ?, NOW())')
+            ->execute([$permission, '']);
+        $sel = $this->pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+        $sel->execute([$permission]);
+        $permissionId = (int) $sel->fetchColumn();
+
+        $this->pdo->prepare('INSERT INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
+            ->execute([$roleId, $permissionId]);
+
+        $this->pdo->prepare(
+            'INSERT INTO memberships (profile_id, tenant_id, role_id, status, created_at) VALUES (?, ?, ?, ?, NOW())'
+        )->execute([$profileId, $tenantId, $roleId, 'active']);
+    }
 
     /**
      * Create a test profile in the database.

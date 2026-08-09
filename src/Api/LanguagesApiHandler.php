@@ -5,9 +5,15 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use PDO;
+use Whity\Auth\RoleChecker;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Tenant\TenantContext;
+use Whity\Core\i18n\Language;
 use Whity\Core\i18n\LanguageRegistry;
+use Whity\Core\i18n\LanguageRepositoryInterface;
+use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
 
 /**
@@ -19,13 +25,24 @@ use Whity\Http\JsonBody;
  *  - GET /api/v1/settings/language — authenticated, returns user's language preference
  *    and list of available languages
  *  - PATCH /api/v1/settings/language — authenticated, updates user's language preference
+ *  - GET /api/v1/admin/languages — admin: every language INCLUDING disabled
+ *    ones, with id + enabled status (languages:manage, SYSTEM TENANT ONLY)
+ *  - POST /api/v1/languages — admin: create a language (languages:manage, SYSTEM
+ *    TENANT ONLY — see the class docblock on {@see self::authorizeManage()})
+ *  - PATCH /api/v1/languages/{id} — admin: update a language's name and/or
+ *    toggle enabled/disabled (languages:manage, SYSTEM TENANT ONLY)
  *
  * Language preference is stored in the profiles.language_code column:
  *  - NULL = use tenant default language
  *  - explicit code (e.g., 'ar') = user has opted for a specific language
  *
- * Tenant scoping: languages are global (not tenant-specific), but a user's
- * language preference is per-profile and follows them across all tenant memberships.
+ * Tenant scoping: languages are global (not tenant-specific) — there is no
+ * `tenant_id` column on the `languages` table at all, so create/update is a
+ * PLATFORM capability restricted to the SYSTEM tenant (id 0), mirroring
+ * ENTITLEMENTS_MANAGE/PLANS_MANAGE: `languages:manage` is necessary but not
+ * sufficient, otherwise any tenant holding it could disable a language for
+ * the whole install. A user's language PREFERENCE remains per-profile and
+ * follows them across all tenant memberships.
  *
  * Holds no request state — safe for a FrankenPHP worker.
  */
@@ -33,11 +50,19 @@ final class LanguagesApiHandler
 {
     private PDO $db;
     private LanguageRegistry $languageRegistry;
+    private LanguageRepositoryInterface $languageRepository;
+    private RoleChecker $roleChecker;
 
-    public function __construct(PDO $db, LanguageRegistry $languageRegistry)
-    {
+    public function __construct(
+        PDO $db,
+        LanguageRegistry $languageRegistry,
+        LanguageRepositoryInterface $languageRepository,
+        RoleChecker $roleChecker
+    ) {
         $this->db = $db;
         $this->languageRegistry = $languageRegistry;
+        $this->languageRepository = $languageRepository;
+        $this->roleChecker = $roleChecker;
     }
 
     /**
@@ -65,6 +90,39 @@ final class LanguagesApiHandler
             return Response::json(['languages' => array_values($data)], 200);
         } catch (\Throwable $e) {
             error_log('[LanguagesApiHandler] list failed: ' . $e->getMessage());
+            return Response::error('Failed to fetch languages', 500);
+        }
+    }
+
+    /**
+     * GET /api/v1/admin/languages — admin: every language, INCLUDING disabled
+     * ones, with the full admin shape (id, code, name, enabled, timestamps).
+     *
+     * SYSTEM TENANT ONLY (see class docblock). The public {@see self::list()}
+     * intentionally omits `id`/disabled rows (it drives the end-user language
+     * switcher); the admin management page needs both to render a toggle and
+     * target a PATCH by id.
+     *
+     * Response: `{ data: [ { id, code, name, enabled, created_at, updated_at }, ... ] }`.
+     */
+    public function adminList(Request $request): Response
+    {
+        $auth = $this->authorizeManage($request);
+        if ($auth instanceof Response) {
+            return $auth;
+        }
+
+        try {
+            $languages = $this->languageRepository->findAll();
+
+            return Response::json([
+                'data' => array_values(array_map(
+                    static fn (Language $language): array => self::languagePayload($language),
+                    $languages
+                )),
+            ], 200);
+        } catch (\Throwable $e) {
+            error_log('[LanguagesApiHandler] adminList failed: ' . $e->getMessage());
             return Response::error('Failed to fetch languages', 500);
         }
     }
@@ -164,6 +222,168 @@ final class LanguagesApiHandler
             error_log('[LanguagesApiHandler] patchLanguage failed: ' . $e->getMessage());
             return Response::error('Failed to update language preference', 500);
         }
+    }
+
+    /**
+     * POST /api/v1/languages — admin: create a language.
+     *
+     * SYSTEM TENANT ONLY (see class docblock). Body: `{ code, name, enabled? }`.
+     * `enabled` defaults to true when omitted.
+     *
+     * Response: `{ data: { id, code, name, enabled, created_at, updated_at } }` (201),
+     * or 409 when a language with this code already exists.
+     */
+    public function create(Request $request): Response
+    {
+        $auth = $this->authorizeManage($request);
+        if ($auth instanceof Response) {
+            return $auth;
+        }
+
+        $body = JsonBody::parsed($request);
+        $code = is_string($body['code'] ?? null) ? trim($body['code']) : '';
+        $name = is_string($body['name'] ?? null) ? trim($body['name']) : '';
+        $enabled = array_key_exists('enabled', $body) ? (bool) $body['enabled'] : true;
+
+        if ($code === '' || !preg_match('/^[a-z]{2,10}(-[A-Za-z]{2,10})?$/', $code)) {
+            return Response::error(
+                'code is required and must be a valid language code (e.g. "en", "ar", "en-US")',
+                422,
+                ['code' => $code]
+            );
+        }
+        if ($name === '') {
+            return Response::error('name is required', 422, ['name' => 'Name must be a non-empty string']);
+        }
+        if ($tooLong = InputLimits::firstViolation([
+            'code' => [$code, 10],
+            'name' => [$name, InputLimits::NAME_MAX],
+        ])) {
+            return $tooLong;
+        }
+
+        try {
+            $language = $this->languageRepository->create($code, $name, $enabled);
+            if ($language === null) {
+                return Response::error('A language with this code already exists', 409);
+            }
+
+            $this->languageRegistry->invalidateCache();
+
+            return Response::json(['data' => self::languagePayload($language)], 201);
+        } catch (\Throwable $e) {
+            error_log('[LanguagesApiHandler] create failed: ' . $e->getMessage());
+            return Response::error('Failed to create language', 500);
+        }
+    }
+
+    /**
+     * PATCH /api/v1/languages/{id} — admin: update a language's name and/or
+     * toggle enabled/disabled.
+     *
+     * SYSTEM TENANT ONLY (see class docblock). Body: `{ name?, enabled? }` — at
+     * least one field must be present.
+     *
+     * Response: `{ data: { id, code, name, enabled, created_at, updated_at } }` (200),
+     * or 404 when no language matches the id.
+     *
+     * @param array<string, mixed> $params Route params (expects `id`).
+     */
+    public function update(Request $request, array $params): Response
+    {
+        $auth = $this->authorizeManage($request);
+        if ($auth instanceof Response) {
+            return $auth;
+        }
+
+        $id = (int) ($params['id'] ?? 0);
+        $body = JsonBody::parsed($request);
+
+        if (!array_key_exists('name', $body) && !array_key_exists('enabled', $body)) {
+            return Response::error('No updatable fields supplied (name, enabled)', 422);
+        }
+
+        $name = null;
+        if (array_key_exists('name', $body)) {
+            $name = is_string($body['name']) ? trim($body['name']) : '';
+            if ($name === '') {
+                return Response::error('name must be a non-empty string', 422);
+            }
+            if ($tooLong = InputLimits::firstViolation(['name' => [$name, InputLimits::NAME_MAX]])) {
+                return $tooLong;
+            }
+        }
+
+        $enabled = null;
+        if (array_key_exists('enabled', $body)) {
+            if (!is_bool($body['enabled'])) {
+                return Response::error('enabled must be a boolean', 422);
+            }
+            $enabled = $body['enabled'];
+        }
+
+        try {
+            $language = $this->languageRepository->update($id, $name, $enabled);
+            if ($language === null) {
+                return Response::error('Language not found', 404);
+            }
+
+            $this->languageRegistry->invalidateCache();
+
+            return Response::json(['data' => self::languagePayload($language)], 200);
+        } catch (\Throwable $e) {
+            error_log('[LanguagesApiHandler] update failed: ' . $e->getMessage());
+            return Response::error('Failed to update language', 500);
+        }
+    }
+
+    /**
+     * Authorize an admin write: require `languages:manage` AND that the caller
+     * is acting in the SYSTEM tenant (id 0). Languages carry no `tenant_id`
+     * column at all, so allowing any tenant holding the permission to write
+     * would let a regular tenant admin change a platform-wide catalogue — the
+     * same reasoning as ENTITLEMENTS_MANAGE/PLANS_MANAGE (see class docblock).
+     *
+     * The route-level RbacMiddleware already enforces `languages:manage`; this
+     * is defence in depth plus the system-tenant check the router cannot express.
+     *
+     * @return array{tenantId: int, userId: int}|Response
+     */
+    private function authorizeManage(Request $request): array|Response
+    {
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            return Response::error('Tenant context is required', 403);
+        }
+
+        $actor = $request->user;
+        $userId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+            ? $actor->profile_id
+            : null;
+        if ($userId === null || !$this->roleChecker->hasPermissionForProfile($userId, CorePermissions::LANGUAGES_MANAGE, $tenantId)) {
+            return Response::error('Insufficient permissions', 403, ['required' => CorePermissions::LANGUAGES_MANAGE]);
+        }
+
+        if ($tenantId !== 0) {
+            return Response::error('Language management is restricted to the system tenant', 403);
+        }
+
+        return ['tenantId' => $tenantId, 'userId' => $userId];
+    }
+
+    /**
+     * @return array{id: int, code: string, name: string, enabled: bool, created_at: string, updated_at: string}
+     */
+    private static function languagePayload(Language $language): array
+    {
+        return [
+            'id' => $language->id,
+            'code' => $language->code,
+            'name' => $language->name,
+            'enabled' => $language->enabled,
+            'created_at' => $language->createdAt,
+            'updated_at' => $language->updatedAt,
+        ];
     }
 
     /**

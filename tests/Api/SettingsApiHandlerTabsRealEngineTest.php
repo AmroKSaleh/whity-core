@@ -223,7 +223,10 @@ final class SettingsApiHandlerTabsRealEngineTest extends TestCase
 
         $tabs = $this->tabIds($this->handler->tabs($this->requestAs($profileId, 0)));
 
-        $this->assertSame(['general', 'branding', 'signup', 'email', 'storage', 'feature-flags'], $tabs);
+        $this->assertSame(
+            ['general', 'branding', 'signup', 'email', 'storage', 'feature-flags', 'error-tracking'],
+            $tabs
+        );
     }
 
     public function testFeatureFlagsTabIsHiddenForSettingsManageInARegularTenant(): void

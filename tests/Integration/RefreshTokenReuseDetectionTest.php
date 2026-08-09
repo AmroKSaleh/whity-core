@@ -69,7 +69,11 @@ class RefreshTokenReuseDetectionTest extends TestCase
         );
 
         $refreshToken = $this->mintRefresh(0);
-        $refreshJti = (string) $this->jwtParser->parse($refreshToken)['jti'];
+        $refreshClaims = $this->jwtParser->parse($refreshToken);
+        if ($refreshClaims === null) {
+            throw new \RuntimeException('Failed to parse minted refresh token');
+        }
+        $refreshJti = (string) $refreshClaims['jti'];
 
         $_COOKIE['refresh_token'] = $refreshToken;
 
@@ -110,7 +114,11 @@ class RefreshTokenReuseDetectionTest extends TestCase
         );
 
         $refreshToken = $this->mintRefresh(0);
-        $refreshJti = (string) $this->jwtParser->parse($refreshToken)['jti'];
+        $refreshClaims = $this->jwtParser->parse($refreshToken);
+        if ($refreshClaims === null) {
+            throw new \RuntimeException('Failed to parse minted refresh token');
+        }
+        $refreshJti = (string) $refreshClaims['jti'];
 
         // Step 1: First refresh succeeds
         $_COOKIE['refresh_token'] = $refreshToken;
@@ -147,7 +155,11 @@ class RefreshTokenReuseDetectionTest extends TestCase
         );
 
         $refreshToken = $this->mintRefresh(0);
-        $refreshJti = (string) $this->jwtParser->parse($refreshToken)['jti'];
+        $refreshClaims = $this->jwtParser->parse($refreshToken);
+        if ($refreshClaims === null) {
+            throw new \RuntimeException('Failed to parse minted refresh token');
+        }
+        $refreshJti = (string) $refreshClaims['jti'];
 
         // Step 1: First refresh succeeds (no reuse yet)
         $_COOKIE['refresh_token'] = $refreshToken;
@@ -236,7 +248,11 @@ class RefreshTokenReuseDetectionTest extends TestCase
         );
 
         $refreshToken = $this->mintRefresh(0);
-        $refreshJti = (string) $this->jwtParser->parse($refreshToken)['jti'];
+        $refreshClaims = $this->jwtParser->parse($refreshToken);
+        if ($refreshClaims === null) {
+            throw new \RuntimeException('Failed to parse minted refresh token');
+        }
+        $refreshJti = (string) $refreshClaims['jti'];
 
         // Step 1: First refresh succeeds
         $_COOKIE['refresh_token'] = $refreshToken;
@@ -283,6 +299,9 @@ class RefreshTokenReuseDetectionTest extends TestCase
         return (bool) $stmt->fetchColumn();
     }
 
+    /**
+     * @return list<array<string, mixed>>
+     */
     private function getAuditLogEntries(string $action): array
     {
         $stmt = $this->pdo->prepare(
@@ -290,8 +309,7 @@ class RefreshTokenReuseDetectionTest extends TestCase
         );
         $stmt->execute([$action]);
 
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return is_array($rows) ? $rows : [];
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     private function clearAuditLog(): void

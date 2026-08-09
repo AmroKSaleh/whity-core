@@ -71,5 +71,10 @@
         <env name="INITIAL_USER_PASSWORD" value="test_initial_user_password_min_32_chars_"/>
         <env name="INITIAL_SYSTEM_ADMIN_PASSWORD" value="test_initial_system_admin_password_min32"/>
         <env name="INITIAL_SUPERUSER_PASSWORD" value="test_initial_superuser_password_min_32_c"/>
+        <!-- WC-35: the scale-seeder (ScaleSeeder) hashes ONE shared password for every
+             scale-seeded user via InitialPassword; pin it here for the same reason as the
+             four INITIAL_*_PASSWORD vars above (deterministic, silences the generated-
+             password stdout notice that beStrictAboutOutputDuringTests would flag). -->
+        <env name="SCALE_SEED_PASSWORD" value="test_scale_seed_password_min_32_characters"/>
     </php>
 </phpunit>

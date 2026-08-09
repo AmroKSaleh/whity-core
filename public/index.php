@@ -96,6 +96,16 @@ if ($isCli && isset($argv[1])) {
         exit($scheduleRunCommand->execute($argv));
     }
 
+    // WC-status-page: the service-health collector behind /status. Runs as its
+    // own container so it keeps recording while the app tier is unreachable —
+    // the one failure an in-app probe structurally cannot observe.
+    if ($command === 'health:watch') {
+        $healthWatchCommand = new \Whity\Cli\Commands\HealthWatchCommand();
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'health:watch' command
+        exit($healthWatchCommand->execute($argv));
+    }
+
     echo "Unknown command: {$command}\n";
     echo "Available commands:\n";
     echo "  generate:openapi           Generate OpenAPI 3.0 schema\n";
@@ -105,6 +115,7 @@ if ($isCli && isset($argv[1])) {
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
+    echo "  health:watch               Sample service health for the public /status page\n";
     exit(1);
 }
 
@@ -441,6 +452,18 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::AUDIT_READ,
     ];
     $items[] = [
+        'id' => 'errors',
+        'label' => 'Errors',
+        'href' => '/admin/errors',
+        'icon' => 'alert-triangle',
+        'group' => 'admin',
+        'order' => 7,
+        // WC-error-tracking: mirrors GET /api/errors, which is operator-only
+        // (settings:manage + system tenant, enforced in the handler) — so the
+        // nav item gates on the same permission. A tenant admin never sees it.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_MANAGE,
+    ];
+    $items[] = [
         'id' => 'plugins',
         'label' => 'Plugins',
         'href' => '/admin/plugins',
@@ -539,6 +562,35 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::MCP_TOKENS_MANAGE,
     ];
     $items[] = [
+        'id' => 'languages',
+        'label' => 'Languages',
+        'href' => '/admin/languages',
+        'icon' => 'language',
+        'group' => 'admin',
+        'order' => 9.6,
+        // WC-583: languages are a GLOBAL catalogue (no tenant_id column at
+        // all) — create/update/enable/disable is a SYSTEM-TENANT-ONLY
+        // PLATFORM capability (mirrors the Feature Flags/Email/Storage
+        // settings tabs), so the nav item itself is hidden from every other
+        // tenant rather than 403ing on click.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::LANGUAGES_MANAGE,
+        'systemTenantOnly' => true,
+    ];
+    $items[] = [
+        'id' => 'translations',
+        'label' => 'Translations',
+        'href' => '/admin/translations',
+        'icon' => 'world',
+        'group' => 'admin',
+        'order' => 9.7,
+        // WC-583: translation rows ARE tenant-scoped (system default vs a
+        // tenant's own override) — unlike Languages above, every tenant
+        // holding translations:manage may reach this page to edit its own
+        // overrides; the page itself branches on the caller's tenant (system
+        // vs regular) for which column is editable.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TRANSLATIONS_MANAGE,
+    ];
+    $items[] = [
         'id' => 'settings',
         'label' => 'Settings',
         'href' => '/settings',
@@ -561,6 +613,28 @@ $delegationRepository = new DelegationRepository($db->getPdo());
 $delegationService = new DelegationService($delegationRepository, $baseRoleChecker, $permissionRegistry);
 
 $roleChecker = new RoleChecker($db, $permissionRegistry, null, $delegationService);
+
+// 5b. Expose permission RESOLUTION to plugins (WC-712, issue #712).
+//     A route's `requiredPermission` is a flat, one-shot gate: it answers a
+//     single question before the handler runs. A plugin needing a second
+//     decision INSIDE a handler ("may this caller see archived rows?") had no
+//     way to ask the host — plugins receive only a raw PDO — so the only option
+//     was to re-derive the answer in hand-written SQL. Real resolution is not
+//     one join (active-membership gating, OU-ancestor chain, role hierarchy with
+//     cycle/depth guards, live delegations, catalogue validation), so any
+//     re-derivation drifts and the system ends up holding two different answers
+//     to the same authorization question.
+//
+//     Registered under the SDK interface so an out-of-repo plugin can type-hint
+//     it with only whity/plugin-sdk installed, and READ-ONLY (three question
+//     methods; no cache invalidation, no DB handle) so it grants no authority.
+//
+//     It wraps THE SAME delegation-aware $roleChecker the RBAC middleware below
+//     enforces with — passing $baseRoleChecker here instead would make a live
+//     delegation unlock a route-level gate but not a plugin's in-handler check,
+//     reinstating the exact divergence this closes.
+$permissionResolver = new \Whity\Core\RBAC\RoleCheckerPermissionResolver($roleChecker, $permissionRegistry);
+\Whity\register_service(\Whity\Sdk\Rbac\PermissionResolver::class, $permissionResolver); // @phpstan-ignore-line
 
 // 6. Initialize RBAC middleware
 $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
@@ -718,6 +792,42 @@ $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // the encryption key so the mail-settings handler can read + decrypt the
 // out-of-registry encrypted SMTP password.
 $secretStore = \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV);
+
+// WC-error-tracking: UPGRADE the boot-time error tracker now that settings, the
+// secret store and the queue exist.
+//
+// The early construction at the top of this file is env-only on purpose — it has
+// to work before the database is reachable, which is exactly when early-boot
+// failures happen. From here on, an operator's choice in the admin UI takes
+// over: `internal` records into this deployment's own database (no extra
+// infrastructure), `sentry` ships to any Sentry-PROTOCOL backend using the
+// ENCRYPTED DSN. With error tracking disabled this returns to the env behaviour,
+// so a deployment configured purely from the environment is unaffected.
+//
+// Alerts are ENQUEUED, never sent inline: capture runs on the error path, and
+// talking to SMTP there would add latency exactly when the system can least
+// afford it (and a broken mail server would then break error capture too).
+$errorTracker = \Whity\Core\Observability\ErrorTrackerFactory::fromSettings(
+    $db->getPdo(),
+    static fn(string $key): ?string => $globalSettingsRepository->get($key),
+    static fn(string $ciphertext): string => $secretStore->decrypt($ciphertext),
+    $_ENV,
+    static function (int $groupId, string $reason) use ($db): void {
+        try {
+            (new \Whity\Core\Queue\JobRepository($db->getPdo()))->enqueue(
+                0, // system tenant: error tracking is deployment-wide
+                \Whity\Core\Observability\Jobs\NotifyErrorGroupJob::NAME,
+                ['group_id' => $groupId, 'reason' => $reason],
+                // One alert per group per reason, even if two workers capture
+                // the same new error at the same instant.
+                ['idempotency_key' => "error-notify:{$groupId}:{$reason}"]
+            );
+        } catch (\Throwable $e) {
+            // Never let a failed enqueue break the request that errored.
+            error_log('[error-tracking] could not enqueue alert: ' . $e->getMessage());
+        }
+    }
+);
 
 // Payment wall (WC-billing) — registered here (not up with the other middleware)
 // because it depends on $settingsService just constructed above. It is still the
@@ -1003,6 +1113,19 @@ $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'l
 $healthHandler = new HealthApiHandler($db, $bootTimestamp);
 $router->registerUnversioned('GET', '/api/health', [$healthHandler, 'handle']);
 
+// WC-status-page: the public service-status surface behind /status. Registered
+// versioned (bare path — the router prepends /v1) and, like /api/health,
+// deliberately unauthenticated: the people who most need to know whether the
+// service is up are the ones who cannot sign in. It only READS the
+// health_samples time series written by `health:watch`, so it stays cheap and
+// cannot add load during an incident.
+$statusHandler = new \Whity\Api\StatusApiHandler(
+    new \Whity\Core\Health\StatusReport(
+        new \Whity\Core\Health\HealthSampleRepository($db->getPdo())
+    )
+);
+$router->register('GET', '/api/status', [$statusHandler, 'get'], null);
+
 // WC-206: unversioned version-discovery endpoint. Returns the current API
 // version, the full supported set, and the default. No auth required — it is a
 // public metadata probe analogous to /api/health.
@@ -1134,6 +1257,23 @@ $router->register('PATCH', '/api/settings/global', [$settingsHandler, 'patchGlob
 // /api/navigation's permission-free registration.
 $router->register('GET', '/api/settings/tabs', [$settingsHandler, 'tabs']);
 
+// WC-error-tracking: the built-in error inbox and its write-only DSN. Every
+// route is operator-only (settings:manage + system tenant, enforced in the
+// handler) because error tracking is deployment-wide — it captures errors from
+// every tenant, and errors that belong to no tenant at all.
+$errorsHandler = new \Whity\Api\ErrorsApiHandler(
+    new \Whity\Core\Observability\ErrorGroupRepository($db->getPdo()),
+    $globalSettingsRepository,
+    $secretStore,
+    $roleChecker
+);
+$router->register('GET',   '/api/errors',                      [$errorsHandler, 'list'],   null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('GET',   '/api/errors/{id:\d+}',             [$errorsHandler, 'get'],    null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('PATCH', '/api/errors/{id:\d+}',             [$errorsHandler, 'update'], null, null, CorePermissions::SETTINGS_MANAGE);
+$router->register('GET',   '/api/settings/error-tracking',     [$errorsHandler, 'status'], null, null, CorePermissions::SETTINGS_MANAGE);
+// Write-only, like the SMTP password: the DSN is a credential and is never read back.
+$router->register('PUT',   '/api/settings/error-tracking/dsn', [$errorsHandler, 'setDsn'], null, null, CorePermissions::SETTINGS_MANAGE);
+
 // 12. Languages API (WC-i18n). i18n language management and user language preference.
 // GET /api/v1/languages — public endpoint, returns list of available languages (no auth required).
 // GET /api/v1/settings/language — authenticated, returns user's language preference.
@@ -1158,19 +1298,39 @@ try {
 
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
-$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry);
+$languagesHandler = new \Whity\Api\LanguagesApiHandler($db->getPdo(), $languageRegistry, $languageRepository, $roleChecker);
 $router->register('GET',   '/api/languages',         [$languagesHandler, 'list'],          null);
 $router->register('GET',   '/api/settings/language', [$languagesHandler, 'getLanguage'],   null);
 $router->register('PATCH', '/api/settings/language', [$languagesHandler, 'patchLanguage'], null);
+// WC-583: admin language management. languages:manage is necessary but not
+// sufficient — the handler additionally requires the SYSTEM tenant (id 0),
+// since languages carry no tenant_id column at all (see LanguagesApiHandler
+// class docblock).
+$router->register('POST',  '/api/languages',        [$languagesHandler, 'create'], null, null, CorePermissions::LANGUAGES_MANAGE);
+$router->register('PATCH', '/api/languages/{id:\d+}', [$languagesHandler, 'update'], null, null, CorePermissions::LANGUAGES_MANAGE);
+// Admin listing (id + disabled languages included) for the languages
+// management page — the public list above deliberately omits both.
+$router->register('GET', '/api/admin/languages', [$languagesHandler, 'adminList'], null, null, CorePermissions::LANGUAGES_MANAGE);
 
-// Translations API handler — public endpoint for fetching translated strings
-// before a session exists (the login screen needs its own language).
+// Translations API handler — GET /api/translations/{language_code}/{domain} is
+// a public endpoint for fetching translated strings before a session exists
+// (the login screen needs its own language). WC-583 adds admin CRUD over
+// individual translation rows, gated on translations:manage: GET /api/translations
+// (raw rows for a language+domain, admin listing), POST (create), PATCH/DELETE
+// /api/translations/{id} (update/delete) — tenant-scoped per the System-Tenant
+// Context convention (see TranslationsApiHandler class docblock).
 $translationsHandler = new \Whity\Api\TranslationsApiHandler(
     $languageRepository,
     $translationRepository,
-    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+    new \Whity\Core\Tenant\StaticTenantContextAdapter(),
+    $roleChecker,
+    $languageRegistry
 );
-$router->register('GET', '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
+$router->register('GET',    '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
+$router->register('GET',    '/api/translations',            [$translationsHandler, 'adminList'], null, null, CorePermissions::TRANSLATIONS_MANAGE);
+$router->register('POST',   '/api/translations',            [$translationsHandler, 'create'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
+$router->register('PATCH',  '/api/translations/{id:\d+}',   [$translationsHandler, 'update'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
+$router->register('DELETE', '/api/translations/{id:\d+}',   [$translationsHandler, 'delete'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
 
 // First-run instance lifecycle (WC-instance-first-run). InstanceService reuses
 // the already-constructed $globalSettingsRepository (the flag lives in a reserved
@@ -1359,14 +1519,14 @@ $tagGroupRepository = new \Whity\Core\Taxonomy\TagGroupRepository($db->getPdo())
 $tagRepository = new \Whity\Core\Taxonomy\TagRepository($db->getPdo());
 $entityTagRepository = new \Whity\Core\Taxonomy\EntityTagRepository($db->getPdo());
 
-$tagGroupsHandler = new \Whity\Api\TagGroupsApiHandler($tagGroupRepository, $roleChecker);
+$tagGroupsHandler = new \Whity\Api\TagGroupsApiHandler($tagGroupRepository, $roleChecker, $auditLogger);
 $router->register('GET',    '/api/tag-groups',          [$tagGroupsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
 $router->register('POST',   '/api/tag-groups',          [$tagGroupsHandler, 'create'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('GET',    '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'show'],   null, null, CorePermissions::TAGS_READ);
 $router->register('PATCH',  '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'update'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('DELETE', '/api/tag-groups/{id:\d+}', [$tagGroupsHandler, 'delete'], null, null, CorePermissions::TAGS_MANAGE);
 
-$tagsHandler = new \Whity\Api\TagsApiHandler($tagRepository, $tagGroupRepository, $roleChecker);
+$tagsHandler = new \Whity\Api\TagsApiHandler($tagRepository, $tagGroupRepository, $roleChecker, $auditLogger);
 $router->register('GET',    '/api/tags',          [$tagsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
 $router->register('POST',   '/api/tags',          [$tagsHandler, 'create'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('GET',    '/api/tags/{id:\d+}', [$tagsHandler, 'show'],   null, null, CorePermissions::TAGS_READ);
@@ -1377,6 +1537,9 @@ $entityTagsHandler = new \Whity\Api\EntityTagsApiHandler($entityTagRepository, $
 $router->register('GET',    '/api/entity-tags', [$entityTagsHandler, 'list'],   null, null, CorePermissions::TAGS_READ);
 $router->register('POST',   '/api/entity-tags', [$entityTagsHandler, 'attach'], null, null, CorePermissions::TAGS_MANAGE);
 $router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], null, null, CorePermissions::TAGS_MANAGE);
+// WC-714 §6: a plugin's record-delete cleanup hook. Distinct path so a
+// malformed single-detach body can never degrade into "remove everything".
+$router->register('DELETE', '/api/entity-tags/all', [$entityTagsHandler, 'detachAll'], null, null, CorePermissions::TAGS_MANAGE);
 
 // 13b-quater. Generic async-job submission + status API (WC-jobs-api). Wraps the
 // durable queue: POST enqueues an ALLOW-LISTED job for the caller's tenant (with
@@ -1858,6 +2021,15 @@ if ($isWorker) {
                 \Whity\Core\Tenant\TenantContext::reset();
                 // Reset the audit actor/IP context for the same reason (WC-34).
                 AuditContext::reset();
+                // RoleChecker's effective-permission cache is PROCESS-level, so
+                // it outlives the request that filled it. Every mutating write
+                // calls RoleChecker::clearCache(), but that only clears the ONE
+                // worker that served the write — the other workers keep serving
+                // the stale set until they recycle. That means a granted
+                // permission can stay invisible and, worse, a REVOKED one can
+                // stay live. Scope the cache to the request instead; it still
+                // de-duplicates the repeated resolutions within a single one.
+                RoleChecker::clearCache();
                 // DB session hygiene (WC-21/PR #84): after the response is sent,
                 // roll back any dangling transaction and DISCARD ALL session-local
                 // state on the shared worker connection so nothing request-specific
@@ -1971,6 +2143,9 @@ if ($isWorker) {
     } finally {
         \Whity\Core\Tenant\TenantContext::reset();
         AuditContext::reset();
+        // Same reasoning as the worker loop above: the effective-permission
+        // cache must not outlive the request that filled it.
+        RoleChecker::clearCache();
     }
 }
 

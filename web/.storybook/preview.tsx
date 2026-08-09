@@ -13,6 +13,7 @@ import { NavigationProvider } from "@/lib/navigation-context"
 import { DirectionProvider } from "@/lib/direction-context"
 import { ThemeModeProvider } from "@/lib/theme-mode-context"
 import { ToastContainer } from "@/components/ui/toast-container"
+import { CapabilitiesProvider } from "@/lib/capabilities-context"
 import { defaultHandlers, MOCK_BRANDING } from "./mocks"
 
 // Start the MSW worker. Unhandled requests pass through (harmless in SB).
@@ -29,22 +30,24 @@ const withProviders: Decorator = (Story, context) => {
   const isDark = context.globals.theme === "dark"
   return (
     <AuthProvider>
-      <BrandingProvider initial={MOCK_BRANDING}>
-        <ThemeModeProvider>
-          <DirectionProvider>
-            <NavigationProvider>
-              <ToastProvider>
-                <div className={isDark ? "dark" : ""}>
-                  <div className="bg-background text-foreground min-h-svh p-8">
-                    <Story />
+      <CapabilitiesProvider>
+        <BrandingProvider initial={MOCK_BRANDING}>
+          <ThemeModeProvider>
+            <DirectionProvider>
+              <NavigationProvider>
+                <ToastProvider>
+                  <div className={isDark ? "dark" : ""}>
+                    <div className="bg-background text-foreground min-h-svh p-8">
+                      <Story />
+                    </div>
                   </div>
                   <ToastContainer />
-                </div>
-              </ToastProvider>
-            </NavigationProvider>
-          </DirectionProvider>
-        </ThemeModeProvider>
-      </BrandingProvider>
+                </ToastProvider>
+              </NavigationProvider>
+            </DirectionProvider>
+          </ThemeModeProvider>
+        </BrandingProvider>
+      </CapabilitiesProvider>
     </AuthProvider>
   )
 }

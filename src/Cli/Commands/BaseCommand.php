@@ -11,7 +11,11 @@ use Whity\Http\RbacMiddleware;
 use Whity\Http\Middleware\EnforceTenantIsolation;
 use Whity\Auth\JwtParser;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Delegation\DelegationRepository;
+use Whity\Core\Delegation\DelegationService;
 use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\RBAC\RoleCheckerPermissionResolver;
+use Whity\Sdk\Rbac\PermissionResolver;
 use Whity\Core\Hooks\HookManager;
 use Whity\Database\Database;
 use Whity\Api\UsersApiHandler;
@@ -65,8 +69,36 @@ abstract class BaseCommand
         $hookManager = new HookManager();
         \Whity\register_service(HookManager::class, $hookManager);
 
-        $roleChecker = new RoleChecker($db, $permissionRegistry);
+        // WC-712: mirror public/index.php's RBAC wiring exactly.
+        //
+        // This kernel previously built a RoleChecker with NO delegation
+        // resolver, so the CLI's simulated API enforced a DIFFERENT
+        // authorization policy from the HTTP API: a permission held only
+        // through a live, non-revoked delegation opened a route over HTTP and
+        // was invisible over the CLI. Two answers to the same authorization
+        // question, decided by which entry point happened to ask.
+        //
+        // The bounding checker stays delegation-UNAWARE on purpose (a grantor
+        // may delegate only what BASE RBAC grants them, never what was
+        // delegated to them — no transitive re-delegation, WC-34); the checker
+        // the middleware enforces with is the delegation-aware one.
+        $baseRoleChecker = new RoleChecker($db, $permissionRegistry);
+        $delegationService = new DelegationService(
+            new DelegationRepository($db->getPdo()),
+            $baseRoleChecker,
+            $permissionRegistry
+        );
+        $roleChecker = new RoleChecker($db, $permissionRegistry, null, $delegationService);
         $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
+
+        // Same read-only resolver contract the HTTP entry point registers, over
+        // the same delegation-aware checker, so plugin code reached through a
+        // CLI command resolves permissions identically to a web request.
+        \Whity\register_service(
+            PermissionResolver::class,
+            new RoleCheckerPermissionResolver($roleChecker, $permissionRegistry)
+        );
+
         $tenantIsolationMiddleware = new EnforceTenantIsolation($jwtParser);
 
         $this->kernel = new HttpKernel($router, $rbacMiddleware);

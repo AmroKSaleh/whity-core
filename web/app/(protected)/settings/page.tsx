@@ -4,7 +4,9 @@ import { useAuth } from '@/lib/auth-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { SessionsSettings } from '@/components/SessionsSettings';
+import { DevicesSettings } from '@/components/DevicesSettings';
 import { EmailAddressesSettings } from '@/components/EmailAddressesSettings';
+import { LanguageSwitcher } from '@amroksaleh/features/i18n';
 import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
@@ -36,6 +38,21 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Language (WHIT-582) — independent of interface direction (RTL/LTR),
+          which lives in the sidebar; see lib/direction-context.tsx. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Language</CardTitle>
+          <CardDescription>Choose the language used across the interface</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LanguageSwitcher
+            variant="dropdown"
+            className="h-9 w-full max-w-xs rounded-md border border-input bg-input/20 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          />
+        </CardContent>
+      </Card>
+
       {/* Email addresses — multi-email self-service (WC-54fb5c37) */}
       <Card>
         <CardHeader>
@@ -58,14 +75,27 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Sessions & devices (WC-b-logout-others) */}
+      {/* Sessions (WC-b-logout-others) — interactive browser/app logins only;
+          native-device credentials are a genuinely separate list below (#409). */}
       <Card>
         <CardHeader>
-          <CardTitle>Sessions &amp; devices</CardTitle>
-          <CardDescription>Sign out of sessions on your other browsers, apps, and devices</CardDescription>
+          <CardTitle>Sessions</CardTitle>
+          <CardDescription>Sign out of your active sessions on other browsers and apps</CardDescription>
         </CardHeader>
         <CardContent>
           <SessionsSettings />
+        </CardContent>
+      </Card>
+
+      {/* Devices (#409) — long-lived native-client credentials (e.g. Elmak),
+          distinct from the interactive sessions above. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Devices</CardTitle>
+          <CardDescription>Manage native apps and devices with long-lived access to your account</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DevicesSettings />
         </CardContent>
       </Card>
     </div>

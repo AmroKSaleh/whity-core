@@ -554,7 +554,11 @@ class UsersApiHandler
             }
 
             // OU assignment lives on the membership (scoped to the owning tenant).
-            if (isset($body['ou_id'])) {
+            // array_key_exists (not isset): an explicit `null` — "clear the OU" —
+            // must be honoured; isset() is false for a null value and would
+            // otherwise silently drop the change (the same class of bug
+            // OusApiHandler::update() documents for parent_id).
+            if (array_key_exists('ou_id', $body)) {
                 $ouId = $body['ou_id'];
                 if ($ouId !== null && $ouId !== 0 && $ouId !== '') {
                     // SECURITY: ou_id must belong to the membership's owning tenant.
