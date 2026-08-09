@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\RBAC;
 
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Support\SourceSlug;
 
 /**
  * The catalogue of RESOURCE TYPES that may carry a role grant (WC-712 §2).
@@ -153,19 +154,16 @@ class ResourceTypeRegistry
     /**
      * Normalise a source name into a slug usable as a namespace prefix.
      *
-     * Plugin names are PHP-ish (`DemoCatalog`, `Acme\Widgets\Plugin`), so the
-     * last segment is lowercased and non-slug characters collapse to
-     * underscores. Returns null when nothing usable survives, so a nameless
-     * plugin is rejected rather than silently registering unprefixed types.
+     * Delegates to {@see SourceSlug}, which the table-ownership registry
+     * (WC-723) uses for the same purpose: two registries deriving "who is this
+     * plugin?" with two slightly different rules would let one call a plugin
+     * `acme` while the other calls it `acme_widgets`, so the rule lives once.
+     * Returns null when nothing usable survives, so a nameless plugin is
+     * rejected rather than silently registering unprefixed types.
      */
     private static function sourcePrefix(string $source): ?string
     {
-        $segments = explode('\\', $source);
-        $last = (string) end($segments);
-        $slug = strtolower(preg_replace('/[^A-Za-z0-9_]+/', '_', $last) ?? '');
-        $slug = trim($slug, '_');
-
-        return $slug === '' || !preg_match('/^[a-z]/', $slug) ? null : $slug;
+        return SourceSlug::from($source);
     }
 
     /**

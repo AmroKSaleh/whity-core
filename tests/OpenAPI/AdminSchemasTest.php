@@ -283,9 +283,27 @@ final class AdminSchemasTest extends TestCase
         $collect($spec);
 
         $this->assertNotSame([], $refs, 'The spec must actually use $refs');
-        foreach ($refs as $ref) {
+
+        // Collect first, assert ONCE. This class runs each test in a separate
+        // process, where PHPUnit buffers a per-assertion event carrying the
+        // asserted value — and the value here is the whole 250-component schema
+        // map. One assertion per $ref meant ~1500 buffered copies of it and a
+        // peak approaching the suite's 768M ceiling, so the test was one handful
+        // of new components away from dying of its own bookkeeping rather than
+        // of a real defect (WC-723). Asserting on the collected set is O(1) in
+        // events, and reports EVERY dangling ref instead of stopping at the first.
+        $dangling = [];
+        foreach (array_unique($refs) as $ref) {
             $name = substr($ref, strlen('#/components/schemas/'));
-            $this->assertArrayHasKey($name, $schemas, "Committed spec has a dangling ref: {$ref}");
+            if (!array_key_exists($name, $schemas)) {
+                $dangling[] = $ref;
+            }
         }
+
+        $this->assertSame(
+            [],
+            $dangling,
+            'Committed spec has dangling refs: ' . implode(', ', $dangling)
+        );
     }
 }

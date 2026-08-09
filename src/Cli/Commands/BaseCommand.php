@@ -121,6 +121,28 @@ abstract class BaseCommand
         $healthProbeRegistry->registerCoreProbes();
         \Whity\register_service(\Whity\Core\Health\HealthProbeRegistry::class, $healthProbeRegistry);
 
+        // Table ownership + data types (WC-723), registered as services exactly as
+        // public/index.php does. A divergence between these two entry points is a
+        // recurring bug class here (#717 for the RoleChecker, #724 for the
+        // permission and resource-type registries): without this, a plugin's
+        // declared tables and data types would exist over HTTP and simply not
+        // exist under the CLI, so a lifecycle transition performed by a command
+        // would silently answer "unregistered type" for a type that is declared.
+        $tableOwnershipRegistry = new \Whity\Core\Tenant\TableOwnershipRegistry($hookManager);
+        $tableOwnershipRegistry->registerCoreTables();
+        \Whity\register_service(\Whity\Core\Tenant\TableOwnershipRegistry::class, $tableOwnershipRegistry);
+
+        $dataTypeRegistry = new \Whity\Core\DataType\DataTypeRegistry($tableOwnershipRegistry, $hookManager);
+        \Whity\register_service(\Whity\Core\DataType\DataTypeRegistry::class, $dataTypeRegistry);
+
+        $dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
+            $db->getPdo(),
+            $dataTypeRegistry,
+            $hookManager
+        );
+        \Whity\register_service(\Whity\Core\DataType\DataTypeLifecycleService::class, $dataTypeLifecycle);
+        \Whity\register_service(\Whity\Sdk\DataType\DataTypeGuard::class, $dataTypeLifecycle);
+
         $baseDir = dirname(__DIR__, 3);
         // The registries are passed HERE, not just constructed above: this loader
         // previously received neither, so plugin-declared permissions were never
@@ -135,7 +157,9 @@ abstract class BaseCommand
             null,
             null,
             $resourceTypeRegistry,
-            $healthProbeRegistry
+            $healthProbeRegistry,
+            $tableOwnershipRegistry,
+            $dataTypeRegistry
         );
         $pluginLoader->load();
 
