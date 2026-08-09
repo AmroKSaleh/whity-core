@@ -332,6 +332,19 @@ $resourceTypeRegistry = new \Whity\Core\RBAC\ResourceTypeRegistry($hookManager);
 $resourceTypeRegistry->registerCoreResourceTypes();
 \Whity\register_service(\Whity\Core\RBAC\ResourceTypeRegistry::class, $resourceTypeRegistry); // @phpstan-ignore-line
 
+// 4c-bis. Status-page probe catalogue (WC-status-probes): WHICH components this
+// deployment samples for /status. Core's four (database, queue, scheduler,
+// render) are registered here; the plugin loader below adds whatever plugins
+// contribute, namespaced under the plugin name IT supplies.
+//
+// Registered as a service for the same reason the resource-type catalogue is:
+// a handler or plugin that built its own instance would see core's four and
+// none of the contributions, and would then render a status page that quietly
+// omits half of what is being watched.
+$healthProbeRegistry = new \Whity\Core\Health\HealthProbeRegistry($hookManager);
+$healthProbeRegistry->registerCoreProbes();
+\Whity\register_service(\Whity\Core\Health\HealthProbeRegistry::class, $healthProbeRegistry); // @phpstan-ignore-line
+
 // 4b-bis. Durable async queue (WC-queue): the producer-side QueueService is
 // registered so core services, hooks, and plugins enqueue work into the durable
 // `jobs` table instead of the old log-only Queue stub. The consumer side
@@ -758,7 +771,8 @@ $pluginLoader = new PluginLoader(
     $hookManager,
     $logger,
     new PluginRoleSeeder($db->getPdo(), $logger),
-    $resourceTypeRegistry
+    $resourceTypeRegistry,
+    $healthProbeRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -1135,9 +1149,14 @@ $router->registerUnversioned('GET', '/api/health', [$healthHandler, 'handle']);
 // service is up are the ones who cannot sign in. It only READS the
 // health_samples time series written by `health:watch`, so it stays cheap and
 // cannot add load during an incident.
+// The probe catalogue is passed so a PLUGIN-contributed component appears on the
+// page as its own card rather than being collected into health_samples and then
+// never rendered — the registry instance is shared and already populated by the
+// plugin loader above.
 $statusHandler = new \Whity\Api\StatusApiHandler(
     new \Whity\Core\Health\StatusReport(
-        new \Whity\Core\Health\HealthSampleRepository($db->getPdo())
+        new \Whity\Core\Health\HealthSampleRepository($db->getPdo()),
+        $healthProbeRegistry
     )
 );
 $router->register('GET', '/api/status', [$statusHandler, 'get'], null);

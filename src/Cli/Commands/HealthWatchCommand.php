@@ -7,8 +7,11 @@ namespace Whity\Cli\Commands;
 use PDO;
 use Throwable;
 use Whity\Core\Health\HealthProbe;
+use Whity\Core\Health\HealthProbeRegistry;
 use Whity\Core\Health\HealthSampleRepository;
 use Whity\Core\Health\HealthStatus;
+use Whity\Core\PluginLoader;
+use Whity\Core\Router;
 use Whity\Database\Database;
 
 /**
@@ -24,7 +27,9 @@ use Whity\Database\Database;
  * noticed was the thing that was down.
  *
  * So this process:
- *  1. probes the internal components (database, queue, scheduler, render), and
+ *  1. probes the internal components — core's database, queue, scheduler and
+ *     render, plus whatever plugins contributed to the
+ *     {@see HealthProbeRegistry} — and
  *  2. probes the PUBLIC URL over HTTP, from outside the app process, recording
  *     `web` as down when it cannot be reached.
  *
@@ -58,9 +63,23 @@ final class HealthWatchCommand
     /** @var callable(int): void */
     private $sleeper;
 
-    public function __construct(?PDO $pdo = null, ?callable $sleeper = null)
-    {
+    /**
+     * The component catalogue, built once on the first pass.
+     *
+     * This process runs OUTSIDE both hosts — it is neither a FrankenPHP worker
+     * nor a {@see BaseCommand} kernel — so nothing has registered a catalogue
+     * for it. It therefore builds its own (see {@see probeRegistry()}); tests
+     * inject one directly.
+     */
+    private ?HealthProbeRegistry $probes;
+
+    public function __construct(
+        ?PDO $pdo = null,
+        ?callable $sleeper = null,
+        ?HealthProbeRegistry $probes = null,
+    ) {
         $this->pdo = $pdo;
+        $this->probes = $probes;
         $this->sleeper = $sleeper ?? static function (int $seconds): void {
             if ($seconds > 0) {
                 sleep($seconds);
@@ -117,7 +136,12 @@ final class HealthWatchCommand
 
         try {
             $renderUrl = getenv('WHITY_RENDER_URL') ?: null;
-            (new HealthProbe($pdo, $samples, is_string($renderUrl) ? $renderUrl : null))->runAll();
+            (new HealthProbe(
+                $pdo,
+                $samples,
+                is_string($renderUrl) ? $renderUrl : null,
+                $this->probeRegistry()
+            ))->runAll();
         } catch (Throwable $e) {
             fwrite(STDERR, '[health:watch] internal probe failed: ' . $e->getMessage() . "\n");
         }
@@ -191,6 +215,58 @@ final class HealthWatchCommand
         } catch (Throwable $e) {
             fwrite(STDERR, '[health:watch] could not record web sample: ' . $e->getMessage() . "\n");
         }
+    }
+
+    /**
+     * The component catalogue this process samples, built once and reused for
+     * every pass.
+     *
+     * Why plugins are loaded HERE. Collection happens only in this process —
+     * neither host bootstrap runs in it — so a probe a plugin contributes would
+     * be registered in the web workers, where nothing collects, and be absent
+     * in the one place that does. Loading the plugin tree here is what makes a
+     * contributed probe actually sampled rather than merely declarable.
+     *
+     * Loading is best-effort and non-fatal by construction: the loader already
+     * error-boundaries each plugin, and any failure of the whole tree is logged
+     * to the container log and leaves core's four probes collecting. A status
+     * page that keeps reporting the database is far more valuable than one that
+     * refuses to report anything because a plugin could not be read.
+     *
+     * The plugins register into a throwaway Router with no permission registry,
+     * hook manager or role seeder: nothing in this process serves HTTP, so the
+     * only capability being harvested is the probe declaration.
+     */
+    private function probeRegistry(): HealthProbeRegistry
+    {
+        if ($this->probes !== null) {
+            return $this->probes;
+        }
+
+        $registry = new HealthProbeRegistry();
+        $registry->registerCoreProbes();
+
+        try {
+            $loader = new PluginLoader(
+                dirname(__DIR__, 3) . '/plugins',
+                new Router(''),
+                null,
+                null,
+                null,
+                null,
+                null,
+                $registry
+            );
+            $loader->load();
+        } catch (Throwable $e) {
+            fwrite(
+                STDERR,
+                '[health:watch] plugin probes unavailable, collecting core components only: '
+                . $e->getMessage() . "\n"
+            );
+        }
+
+        return $this->probes = $registry;
     }
 
     /** Reconnect lazily: the database may come back between passes. */

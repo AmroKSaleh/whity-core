@@ -36,8 +36,17 @@ final class StatusReport
      */
     private const STALE_AFTER_SECONDS = 900;
 
-    public function __construct(private readonly HealthSampleRepository $samples)
-    {
+    /**
+     * @param HealthProbeRegistry|null $registry Optional component catalogue. When
+     *        wired, PLUGIN-contributed components are listed after core's, using
+     *        the label the plugin declared. Without it the page shows exactly the
+     *        core components it always has — a host that never wired a registry
+     *        loses nothing.
+     */
+    public function __construct(
+        private readonly HealthSampleRepository $samples,
+        private readonly ?HealthProbeRegistry $registry = null,
+    ) {
     }
 
     /**
@@ -59,7 +68,7 @@ final class StatusReport
         $components = [];
         $states = [];
 
-        foreach (self::COMPONENTS as $key => $name) {
+        foreach ($this->componentLabels() as $key => $name) {
             $sample = $latest[$key] ?? null;
             $status = $this->resolveStatus($sample);
             if ($status !== null) {
@@ -85,6 +94,36 @@ final class StatusReport
             'window_days' => $windowDays,
             'generated_at' => gmdate('c'),
         ];
+    }
+
+    /**
+     * The components to render, in display order: core's fixed list first, then
+     * whatever plugins contributed.
+     *
+     * Core stays first and unchanged — an operator scanning the page during an
+     * incident should find the database card where it has always been, not
+     * shifted down by however many plugins are installed. Contributed
+     * components are sorted by key so the order is stable across workers rather
+     * than reflecting plugin discovery order.
+     *
+     * A contributed key can never equal a core one (core keys are bare,
+     * contributed keys are namespaced `plugin:key`), but the union is written
+     * core-last-wins anyway so a future collision cannot rename a core card.
+     *
+     * @return array<string, string> component key => display label
+     */
+    private function componentLabels(): array
+    {
+        $contributed = $this->registry?->contributedLabels() ?? [];
+        if ($contributed === []) {
+            return self::COMPONENTS;
+        }
+
+        ksort($contributed);
+
+        // `+` keeps the LEFT operand's entry on a key collision: core's label
+        // and position always win.
+        return self::COMPONENTS + $contributed;
     }
 
     /**

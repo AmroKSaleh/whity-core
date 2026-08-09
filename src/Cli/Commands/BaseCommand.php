@@ -111,6 +111,16 @@ abstract class BaseCommand
         $resourceTypeRegistry->registerCoreResourceTypes();
         \Whity\register_service(\Whity\Core\RBAC\ResourceTypeRegistry::class, $resourceTypeRegistry);
 
+        // Status-page probe catalogue (WC-status-probes), registered as a service
+        // exactly as public/index.php does. A divergence between the two entry
+        // points here is the recurring bug class this repo has already paid for
+        // twice (#717, #724): a plugin reached through a CLI command would ask
+        // for the catalogue and get a RuntimeException, or worse, build its own
+        // empty one and conclude nothing is being watched.
+        $healthProbeRegistry = new \Whity\Core\Health\HealthProbeRegistry($hookManager);
+        $healthProbeRegistry->registerCoreProbes();
+        \Whity\register_service(\Whity\Core\Health\HealthProbeRegistry::class, $healthProbeRegistry);
+
         $baseDir = dirname(__DIR__, 3);
         // The registries are passed HERE, not just constructed above: this loader
         // previously received neither, so plugin-declared permissions were never
@@ -124,7 +134,8 @@ abstract class BaseCommand
             $hookManager,
             null,
             null,
-            $resourceTypeRegistry
+            $resourceTypeRegistry,
+            $healthProbeRegistry
         );
         $pluginLoader->load();
 

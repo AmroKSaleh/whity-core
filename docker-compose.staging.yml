@@ -173,6 +173,23 @@ services:
       - .:/app
     working_dir: /app
     restart: unless-stopped
+    # Override the FrankenPHP base image's inherited HEALTHCHECK, which curls
+    # the admin endpoint on localhost:2019 — a port that does not exist in a
+    # container running a CLI collector loop. It reported UNHEALTHY forever
+    # while collecting perfectly, and a red that is always red trains everyone
+    # to ignore the column, so the day it means something nobody sees it.
+    #
+    # The replacement asserts the one thing this container is for: that samples
+    # are still being written. See ops/health-watch-healthcheck.php.
+    healthcheck:
+      test: ["CMD", "php", "/app/ops/health-watch-healthcheck.php"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      # The first pass runs at startup, but Postgres may still be coming up
+      # behind it; do not judge the container before it has had a chance to
+      # write anything.
+      start_period: 120s
     command:
       - sh
       - -c

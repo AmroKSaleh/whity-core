@@ -11,6 +11,9 @@ use Whity\Core\RBAC\InvalidPermissionException;
 use Whity\Core\RBAC\InvalidResourceTypeException;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceTypeRegistry;
+use Whity\Core\Health\HealthProbeRegistry;
+use Whity\Core\Health\InvalidHealthProbeException;
+use Whity\Sdk\Health\PluginHealthProbesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
@@ -88,6 +91,15 @@ class PluginLoader
      * rather than failing, matching how a null permission registry behaves.
      */
     private ?ResourceTypeRegistry $resourceTypeRegistry = null;
+
+    /**
+     * Optional catalogue of plugin-contributed status-page probes.
+     *
+     * Null in hosts that have not wired one (and in the many tests that build a
+     * bare loader); declarations are then skipped rather than failing, matching
+     * how a null permission or resource-type registry behaves.
+     */
+    private ?HealthProbeRegistry $healthProbeRegistry = null;
 
     /**
      * @var HookManager|null Hook manager instance
@@ -276,6 +288,8 @@ class PluginLoader
      * @param HookManager|null     $hookManager        Optional hook manager
      * @param LoggerInterface|null $logger             Optional logger instance
      * @param PluginRoleSeeder|null $roleSeeder         Optional seeder for plugin-declared roles
+     * @param ResourceTypeRegistry|null $resourceTypeRegistry Optional resource-type catalogue
+     * @param HealthProbeRegistry|null $healthProbeRegistry Optional status-page probe catalogue
      */
     public function __construct(
         string $pluginDir,
@@ -284,12 +298,14 @@ class PluginLoader
         ?HookManager $hookManager = null,
         ?LoggerInterface $logger = null,
         ?PluginRoleSeeder $roleSeeder = null,
-        ?ResourceTypeRegistry $resourceTypeRegistry = null
+        ?ResourceTypeRegistry $resourceTypeRegistry = null,
+        ?HealthProbeRegistry $healthProbeRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
         $this->permissionRegistry = $permissionRegistry;
         $this->resourceTypeRegistry = $resourceTypeRegistry;
+        $this->healthProbeRegistry = $healthProbeRegistry;
         $this->hookManager = $hookManager;
         $this->logger = $logger;
         $this->roleSeeder = $roleSeeder;
@@ -2379,6 +2395,31 @@ class PluginLoader
                 } else {
                     error_log($warningMsg);
                 }
+            }
+        }
+
+        // 2a-bis. Register declared STATUS-PAGE PROBES (WC-status-probes). Same
+        //     shape as (2a): an OPTIONAL interface, so a plugin with no
+        //     dependency worth watching implements nothing and is skipped; the
+        //     source is $plugin->getName(), supplied here rather than taken
+        //     from the plugin, so a probe is namespaced under its real owner
+        //     and can neither collide with another plugin's nor shadow one of
+        //     core's four.
+        //
+        //     Two boundaries, because two different things can go wrong: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps
+        //     serving, it simply contributes no probe), while a getHealthProbes()
+        //     that THROWS is plugin code misbehaving and goes through the
+        //     lifecycle error boundary that can eventually fail the plugin.
+        if ($this->healthProbeRegistry !== null && $plugin instanceof PluginHealthProbesInterface) {
+            try {
+                $this->healthProbeRegistry->register($plugin->getName(), $plugin->getHealthProbes());
+            } catch (InvalidHealthProbeException $e) {
+                $this->logWarning(
+                    "Plugin {$pluginKey} declares an invalid health probe: " . $e->getMessage()
+                );
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getHealthProbes');
             }
         }
 

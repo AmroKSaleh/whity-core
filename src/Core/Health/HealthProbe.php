@@ -20,7 +20,10 @@ use Throwable;
  * Every probe is individually guarded: one component failing to answer must
  * record THAT component as down, never abort the tick and leave the rest of the
  * page stale — a status page that stops updating during an incident is worse
- * than no status page.
+ * than no status page. That guarantee now also covers PLUGIN-contributed
+ * probes ({@see HealthProbeRegistry}): a plugin's dependency going down, or its
+ * probe throwing outright, records that plugin's component as down and leaves
+ * every core component sampled exactly as before.
  */
 final class HealthProbe
 {
@@ -35,10 +38,17 @@ final class HealthProbe
     private const SCHEDULER_DEGRADED_SECONDS = 300;
     private const SCHEDULER_DOWN_SECONDS = 900;
 
+    /**
+     * @param HealthProbeRegistry|null $registry The component catalogue. Null
+     *        means "core's four, exactly as before" — the registry is a widening
+     *        of what is sampled, never a precondition for sampling at all, so a
+     *        host that has not wired one still collects a full status page.
+     */
     public function __construct(
         private readonly PDO $pdo,
         private readonly HealthSampleRepository $samples,
         private readonly ?string $renderUrl = null,
+        private readonly ?HealthProbeRegistry $registry = null,
     ) {
     }
 
@@ -50,7 +60,7 @@ final class HealthProbe
     public function runAll(): array
     {
         $results = [];
-        foreach (['database', 'queue', 'scheduler', 'render'] as $component) {
+        foreach ($this->registry?->getAll() ?? HealthProbeRegistry::CORE_PROBES as $component) {
             $results[$component] = $this->runOne($component);
         }
 
@@ -60,12 +70,15 @@ final class HealthProbe
     private function runOne(string $component): HealthStatus
     {
         try {
+            // Core's four are matched BY NAME here, before the registry is ever
+            // consulted, so no contributed probe can intercept them even if the
+            // namespacing that already prevents it were somehow bypassed.
             [$status, $latency, $detail] = match ($component) {
                 'database' => $this->probeDatabase(),
                 'queue' => $this->probeQueue(),
                 'scheduler' => $this->probeScheduler(),
                 'render' => $this->probeRender(),
-                default => [HealthStatus::Operational, null, null],
+                default => $this->probeContributed($component),
             };
         } catch (Throwable $e) {
             // A probe that throws IS a down signal for its component, not a
@@ -83,6 +96,41 @@ final class HealthProbe
         }
 
         return $status;
+    }
+
+    /**
+     * Run a PLUGIN-contributed probe (WC-status-probes).
+     *
+     * The registry hands back the plugin's own callable; the surrounding
+     * try/catch in {@see runOne()} is what makes contributing one safe — a
+     * probe that throws, or returns something that is not a
+     * {@see \Whity\Sdk\Health\ProbeResult}, records ITS component as down and
+     * the pass continues to the next component.
+     *
+     * An unknown component (registered nowhere, or a core key reaching here,
+     * which cannot happen) keeps the historical default of "nothing to say" =
+     * operational, so this arm never invents an outage.
+     *
+     * @return array{0: HealthStatus, 1: ?int, 2: ?string}
+     */
+    private function probeContributed(string $component): array
+    {
+        $definition = $this->registry?->definitionFor($component);
+        if ($definition === null) {
+            return [HealthStatus::Operational, null, null];
+        }
+
+        $result = $definition->run();
+
+        // ProbeResult's private constructor guarantees one of the three states,
+        // so from() cannot fail here; if a future SDK widened it, the ValueError
+        // would land in runOne()'s boundary and read as "that component is down"
+        // — the honest reading of a probe the host cannot interpret.
+        return [
+            HealthStatus::from($result->status),
+            $result->latencyMs,
+            $result->detail,
+        ];
     }
 
     /** @return array{0: HealthStatus, 1: ?int, 2: ?string} */

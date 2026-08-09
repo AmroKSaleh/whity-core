@@ -75,13 +75,20 @@ namespace Whity\Sdk;
  * question the host's RBAC middleware answers — membership gating, OU-ancestor
  * inheritance, role hierarchy, live delegations, catalogue validation — instead
  * of re-deriving it in hand-written SQL and drifting from what is actually
- * enforced, WC-712).
+ * enforced, WC-712) →
+ * 1.19 (status-page health probes: {@see \Whity\Sdk\Health\PluginHealthProbesInterface},
+ * {@see \Whity\Sdk\Health\HealthProbeDefinition} and
+ * {@see \Whity\Sdk\Health\ProbeResult} — a plugin contributes a probe for a
+ * dependency it owns and the host samples and publishes it beside its own
+ * database/queue/scheduler/render probes, instead of the plugin inventing a
+ * second status surface nobody watches. Host-namespaced under the plugin name,
+ * so probes cannot collide or shadow a core one).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.18.0';
+    public const VERSION = '1.19.0';
 
     /**
      * Static identity only — never instantiated.
