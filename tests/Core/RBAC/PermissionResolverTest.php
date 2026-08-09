@@ -122,19 +122,44 @@ final class PermissionResolverTest extends TestCase
     }
 
     /**
-     * Resource-scoped arguments are deliberately absent until resolution can
-     * honour them: a silently ignored $resourceId would hand a caller the
-     * tenant-wide answer while it believed it had a record-scoped one, which
-     * fails OPEN. Pins that decision so it is not "helpfully" added later.
+     * Resource-scoped arguments exist as of WC-712 §2 / SDK 1.17 — and the
+     * invariant this test has always protected is unchanged: they must never be
+     * SILENTLY IGNORED. An accepted-then-discarded $resourceId would hand a
+     * caller the tenant-wide answer while it believed it held a record-scoped
+     * one, which fails OPEN.
+     *
+     * Until resolution could honour them the only safe contract was to omit
+     * them; now that `resource_role_assignments` exists they are honoured, so
+     * this pins BOTH the shape and — in the behavioural half below — that they
+     * actually change the answer.
      */
-    public function testContractHasNoSilentlyIgnoredResourceScopeArguments(): void
+    public function testContractExposesResourceScopeArguments(): void
     {
         $parameters = array_map(
             static fn (\ReflectionParameter $p): string => $p->getName(),
             (new \ReflectionMethod(PermissionResolver::class, 'hasPermission'))->getParameters()
         );
 
-        $this->assertSame(['profileId', 'tenantId', 'permission'], $parameters);
+        $this->assertSame(
+            ['profileId', 'tenantId', 'permission', 'resourceType', 'resourceId'],
+            $parameters
+        );
+
+        // Additive only: a caller written against SDK 1.16 must keep compiling
+        // and keep getting the tenant-wide answer.
+        $method = new \ReflectionMethod(PermissionResolver::class, 'hasPermission');
+        $this->assertTrue(
+            $method->getParameters()[3]->isOptional() && $method->getParameters()[4]->isOptional(),
+            'Resource arguments must be optional so existing callers are unaffected.'
+        );
+
+        // The same must hold for effectivePermissions(), or the documented parity
+        // identity between the two methods cannot be expressed at resource scope.
+        $effective = array_map(
+            static fn (\ReflectionParameter $p): string => $p->getName(),
+            (new \ReflectionMethod(PermissionResolver::class, 'effectivePermissions'))->getParameters()
+        );
+        $this->assertSame(['profileId', 'tenantId', 'resourceType', 'resourceId'], $effective);
     }
 
     // =========================================================================

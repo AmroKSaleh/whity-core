@@ -58,8 +58,13 @@ final class ServiceContainerTest extends TestCase
     public function testInterfaceKeyResolvesToTheRegisteredImplementation(): void
     {
         $fake = new class implements PermissionResolver {
-            public function hasPermission(int $profileId, int $tenantId, string $permission): bool
-            {
+            public function hasPermission(
+                int $profileId,
+                int $tenantId,
+                string $permission,
+                ?string $resourceType = null,
+                ?int $resourceId = null
+            ): bool {
                 return false;
             }
 
@@ -69,8 +74,12 @@ final class ServiceContainerTest extends TestCase
             }
 
             /** @return list<string> */
-            public function effectivePermissions(int $profileId, int $tenantId): array
-            {
+            public function effectivePermissions(
+                int $profileId,
+                int $tenantId,
+                ?string $resourceType = null,
+                ?int $resourceId = null
+            ): array {
                 return [];
             }
         };

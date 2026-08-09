@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk\Rbac;
 
 /**
- * Read-only access to the host's AUTHORITATIVE permission resolution (SDK 1.16).
+ * Read-only access to the host's AUTHORITATIVE permission resolution (SDK 1.17).
  *
  * Why this exists
  * ---------------
@@ -54,16 +54,28 @@ namespace Whity\Sdk\Rbac;
  * tenant boundary. Plugins should pass the tenant resolved for the current
  * request rather than one taken from client input.
  *
- * Resource-scoped checks
- * ----------------------
- * This contract intentionally has NO `$resourceType` / `$resourceId`
- * parameters. Role grants are currently addressable only to a tenant or an
- * organizational unit, so a resource argument would be accepted and then
- * silently IGNORED — a caller passing one would believe it had received a
- * narrow, record-scoped answer while actually receiving the tenant-wide one.
- * That fails OPEN, which is the exact failure mode this contract exists to
- * prevent. Resource-scoped overloads are additive and will be introduced in a
- * later minor once the host can actually honour them.
+ * Resource-scoped checks (SDK 1.17)
+ * ---------------------------------
+ * `$resourceType` / `$resourceId` are now HONOURED, not ignored. The host
+ * resolves grants addressed at a single record through
+ * `resource_role_assignments`, so a plugin can ask "may this caller act on THIS
+ * document?" and receive an answer narrowed to that record.
+ *
+ * Earlier minors deliberately omitted these parameters rather than accept and
+ * discard them: a caller passing a resource would have believed it held a
+ * record-scoped answer while actually holding the tenant-wide one, which fails
+ * OPEN. They are additive — omitting them preserves the previous behaviour
+ * exactly.
+ *
+ * The scoped answer is a SUPERSET of the unscoped one. A resource grant widens
+ * authority at that resource; it never narrows it, and it is never a substitute
+ * for tenant membership. A profile with no active membership in the tenant
+ * resolves to nothing regardless of what is granted at the resource, so a grant
+ * cannot become a back door into a tenant.
+ *
+ * `$resourceType` must be a type the host has registered (core ships `ou`;
+ * plugins declare their own). An unregistered type resolves to no grants rather
+ * than throwing — an unknown type can never be a reason to widen authority.
  */
 interface PermissionResolver
 {
@@ -75,12 +87,24 @@ interface PermissionResolver
      * slug is never granted, and a `:read` permission never satisfies a `:write`
      * check — there is no prefix or wildcard matching.
      *
-     * @param int    $profileId  The profile whose authority is being tested.
-     * @param int    $tenantId   The resolved tenant id (0 = system tenant).
-     * @param string $permission A `resource:action` slug, e.g. `demo_catalog:manage`.
+     * Pass `$resourceType` and `$resourceId` together to narrow the question to
+     * one record; pass neither for the tenant-wide answer. Passing only one is
+     * treated as passing neither — a half-specified resource is not a resource.
+     *
+     * @param int         $profileId    The profile whose authority is being tested.
+     * @param int         $tenantId     The resolved tenant id (0 = system tenant).
+     * @param string      $permission   A `resource:action` slug, e.g. `demo_catalog:manage`.
+     * @param string|null $resourceType A registered resource type, e.g. `document`.
+     * @param int|null    $resourceId   The id of that resource.
      * @return bool True when the profile effectively holds the permission.
      */
-    public function hasPermission(int $profileId, int $tenantId, string $permission): bool;
+    public function hasPermission(
+        int $profileId,
+        int $tenantId,
+        string $permission,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): bool;
 
     /**
      * Whether a profile effectively holds a role within a tenant.
@@ -114,10 +138,23 @@ interface PermissionResolver
      * nothing on its own, and every write must still be gated by an explicit
      * check.
      *
-     * @param int $profileId The profile whose authority is being resolved.
-     * @param int $tenantId  The resolved tenant id (0 = system tenant).
+     * The parity identity holds at BOTH scopes — the resource arguments must be
+     * passed to both calls or the two disagree:
+     *
+     *     in_array($p, $r->effectivePermissions($id, $t, $ty, $rid), true)
+     *         === $r->hasPermission($id, $t, $p, $ty, $rid)
+     *
+     * @param int         $profileId    The profile whose authority is being resolved.
+     * @param int         $tenantId     The resolved tenant id (0 = system tenant).
+     * @param string|null $resourceType A registered resource type, e.g. `document`.
+     * @param int|null    $resourceId   The id of that resource.
      * @return list<string> Distinct `resource:action` slugs; empty when the
      *                      profile has no active membership in the tenant.
      */
-    public function effectivePermissions(int $profileId, int $tenantId): array;
+    public function effectivePermissions(
+        int $profileId,
+        int $tenantId,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): array;
 }

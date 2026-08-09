@@ -68,9 +68,22 @@ final class RoleCheckerPermissionResolver implements PermissionResolver
     /**
      * @inheritDoc
      */
-    public function hasPermission(int $profileId, int $tenantId, string $permission): bool
-    {
-        return $this->roleChecker->hasPermissionForProfile($profileId, $permission, $tenantId);
+    public function hasPermission(
+        int $profileId,
+        int $tenantId,
+        string $permission,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): bool {
+        [$resourceType, $resourceId] = self::normaliseScope($resourceType, $resourceId);
+
+        return $this->roleChecker->hasPermissionForProfile(
+            $profileId,
+            $permission,
+            $tenantId,
+            $resourceType,
+            $resourceId
+        );
     }
 
     /**
@@ -84,13 +97,45 @@ final class RoleCheckerPermissionResolver implements PermissionResolver
     /**
      * @inheritDoc
      */
-    public function effectivePermissions(int $profileId, int $tenantId): array
-    {
-        $resolved = $this->roleChecker->getEffectivePermissionsForProfile($profileId, $tenantId);
+    public function effectivePermissions(
+        int $profileId,
+        int $tenantId,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): array {
+        [$resourceType, $resourceId] = self::normaliseScope($resourceType, $resourceId);
+
+        $resolved = $this->roleChecker->getEffectivePermissionsForProfile(
+            $profileId,
+            $tenantId,
+            $resourceType,
+            $resourceId
+        );
 
         return array_values(array_filter(
             $resolved,
             fn (string $permission): bool => $this->registry->exists($permission)
         ));
+    }
+
+    /**
+     * Collapse a half-specified resource scope to no scope at all.
+     *
+     * A type without an id (or an id without a type) does not identify a record.
+     * Treating it as a resource would mean matching rows on one column and
+     * ignoring the other — quietly returning grants from the WRONG resource.
+     * Both methods normalise identically so the parity identity documented on
+     * {@see PermissionResolver::effectivePermissions()} holds for partial input
+     * too.
+     *
+     * @return array{0: string|null, 1: int|null}
+     */
+    private static function normaliseScope(?string $resourceType, ?int $resourceId): array
+    {
+        if ($resourceType === null || $resourceId === null || $resourceType === '') {
+            return [null, null];
+        }
+
+        return [$resourceType, $resourceId];
     }
 }

@@ -55,6 +55,7 @@ final class TenantOwnedTables
         'migration_rollbacks' => '004_create_deployment_tables.php',
         'organizational_units' => '005_create_organizational_units.php',
         'ou_role_assignments' => '008_create_ou_role_assignments.php',
+        'resource_role_assignments' => '088_create_resource_role_assignments.php',
         'permission_delegations' => '014_create_permission_delegations.php',
         'audit_log' => '016_create_audit_log.php',
         'persons' => '018_create_persons.php',
