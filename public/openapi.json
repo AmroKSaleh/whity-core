@@ -2794,6 +2794,650 @@
                 ]
             }
         },
+        "/api/v1/data-types": {
+            "get": {
+                "operationId": "get_api_v1_data_types",
+                "summary": "List the plugin-declared data types the caller may read, with the lifecycle actions they may use",
+                "tags": [
+                    "data-types"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Declared types, filtered per caller (empty data is valid)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/data-types/{type}/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_data_types_type_id",
+                "summary": "Delete a record for real, if every declared referential guard permits it",
+                "tags": [
+                    "data-types"
+                ],
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The namespaced data-type key, e.g. `democatalog:item`"
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The record's primary-key value"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The record was removed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeTransitionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown data type, or no such record in the caller's tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "This data type does not offer that action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Refused: rows still reference this record, the record is retired (permanent), or a trashable type's record has not been trashed first",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "get": {
+                "operationId": "get_api_v1_data_types_type_id",
+                "summary": "Read one record's lifecycle state and the declared references that block deleting it",
+                "tags": [
+                    "data-types"
+                ],
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The namespaced data-type key, e.g. `democatalog:item`"
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The record's primary-key value"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The record's lifecycle position",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeRecordState"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown data type, or no such record in the caller's tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "This data type does not offer that action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/data-types/{type}/{id}/restore": {
+            "post": {
+                "operationId": "post_api_v1_data_types_type_id_restore",
+                "summary": "Restore a trashed record to the type's default state",
+                "tags": [
+                    "data-types"
+                ],
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The namespaced data-type key, e.g. `democatalog:item`"
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The record's primary-key value"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The record's new lifecycle state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeTransitionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown data type, or no such record in the caller's tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "This data type does not offer that action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A retired record cannot be restored \u2014 retirement is permanent",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/data-types/{type}/{id}/retire": {
+            "post": {
+                "operationId": "post_api_v1_data_types_type_id_retire",
+                "summary": "Retire a record \u2014 closed to new references, permanently readable, never deletable",
+                "tags": [
+                    "data-types"
+                ],
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The namespaced data-type key, e.g. `democatalog:item`"
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The record's primary-key value"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The record's new lifecycle state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeTransitionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown data type, or no such record in the caller's tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "This data type does not offer that action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A trashed record must be restored before it can be retired",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/data-types/{type}/{id}/trash": {
+            "post": {
+                "operationId": "post_api_v1_data_types_type_id_trash",
+                "summary": "Trash a record \u2014 reversible, closed to new references, removable once nothing references it",
+                "tags": [
+                    "data-types"
+                ],
+                "parameters": [
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The namespaced data-type key, e.g. `democatalog:item`"
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        },
+                        "description": "The record's primary-key value"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The record's new lifecycle state",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DataTypeTransitionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown data type, or no such record in the caller's tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "This data type does not offer that action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A retired record cannot be trashed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/delegations": {
             "get": {
                 "operationId": "get_api_v1_delegations",
@@ -18254,6 +18898,251 @@
                 "properties": {
                     "data": {
                         "$ref": "#/components/schemas/Branding"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DataType": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "object",
+                        "x-whity-localized-text": true,
+                        "properties": {
+                            "ar": {
+                                "type": "string"
+                            },
+                            "en": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "lifecycle": {
+                        "$ref": "#/components/schemas/DataTypeLifecycle"
+                    },
+                    "blocks_delete": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DataTypeReference"
+                        }
+                    },
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "read",
+                                "trash",
+                                "restore",
+                                "retire",
+                                "delete"
+                            ]
+                        }
+                    },
+                    "permissions": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "key",
+                    "source",
+                    "label",
+                    "lifecycle",
+                    "blocks_delete",
+                    "actions"
+                ]
+            },
+            "DataTypeBlocker": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "table",
+                    "label",
+                    "count"
+                ]
+            },
+            "DataTypeLifecycle": {
+                "type": "object",
+                "properties": {
+                    "declared": {
+                        "type": "boolean"
+                    },
+                    "column": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "states": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "default_state": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "trashable": {
+                        "type": "boolean"
+                    },
+                    "retirable": {
+                        "type": "boolean"
+                    },
+                    "trashed_state": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "retired_state": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "declared",
+                    "trashable",
+                    "retirable"
+                ]
+            },
+            "DataTypeListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DataType"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DataTypeRecordState": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string"
+                            },
+                            "state": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "referenceable": {
+                                "type": "boolean"
+                            },
+                            "pending_removal": {
+                                "type": "boolean"
+                            },
+                            "restorable": {
+                                "type": "boolean"
+                            },
+                            "deletable": {
+                                "type": "boolean"
+                            },
+                            "blockers": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/DataTypeBlocker"
+                                }
+                            }
+                        },
+                        "required": [
+                            "key",
+                            "state",
+                            "referenceable",
+                            "pending_removal",
+                            "restorable",
+                            "deletable",
+                            "blockers"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DataTypeReference": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string"
+                    },
+                    "column": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "table",
+                    "column",
+                    "label"
+                ]
+            },
+            "DataTypeTransitionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "key": {
+                                "type": "string"
+                            },
+                            "outcome": {
+                                "type": "string",
+                                "enum": [
+                                    "ok"
+                                ]
+                            },
+                            "state": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "reason": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "message": {
+                                "type": "string"
+                            },
+                            "blockers": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/DataTypeBlocker"
+                                }
+                            }
+                        },
+                        "required": [
+                            "key",
+                            "outcome",
+                            "state",
+                            "message",
+                            "blockers"
+                        ]
                     }
                 },
                 "required": [

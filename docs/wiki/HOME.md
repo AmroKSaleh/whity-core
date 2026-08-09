@@ -18,6 +18,7 @@ Welcome to the Whity Core documentation.
 - **[Email (SMTP) Setup](Email-SMTP-Setup.md)** — Configure outbound email end to end: cPanel/SMTP credentials, the `mail.*` settings + write-only encrypted password, local Mailpit testing, troubleshooting.
 - **[Hook System](HOOK_SYSTEM.md)** — Plugin event/extension mechanism.
 - **[Plugin UI Blocks](Plugin-UI-Blocks.md)** — Server-driven UI: the platform-neutral block contract (display / data-bound / interactive) plugins declare and each platform renders.
+- **[Plugin Data Types](Plugin-Data-Types.md)** — `registerDataType`: a plugin declares its records' lifecycle (trashed ≠ retired) and reference graph as data; core owns the guard evaluation, the refusals, and the generated trash/restore/retire surface.
 - **[Family Relations](RELATIONS.md)** — Person-node graph, relationship types, the relations API + admin hub.
 - **[Document & Label Designer](Document-Designer.md)** — WYSIWYG designer for docs/labels: multi-page, variable-data batch (serials/CSV), N-up sheets, reusable blocks, starters, RTL; model, rendering, and the backend persistence/PDF contract.
 - **[Navigation Customization](Navigation-Customization.md)** — Design for a customizable sidebar: tenant default layout + per-user overrides gated by a tenant setting; server resolves RBAC ∩ tenant ∩ user.

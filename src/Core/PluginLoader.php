@@ -14,7 +14,13 @@ use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Health\HealthProbeRegistry;
 use Whity\Core\Health\InvalidHealthProbeException;
 use Whity\Sdk\Health\PluginHealthProbesInterface;
+use Whity\Core\DataType\DataTypeRegistry;
+use Whity\Core\DataType\InvalidDataTypeException;
+use Whity\Core\Tenant\TableOwnershipException;
+use Whity\Core\Tenant\TableOwnershipRegistry;
+use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
+use Whity\Sdk\Tenant\PluginTablesInterface;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Tenant\TenantContext;
 use Psr\Log\LoggerInterface;
@@ -100,6 +106,23 @@ class PluginLoader
      * how a null permission or resource-type registry behaves.
      */
     private ?HealthProbeRegistry $healthProbeRegistry = null;
+
+    /**
+     * Optional map of which source owns which database table (WC-723 Piece 1).
+     *
+     * Null in hosts that have not wired one; declarations are then skipped
+     * rather than failing, matching how a null permission registry behaves.
+     */
+    private ?TableOwnershipRegistry $tableOwnershipRegistry = null;
+
+    /**
+     * Optional catalogue of plugin-declared data types (WC-723 Piece 2).
+     *
+     * Null in hosts that have not wired one. A data type is only registerable
+     * when the ownership registry above is also present, since every table it
+     * names must be one this plugin owns.
+     */
+    private ?DataTypeRegistry $dataTypeRegistry = null;
 
     /**
      * @var HookManager|null Hook manager instance
@@ -290,6 +313,9 @@ class PluginLoader
      * @param PluginRoleSeeder|null $roleSeeder         Optional seeder for plugin-declared roles
      * @param ResourceTypeRegistry|null $resourceTypeRegistry Optional resource-type catalogue
      * @param HealthProbeRegistry|null $healthProbeRegistry Optional status-page probe catalogue
+     * @param ResourceTypeRegistry|null $resourceTypeRegistry Optional catalogue of plugin resource types
+     * @param TableOwnershipRegistry|null $tableOwnershipRegistry Optional loader-stamped table-ownership map
+     * @param DataTypeRegistry|null $dataTypeRegistry   Optional catalogue of plugin-declared data types
      */
     public function __construct(
         string $pluginDir,
@@ -299,13 +325,17 @@ class PluginLoader
         ?LoggerInterface $logger = null,
         ?PluginRoleSeeder $roleSeeder = null,
         ?ResourceTypeRegistry $resourceTypeRegistry = null,
-        ?HealthProbeRegistry $healthProbeRegistry = null
+        ?HealthProbeRegistry $healthProbeRegistry = null,
+        ?TableOwnershipRegistry $tableOwnershipRegistry = null,
+        ?DataTypeRegistry $dataTypeRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
         $this->permissionRegistry = $permissionRegistry;
         $this->resourceTypeRegistry = $resourceTypeRegistry;
         $this->healthProbeRegistry = $healthProbeRegistry;
+        $this->tableOwnershipRegistry = $tableOwnershipRegistry;
+        $this->dataTypeRegistry = $dataTypeRegistry;
         $this->hookManager = $hookManager;
         $this->logger = $logger;
         $this->roleSeeder = $roleSeeder;
@@ -2420,6 +2450,41 @@ class PluginLoader
                 );
             } catch (Throwable $e) {
                 $this->handlePluginThrowable($pluginKey, $e, 'getHealthProbes');
+            }
+        }
+
+        // 2a-ter. Register declared TABLE OWNERSHIP (WC-723 Piece 1). The whole
+        //     point of routing this through the loader is that the plugin says
+        //     WHICH tables it claims and the host stamps WHO claimed them, from
+        //     $plugin->getName(). A plugin may name any table; it cannot name
+        //     itself something else, and a table core or an earlier plugin
+        //     already owns is refused outright — with the ENTIRE declaration,
+        //     so ownership never depends on how far the loop got.
+        //
+        //     Optional interface, same per-plugin error boundary as permissions:
+        //     a bad declaration is a logged warning, never a dead host.
+        if ($this->tableOwnershipRegistry !== null && $plugin instanceof PluginTablesInterface) {
+            try {
+                $this->tableOwnershipRegistry->register($plugin->getName(), $plugin->getOwnedTables());
+            } catch (TableOwnershipException $e) {
+                $this->logWarning("Plugin {$pluginKey} declares invalid table ownership: " . $e->getMessage());
+            }
+        }
+
+        // 2a-quater. Register declared DATA TYPES (WC-723 Piece 2, `registerDataType`).
+        //     Ordered AFTER table ownership deliberately: every table a data type
+        //     names — its own and every referencing table in blocks_delete — must
+        //     already be owned by THIS plugin, and that check is only meaningful
+        //     once the claim above has been stamped (or refused).
+        //
+        //     Registration is per type, so one malformed declaration does not
+        //     discard the plugin's other types; the first failure is logged
+        //     against the plugin.
+        if ($this->dataTypeRegistry !== null && $plugin instanceof PluginDataTypesInterface) {
+            try {
+                $this->dataTypeRegistry->register($plugin->getName(), $plugin->getDataTypes());
+            } catch (InvalidDataTypeException $e) {
+                $this->logWarning("Plugin {$pluginKey} declares an invalid data type: " . $e->getMessage());
             }
         }
 

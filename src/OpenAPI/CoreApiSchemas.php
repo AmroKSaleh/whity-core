@@ -110,7 +110,8 @@ final class CoreApiSchemas
             self::twoFactorPolicyRoutes(),
             self::tagRoutes(),
             self::passwordResetRoutes(),
-            self::twoFactorRecoveryRoutes()
+            self::twoFactorRecoveryRoutes(),
+            self::dataTypeRoutes()
         );
     }
 
@@ -3209,6 +3210,192 @@ final class CoreApiSchemas
                 'profile_id' => self::int(),
                 'status' => ['type' => 'string', 'enum' => ['forced']],
             ], ['profile_id', 'status'])),
+
+            // ── Plugin-declared data types (WC-723, Door 2) ───────────────────
+            // `actions` is the honest-degradation contract: it lists ONLY the
+            // actions this type offers AND this caller may use, so a generated
+            // screen that renders exactly what it is told can never present a
+            // control the endpoint would refuse.
+            'DataTypeLifecycle' => self::object([
+                'declared' => self::bool(),
+                'column' => self::str(true),
+                'states' => ['type' => 'array', 'items' => self::str()],
+                'default_state' => self::str(true),
+                'trashable' => self::bool(),
+                'retirable' => self::bool(),
+                'trashed_state' => self::str(true),
+                'retired_state' => self::str(true),
+            ], ['declared', 'trashable', 'retirable']),
+            // One declared edge of the reference graph. `label` is what a refusal
+            // message says; core never learns what the table means.
+            'DataTypeReference' => self::object([
+                'table' => self::str(),
+                'column' => self::str(),
+                'label' => self::str(),
+            ], ['table', 'column', 'label']),
+            'DataType' => self::object([
+                'key' => self::str(),
+                'source' => self::str(),
+                'label' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
+                'lifecycle' => SchemaBuilder::ref('DataTypeLifecycle'),
+                'blocks_delete' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeReference')],
+                'actions' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['read', 'trash', 'restore', 'retire', 'delete']]],
+                'permissions' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+            ], ['key', 'source', 'label', 'lifecycle', 'blocks_delete', 'actions']),
+            'DataTypeListResponse' => self::listEnvelope('DataType'),
+            // A single guard's blocking rows, with the plugin's own label.
+            'DataTypeBlocker' => self::object([
+                'table' => self::str(),
+                'label' => self::str(),
+                'count' => self::int(),
+            ], ['table', 'label', 'count']),
+            // One record's lifecycle position. `referenceable` is false for BOTH
+            // trashed and retired; `pending_removal` separates them.
+            'DataTypeRecordState' => self::dataEnvelope(self::object([
+                'key' => self::str(),
+                'state' => self::str(true),
+                'referenceable' => self::bool(),
+                'pending_removal' => self::bool(),
+                'restorable' => self::bool(),
+                'deletable' => self::bool(),
+                'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
+            ], ['key', 'state', 'referenceable', 'pending_removal', 'restorable', 'deletable', 'blockers'])),
+            'DataTypeTransitionResponse' => self::dataEnvelope(self::object([
+                'key' => self::str(),
+                'outcome' => ['type' => 'string', 'enum' => ['ok']],
+                'state' => self::str(true),
+                'reason' => self::str(true),
+                'message' => self::str(),
+                'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
+            ], ['key', 'outcome', 'state', 'message', 'blockers'])),
+        ];
+    }
+
+    /**
+     * The generated lifecycle surface for plugin-declared data types
+     * (WC-723, Door 2).
+     *
+     * One route set serves EVERY registered type, so these are declared once
+     * here rather than per plugin. They carry NO route-level requiredPermission
+     * because the permission varies per type: the handler resolves the type's
+     * own declared permission through the same RoleChecker the middleware uses,
+     * and fails closed when the type does not offer the action (405) or the
+     * caller lacks the declared permission (403).
+     *
+     * A blocked delete is a 409 carrying the plugin's own labels — "still
+     * referenced by 3 recorded entries" — which is the difference between a
+     * refusal a user can act on and one they cannot.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function dataTypeRoutes(): array
+    {
+        $typeParam = [
+            'name' => 'type',
+            'in' => 'path',
+            'required' => true,
+            'schema' => ['type' => 'string'],
+            'description' => 'The namespaced data-type key, e.g. `democatalog:item`',
+        ];
+        $idParam = [
+            'name' => 'id',
+            'in' => 'path',
+            'required' => true,
+            'schema' => ['type' => 'string'],
+            'description' => 'The record\'s primary-key value',
+        ];
+
+        $recordErrors = [
+            404 => self::errorResponse('Unknown data type, or no such record in the caller\'s tenant'),
+            405 => self::errorResponse('This data type does not offer that action'),
+        ] + self::authErrors();
+
+        $transition = static function (string $path, string $summary, string $conflict) use (
+            $typeParam,
+            $idParam,
+            $recordErrors
+        ): array {
+            return [
+                'method' => 'POST',
+                'path' => $path,
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => $summary,
+                    'tags' => ['data-types'],
+                    'parameters' => [$typeParam, $idParam],
+                    'responses' => [
+                        200 => self::jsonResponse('The record\'s new lifecycle state', 'DataTypeTransitionResponse'),
+                        409 => self::errorResponse($conflict),
+                    ] + $recordErrors,
+                ],
+            ];
+        };
+
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/data-types',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'List the plugin-declared data types the caller may read, with the lifecycle actions they may use',
+                    'tags' => ['data-types'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Declared types, filtered per caller (empty data is valid)',
+                            'DataTypeListResponse'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/data-types/{type}/{id}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Read one record\'s lifecycle state and the declared references that block deleting it',
+                    'tags' => ['data-types'],
+                    'parameters' => [$typeParam, $idParam],
+                    'responses' => [
+                        200 => self::jsonResponse('The record\'s lifecycle position', 'DataTypeRecordState'),
+                    ] + $recordErrors,
+                ],
+            ],
+            $transition(
+                '/api/data-types/{type}/{id}/trash',
+                'Trash a record — reversible, closed to new references, removable once nothing references it',
+                'A retired record cannot be trashed'
+            ),
+            $transition(
+                '/api/data-types/{type}/{id}/restore',
+                'Restore a trashed record to the type\'s default state',
+                'A retired record cannot be restored — retirement is permanent'
+            ),
+            $transition(
+                '/api/data-types/{type}/{id}/retire',
+                'Retire a record — closed to new references, permanently readable, never deletable',
+                'A trashed record must be restored before it can be retired'
+            ),
+            [
+                'method' => 'DELETE',
+                'path' => '/api/data-types/{type}/{id}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Delete a record for real, if every declared referential guard permits it',
+                    'tags' => ['data-types'],
+                    'parameters' => [$typeParam, $idParam],
+                    'responses' => [
+                        200 => self::jsonResponse('The record was removed', 'DataTypeTransitionResponse'),
+                        409 => self::errorResponse(
+                            'Refused: rows still reference this record, the record is retired '
+                            . '(permanent), or a trashable type\'s record has not been trashed first'
+                        ),
+                    ] + $recordErrors,
+                ],
+            ],
         ];
     }
 

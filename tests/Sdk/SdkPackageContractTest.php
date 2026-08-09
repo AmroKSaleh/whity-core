@@ -166,9 +166,18 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.19.0',
+            '1.20.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.19 adds PluginHealthProbesInterface — the OPTIONAL contract by '
+            'SDK 1.20 adds the plugin-owned data-type contracts (WC-723 Door 2): '
+            . 'Tenant\PluginTablesInterface, by which a plugin declares WHICH '
+            . 'tables it owns while the host stamps WHO owns them; '
+            . 'DataType\PluginDataTypesInterface, by which it declares a record\'s '
+            . 'lifecycle and reference graph as DATA rather than code; and the '
+            . 'read-only DataType\DataTypeGuard, so a plugin\'s own delete route '
+            . 'enforces through the same evaluator the generated one uses. All '
+            . 'three OPTIONAL; trashed (reversible, pending removal) and retired '
+            . '(permanent, closed to new references) stay distinct states; '
+            . 'SDK 1.19 adds PluginHealthProbesInterface — the OPTIONAL contract by '
             . 'which a plugin contributes a status-page probe for a dependency it '
             . 'owns, sampled and published beside core\'s database/queue/scheduler/'
             . 'render probes instead of on a private status surface nobody watches. '

@@ -6,14 +6,17 @@ namespace DemoCatalog;
 
 use DemoCatalog\Api\DemoCatalogApiHandler;
 use DemoCatalog\Migrations\AddSyncColumnsToDemoCatalogItems;
+use DemoCatalog\Migrations\CreateDemoCatalogItemNotesTable;
 use DemoCatalog\Migrations\CreateDemoCatalogItemsTable;
 use DemoCatalog\Migrations\GrantDemoCatalogPermissionsToAdmin;
+use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
+use Whity\Sdk\Tenant\PluginTablesInterface;
 
 /**
  * DemoCatalogPlugin (multi-client feature-extraction pilot).
@@ -45,7 +48,13 @@ use Whity\Sdk\Rbac\PluginResourceTypesInterface;
  * resolves it under the `DemoCatalog` namespace prefix (directory name) and
  * auto-discovers it without any manual registration.
  */
-final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginResourceTypesInterface
+final class DemoCatalogPlugin implements
+    PluginInterface,
+    PluginRequirementsInterface,
+    PluginFrontendInterface,
+    PluginResourceTypesInterface,
+    PluginTablesInterface,
+    PluginDataTypesInterface
 {
     /**
      * @inheritDoc
@@ -311,6 +320,93 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
     }
 
     /**
+     * The tables this plugin owns (WC-723 Piece 1).
+     *
+     * Declaring them is what earns the right to declare a referential guard
+     * over them. The host stamps the OWNER from this plugin's name — this method
+     * says which tables, never who said so — and refuses anything core or an
+     * earlier plugin already claimed.
+     *
+     * `demo_catalog_change_seq` is deliberately GLOBAL: it is a one-row
+     * monotonic counter with no tenant column, so no tenant predicate could be
+     * bound to it. Declaring that honestly is what stops a data type or a guard
+     * ever being built over it.
+     *
+     * @inheritDoc
+     */
+    public function getOwnedTables(): array
+    {
+        return [
+            'demo_catalog_items' => self::SCOPE_TENANT,
+            'demo_catalog_item_notes' => self::SCOPE_TENANT,
+            'demo_catalog_change_seq' => self::SCOPE_GLOBAL,
+        ];
+    }
+
+    /**
+     * The data types this plugin owns — the Door 2 reference implementation
+     * (WC-723).
+     *
+     * One bare slug, `item`, which the host namespaces to `democatalog:item`.
+     * The declaration hands core exactly three things and nothing more:
+     *
+     *  - WHERE the record lives (`demo_catalog_items`, keyed by `id`, scoped by
+     *    `tenant_id`);
+     *  - WHAT its lifecycle states mean — `trashed` is a mistake pending
+     *    removal, `retired` is a finished item that other rows still resolve
+     *    against, and the two are not the same thing;
+     *  - WHICH rows still point at it (`demo_catalog_item_notes.item_id`), and
+     *    what to CALL them when refusing a delete ("catalogue notes").
+     *
+     * `ignore_when` says a note that is itself trashed does not keep its item
+     * alive — without it a trashed child would pin its parent forever.
+     *
+     * Note on the sync tombstone: `deleted_at` remains the offline-sync
+     * transport's own concern (it is how a deletion propagates to a client) and
+     * is untouched by the lifecycle. Lifecycle state lives in `status`, and the
+     * two answer different questions — "what is this record now?" versus "what
+     * must the next pull be told?".
+     *
+     * @inheritDoc
+     */
+    public function getDataTypes(): array
+    {
+        return [
+            'item' => [
+                'table' => 'demo_catalog_items',
+                'key' => 'id',
+                'tenant_column' => 'tenant_id',
+                'label' => ['en' => 'Catalogue item', 'ar' => 'عنصر الكتالوج'],
+                'lifecycle' => [
+                    'column' => 'status',
+                    'states' => ['active', 'archived', 'retired', 'trashed'],
+                    'default_state' => 'active',
+                    'trashable' => true,
+                    'retirable' => true,
+                    'trashed_state' => 'trashed',
+                    'retired_state' => 'retired',
+                ],
+                'blocks_delete' => [
+                    [
+                        'table' => 'demo_catalog_item_notes',
+                        'column' => 'item_id',
+                        'label' => 'catalogue notes',
+                        'tenant_column' => 'tenant_id',
+                        'ignore_when' => ['status' => ['trashed']],
+                    ],
+                ],
+                'permissions' => [
+                    'read' => 'demo_catalog:view',
+                    'trash' => 'demo_catalog:manage',
+                    'restore' => 'demo_catalog:manage',
+                    'retire' => 'demo_catalog:manage',
+                    'delete' => 'demo_catalog:manage',
+                ],
+            ],
+        ];
+    }
+
+    /**
      * No hooks — the pilot plugin observes no platform events.
      *
      * @inheritDoc
@@ -329,6 +425,7 @@ final class DemoCatalogPlugin implements PluginInterface, PluginRequirementsInte
             CreateDemoCatalogItemsTable::class,
             AddSyncColumnsToDemoCatalogItems::class,
             GrantDemoCatalogPermissionsToAdmin::class,
+            CreateDemoCatalogItemNotesTable::class,
         ];
     }
 

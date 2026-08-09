@@ -345,6 +345,28 @@ $healthProbeRegistry = new \Whity\Core\Health\HealthProbeRegistry($hookManager);
 $healthProbeRegistry->registerCoreProbes();
 \Whity\register_service(\Whity\Core\Health\HealthProbeRegistry::class, $healthProbeRegistry); // @phpstan-ignore-line
 
+// 4c-ter. Table ownership (WC-723 Piece 1): WHO owns each table. Core claims
+// every table its own migrations create BEFORE any plugin loads, so a plugin
+// claiming `memberships` loses the race by construction rather than by load
+// order. The plugin loader below stamps each plugin's claims from
+// $plugin->getName() — a plugin declares WHICH tables, never WHO said so.
+//
+// This is the foundation the data-type registry stands on: a referential guard
+// is an aggregate over the referencing table, so declaring one over a table the
+// plugin does not own would read data it cannot otherwise reach.
+$tableOwnershipRegistry = new \Whity\Core\Tenant\TableOwnershipRegistry($hookManager);
+$tableOwnershipRegistry->registerCoreTables();
+\Whity\register_service(\Whity\Core\Tenant\TableOwnershipRegistry::class, $tableOwnershipRegistry); // @phpstan-ignore-line
+
+// 4c-quater. Data-type catalogue (WC-723 Piece 2, `registerDataType`): the declared
+// lifecycle and reference graph of plugin-owned records. Constructed with the
+// ownership registry above so every declaration is validated against
+// loader-stamped ownership, and registered as a service so plugins and handlers
+// resolve the SAME instance the loader filled — a second instance would answer
+// "unregistered" for every declared type and refuse every lifecycle call.
+$dataTypeRegistry = new \Whity\Core\DataType\DataTypeRegistry($tableOwnershipRegistry, $hookManager);
+\Whity\register_service(\Whity\Core\DataType\DataTypeRegistry::class, $dataTypeRegistry); // @phpstan-ignore-line
+
 // 4b-bis. Durable async queue (WC-queue): the producer-side QueueService is
 // registered so core services, hooks, and plugins enqueue work into the durable
 // `jobs` table instead of the old log-only Queue stub. The consumer side
@@ -772,7 +794,9 @@ $pluginLoader = new PluginLoader(
     $logger,
     new PluginRoleSeeder($db->getPdo(), $logger),
     $resourceTypeRegistry,
-    $healthProbeRegistry
+    $healthProbeRegistry,
+    $tableOwnershipRegistry,
+    $dataTypeRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -1575,6 +1599,39 @@ $router->register('DELETE', '/api/entity-tags', [$entityTagsHandler, 'detach'], 
 // WC-714 §6: a plugin's record-delete cleanup hook. Distinct path so a
 // malformed single-detach body can never degrade into "remove everything".
 $router->register('DELETE', '/api/entity-tags/all', [$entityTagsHandler, 'detachAll'], null, null, CorePermissions::TAGS_MANAGE);
+
+// 13b-ter. Generated lifecycle surface for plugin-declared data types
+// (WC-723 Door 2). One handler serves EVERY registered type: the shape of a
+// trash view, a restore, a retire and a delete-that-refuses is identical across
+// plugins, so it is generated once here and the differences arrive as
+// declarations.
+//
+// The lifecycle service is also registered under the SDK's read-only
+// DataTypeGuard contract. That is not a convenience: a plugin keeping its own
+// delete route — the escape hatch that must stay open — resolves the SAME
+// evaluator core enforces with, so the two paths cannot drift into two
+// different answers to "what still references this?".
+//
+// Registered with NO route-level requiredPermission because permissions vary
+// PER TYPE; the handler gates itself against the same RoleChecker the
+// middleware uses, and fails closed on an unresolved tenant, an action the type
+// does not offer, or an action whose declared permission the caller lacks.
+$dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
+    $db->getPdo(),
+    $dataTypeRegistry,
+    $hookManager,
+    $auditLogger
+);
+\Whity\register_service(\Whity\Core\DataType\DataTypeLifecycleService::class, $dataTypeLifecycle); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Sdk\DataType\DataTypeGuard::class, $dataTypeLifecycle); // @phpstan-ignore-line
+
+$dataTypesHandler = new \Whity\Api\DataTypesApiHandler($dataTypeRegistry, $dataTypeLifecycle, $roleChecker);
+$router->register('GET',    '/api/data-types',                       [$dataTypesHandler, 'list']);
+$router->register('GET',    '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'show']);
+$router->register('POST',   '/api/data-types/{type}/{id}/trash',     [$dataTypesHandler, 'trash']);
+$router->register('POST',   '/api/data-types/{type}/{id}/restore',   [$dataTypesHandler, 'restore']);
+$router->register('POST',   '/api/data-types/{type}/{id}/retire',    [$dataTypesHandler, 'retire']);
+$router->register('DELETE', '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'delete']);
 
 // 13b-quater. Generic async-job submission + status API (WC-jobs-api). Wraps the
 // durable queue: POST enqueues an ALLOW-LISTED job for the caller's tenant (with

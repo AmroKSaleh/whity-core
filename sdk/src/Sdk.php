@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.18).
+ * SDK identity (v1.20).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -76,19 +76,36 @@ namespace Whity\Sdk;
  * inheritance, role hierarchy, live delegations, catalogue validation — instead
  * of re-deriving it in hand-written SQL and drifting from what is actually
  * enforced, WC-712) →
+ * 1.17 (resource-scoped resolution: `$resourceType`/`$resourceId` on
+ * {@see \Whity\Sdk\Rbac\PermissionResolver}, so a plugin can ask "may this
+ * caller act on THIS record?" — additive, omitting them preserves the previous
+ * tenant-wide answer exactly, WC-712 §2) →
+ * 1.18 (plugin-declared resource types:
+ * {@see \Whity\Sdk\Rbac\PluginResourceTypesInterface}, the optional declaration
+ * that lets a plugin address a role grant at one of its own records instead of
+ * keeping a private grant table, WC-712 §2) →
  * 1.19 (status-page health probes: {@see \Whity\Sdk\Health\PluginHealthProbesInterface},
  * {@see \Whity\Sdk\Health\HealthProbeDefinition} and
  * {@see \Whity\Sdk\Health\ProbeResult} — a plugin contributes a probe for a
  * dependency it owns and the host samples and publishes it beside its own
  * database/queue/scheduler/render probes, instead of the plugin inventing a
  * second status surface nobody watches. Host-namespaced under the plugin name,
- * so probes cannot collide or shadow a core one).
+ * so probes cannot collide or shadow a core one) →
+ * 1.20 (plugin-owned data types — Door 2 of the schema-driven admin surface:
+ * {@see \Whity\Sdk\Tenant\PluginTablesInterface} declares WHICH tables a plugin
+ * owns (the host stamps WHO owns them, from the plugin name the loader holds),
+ * {@see \Whity\Sdk\DataType\PluginDataTypesInterface} declares a record's
+ * lifecycle and its reference graph as DATA, and
+ * {@see \Whity\Sdk\DataType\DataTypeGuard} exposes the host's own guard
+ * evaluation so a plugin's custom delete route enforces through the same path
+ * the generated one does. Trashed and retired are kept distinct: reversible-and
+ * -pending-removal versus permanent-and-closed-to-new-references, WC-723).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.19.0';
+    public const VERSION = '1.20.0';
 
     /**
      * Static identity only — never instantiated.
