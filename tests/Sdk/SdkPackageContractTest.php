@@ -166,12 +166,15 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.15.0',
+            '1.16.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.15 adds the read-only permission-resolution contract '
+            'SDK 1.16 adds the read-only permission-resolution contract '
             . '(Rbac\PermissionResolver, WC-712) so a plugin asks the host the same '
             . 'authorization question the RBAC middleware answers instead of '
             . 're-deriving it in hand-written SQL; '
+            . 'SDK 1.15 adds the hook VETO contract (HookVetoException — the one '
+            . 'Throwable the host error boundary re-throws, so a plugin can refuse '
+            . 'a deletion and have it rolled back, WC-713); '
             . '1.14 adds the notification transport contract (NotificationTransport '
             . '+ NotificationMessage/SendResult value objects, WC-notifications); '
             . '1.13 adds the embed frontend-feature screen and multipart '

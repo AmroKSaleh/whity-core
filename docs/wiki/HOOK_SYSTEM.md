@@ -110,7 +110,11 @@ final class AuditPlugin implements \Whity\Sdk\PluginInterface
 }
 ```
 
-`PluginLoader::registerCapabilities()` reads `getHooks()` and subscribes each callback through `HookManager::listen()` — but **wrapped in a per-plugin error boundary** (`wrapHookCallback()`). A throwing hook callback is caught and logged, the original `$data` is returned unchanged (so a bad listener can't corrupt the chain), and the failure is recorded against the plugin's lifecycle (after `MAX_CONSECUTIVE_ERRORS = 3` the plugin is taken out of service). The loader records the exact wrapped callbacks it registered so it can cleanly `removeListener()` them when the plugin is disabled, removed, or hot-reloaded. See [Plugin-Development](Plugin-Development.md) and the plugin lifecycle in [Architecture](Architecture.md#plugin-system).
+`PluginLoader::registerCapabilities()` reads `getHooks()` and subscribes each callback through `HookManager::listen()` — but **wrapped in a per-plugin error boundary** (`wrapHookCallback()`). A throwing hook callback is caught and logged, the original `$data` is returned unchanged (so a bad listener can't corrupt the chain), and the failure is recorded against the plugin's lifecycle (after `MAX_CONSECUTIVE_ERRORS = 3` the plugin is taken out of service).
+
+The loader records the exact wrapped callbacks it registered so it can cleanly `removeListener()` them when the plugin is disabled, removed, or hot-reloaded. See [Plugin-Development](Plugin-Development.md) and the plugin lifecycle in [Architecture](Architecture.md#plugin-system).
+
+**One exception crosses that boundary: `Whity\Sdk\Hooks\HookVetoException` (SDK 1.15, WC-713).** The isolation above is what makes a broken plugin survivable, but it also meant a plugin could never say *"do not do this"* — its objection was logged and the host carried on regardless. A veto is therefore re-thrown to the dispatching handler, and does **not** count toward the failure threshold (a veto is a healthy plugin doing its job, not a fault). See the deletion contract below.
 
 ## Events fired by the core
 
@@ -131,6 +135,26 @@ These events are dispatched by the current core code (verify in source before re
 
 `UsersApiHandler`, `TenantsApiHandler`, and `OusApiHandler` are also constructed with the `HookManager`, so check those handlers for the exact `user.*` / `tenant.*` / `ou.*` events they emit; treat any event not in the table above as something to confirm in source rather than assume.
 
+### Deletion is transactional (WC-713)
+
+For `tenant.*`, `ou.*` and `role.*`, `TenantsApiHandler::delete()`, `OusApiHandler::delete()` and `RolesApiHandler::delete()` run
+
+```
+*.deleting  →  DELETE  →  *.deleted        [ all inside ONE transaction ]
+                                            ↓ commit
+                                        *.deleted.async
+```
+
+Three guarantees follow:
+
+1. **`*.deleting` still sees the row.** It is the read point — look up whatever you need about the entity there, because by `*.deleted` it is gone (within the transaction).
+2. **A throwing listener rolls the DELETE back.** Previously the DELETE committed on its own and `*.deleted` fired afterwards, so a plugin's cleanup was best-effort: a failure left the caller a 500 *and* a committed delete, with the plugin's own rows orphaned against a parent that no longer existed. Core tables survive that on their `ON DELETE CASCADE` constraints; plugin tables have no FK, so the hook was their only mechanism.
+3. **`*.deleted.async` fires only after a successful commit**, so no durable/outbox event ever announces a deletion that was rolled back.
+
+Throw `HookVetoException` from either hook to refuse the deletion deliberately; the API answers **409 Conflict** with your `reason()` under `details.reason`. Any other Throwable rolls the delete back too, but surfaces as a generic 500.
+
+`user.deleted` is deliberately **not** part of this contract: it has no `user.deleting` counterpart, and its core listeners send mail — which must neither hold a transaction open nor be able to undo a membership removal.
+
 > **Core subscriber — the audit trail (WC-34).** `AuditLogger` (`src/Core/Audit/AuditLogger.php`) subscribes (at priority 50) to the post-action `role.*`, `user.*`, `tenant.*` and `ou.*` lifecycle hooks and writes a row to `audit_log` for each — so security-relevant mutations are audited without per-handler code. To support this, `UsersApiHandler::update()`/`delete()` now also fire `user.updated` / `user.deleted` (carrying `id` + `tenant_id`). The listeners return `$data` unchanged. See [AUDIT_TRAIL](AUDIT_TRAIL.md).
 
 ## Best practices
@@ -140,6 +164,7 @@ These events are dispatched by the current core code (verify in source before re
 3. **Keep payloads scalar** — pass ids/strings, not live model objects, so listeners can't mutate shared object state and escape the chain.
 4. **No request state in statics** — workers persist; never accumulate per-request state in a static variable inside a listener.
 5. **Fail loudly in validators** — throwing in a sync `*.creating`/`*.updating` listener is fine; the plugin error boundary will catch a plugin listener's throw, log it, and leave the data unchanged (and count it toward the plugin's failure threshold).
+6. **Veto with `HookVetoException`, not a bare throw** — on the deletion paths it is the only Throwable that reaches the caller as a clean 409 with your reason; anything else is a generic 500. Write `reason()` for a human administrator, never as raw internal error text — it is shown to the client.
 
 ## Summary
 
@@ -147,4 +172,5 @@ These events are dispatched by the current core code (verify in source before re
 - Listeners run in ascending priority (default 10); every dispatch injects `{tenant_id, timestamp}` context.
 - Plugins declare hooks via `PluginInterface::getHooks()`; the loader subscribes them through `HookManager::listen()` inside a per-plugin error boundary and unsubscribes them on disable/reload via `removeListener()`.
 - Core fires worker lifecycle, navigation, permission-registration, and role lifecycle events; confirm `user.*`/`tenant.*`/`ou.*` payload shapes in their handlers.
+- Entity deletion (`tenant`/`ou`/`role`) runs `*.deleting` → DELETE → `*.deleted` in one transaction; a throwing listener rolls it back, `HookVetoException` turns that into a 409, and `*.deleted.async` fires only after commit.
 </content>

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.12).
+ * SDK identity (v1.16).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -63,7 +63,13 @@ namespace Whity\Sdk;
  * {@see \Whity\Sdk\Notification\SendResult} value objects — one contract for
  * email/SMS/in-app/push delivery. Core ships the transport registry + a
  * null/log transport; plugins contribute real ones, WC-notifications) →
- * 1.15 (read-only permission resolution:
+ * 1.15 (hook VETO contract: {@see \Whity\Sdk\Hooks\HookVetoException}, the one
+ * Throwable the host's per-plugin error boundary lets through. Paired with the
+ * host now running `*.deleting` → DELETE → `*.deleted` inside one transaction
+ * for tenants/OUs/roles, this lets a plugin refuse a deletion — or fail its own
+ * cleanup — and have the deletion rolled back rather than silently committed,
+ * WC-713) →
+ * 1.16 (read-only permission resolution:
  * {@see \Whity\Sdk\Rbac\PermissionResolver}, the host-registered contract a
  * plugin resolves from the service container to ask the SAME authorization
  * question the host's RBAC middleware answers — membership gating, OU-ancestor
@@ -75,7 +81,7 @@ namespace Whity\Sdk;
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.15.0';
+    public const VERSION = '1.16.0';
 
     /**
      * Static identity only — never instantiated.

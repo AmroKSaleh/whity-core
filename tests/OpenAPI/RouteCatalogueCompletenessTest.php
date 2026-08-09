@@ -97,6 +97,14 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // with the status-page documentation task, per the
         // KNOWN_UNDOCUMENTED-first path this file establishes.
         'GET /api/status',
+        // WC-error-tracking: the operator-only error inbox and the write-only
+        // DSN credential. OpenAPI components land with the error-tracking
+        // documentation task, per the KNOWN_UNDOCUMENTED-first path.
+        'GET /api/errors',
+        'GET /api/errors/{id}',
+        'PATCH /api/errors/{id}',
+        'GET /api/settings/error-tracking',
+        'PUT /api/settings/error-tracking/dsn',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void

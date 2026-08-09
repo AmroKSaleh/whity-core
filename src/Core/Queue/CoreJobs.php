@@ -8,8 +8,11 @@ use PDO;
 use Psr\Log\LoggerInterface;
 use Whity\Core\Notification\CoreTransports;
 use Whity\Core\Notification\Jobs\SendNotificationDeliveryJob;
+use Whity\Core\Notification\NotificationDispatcher;
 use Whity\Core\Notification\NotificationRepository;
 use Whity\Core\Notification\TransportRegistry;
+use Whity\Core\Observability\ErrorGroupRepository;
+use Whity\Core\Observability\Jobs\NotifyErrorGroupJob;
 use Whity\Core\Queue\Jobs\EchoJob;
 
 /**
@@ -53,6 +56,29 @@ final class CoreJobs
                     $logger,
                     // Non-PII lifecycle audit of each delivery outcome (WC-notifications #4d40cc1c).
                     new \Whity\Core\Audit\AuditLogger($pdo, $logger)
+                ),
+                false
+            );
+
+            // WC-error-tracking: emails platform operators about a NEW or
+            // REGRESSED error. Internal — capture enqueues it, never a public
+            // caller. It needs the notification dispatcher so alerts honour the
+            // same channels, preferences and transports as every other
+            // notification instead of reaching for SMTP directly.
+            $registry->register(
+                NotifyErrorGroupJob::NAME,
+                new NotifyErrorGroupJob(
+                    $pdo,
+                    new ErrorGroupRepository($pdo),
+                    new NotificationDispatcher(
+                        new NotificationRepository($pdo),
+                        $transports,
+                        new QueueService(new JobRepository($pdo)),
+                        null,
+                        $logger
+                    ),
+                    $logger,
+                    is_string($_ENV['WHITY_PUBLIC_URL'] ?? null) ? (string) $_ENV['WHITY_PUBLIC_URL'] : null
                 ),
                 false
             );

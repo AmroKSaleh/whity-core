@@ -197,6 +197,22 @@ final class SettingsRegistry
     public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
     /**
+     * Error tracking (WC-error-tracking). Operator-only, deployment-wide: one
+     * process serves every tenant, and a boot/queue/cron failure belongs to no
+     * tenant, so these are global-only.
+     *
+     * The DSN is NOT here — it is a credential, stored encrypted and write-only
+     * via PUT /api/v1/settings/error-tracking/dsn, exactly as the SMTP password
+     * is. A secret in the settings registry would be readable through the plain
+     * settings API.
+     */
+    public const ERROR_TRACKING_ENABLED = 'error_tracking.enabled';
+    public const ERROR_TRACKING_PROVIDER = 'error_tracking.provider';
+    public const ERROR_TRACKING_ENVIRONMENT = 'error_tracking.environment';
+    public const ERROR_TRACKING_NOTIFY_ADMINS = 'error_tracking.notify_admins';
+    public const ERROR_TRACKING_RETENTION_DAYS = 'error_tracking.retention_days';
+
+    /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
      * uploads go through BrandingService and the binary endpoints.
@@ -220,6 +236,11 @@ final class SettingsRegistry
      * @var list<string>
      */
     private const GLOBAL_ONLY_KEYS = [
+        self::ERROR_TRACKING_ENABLED,
+        self::ERROR_TRACKING_PROVIDER,
+        self::ERROR_TRACKING_ENVIRONMENT,
+        self::ERROR_TRACKING_NOTIFY_ADMINS,
+        self::ERROR_TRACKING_RETENTION_DAYS,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
         self::SELF_PASSWORD_RESET_ENABLED,
@@ -267,6 +288,8 @@ final class SettingsRegistry
      * @var list<string>
      */
     private const BOOL_KEYS = [
+        self::ERROR_TRACKING_ENABLED,
+        self::ERROR_TRACKING_NOTIFY_ADMINS,
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
@@ -318,6 +341,7 @@ final class SettingsRegistry
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
+        self::ERROR_TRACKING_ENABLED,
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
@@ -342,6 +366,11 @@ final class SettingsRegistry
         // the safe global default (never blocks); the operator raises it globally
         // or per-tenant. Kept in sync with SubscriptionService enforcement modes.
         self::BILLING_ENFORCEMENT_DEFAULT => ['off', 'warn', 'block_writes', 'block_all'],
+        // 'internal' stores errors in this deployment's own database (no extra
+        // infrastructure); 'sentry' ships them to any Sentry-PROTOCOL backend —
+        // hosted Sentry, or a self-hosted GlitchTip/Bugsink — via the encrypted
+        // DSN. Switching is a settings change, not a code change.
+        self::ERROR_TRACKING_PROVIDER => ['internal', 'sentry'],
     ];
 
     /**
@@ -428,6 +457,11 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
+        self::ERROR_TRACKING_ENABLED => 'false',
+        self::ERROR_TRACKING_PROVIDER => 'internal',
+        self::ERROR_TRACKING_ENVIRONMENT => '',
+        self::ERROR_TRACKING_NOTIFY_ADMINS => 'true',
+        self::ERROR_TRACKING_RETENTION_DAYS => '90',
     ];
 
     /**

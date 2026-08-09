@@ -966,6 +966,82 @@
                 ]
             }
         },
+        "/api/v1/admin/languages": {
+            "get": {
+                "operationId": "get_api_v1_admin_languages",
+                "summary": "List every language, including disabled ones (admin, system tenant only)",
+                "tags": [
+                    "languages"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Every language with its full admin shape",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LanguageListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Restricted to the system tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/admin/stats": {
             "get": {
                 "operationId": "get_api_v1_admin_stats",
@@ -19423,6 +19499,20 @@
                 "properties": {
                     "data": {
                         "$ref": "#/components/schemas/Language"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "LanguageListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Language"
+                        }
                     }
                 },
                 "required": [

@@ -93,6 +93,26 @@ export interface FieldMeta {
  * labelled from a humanised form of its key (see {@link fieldMetaFor}).
  */
 export const FIELD_META: Record<string, FieldMeta> = {
+  'error_tracking.enabled': {
+    label: 'Record errors',
+    help: 'Capture unhandled errors from this instance. Off means nothing is recorded or sent.',
+  },
+  'error_tracking.provider': {
+    label: 'Destination',
+    help: 'Keep errors on this instance in the built-in inbox, or forward them over the Sentry protocol.',
+  },
+  'error_tracking.environment': {
+    label: 'Environment label',
+    help: 'Tags events with the deployment they came from (e.g. staging, production). Leave blank to omit.',
+  },
+  'error_tracking.notify_admins': {
+    label: 'Email platform admins',
+    help: 'Alerts admins when an error group first appears, or reappears after being resolved. Sent through the durable queue, so a mail outage never loses an alert.',
+  },
+  'error_tracking.retention_days': {
+    label: 'Retention (days)',
+    help: 'How long resolved groups and their occurrences are kept before pruning.',
+  },
   site_name: {
     label: 'Site name',
     help: 'The public name of this instance, shown in the browser title and on the sign-in screen.',
