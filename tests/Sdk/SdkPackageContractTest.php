@@ -166,9 +166,15 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.18.0',
+            '1.19.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.18 adds PluginResourceTypesInterface — the OPTIONAL contract '
+            'SDK 1.19 adds PluginHealthProbesInterface — the OPTIONAL contract by '
+            . 'which a plugin contributes a status-page probe for a dependency it '
+            . 'owns, sampled and published beside core\'s database/queue/scheduler/'
+            . 'render probes instead of on a private status surface nobody watches. '
+            . 'Host-namespaced under the plugin name the loader supplies, so probes '
+            . 'cannot collide or shadow a core one (WC-status-probes); '
+            . 'SDK 1.18 adds PluginResourceTypesInterface — the OPTIONAL contract '
             . 'by which a plugin declares the resource types it owns. The host '
             . 'namespaces them under the plugin name it supplies, so two plugins '
             . 'cannot collide and none can shadow a core type (WC-712 §2); '
@@ -231,6 +237,49 @@ final class SdkPackageContractTest extends TestCase
             (string) (new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, 'effectivePermissions'))
                 ->getReturnType()
         );
+    }
+
+    /**
+     * SDK 1.19 (WC-status-probes): the health-probe contribution point. It must
+     * live in the SDK — not in core — so an out-of-repo plugin, which depends on
+     * whity/plugin-sdk alone, can declare a probe and build its results without
+     * referencing a single host type (core's HealthStatus enum notably included:
+     * ProbeResult carries the state as a plain string the host maps).
+     */
+    public function testHealthProbeContributionPointLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\Health\PluginHealthProbesInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Health\PluginHealthProbesInterface::class))->getMethods()
+        );
+        $this->assertSame(['getHealthProbes'], $methods);
+        $this->assertSame(
+            'array',
+            (string) (new \ReflectionMethod(
+                \Whity\Sdk\Health\PluginHealthProbesInterface::class,
+                'getHealthProbes'
+            ))->getReturnType()
+        );
+
+        $this->assertTrue(class_exists(\Whity\Sdk\Health\HealthProbeDefinition::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Health\ProbeResult::class));
+
+        // A result can only be built through the three factories, so `status` is
+        // always one of the three states the host knows how to render — a plugin
+        // cannot mint a fourth.
+        $this->assertFalse(
+            (new \ReflectionClass(\Whity\Sdk\Health\ProbeResult::class))
+                ->getConstructor()?->isPublic() ?? true,
+            'ProbeResult must not be constructible with an arbitrary status string'
+        );
+        $this->assertSame(
+            'operational',
+            \Whity\Sdk\Health\ProbeResult::operational()->status
+        );
+        $this->assertSame('degraded', \Whity\Sdk\Health\ProbeResult::degraded('slow')->status);
+        $this->assertSame('down', \Whity\Sdk\Health\ProbeResult::down('gone')->status);
     }
 
     public function testPluginMcpInterface_existsWithGetMcpPromptsMethod(): void
