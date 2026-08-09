@@ -141,8 +141,14 @@ services:
   # WHITY_PUBLIC_URL must be the PUBLIC origin, not the internal service name:
   # probing http://frankenphp would exercise only the app container and miss
   # exactly what broke last time — the web tier and the Cloudflare tunnel in
-  # front of it. Falls back to the local mapping so a bare `up` still collects
-  # something rather than silently probing nothing.
+  # front of it. Falls back to APP_URL (the same public origin) so a bare `up`
+  # still collects something rather than silently probing nothing.
+  #
+  # NOT APP_PORT_HOST: that is a BIND ADDRESS (e.g. `127.0.0.1:8100`), not a
+  # bare port, so `http://localhost:${APP_PORT_HOST}` expands to the malformed
+  # `http://localhost:127.0.0.1:8100`. Every probe then fails instantly and the
+  # public status page reports api/web DOWN while both serve 200 — a status
+  # page crying wolf is worse than none.
   health-watch:
     build:
       context: .
@@ -158,7 +164,7 @@ services:
       DB_PORT: 5432
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
-      WHITY_PUBLIC_URL: ${WHITY_PUBLIC_URL:-http://localhost:${APP_PORT_HOST:-8100}}
+      WHITY_PUBLIC_URL: ${WHITY_PUBLIC_URL:-${APP_URL:-http://localhost:8100}}
       WHITY_RENDER_URL: ${RENDER_SERVICE_URL:-}
     depends_on:
       postgres:
