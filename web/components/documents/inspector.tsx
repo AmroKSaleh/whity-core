@@ -17,7 +17,14 @@ import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight, IconBold, IconI
 const SELECT_CLASS =
   'h-7 w-full min-w-0 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30';
 
-type Tab = 'element' | 'page' | 'data' | 'batch' | 'sheet';
+/**
+ * The panel's five tabs. Which one shows is CONTROLLED by the caller, and the
+ * tab STRIP itself lives outside this component — in `side-rail.tsx`, which
+ * merges these tabs with Layers into one strip so the editor needs only a single
+ * rail. That also lets the menu bar open a specific tab (Page setup…,
+ * Placeholders…, Label sheet layout…) and lets a story render any tab directly.
+ */
+export type InspectorTab = 'element' | 'page' | 'data' | 'batch' | 'sheet';
 
 export interface BatchState {
   active: boolean;
@@ -32,6 +39,7 @@ export function Inspector({
   batch,
   sheet,
   sequence,
+  tab,
   onChangeSelected,
   onChangePage,
   onChangePlaceholders,
@@ -48,6 +56,7 @@ export function Inspector({
   batch: BatchState;
   sheet: SheetSpec;
   sequence: SequenceConfig;
+  tab: InspectorTab;
   onChangeSelected: (patch: Partial<DocElement>) => void;
   onChangePage: (patch: Partial<PageSpec>) => void;
   onChangePlaceholders: (list: Placeholder[]) => void;
@@ -58,31 +67,16 @@ export function Inspector({
   onChangeSheet: (patch: Partial<SheetSpec>) => void;
   onChangeSequence: (patch: Partial<SequenceConfig>) => void;
 }) {
-  const [tab, setTab] = useState<Tab>('element');
   const unitsTotal = (batch.active ? batch.total : 1) * template.pages.length;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="mb-3 flex gap-0.5 rounded-md bg-muted/40 p-0.5 text-[11px]">
-        {(['element', 'page', 'data', 'batch', 'sheet'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            data-testid={`doc-tab-${t}`}
-            onClick={() => setTab(t)}
-            className={`flex-1 rounded px-1.5 py-1 capitalize ${tab === t ? 'bg-card font-medium text-foreground shadow-sm' : 'text-muted-foreground'}`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-
+    <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pe-1">
         {tab === 'element' &&
           (selectedCount > 1 ? (
             <p className="text-xs text-muted-foreground">
-              {selectedCount} elements selected. Use the actions above (align, copy, duplicate, delete), or select a
-              single element to edit its properties.
+              {selectedCount} elements selected. Align, arrange and clipboard actions are in the toolbar and the Format
+              menu; select a single element to edit its properties.
             </p>
           ) : (
             <ElementTab selected={selected} placeholders={template.placeholders} onChange={onChangeSelected} />
