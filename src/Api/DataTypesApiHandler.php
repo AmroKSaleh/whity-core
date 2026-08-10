@@ -98,11 +98,16 @@ final class DataTypesApiHandler
     }
 
     /**
-     * GET /api/data-types/{type}/{id} — one record's lifecycle state and the
-     * references that currently block deleting it.
+     * GET /api/data-types/{type}/{id} — one record's lifecycle state, the
+     * references that currently block deleting it, and why any unavailable
+     * action is unavailable.
      *
      * This is what lets a generated screen refuse honestly BEFORE the user
-     * clicks: the blockers arrive with the plugin's own labels attached.
+     * clicks: the blockers arrive with the plugin's own labels attached, and
+     * `refusals` carries a stable reason key per action so a disabled control
+     * can explain itself rather than sitting there greyed out. A `false` in this
+     * payload is never unexplained — `deletable: false` always has a matching
+     * `refusals['delete']`, whether the cause is a reference or a policy.
      *
      * @param Request               $request The incoming request.
      * @param array<string, string> $params  Captured path parameters.

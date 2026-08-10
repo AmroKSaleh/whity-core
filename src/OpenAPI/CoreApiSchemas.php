@@ -3228,11 +3228,21 @@ final class CoreApiSchemas
             ], ['declared', 'trashable', 'retirable']),
             // One declared edge of the reference graph. `label` is what a refusal
             // message says; core never learns what the table means.
+            //
+            // `ignore_when` is echoed back so the entry ROUND-TRIPS the
+            // declaration. No renderer needs it — but a filter that is enforced
+            // and never published is indistinguishable from one that was
+            // silently dropped, and the only way to tell them apart is to read
+            // core's source. Publishing it costs a renderer nothing.
             'DataTypeReference' => self::object([
                 'table' => self::str(),
                 'column' => self::str(),
                 'label' => self::str(),
-            ], ['table', 'column', 'label']),
+                'ignore_when' => [
+                    'type' => 'object',
+                    'additionalProperties' => ['type' => 'array', 'items' => self::str()],
+                ],
+            ], ['table', 'column', 'label', 'ignore_when']),
             'DataType' => self::object([
                 'key' => self::str(),
                 'source' => self::str(),
@@ -3249,8 +3259,38 @@ final class CoreApiSchemas
                 'label' => self::str(),
                 'count' => self::int(),
             ], ['table', 'label', 'count']),
+            // Why one action is unavailable on one record. `reason` is a STABLE
+            // key a client branches on and localises itself; `message` is core's
+            // own sentence, offered as a fallback and never as the contract —
+            // string-matching prose is not an API.
+            'DataTypeRefusal' => self::object([
+                'reason' => ['type' => 'string', 'enum' => [
+                    'still_referenced',
+                    'trash_before_deleting',
+                    'retired_records_are_permanent',
+                    'retired_records_cannot_be_trashed',
+                    'retirement_is_permanent',
+                    'restore_before_retiring',
+                ]],
+                'message' => self::str(),
+            ], ['reason', 'message']),
+            // A policy refusal per lifecycle action, present only for actions the
+            // record's CURRENT STATE forbids. Distinct from `blockers`, which
+            // answers only "how many rows point at this" — a refusal is not a
+            // reference, and merging them would make the row count unanswerable.
+            'DataTypeRefusals' => self::object([
+                'trash' => SchemaBuilder::ref('DataTypeRefusal'),
+                'restore' => SchemaBuilder::ref('DataTypeRefusal'),
+                'retire' => SchemaBuilder::ref('DataTypeRefusal'),
+                'delete' => SchemaBuilder::ref('DataTypeRefusal'),
+            ], []),
             // One record's lifecycle position. `referenceable` is false for BOTH
             // trashed and retired; `pending_removal` separates them.
+            //
+            // No `false` here is unexplained: `deletable: false` ALWAYS carries
+            // `refusals.delete`, whether the cause is a reference
+            // (`still_referenced`, `blockers` populated) or a policy
+            // (`trash_before_deleting`, `blockers` empty).
             'DataTypeRecordState' => self::dataEnvelope(self::object([
                 'key' => self::str(),
                 'state' => self::str(true),
@@ -3259,7 +3299,17 @@ final class CoreApiSchemas
                 'restorable' => self::bool(),
                 'deletable' => self::bool(),
                 'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
-            ], ['key', 'state', 'referenceable', 'pending_removal', 'restorable', 'deletable', 'blockers'])),
+                'refusals' => SchemaBuilder::ref('DataTypeRefusals'),
+            ], [
+                'key',
+                'state',
+                'referenceable',
+                'pending_removal',
+                'restorable',
+                'deletable',
+                'blockers',
+                'refusals',
+            ])),
             'DataTypeTransitionResponse' => self::dataEnvelope(self::object([
                 'key' => self::str(),
                 'outcome' => ['type' => 'string', 'enum' => ['ok']],
@@ -3355,7 +3405,8 @@ final class CoreApiSchemas
                 'requiredRole' => null,
                 'requiredPermission' => null,
                 'schema' => [
-                    'summary' => 'Read one record\'s lifecycle state and the declared references that block deleting it',
+                    'summary' => 'Read one record\'s lifecycle state, the declared references that block deleting it, '
+                        . 'and the stable reason key behind every action its current state refuses',
                     'tags' => ['data-types'],
                     'parameters' => [$typeParam, $idParam],
                     'responses' => [

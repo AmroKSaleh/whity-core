@@ -70,6 +70,17 @@ namespace Whity\Sdk\DataType;
  *         ];
  *     }
  *
+ * Verifying what the host accepted
+ * --------------------------------
+ * `GET /api/data-types` ROUND-TRIPS this declaration: every field above is
+ * echoed back as the host accepted it — `ignore_when` included, and with the
+ * host's own normalisation (guard values become strings) visible. Checking
+ * whether a field took effect is therefore a diff against the entry, never a
+ * read of the host's source.
+ *
+ * The one field that is NOT a copy of the declaration is `actions`, which is
+ * filtered per caller — see "Honest degradation" below.
+ *
  * Namespacing and ownership
  * -------------------------
  * Declare BARE keys. The host stores them under this plugin's own namespace, so

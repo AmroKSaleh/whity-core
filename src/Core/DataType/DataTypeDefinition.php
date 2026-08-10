@@ -244,7 +244,12 @@ final class DataTypeDefinition
      * whereas how many rows currently reference a given record is tenant data
      * and is answered per record, per caller, through the guarded read.
      *
-     * @return array{key: string, source: string, label: array<string, string>, lifecycle: array<string, mixed>, blocks_delete: list<array{table: string, column: string, label: string}>, actions: list<string>, permissions: array<string, string>}
+     * Within that boundary the entry ROUND-TRIPS the declaration: every field a
+     * plugin declared is echoed back as the host accepted it, so a declarer can
+     * diff what they wrote against what took effect instead of reading core's
+     * source to find out whether a field was honoured or quietly dropped.
+     *
+     * @return array{key: string, source: string, label: array<string, string>, lifecycle: array<string, mixed>, blocks_delete: list<array{table: string, column: string, label: string, ignore_when: array<string, list<string>>}>, actions: list<string>, permissions: array<string, string>}
      */
     public function toArray(): array
     {

@@ -141,6 +141,51 @@ would be a way to count rows the plugin cannot otherwise read.
 itself trashed would pin its parent alive forever, and the guard would be a
 leak rather than a protection.
 
+## The published entry round-trips your declaration
+
+`GET /api/data-types` echoes back **every field you declared**, as the host
+accepted it — labels, lifecycle, `blocks_delete` including `ignore_when`, and
+the permission map. So you never have to read core's source to find out whether
+a field took effect: diff the entry against what you wrote.
+
+```jsonc
+{
+  "key": "acme:record",
+  "source": "Acme",
+  "label": { "en": "Record" },
+  "lifecycle": {
+    "declared": true, "column": "status",
+    "states": ["draft", "active", "retired", "trashed"],
+    "default_state": "active",
+    "trashable": true, "retirable": true,
+    "trashed_state": "trashed", "retired_state": "retired"
+  },
+  "blocks_delete": [
+    {
+      "table": "acme_entries",
+      "column": "record_id",
+      "label": "recorded entries",
+      "ignore_when": { "status": ["trashed"] }   // echoed, so you can verify it
+    }
+  ],
+  "actions": ["read", "trash", "restore", "retire", "delete"],
+  "permissions": { "read": "acme:read", "…": "…" }
+}
+```
+
+Two limits on that, both deliberate:
+
+* it round-trips **what was accepted**, not the bytes you sent — guard values
+  are normalised to strings, so `['archived' => [1]]` comes back as
+  `{"archived": ["1"]}`. Seeing the normalisation is the point.
+* `actions` is the one field filtered **per caller** (see below), so it is the
+  intersection of what the type offers and what this caller may use — not a
+  copy of your declaration.
+
+No renderer needs `ignore_when`. It is published anyway: a filter that is
+enforced but never echoed is indistinguishable from one that was silently
+dropped, and telling those apart should not require a source dive.
+
 ## Honest degradation
 
 An action exists only when **both** its lifecycle support and its permission
@@ -186,6 +231,62 @@ A refused delete answers `409` with the blockers attached:
   }
 }
 ```
+
+## Why an action is unavailable
+
+`GET /api/data-types/{type}/{id}` reports the record's position **and the reason
+behind every action its current state refuses**, so a generated screen can say
+why a control is disabled instead of rendering a dead button:
+
+```json
+{
+  "data": {
+    "key": "acme:record",
+    "state": "active",
+    "referenceable": true,
+    "pending_removal": false,
+    "restorable": false,
+    "deletable": false,
+    "blockers": [],
+    "refusals": {
+      "delete": {
+        "reason": "trash_before_deleting",
+        "message": "Move this record to the trash before deleting it"
+      }
+    }
+  }
+}
+```
+
+**`blockers` and `refusals` are different questions and stay apart.**
+`blockers` answers only *how many rows point at this record* — the count a
+"3 catalogue notes still reference this" message is built from. `refusals`
+answers *which actions this record's state forbids, and why*. A policy refusal
+is not a reference, so it never appears as a synthetic blocker; if it did,
+the row count would stop being answerable.
+
+The invariant to rely on: **no `false` in this payload is unexplained.**
+`deletable: false` always carries `refusals.delete`, whether the cause is a
+reference (`still_referenced`, with `blockers` populated) or a policy
+(`trash_before_deleting`, with `blockers` empty) — which is exactly the pair a
+caller could not previously tell apart.
+
+`reason` is the contract; `message` is core's own sentence, offered as a
+fallback. **Branch on `reason`** and localise your own text — string-matching
+prose is not an API. The keys are the five listed under [Two end-states, not
+one](#two-end-states-not-one) plus `still_referenced`, and they are the same
+keys the `409` refusal body carries, produced by the same evaluator: what the
+screen predicts and what the endpoint does cannot drift apart.
+
+`refusals` covers all four mutating actions — `trash`, `restore`, `retire`,
+`delete` — and an entry is present **only** when the action is currently
+refused. An idempotent no-op is not a refusal: retiring an already-retired
+record succeeds, so it is absent. Actions the type never offered are absent too;
+their absence from `actions` in the list response is where that is said.
+
+Nothing new is disclosed: every reason is derivable from `state` and the
+type's published lifecycle. The permission and ownership gates are untouched —
+a caller who may not read the type gets `404`, and never learns the type exists.
 
 ## Keeping your own delete route
 
