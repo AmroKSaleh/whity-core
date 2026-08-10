@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import * as React from "react"
 import { IconAlertTriangle, IconArrowRight, IconCheck, IconInfoCircle, IconPlus, IconSparkles } from "@tabler/icons-react"
 
 import { Button } from "./button"

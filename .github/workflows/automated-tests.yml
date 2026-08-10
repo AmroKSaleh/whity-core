@@ -487,6 +487,17 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # `packages/ui` ships RAW SOURCES (exports "." -> "./src/index.ts"), so
+      # until now its only type checking was whatever each consumer's tsconfig
+      # happened to enforce — the library's effective strictness was its
+      # strictest consumer's, and its stories were checked by nobody. A dead
+      # import that `web` tolerated broke `templates/tauri-desktop` outright
+      # (it sets noUnusedLocals). Check the library on its own terms instead,
+      # under its own tsconfig — which includes the .stories.tsx files.
+      - name: Type check @amroksaleh/ui
+        working-directory: .
+        run: npm run typecheck -w @amroksaleh/ui
+
       # ESLint gate (WC-122): zero errors required; warnings are tolerated.
       # Runs after the WC-195 debt clearance so the gate starts clean.
       - name: Lint

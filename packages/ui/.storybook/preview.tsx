@@ -1,4 +1,3 @@
-import * as React from "react"
 import type { Preview, Decorator } from "@storybook/react-vite"
 
 // The package's own design tokens + Tailwind entry. Dark tokens live under

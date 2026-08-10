@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import { fn } from "storybook/test"
 import * as React from "react"
-import { IconCloudUpload, IconCpu, IconDatabase, IconPuzzle, IconShieldCheck } from "@tabler/icons-react"
+import { IconCloudUpload, IconDatabase, IconPuzzle, IconShieldCheck } from "@tabler/icons-react"
 
 import { PluginStoreCard, InstalledPluginCard, type PluginItem } from "./plugin-card"
 
@@ -92,15 +93,24 @@ const SAMPLE_PLUGINS: PluginItem[] = [
 const meta = {
   title: "Primitives/PluginCard",
   component: PluginStoreCard,
+  subcomponents: { InstalledPluginCard },
   tags: ["autodocs"],
   parameters: { layout: "padded" },
+  args: {
+    plugin: SAMPLE_PLUGINS[0],
+    onInstall: fn(),
+    onConfigure: fn(),
+  },
 } satisfies Meta<typeof PluginStoreCard>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** A single store card, driven entirely by the Controls panel. */
+export const StoreCard: Story = {}
+
 export const PluginStoreMarketplace: Story = {
-  render: () => (
+  render: (args) => (
     <div className="space-y-4 max-w-4xl">
       <div className="space-y-1">
         <h3 className="text-base font-bold text-foreground">Real-Store Plugin Marketplace</h3>
@@ -110,32 +120,36 @@ export const PluginStoreMarketplace: Story = {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {SAMPLE_PLUGINS.slice(0, 2).map((plugin) => (
-          <PluginStoreCard
-            key={plugin.id}
-            plugin={plugin}
-            onInstall={(p) => alert(`Installing plugin: ${p.name}`)}
-          />
+        {/* The first card is the `plugin` arg; the second shows a second
+            catalogue entry beside it, as the marketplace grid renders them. */}
+        {[args.plugin, SAMPLE_PLUGINS[1]].map((plugin) => (
+          <PluginStoreCard {...args} key={plugin.id} plugin={plugin} />
         ))}
       </div>
     </div>
   ),
 }
 
-export const InstalledPluginsAllStates: Story = {
-  render: () => {
-    const [plugins, setPlugins] = React.useState(SAMPLE_PLUGINS)
+/** `onUpdate` is not one of the store card's args, so it gets its own spy. */
+const logUpdate = fn()
 
-    const handleToggle = (plugin: PluginItem, newState: "active" | "inactive") => {
+export const InstalledPluginsAllStates: Story = {
+  args: { plugin: SAMPLE_PLUGINS[0] },
+  render: ({ plugin, onConfigure }) => {
+    const [plugins, setPlugins] = React.useState<PluginItem[]>(() => [
+      plugin,
+      ...SAMPLE_PLUGINS.slice(1),
+    ])
+
+    const handleToggle = (target: PluginItem, newState: "active" | "inactive") => {
       setPlugins((prev) =>
-        prev.map((p) => (p.id === plugin.id ? { ...p, state: newState } : p))
+        prev.map((p) => (p.id === target.id ? { ...p, state: newState } : p))
       )
     }
 
-    const handleRollback = (plugin: PluginItem, version: string) => {
-      alert(`Rolled back ${plugin.name} to version v${version}`)
+    const handleRollback = (target: PluginItem, version: string) => {
       setPlugins((prev) =>
-        prev.map((p) => (p.id === plugin.id ? { ...p, version, state: "active" } : p))
+        prev.map((p) => (p.id === target.id ? { ...p, version, state: "active" } : p))
       )
     }
 
@@ -149,14 +163,14 @@ export const InstalledPluginsAllStates: Story = {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {plugins.map((plugin) => (
+          {plugins.map((p) => (
             <InstalledPluginCard
-              key={plugin.id}
-              plugin={plugin}
+              key={p.id}
+              plugin={p}
               onToggleState={handleToggle}
-              onUpdate={(p) => alert(`Updating ${p.name} to v${p.latestVersion}`)}
+              onUpdate={logUpdate}
               onRollback={handleRollback}
-              onConfigure={(p) => alert(`Configuring ${p.name}`)}
+              onConfigure={onConfigure}
             />
           ))}
         </div>

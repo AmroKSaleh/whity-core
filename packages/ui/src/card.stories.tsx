@@ -1,14 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import * as React from "react"
 import {
-  IconArrowRight,
   IconCheck,
   IconCloudUpload,
   IconCpu,
   IconDownload,
   IconKey,
   IconLock,
-  IconPlugin,
   IconPuzzle,
   IconShieldCheck,
   IconSparkles,

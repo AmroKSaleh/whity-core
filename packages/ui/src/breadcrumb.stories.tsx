@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import * as React from "react"
-import { IconBuilding, IconFolder, IconHome, IconUsers } from "@tabler/icons-react"
+import { IconBuilding, IconFolder, IconUsers } from "@tabler/icons-react"
 
 import { Breadcrumb } from "./breadcrumb"
 

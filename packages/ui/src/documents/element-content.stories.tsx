@@ -34,6 +34,11 @@ const meta = {
   title: "Documents/ElementContent",
   component: ElementContent,
   tags: ["autodocs"],
+  args: {
+    el: { ...BASE, type: "text", text: "Plain, unformatted text", style: BASE_STYLE } satisfies DocElement,
+    data: {},
+    preview: true,
+  },
   parameters: {
     docs: {
       description: {
@@ -47,20 +52,22 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** Frames a story at the size its element type is meant to be inspected in. */
+const framed =
+  (w: number, h: number): Story["render"] =>
+  (args) => (
+    <Frame w={w} h={h}>
+      <ElementContent {...args} />
+    </Frame>
+  )
+
 export const TextPlain: Story = {
-  render: () => {
-    const el: DocElement = { ...BASE, type: "text", text: "Plain, unformatted text", style: BASE_STYLE };
-    return (
-      <Frame w={240} h={60}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
-  },
+  render: framed(240, 60),
 }
 
 export const TextRichRuns: Story = {
-  render: () => {
-    const el: DocElement = {
+  args: {
+    el: {
       ...BASE,
       type: "text",
       text: "Hello bold and italic world",
@@ -72,173 +79,124 @@ export const TextRichRuns: Story = {
         { text: "italic", italic: true },
         { text: " world" },
       ],
-    };
-    return (
-      <Frame w={240} h={60}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
+    },
   },
+  render: framed(240, 60),
+}
+
+const DYNAMIC_TEXT: DocElement = {
+  ...BASE,
+  type: "dynamicText",
+  template: "Hello {{name}}, your order {{order}} shipped!",
+  style: BASE_STYLE,
+  runs: [
+    { text: "Hello " },
+    { text: "{{name}}", bold: true },
+    { text: ", your order " },
+    { text: "{{order}}", italic: true },
+    { text: " shipped!" },
+  ],
 }
 
 export const DynamicTextPreview: Story = {
   name: "Dynamic Text — Preview (interpolated)",
-  render: () => {
-    const el: DocElement = {
-      ...BASE,
-      type: "dynamicText",
-      template: "Hello {{name}}, your order {{order}} shipped!",
-      style: BASE_STYLE,
-      runs: [
-        { text: "Hello " },
-        { text: "{{name}}", bold: true },
-        { text: ", your order " },
-        { text: "{{order}}", italic: true },
-        { text: " shipped!" },
-      ],
-    };
-    return (
-      <Frame w={280} h={60}>
-        <ElementContent el={el} data={{ name: "Acme Corp", order: "ORD-1042" }} preview />
-      </Frame>
-    );
+  args: {
+    el: DYNAMIC_TEXT,
+    data: { name: "Acme Corp", order: "ORD-1042" },
   },
+  render: framed(280, 60),
 }
 
 export const DynamicTextEditing: Story = {
   name: "Dynamic Text — Editing (raw tokens)",
-  render: () => {
-    const el: DocElement = {
-      ...BASE,
-      type: "dynamicText",
-      template: "Hello {{name}}, your order {{order}} shipped!",
-      style: BASE_STYLE,
-      runs: [
-        { text: "Hello " },
-        { text: "{{name}}", bold: true },
-        { text: ", your order " },
-        { text: "{{order}}", italic: true },
-        { text: " shipped!" },
-      ],
-    };
-    return (
-      <Frame w={280} h={60}>
-        <ElementContent el={el} data={{ name: "Acme Corp", order: "ORD-1042" }} preview={false} />
-      </Frame>
-    );
+  args: {
+    el: DYNAMIC_TEXT,
+    data: { name: "Acme Corp", order: "ORD-1042" },
+    preview: false,
   },
+  render: framed(280, 60),
 }
 
 export const MathInline: Story = {
-  render: () => {
-    const el: DocElement = { ...BASE, type: "math", expression: "E = mc^2", block: false };
-    return (
-      <Frame w={200} h={50}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
+  args: {
+    el: { ...BASE, type: "math", expression: "E = mc^2", block: false },
   },
+  render: framed(200, 50),
 }
 
 export const MathBlock: Story = {
-  render: () => {
-    const el: DocElement = {
+  args: {
+    el: {
       ...BASE,
       type: "math",
       expression: "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}",
       block: true,
-    };
-    return (
-      <Frame w={220} h={80}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
+    },
   },
+  render: framed(220, 80),
 }
 
 export const Image: Story = {
-  render: () => {
-    const el: DocElement = {
+  args: {
+    el: {
       ...BASE,
       type: "image",
       src: "https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=400&auto=format&fit=crop&q=60",
       fit: "cover",
-    };
-    return (
-      <Frame w={200} h={130}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
+    },
   },
+  render: framed(200, 130),
 }
 
 export const ImageMissingBinding: Story = {
   name: "Image — unresolved binding placeholder",
-  render: () => {
-    const el: DocElement = { ...BASE, type: "image", src: "", binding: "logo_url", fit: "contain" };
-    return (
-      <Frame w={160} h={100}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
+  args: {
+    el: { ...BASE, type: "image", src: "", binding: "logo_url", fit: "contain" },
   },
+  render: framed(160, 100),
 }
 
 export const Barcode: Story = {
-  render: () => {
-    const el: DocElement = {
+  args: {
+    el: {
       ...BASE,
       type: "barcode",
       symbology: "code128",
       value: "{{sku}}",
       binding: undefined,
       showText: true,
-    };
-    return (
-      <Frame w={220} h={70}>
-        <ElementContent el={el} data={{ sku: "SKU-00231" }} preview />
-      </Frame>
-    );
+    },
+    data: { sku: "SKU-00231" },
   },
+  render: framed(220, 70),
 }
 
 export const Qr: Story = {
   name: "QR Code",
-  render: () => {
-    const el: DocElement = { ...BASE, type: "qr", value: "{{tracking}}", binding: undefined, eclevel: "M" };
-    return (
-      <Frame w={140} h={140}>
-        <ElementContent el={el} data={{ tracking: "https://whity.jameedium.org/t/00231" }} preview />
-      </Frame>
-    );
+  args: {
+    el: { ...BASE, type: "qr", value: "{{tracking}}", binding: undefined, eclevel: "M" },
+    data: { tracking: "https://whity.jameedium.org/t/00231" },
   },
+  render: framed(140, 140),
 }
 
 export const Rect: Story = {
-  render: () => {
-    const el: DocElement = {
+  args: {
+    el: {
       ...BASE,
       type: "rect",
       fill: "#eef2ff",
       stroke: "#4f46e5",
       strokeWidth: 2,
       radius: 8,
-    };
-    return (
-      <Frame w={200} h={100}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
+    },
   },
+  render: framed(200, 100),
 }
 
 export const Line: Story = {
-  render: () => {
-    const el: DocElement = { ...BASE, type: "line", stroke: "#111111", strokeWidth: 2 };
-    return (
-      <Frame w={200} h={4}>
-        <ElementContent el={el} data={{}} preview />
-      </Frame>
-    );
+  args: {
+    el: { ...BASE, type: "line", stroke: "#111111", strokeWidth: 2 },
   },
+  render: framed(200, 4),
 }

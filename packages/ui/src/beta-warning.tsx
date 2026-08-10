@@ -13,7 +13,11 @@ export interface BetaWarningActionConfig {
   href?: string
 }
 
-export interface BetaWarningProps extends React.ComponentProps<"div"> {
+// `title` is the component's own rich heading (a ReactNode rendered inside the
+// banner), not the DOM's `title` tooltip attribute — which only accepts a
+// string. Omitting the DOM one keeps the two from colliding: it is consumed by
+// destructuring below and never reaches the underlying <div> through `...props`.
+export interface BetaWarningProps extends Omit<React.ComponentProps<"div">, "title"> {
   /** Title or feature name (defaults to "Experimental Feature"). */
   title?: React.ReactNode
   /** Description message explaining the beta/experimental status. */

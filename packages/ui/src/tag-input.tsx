@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 import { IconX } from "@tabler/icons-react"
 
 import { cn } from "./utils"
