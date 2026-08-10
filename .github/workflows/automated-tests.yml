@@ -72,6 +72,11 @@ jobs:
               - '.github/workflows/automated-tests.yml'
             frontend:
               - 'web/**'
+              # packages/** are consumed by web/ as RAW SOURCES (@amroksaleh/ui
+              # exports "." -> "./src/index.ts"), so a change there compiles
+              # inside every consumer's build — yet a packages-only PR used to
+              # skip this job entirely and ship unverified.
+              - 'packages/**'
               - 'public/openapi.json'
               - '.github/workflows/automated-tests.yml'
             # ADR 0012: the render service bundles this exact source slice
