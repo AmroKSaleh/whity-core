@@ -194,6 +194,11 @@ the generated contract *and* the retire endpoint refuses with `405`. The
 alternative — rendering a control the endpoint would reject, or running an
 ungated one — is worse than omitting it.
 
+That answer is consistent per record too: a type that does not offer `delete`
+reports `deletable: false` with `refusals.delete.reason = "delete_not_offered"`
+(see [below](#why-an-action-is-unavailable)), never `true` for a call that would
+come back `405`.
+
 An invalid declaration is a logged warning against the plugin, never a dead
 host, and rejection is per data type: one malformed entry does not discard the
 others.
@@ -249,6 +254,10 @@ why a control is disabled instead of rendering a dead button:
     "deletable": false,
     "blockers": [],
     "refusals": {
+      "restore": {
+        "reason": "nothing_to_restore",
+        "message": "This record is not in the trash, so there is nothing to restore"
+      },
       "delete": {
         "reason": "trash_before_deleting",
         "message": "Move this record to the trash before deleting it"
@@ -261,32 +270,69 @@ why a control is disabled instead of rendering a dead button:
 **`blockers` and `refusals` are different questions and stay apart.**
 `blockers` answers only *how many rows point at this record* — the count a
 "3 catalogue notes still reference this" message is built from. `refusals`
-answers *which actions this record's state forbids, and why*. A policy refusal
-is not a reference, so it never appears as a synthetic blocker; if it did,
-the row count would stop being answerable.
+answers *which actions are unavailable on this record right now, and why*. A
+refusal is not a reference, so it never appears as a synthetic blocker; if it
+did, the row count would stop being answerable.
 
-The invariant to rely on: **no `false` in this payload is unexplained.**
-`deletable: false` always carries `refusals.delete`, whether the cause is a
-reference (`still_referenced`, with `blockers` populated) or a policy
-(`trash_before_deleting`, with `blockers` empty) — which is exactly the pair a
-caller could not previously tell apart.
+### The invariant, precisely
 
-`reason` is the contract; `message` is core's own sentence, offered as a
-fallback. **Branch on `reason`** and localise your own text — string-matching
-prose is not an API. The keys are the five listed under [Two end-states, not
-one](#two-end-states-not-one) plus `still_referenced`, and they are the same
-keys the `409` refusal body carries, produced by the same evaluator: what the
-screen predicts and what the endpoint does cannot drift apart.
+The payload holds two kinds of field, and only one of them is an action:
+
+| | fields | rule |
+|---|---|---|
+| **Actions** | `restorable`, `deletable` | each is **exactly** `!refusals[action]` |
+| **Properties** | `referenceable`, `pending_removal` | read off `state`; **never** carry a refusal |
+
+**No action-shaped `false` is unexplained.** `restorable: false` always carries
+`refusals.restore` and `deletable: false` always carries `refusals.delete` —
+whatever the cause, and there are three:
+
+* a **reference** — `still_referenced`, with `blockers` populated;
+* the record's **state** — e.g. `trash_before_deleting`, with `blockers` empty;
+* the type **not offering the action** — `delete_not_offered`, the same key the
+  endpoint's `405` carries.
+
+Both fields answer the same question the same way, so a renderer can disable a
+control and say why with one expression rather than two special cases.
+
+The properties are the deliberate exception, not an oversight. There is no
+`referenceable` control to disable and nothing to refuse — `referenceable:
+false` means the record is trashed or retired, and `state` is published right
+beside it. A `refusals.referenceable` would be a refusal for an action that does
+not exist.
+
+### Reason keys
+
+`reason` is the **contract**; `message` is core's own sentence, offered as a
+**fallback**. Branch on `reason` and localise your own text — string-matching
+prose is not an API, and the sentences may be reworded without notice.
+
+| key | meaning |
+|---|---|
+| `still_referenced` | rows still point at this record; see `blockers` |
+| `trash_before_deleting` | a trashable type has no live → gone path |
+| `retired_records_are_permanent` | a retired record is never deletable |
+| `retired_records_cannot_be_trashed` | retirement is not a mistake to undo |
+| `retirement_is_permanent` | a retired record is never restorable |
+| `restore_before_retiring` | restore a trashed record before retiring it |
+| `nothing_to_restore` | the record is not in the trash |
+| `trash_not_offered` · `restore_not_offered` · `retire_not_offered` · `delete_not_offered` | the type does not offer that action |
+
+The state keys are produced by the **same evaluator** the endpoints enforce
+with, and the `*_not_offered` keys are the same ones the `405` body carries, so
+what a screen predicts and what a click gets cannot drift apart.
 
 `refusals` covers all four mutating actions — `trash`, `restore`, `retire`,
-`delete` — and an entry is present **only** when the action is currently
-refused. An idempotent no-op is not a refusal: retiring an already-retired
-record succeeds, so it is absent. Actions the type never offered are absent too;
-their absence from `actions` in the list response is where that is said.
+`delete` — and an entry is present **only** when the action is unavailable now.
+An idempotent no-op is not a refusal: retiring an already-retired record
+succeeds, so it carries no entry. Restore is the one place where "already there"
+*is* unavailability — a record that is not in the trash has nothing to restore,
+which is what `restorable: false` has always meant; it now says so.
 
-Nothing new is disclosed: every reason is derivable from `state` and the
-type's published lifecycle. The permission and ownership gates are untouched —
-a caller who may not read the type gets `404`, and never learns the type exists.
+Nothing new is disclosed: every reason is derivable from `state` and the type's
+published lifecycle and permissions, all of which the caller already reads. The
+permission and ownership gates are untouched — a caller who may not read the
+type gets `404`, and never learns the type exists.
 
 ## Keeping your own delete route
 

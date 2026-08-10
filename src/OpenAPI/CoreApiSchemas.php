@@ -3263,6 +3263,11 @@ final class CoreApiSchemas
             // key a client branches on and localises itself; `message` is core's
             // own sentence, offered as a fallback and never as the contract —
             // string-matching prose is not an API.
+            //
+            // Three causes, one vocabulary: a reference, the record's state, or
+            // the type not offering the action. The `*_not_offered` keys are the
+            // SAME ones the mutation endpoint's 405 body carries, so the preview
+            // predicts the endpoint's answer down to the reason.
             'DataTypeRefusal' => self::object([
                 'reason' => ['type' => 'string', 'enum' => [
                     'still_referenced',
@@ -3271,26 +3276,39 @@ final class CoreApiSchemas
                     'retired_records_cannot_be_trashed',
                     'retirement_is_permanent',
                     'restore_before_retiring',
+                    'nothing_to_restore',
+                    'trash_not_offered',
+                    'restore_not_offered',
+                    'retire_not_offered',
+                    'delete_not_offered',
                 ]],
                 'message' => self::str(),
             ], ['reason', 'message']),
-            // A policy refusal per lifecycle action, present only for actions the
-            // record's CURRENT STATE forbids. Distinct from `blockers`, which
-            // answers only "how many rows point at this" — a refusal is not a
-            // reference, and merging them would make the row count unanswerable.
+            // Why each unavailable action is unavailable, keyed by action and
+            // present ONLY for actions that are unavailable right now. Distinct
+            // from `blockers`, which answers only "how many rows point at this" —
+            // a refusal is not a reference, and merging them would make the row
+            // count unanswerable.
             'DataTypeRefusals' => self::object([
                 'trash' => SchemaBuilder::ref('DataTypeRefusal'),
                 'restore' => SchemaBuilder::ref('DataTypeRefusal'),
                 'retire' => SchemaBuilder::ref('DataTypeRefusal'),
                 'delete' => SchemaBuilder::ref('DataTypeRefusal'),
             ], []),
-            // One record's lifecycle position. `referenceable` is false for BOTH
-            // trashed and retired; `pending_removal` separates them.
+            // One record's lifecycle position, in two kinds of field.
             //
-            // No `false` here is unexplained: `deletable: false` ALWAYS carries
-            // `refusals.delete`, whether the cause is a reference
-            // (`still_referenced`, `blockers` populated) or a policy
-            // (`trash_before_deleting`, `blockers` empty).
+            // ACTIONS — `restorable` and `deletable` — are each EXACTLY
+            // `!refusals[action]`. A `false` on either always carries its
+            // refusal, whatever the cause: a reference (`still_referenced`,
+            // `blockers` populated), the state (`trash_before_deleting`,
+            // `blockers` empty), or the type not offering the action
+            // (`delete_not_offered`, the same key its 405 carries).
+            //
+            // PROPERTIES — `referenceable` and `pending_removal` — are read off
+            // `state` and carry no refusal: there is no control to disable and
+            // nothing to refuse, and `state` sits right beside them.
+            // `referenceable` is false for BOTH trashed and retired;
+            // `pending_removal` is what separates the two.
             'DataTypeRecordState' => self::dataEnvelope(self::object([
                 'key' => self::str(),
                 'state' => self::str(true),

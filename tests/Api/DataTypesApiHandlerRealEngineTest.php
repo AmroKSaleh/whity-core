@@ -29,9 +29,10 @@ use Whity\Sdk\Http\Response;
  *  1. the published entry ROUND-TRIPS the declaration — every field a plugin
  *     declared can be reconstructed from the response, so "did the host honour
  *     my `ignore_when`?" is a diff rather than a read of core's source;
- *  2. an unavailable action EXPLAINS itself — `deletable: false` never arrives
- *     bare, and the explanation is a stable key a renderer can branch on, kept
- *     separate from `blockers` so the row count stays answerable.
+ *  2. an unavailable action EXPLAINS itself — every action-shaped boolean is
+ *     exactly `!refusals[action]`, so neither `restorable` nor `deletable` ever
+ *     arrives bare, and the explanation is a stable key a renderer can branch
+ *     on, kept separate from `blockers` so the row count stays answerable.
  *
  * And one property that must NOT have changed: a caller who may not read a type
  * gets 404, never 403. Existence is not something a reason string may leak.
@@ -58,16 +59,7 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         $this->seedTenantsAndRoles();
         $this->seedPluginTables();
 
-        $permissions = new PermissionRegistry();
-        $permissions->register('Acme', ['acme:read', 'acme:manage', 'acme:retire']);
-
-        $registry = $this->dataTypes();
-
-        $this->handler = new DataTypesApiHandler(
-            $registry,
-            new DataTypeLifecycleService($this->pdo, $registry),
-            new RoleChecker($this->wrap($this->pdo), $permissions)
-        );
+        $this->handler = $this->handlerFor();
     }
 
     protected function tearDown(): void
@@ -186,6 +178,104 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         self::assertSame('restore_before_retiring', $trashedView['refusals']['retire']['reason']);
     }
 
+    public function testTheInvariantHoldsAcrossEveryStateAtThePublishedBoundary(): void
+    {
+        // The service test pins the rule; this pins that the rule SURVIVES
+        // serialisation, which is the only form an adopter ever sees it in.
+        $records = [
+            'active' => $this->seedRecord(self::TENANT_A, 'active'),
+            'draft' => $this->seedRecord(self::TENANT_A, 'draft'),
+            'trashed' => $this->seedRecord(self::TENANT_A, 'trashed'),
+            'retired' => $this->seedRecord(self::TENANT_A, 'retired'),
+        ];
+        $referenced = $this->seedRecord(self::TENANT_A, 'trashed');
+        $this->seedEntry(self::TENANT_A, $referenced);
+        $records['trashed-and-referenced'] = $referenced;
+
+        foreach ($records as $label => $recordId) {
+            $body = $this->data($this->handler->show(
+                $this->request(self::MANAGER_A, self::TENANT_A),
+                ['type' => 'acme:record', 'id' => (string) $recordId]
+            ));
+
+            foreach (['restorable' => 'restore', 'deletable' => 'delete'] as $field => $action) {
+                self::assertSame(
+                    !isset($body['refusals'][$action]),
+                    $body[$field],
+                    "Published '{$field}' on a '{$label}' record must be exactly !refusals['{$action}']."
+                );
+            }
+
+            // The properties are the deliberate exception, and `state` is the
+            // explanation they are published with — see the "Why an action is
+            // unavailable" section of docs/wiki/Plugin-Data-Types.md.
+            self::assertSame(
+                [],
+                array_intersect(['referenceable', 'pending_removal'], array_keys($body['refusals'])),
+                'A property is not an action: it has no control to disable and no refusal to carry.'
+            );
+            self::assertArrayHasKey('state', $body);
+        }
+    }
+
+    public function testAnActionTheTypeDoesNotOfferIsPublishedAsFalseWithItsReason(): void
+    {
+        // The uniformity gap: `deletable` used to ignore whether the type offered
+        // delete at all, so a trashed record on a type with no delete permission
+        // published `deletable: true` while DELETE answered 405 — the payload
+        // promising an affordance the endpoint does not have. It now answers the
+        // question its name asks, with the reason the 405 itself carries.
+        $handler = $this->handlerFor(['read' => 'acme:read', 'trash' => 'acme:manage']);
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+
+        $body = $this->data($handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        ));
+
+        self::assertFalse($body['deletable']);
+        self::assertSame('delete_not_offered', $body['refusals']['delete']['reason']);
+        self::assertNotSame('', $body['refusals']['delete']['message']);
+        self::assertFalse($body['restorable']);
+        self::assertSame('restore_not_offered', $body['refusals']['restore']['reason']);
+        self::assertSame([], $body['blockers'], 'Not-offered is not a reference, and must not fake one.');
+    }
+
+    public function testTheStatusCodesOfANonOfferedMutationAreUnchanged(): void
+    {
+        // The regression guard for the design constraint: the `offers()` check
+        // belongs to the PREVIEW only. Had it moved into the state evaluator the
+        // mutators share, these 405s would have become 409s — a change to the
+        // mutation surface nobody asked for, breaking anything that branches on
+        // the status to tell "this type has no such action" from "not from this
+        // state".
+        $handler = $this->handlerFor(['read' => 'acme:read', 'trash' => 'acme:manage']);
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $params = ['type' => 'acme:record', 'id' => (string) $recordId];
+        $request = $this->request(self::MANAGER_A, self::TENANT_A);
+
+        foreach (['restore', 'retire', 'delete'] as $action) {
+            $response = match ($action) {
+                'restore' => $handler->restore($request, $params),
+                'retire' => $handler->retire($request, $params),
+                default => $handler->delete($request, $params),
+            };
+
+            self::assertSame(405, $response->getStatusCode(), "'{$action}' must stay a 405, never a 409.");
+            $decoded = json_decode($response->getBody(), true);
+            self::assertIsArray($decoded);
+            self::assertIsArray($decoded['details']);
+            self::assertSame(
+                $action . '_not_offered',
+                $decoded['details']['reason'],
+                'And the preview quotes this very key, so the two cannot drift.'
+            );
+        }
+
+        // A trash IS offered here, and is unaffected.
+        self::assertSame(200, $handler->trash($this->request(self::MANAGER_A, self::TENANT_A), $params)->getStatusCode());
+    }
+
     public function testAnAvailableActionIsGivenNoReason(): void
     {
         // The reason map describes refusals and nothing else; a record that can
@@ -246,7 +336,30 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
 
     // ==================== Helpers ====================
 
-    private function dataTypes(): DataTypeRegistry
+    /**
+     * A handler over the declared type, optionally with a REDUCED permission
+     * map — the way a type stops offering an action.
+     *
+     * @param array<string, string>|null $permissions Override the declaration's permissions.
+     */
+    private function handlerFor(?array $permissions = null): DataTypesApiHandler
+    {
+        $registry = new PermissionRegistry();
+        $registry->register('Acme', ['acme:read', 'acme:manage', 'acme:retire']);
+
+        $types = $this->dataTypes($permissions);
+
+        return new DataTypesApiHandler(
+            $types,
+            new DataTypeLifecycleService($this->pdo, $types),
+            new RoleChecker($this->wrap($this->pdo), $registry)
+        );
+    }
+
+    /**
+     * @param array<string, string>|null $permissions Override the declaration's permissions.
+     */
+    private function dataTypes(?array $permissions = null): DataTypeRegistry
     {
         $tables = new TableOwnershipRegistry();
         $tables->register('Acme', [
@@ -274,7 +387,7 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
                     'label' => 'recorded entries',
                     'ignore_when' => ['status' => ['trashed', 'void']],
                 ]],
-                'permissions' => [
+                'permissions' => $permissions ?? [
                     'read' => 'acme:read',
                     'trash' => 'acme:manage',
                     'restore' => 'acme:manage',

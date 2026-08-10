@@ -304,19 +304,36 @@ class DataTypeLifecycleService implements DataTypeGuard
      * Refusals are reported separately from blockers, and both are reported
      * ------------------------------------------------------------------------
      * `blockers` answers one question and only one: how many rows point at this
-     * record. `refusals` answers a different one: which actions the record's
-     * current STATE forbids, and under what stable reason key. Folding a policy
+     * record. `refusals` answers a different one: which actions are unavailable
+     * on this record right now, and under what stable reason key. Folding a
      * refusal into `blockers` as a synthetic entry would make the row-count
      * question unanswerable, so the two stay apart.
      *
-     * The invariant worth relying on: a `false` here is never unexplained.
-     * `deletable: false` ALWAYS carries `refusals['delete']` — whether the cause
-     * is a reference (`still_referenced`, with `blockers` populated) or a policy
-     * (`trash_before_deleting`, with `blockers` empty). A renderer can therefore
-     * always say why a control is disabled instead of showing a dead button.
+     * The invariant worth relying on, stated precisely
+     * -----------------------------------------------
+     * It covers the ACTION-shaped booleans, and each of them is EXACTLY
+     * `!isset($refusals[$action])` — one expression, one meaning, no field
+     * answering a subtly different question than its neighbour:
+     *
+     *   - `restorable` === `!isset($refusals['restore'])`
+     *   - `deletable`  === `!isset($refusals['delete'])`
+     *
+     * So a `false` on an action is never unexplained, whatever the cause: a
+     * reference (`still_referenced`, with `blockers` populated), the record's
+     * state (`trash_before_deleting`, with `blockers` empty), or the type not
+     * offering the action at all (`delete_not_offered` — the same key its 405
+     * carries). A renderer can always say why a control is disabled instead of
+     * showing a dead button.
+     *
+     * `referenceable` and `pending_removal` are NOT actions and carry no
+     * refusal. They are properties read straight off the state — there is no
+     * control to disable and nothing to refuse, and `state` (which the caller
+     * already has, beside them) is the whole explanation. Inventing a refusal
+     * for them would mean inventing an action that does not exist.
      *
      * Nothing new is exposed: every reason is a pure function of `state` and the
-     * type's declared lifecycle, both of which the caller can already read.
+     * type's declared lifecycle and permissions, all of which the caller can
+     * already read.
      *
      * @param string     $dataType The namespaced type key.
      * @param int        $tenantId The resolved tenant id.
@@ -337,10 +354,7 @@ class DataTypeLifecycleService implements DataTypeGuard
 
         $refusals = [];
         foreach (LifecycleAction::mutating() as $action) {
-            $result = self::statePolicy($definition, $action, $state);
-            if ($result->isOk() && $action === LifecycleAction::DELETE && $blockers !== []) {
-                $result = LifecycleResult::blocked($blockers, $state);
-            }
+            $result = self::availability($definition, $action, $state, $blockers);
             if (!$result->isOk()) {
                 $refusals[$action] = [
                     'reason' => (string) $result->reason(),
@@ -353,11 +367,77 @@ class DataTypeLifecycleService implements DataTypeGuard
             'state' => $state,
             'referenceable' => $lifecycle->acceptsNewReferences($state),
             'pending_removal' => $lifecycle->isPendingRemoval($state),
-            'restorable' => $definition->offers(LifecycleAction::RESTORE) && $lifecycle->isTrashed($state),
+            'restorable' => !isset($refusals[LifecycleAction::RESTORE]),
             'deletable' => !isset($refusals[LifecycleAction::DELETE]),
             'blockers' => $blockers,
             'refusals' => $refusals,
         ];
+    }
+
+    /**
+     * Whether one action is available on THIS record right now — and if not,
+     * which single cause to report.
+     *
+     * This is the preview's evaluator, and the only place the three causes of
+     * unavailability are ordered. They are checked in the order the ENDPOINT
+     * would hit them, so the reason a screen shows is the reason a click would
+     * get:
+     *
+     *  1. the type does not offer the action — the router refuses it with 405
+     *     before any record is read, so this outranks anything about the record;
+     *  2. the record's state forbids it — {@see self::statePolicy()}, the same
+     *     pure evaluator the mutators consult;
+     *  3. for a delete, rows still reference it.
+     *
+     * Why the `offers()` check is HERE and not in {@see self::statePolicy()}
+     * ---------------------------------------------------------------------
+     * `statePolicy()` is shared with the mutators, and a refusal there is a 409.
+     * Teaching it about `offers()` would silently turn every "this type has no
+     * such action" 405 into a 409 — a change to the mutation surface that no
+     * caller asked for and that anything branching on status would break on.
+     * The preview needs the union of all three causes; the mutators need only
+     * the state rule. So the state rule stays pure and the preview layers the
+     * other two on top.
+     *
+     * Restore is the one action where "already there" IS unavailability
+     * ----------------------------------------------------------------
+     * An idempotent no-op is normally not a refusal: retiring an already-retired
+     * record succeeds and gets no entry. But a record that is not in the trash
+     * has nothing to restore, and `restorable` has always reported `false` for
+     * it — silently. That silence is the unexplained `false` this fixes; the
+     * verdict is unchanged, it now says `nothing_to_restore`. The mutator is
+     * untouched and still answers such a call with an idempotent success.
+     *
+     * @param string                                                $action   A {@see LifecycleAction} constant.
+     * @param string|null                                           $state    The record's current state.
+     * @param list<array{table: string, label: string, count: int}> $blockers Rows already counted by the caller.
+     */
+    private static function availability(
+        DataTypeDefinition $definition,
+        string $action,
+        ?string $state,
+        array $blockers
+    ): LifecycleResult {
+        if (!$definition->offers($action)) {
+            // The SAME key the 405 body carries, deliberately: the preview
+            // predicts what the endpoint would say, down to the reason.
+            return LifecycleResult::unsupported($action . '_not_offered');
+        }
+
+        $policy = self::statePolicy($definition, $action, $state);
+        if (!$policy->isOk()) {
+            return $policy;
+        }
+
+        if ($action === LifecycleAction::RESTORE && !$definition->lifecycle()->isTrashed($state)) {
+            return LifecycleResult::refused('nothing_to_restore', $state);
+        }
+
+        if ($action === LifecycleAction::DELETE && $blockers !== []) {
+            return LifecycleResult::blocked($blockers, $state);
+        }
+
+        return LifecycleResult::ok($state);
     }
 
     /**
@@ -366,8 +446,8 @@ class DataTypeLifecycleService implements DataTypeGuard
      * Shared by {@see self::delete()} and {@see self::canDelete()} so the
      * pre-flight answer and the enforcement can never disagree about what is
      * permitted. {@see self::describe()} reaches the same verdict through
-     * {@see self::statePolicy()} from a state and a blocker count it has already
-     * read, rather than reading them a second time.
+     * {@see self::availability()} from a state and a blocker count it has
+     * already read, rather than reading them a second time.
      *
      * @param int|string $id The record's key.
      */
@@ -404,7 +484,12 @@ class DataTypeLifecycleService implements DataTypeGuard
      * Pure, and deliberately unaware of {@see DataTypeDefinition::offers()}: an
      * action the type never offered is not "refused by this record's state", it
      * was never on the table, and the mutators reject that case earlier as
-     * UNSUPPORTED.
+     * UNSUPPORTED. Keep it that way — a refusal returned from here is a 409, so
+     * teaching this function about `offers()` would turn every 405 the mutation
+     * surface answers today into a 409 and break anything branching on status.
+     * The preview needs the wider question; it asks it in
+     * {@see self::availability()}, which layers `offers()` and the reference
+     * count on top of this without changing what any mutator sees.
      *
      * @param string      $action A {@see LifecycleAction} constant.
      * @param string|null $state  The record's current state.

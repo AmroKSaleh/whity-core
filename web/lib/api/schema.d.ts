@@ -2650,7 +2650,7 @@ export interface components {
         };
         DataTypeRefusal: {
             /** @enum {string} */
-            reason: "still_referenced" | "trash_before_deleting" | "retired_records_are_permanent" | "retired_records_cannot_be_trashed" | "retirement_is_permanent" | "restore_before_retiring";
+            reason: "still_referenced" | "trash_before_deleting" | "retired_records_are_permanent" | "retired_records_cannot_be_trashed" | "retirement_is_permanent" | "restore_before_retiring" | "nothing_to_restore" | "trash_not_offered" | "restore_not_offered" | "retire_not_offered" | "delete_not_offered";
             message: string;
         };
         DataTypeRefusals: {
