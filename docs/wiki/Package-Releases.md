@@ -65,7 +65,7 @@ only publishes a genuinely new version — bumps release, incidental edits don't
 ## Consuming a package from a DOWNSTREAM repo (not this monorepo)
 
 Everything above is how a package gets *published*. A separate repo (a native
-client like Elmak-Desktop, or any other product) that wants to `npm install
+desktop client, or any other downstream product) that wants to `npm install
 @amroksaleh/ui` (or `features`/`tokens`) needs to *authenticate to GitHub
 Packages first* — **this is required even though the packages are public.**
 Unlike npmjs.org, `npm.pkg.github.com` requires a token on every request,
@@ -97,7 +97,7 @@ to the package instead, and its own auto-provided `GITHUB_TOKEN` will work:
    owns `@amroksaleh` — these are user-owned packages here, so
    `github.com/users/<owner>/packages/npm/<name>`).
 2. **Package settings → Manage Actions access → Add repository** — add the
-   downstream repo (e.g. `Elmak-Desktop`), role **Read**.
+   downstream repo, role **Read**.
 3. Repeat per package (`ui`, `features`, `tokens` — each is a separate grant).
 4. In the downstream workflow, configure npm the same way `setup-node` does it
    in this repo's own publish workflows: `registry-url:

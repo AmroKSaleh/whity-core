@@ -10,7 +10,7 @@ namespace Whity\Storage;
  * Design invariants:
  *
  * - **Opaque tenant-prefixed keys**: callers always pass a fully-qualified key
- *   such as `tenants/42/plugins/elmak/exam_sheet_7.pdf`. The driver treats this
+ *   such as `tenants/42/plugins/reports/summary_7.pdf`. The driver treats this
  *   as an opaque address and maps it to whatever backend path or object name it
  *   needs internally. Callers must never receive raw filesystem paths or bucket
  *   paths in return.

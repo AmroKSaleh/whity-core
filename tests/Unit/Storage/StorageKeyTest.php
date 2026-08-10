@@ -15,9 +15,9 @@ class StorageKeyTest extends TestCase
 
     public function testBuildProducesCanonicalKey(): void
     {
-        $key = StorageKey::build(42, 'elmak', 'exam.pdf');
+        $key = StorageKey::build(42, 'reports', 'summary.pdf');
 
-        $this->assertSame('tenants/42/elmak/exam.pdf', $key);
+        $this->assertSame('tenants/42/reports/summary.pdf', $key);
     }
 
     public function testBuildSanitizesTraversalInPlugin(): void
@@ -65,7 +65,7 @@ class StorageKeyTest extends TestCase
 
     public function testTenantIdExtractsCorrectValue(): void
     {
-        $result = StorageKey::tenantId('tenants/42/elmak/exam.pdf');
+        $result = StorageKey::tenantId('tenants/42/reports/summary.pdf');
 
         $this->assertSame(42, $result);
     }

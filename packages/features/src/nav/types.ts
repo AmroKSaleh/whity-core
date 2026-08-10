@@ -14,7 +14,7 @@ import type { ComponentType, ReactNode } from "react"
  *
  * Nothing here imports next/navigation, next/link, or any router — a client
  * plugs in whichever routing primitive it has (Next's `<Link>`, a hash-router
- * `<a>` substitute, a React Native/Flutter-bridge equivalent).
+ * `<a>` substitute, or a Flutter-bridge equivalent).
  */
 
 /**

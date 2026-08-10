@@ -47,7 +47,7 @@ php public/index.php update:check
 
 ## Applying an update (operators) — the manual runbook
 
-For a compose-based deployment (the dev/KeyHub/Elmak-style anatomy in
+For a compose-based deployment (the per-product deployment anatomy in
 [Plugin-Distribution.md](./Plugin-Distribution.md)):
 
 1. **Back up the database** first; migrations are non-destructive by
