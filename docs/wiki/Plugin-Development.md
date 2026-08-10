@@ -292,6 +292,16 @@ grants no authority your plugin does not already have. `\Whity\app()` throws a
 `RuntimeException` if the host never registered a resolver, so an unwired host
 fails closed rather than silently allowing.
 
+The same holds for host state you resolve by class name. `\Whity\app()`
+auto-instantiates only a concrete class that takes **no constructor parameters
+at all** and has not declared itself
+`Whity\Core\Container\HostWiredService`. Registries carry that marker, so a
+missing host registration throws instead of handing you an empty catalogue —
+worth knowing, because an empty registry answers every question with a
+plausible "no" and your plugin would deny access for a permission it had itself
+declared. If your own plugin ships a registry that is only meaningful once
+filled at boot, implement the marker on it too.
+
 ### Hooks
 
 `getHooks()` maps an **event name** to a subscription. A subscription may be:

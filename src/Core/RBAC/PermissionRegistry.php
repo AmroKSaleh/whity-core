@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\RBAC;
 
+use Whity\Core\Container\HostWiredService;
 use Whity\Core\Hooks\HookManager;
 
 /**
@@ -24,8 +25,18 @@ use Whity\Core\Hooks\HookManager;
  * This registry holds worker-level state only. It is safe to share across
  * requests on FrankenPHP persistent workers because it never stores anything
  * request-specific.
+ *
+ * Host-wired, never improvised
+ * ----------------------------
+ * The catalogue is only meaningful once the plugin loader has filled it, and an
+ * EMPTY catalogue is a perfectly ordinary-looking one — `exists()` just answers
+ * `false`. A container that improvised an instance therefore handed callers a
+ * registry in which no plugin permission existed, and they failed closed with
+ * nothing logged and nothing to diagnose. {@see HostWiredService} stops the
+ * container from ever doing that; both entry points register the populated
+ * instance instead.
  */
-class PermissionRegistry
+class PermissionRegistry implements HostWiredService
 {
     /**
      * Permissions organized by source (plugin ID or {@see CorePermissions::SOURCE}).

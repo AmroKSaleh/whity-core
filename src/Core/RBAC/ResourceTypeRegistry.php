@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\RBAC;
 
+use Whity\Core\Container\HostWiredService;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Support\SourceSlug;
 
@@ -37,7 +38,7 @@ use Whity\Core\Support\SourceSlug;
  * rather than each declaring a private copy, which is precisely the
  * second-source-of-truth problem resource-scoped grants exist to avoid.
  */
-class ResourceTypeRegistry
+class ResourceTypeRegistry implements HostWiredService
 {
     /**
      * Resource types organized by source (plugin id, or {@see self::CORE_SOURCE}).

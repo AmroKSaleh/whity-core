@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Health;
 
 use Throwable;
+use Whity\Core\Container\HostWiredService;
 use Whity\Core\Hooks\HookManager;
 use Whity\Sdk\Health\HealthProbeDefinition;
 
@@ -39,7 +40,7 @@ use Whity\Sdk\Health\HealthProbeDefinition;
  * this class widens WHAT is sampled without touching HOW the existing four are
  * sampled.
  */
-class HealthProbeRegistry
+class HealthProbeRegistry implements HostWiredService
 {
     /** Source name for probes shipped by core. Reserved. */
     public const CORE_SOURCE = 'core';

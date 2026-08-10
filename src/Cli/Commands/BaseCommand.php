@@ -56,6 +56,16 @@ abstract class BaseCommand
     protected function setupKernel(): void
     {
         $db = Database::connect();
+        // Registered as a service exactly as public/index.php does. Without it,
+        // the CLI kernel's simulated API could not serve a plugin route at all:
+        // the documented plugin seam is `\Whity\app(Database::class)` (both
+        // in-tree pilot plugins use it), Database's constructor is private, so
+        // the lookup threw "not instantiable" and every plugin route reached
+        // through a whity-cli command 500'd while the same route over HTTP
+        // worked. Loud rather than silent, unlike the permission registry below,
+        // but the same entry-point divergence (#717, #724).
+        \Whity\register_service(Database::class, $db);
+
         $router = new Router('');
 
         $appEnv = $_ENV['APP_ENV'] ?? 'production';
@@ -65,6 +75,16 @@ abstract class BaseCommand
         $jwtSecret = $_ENV['JWT_SECRET'] ?? 'dev_secret_key_change_in_production';
         $jwtParser = new JwtParser($jwtSecret);
         $permissionRegistry = new PermissionRegistry();
+        // Registered as a service exactly as public/index.php does, so a plugin
+        // reached through a CLI command resolves the same populated catalogue as
+        // one reached over HTTP.
+        //
+        // Neither entry point registered it, and because the container used to
+        // auto-instantiate any concrete class with no REQUIRED constructor
+        // arguments, the lookup silently returned a fresh, EMPTY registry rather
+        // than throwing: every plugin permission read as unregistered and the
+        // caller failed closed with nothing to diagnose from.
+        \Whity\register_service(PermissionRegistry::class, $permissionRegistry);
 
         $hookManager = new HookManager();
         \Whity\register_service(HookManager::class, $hookManager);

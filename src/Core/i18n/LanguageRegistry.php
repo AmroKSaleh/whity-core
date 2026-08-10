@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\i18n;
 
+use Whity\Core\Container\HostWiredService;
 use Whity\Core\Tenant\TenantContextInterface;
 
 /**
@@ -20,7 +21,7 @@ use Whity\Core\Tenant\TenantContextInterface;
  * Tenant isolation is enforced: only translations for NULL tenant_id or the current
  * tenant_id are visible.
  */
-final class LanguageRegistry
+final class LanguageRegistry implements HostWiredService
 {
     /**
      * The operator/system tenant. Its translations live as system defaults

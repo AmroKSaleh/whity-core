@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Mcp\Prompts;
 
+use Whity\Core\Container\HostWiredService;
+
 /**
  * Registry of all available MCP prompts (WC-7755fc38).
  *
@@ -11,8 +13,13 @@ namespace Whity\Mcp\Prompts;
  * Plugin-contributed prompts will be registered via PluginMcpInterface
  * (WC-7abb732f). The registry is read at prompts/list and prompts/get
  * call time, so late-registered entries are naturally included.
+ *
+ * {@see HostWiredService}: an improvised, empty instance would list no prompts
+ * and find none by name — the same answers a deployment with no prompts gives,
+ * so the caller could never tell the two apart. An unregistered lookup throws
+ * instead.
  */
-final class PromptRegistry
+final class PromptRegistry implements HostWiredService
 {
     /** @var list<Prompt> */
     private array $prompts = [];

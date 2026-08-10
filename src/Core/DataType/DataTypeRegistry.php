@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\DataType;
 
+use Whity\Core\Container\HostWiredService;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\Support\SourceSlug;
@@ -47,7 +48,7 @@ use Whity\Core\Tenant\TableOwnershipRegistry;
  * resolved from the container is rebuilt per boot from the same plugin
  * bootstrap every worker runs.
  */
-class DataTypeRegistry
+class DataTypeRegistry implements HostWiredService
 {
     /**
      * Registered definitions, keyed by canonical namespaced key.
