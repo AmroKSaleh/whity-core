@@ -16,7 +16,8 @@ use Whity\Core\Router;
  * the SDK contract (not Whity\Core types), the SDK carries its own
  * composer.json + autoload root with an independent 1.0.0 version, and it must
  * never depend on whity-core — that is what makes a plugin distributable to
- * KeyHub/Elmak without dragging the host framework along.
+ * any downstream Whity-based application without dragging the host framework
+ * along.
  */
 final class SdkPackageContractTest extends TestCase
 {

@@ -7,8 +7,8 @@
 
 ## Context
 
-Whity-Core powers several of the project owner's applications (notably **KeyHub** and
-**Elmak**) that share features. The driving question was strategic: keep investing in
+Whity-Core powers several of the project owner's applications (notably **KeyHub**)
+that share features. The driving question was strategic: keep investing in
 the bespoke Whity-Core framework, or rebase the platform onto **Laravel** to get an
 ecosystem "for free" — with the real goal being *transporting features between apps
 without rewriting them each time*.
@@ -52,8 +52,8 @@ We will (1) stop hand-rolling security-critical commodity code where a vetted li
 demonstrably safer, while keeping the parts already done correctly, and (2) evolve the
 plugin system into a versioned, distributable, full-stack cross-app feature-portability
 SDK. The thesis is proven end-to-end by extracting **one simple shared CRUD feature**
-into a distributable plugin consumed by **both** KeyHub and Elmak (extract-once /
-consume-twice).
+into a distributable plugin consumed by **two separate downstream applications**
+(extract-once / consume-twice).
 
 Per-area decisions (**keep** / **replace** / **build**):
 
@@ -138,7 +138,8 @@ initiative.
 ### Positive
 
 - Feature portability becomes real: a shared feature is authored once and installed in
-  KeyHub and Elmak as a versioned, dependency-gated, full-stack plugin.
+  two separate downstream applications as a versioned, dependency-gated, full-stack
+  plugin.
 - The two highest-severity security findings are eliminated; the SDK contract is
   decoupled from the AGPL core so it can be depended on safely.
 - The lean, sovereign positioning is preserved — only narrowly-scoped, well-justified,
@@ -154,7 +155,7 @@ initiative.
 - The SDK extraction touches the plugin contract and every example plugin; CI must grow
   a real-Postgres + plugin-load job to make the "verified against a real DB" bar
   enforceable.
-- The pilot (T14/T15) crosses into the separate KeyHub/Elmak repositories.
+- The pilot (T14/T15) crosses into the separate downstream product repositories.
 
 ### Impact on existing conventions
 

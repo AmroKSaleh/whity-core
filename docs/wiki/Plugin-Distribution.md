@@ -121,9 +121,10 @@ UI renders with **zero per-app frontend code**.
 
 ## Extract once, consume twice: multi-deployment pattern (WC-171)
 
-The pilot proved the full lifecycle across a fleet of deployments (KeyHub and
-Elmak — each its own clone of whity-core with its own compose project,
-database, secrets, and private plugins, plus the SAME shared plugin package):
+The pilot proved the full lifecycle across a fleet of deployments (two separate
+downstream products — each its own clone of whity-core with its own compose
+project, database, secrets, and private plugins, plus the SAME shared plugin
+package):
 
 **Deployment anatomy.** Each app is a checkout of whity-core with:
 - its own `.env` (distinct `JWT_SECRET`/`ENCRYPTION_KEY`, ports) and a
@@ -157,8 +158,8 @@ cadence: re-deploy the new tag over `plugins/<Name>/`, `migrate run` (only
 the new migrations apply; existing rows keep working), `generate:openapi`,
 restart workers. The schema-driven screens pick up new fields with zero
 frontend work — in the pilot, v1.1.0's `pinned` flag appeared as a new
-column and form checkbox in KeyHub while Elmak ran a different state
-entirely.
+column and form checkbox in one deployment while the other ran a different
+state entirely.
 
 **Uninstall in a fleet** follows the per-deployment Uninstalling steps
 above, and the rollback LIFO caveat bites in practice: in the pilot, another

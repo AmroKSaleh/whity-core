@@ -5,6 +5,12 @@ Whity's shared UI/feature packages (`@amroksaleh/ui`, `@amroksaleh/features`,
 `@amroksaleh/tokens`) — start here instead of `create-tauri-app`'s stock
 scaffold when building a Whity-based desktop product.
 
+**Scope: desktop only** (Windows / macOS / Linux). Tauri's mobile targets are
+deliberately unused here and this template is not a mobile starting point —
+**mobile is Flutter**, consuming the shared design tokens
+(`flutter/whity_tokens`) and re-implementing the same adapter interfaces in
+Dart. There is no React mobile client.
+
 It demonstrates, end to end, the two things every downstream desktop app
 needs:
 
@@ -70,7 +76,9 @@ interface DemoCatalogAdapter {
 Same UI code, three different data sources, zero changes to the components
 themselves. When you build your own feature, follow this same shape: define
 a small adapter interface, implement the presentational components against
-it, and give each client (web/desktop/mobile) its own implementation.
+it, and give each client its own implementation of that interface — the web
+app in React against a server API, a Flutter mobile app in Dart against the
+same backend.
 
 **Offline-first sync (WC-desktop-sync)**: the template now implements the real
 multi-device sync this note used to defer — a cached device login, a versioned

@@ -23,9 +23,9 @@ use Whity\Sdk\Tenant\PluginTablesInterface;
  *
  * A small, deliberately GENERIC example plugin — NOT modeled on any specific
  * downstream product's domain (exams/roster/question-bank, etc. belong to
- * downstream products like Elmak, never to whity-core itself). It exists
- * purely to give the `packages/features` shared-component extraction pilot a
- * real backend to bind against while proving the pattern:
+ * downstream products, never to whity-core itself). It exists purely to give
+ * the `packages/features` shared-component extraction pilot a real backend to
+ * bind against while proving the pattern:
  *
  *   this plugin's tenant-scoped `items` REST resource
  *     -> a `DemoCatalogAdapter` TS interface (defined in packages/features)

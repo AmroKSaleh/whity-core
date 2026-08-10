@@ -13,9 +13,9 @@ import { IconDeviceMobile } from '@tabler/icons-react';
  * interactive-login half).
  *
  * Lists the caller's enrolled native-client devices (GET /api/v1/devices) —
- * long-lived credentials issued to non-browser clients (Elmak, KeyHub
- * companions, etc. — see DeviceApiHandler / DeviceCredentialService). Each can
- * be revoked individually (DELETE /api/v1/devices/{id}), matching the
+ * long-lived credentials issued to non-browser clients (desktop and mobile
+ * companion apps, etc. — see DeviceApiHandler / DeviceCredentialService). Each
+ * can be revoked individually (DELETE /api/v1/devices/{id}), matching the
  * per-session revoke UX in SessionsSettings.
  *
  * The backend's `platform` is a validated enum but `name` is client-supplied

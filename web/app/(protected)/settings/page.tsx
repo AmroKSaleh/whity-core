@@ -87,8 +87,8 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Devices (#409) — long-lived native-client credentials (e.g. Elmak),
-          distinct from the interactive sessions above. */}
+      {/* Devices (#409) — long-lived native-client credentials (desktop and
+          mobile apps), distinct from the interactive sessions above. */}
       <Card>
         <CardHeader>
           <CardTitle>Devices</CardTitle>

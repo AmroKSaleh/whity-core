@@ -3,8 +3,8 @@
 The standalone plugin contract package for the Whity platform. A plugin
 implements the SDK types — and depends on **nothing else**: this package
 requires only PHP, never `whity-core`. That is what makes a plugin
-distributable across Whity-based applications (KeyHub, Elmak, …) without
-dragging a host framework along.
+distributable across Whity-based applications without dragging a host
+framework along.
 
 ## Contract surface (v1.4.0)
 

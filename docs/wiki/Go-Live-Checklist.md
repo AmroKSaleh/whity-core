@@ -2,7 +2,7 @@
 
 A gate you run **before** exposing a Whity-Core deployment to real traffic, and again on every subsequent production release. Each item is pass/fail — do not go live with an unchecked **[BLOCKER]**. Items are grouped by phase; commands assume the container is `whity_frankenphp` and Postgres is reachable as the `postgres` service (adjust for your topology).
 
-> Scope: the core platform runtime (FrankenPHP + PostgreSQL + Next.js web + cron). Product plugins (KeyHub, Elmak, …) ship their own go-live steps on top of this.
+> Scope: the core platform runtime (FrankenPHP + PostgreSQL + Next.js web + cron). Downstream product plugins ship their own go-live steps on top of this.
 
 Related: [Deployment Guide](DEPLOYMENT_GUIDE.md) · [Cron Operations](Cron-Operations.md) · [Core Update](Core-Update.md) · [Architecture](Architecture.md)
 

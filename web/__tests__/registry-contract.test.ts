@@ -1,8 +1,8 @@
 /**
  * CI gate: the shadcn registry must declare exactly what it imports.
  *
- * `registry.json` is a PUBLISHED CONTRACT — consumers (the Elmak Tauri/Flutter
- * clients) install components from https://whity.jameedium.org/r, and
+ * `registry.json` is a PUBLISHED CONTRACT — consumers (downstream Tauri and
+ * Flutter clients) install components from https://whity.jameedium.org/r, and
  * `shadcn build` neither derives dependencies nor rewrites imports. Whatever is
  * authored here is what a consumer gets, so:
  *

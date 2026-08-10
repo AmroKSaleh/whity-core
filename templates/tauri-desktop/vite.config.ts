@@ -2,9 +2,9 @@ import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
-// Standard Tauri + Vite recipe (matches create-tauri-app's template, and
-// Elmak-Desktop's existing scaffold): a fixed dev port Tauri's `devUrl`
-// points at, plus Tailwind v4 as a Vite plugin (mirrors packages/ui's
+// Standard Tauri + Vite recipe (matches create-tauri-app's own template, so a
+// downstream scaffold diffs cleanly against it): a fixed dev port Tauri's
+// `devUrl` points at, plus Tailwind v4 as a Vite plugin (mirrors packages/ui's
 // Storybook config and packages/spa-harness — same pipeline everywhere).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
