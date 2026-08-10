@@ -333,28 +333,131 @@ final class DataTypeLifecycleRealEngineTest extends TestCase
         );
     }
 
-    public function testNoUnavailableActionIsLeftUnexplained(): void
+    public function testEveryActionBooleanThatIsFalseCarriesItsRefusal(): void
     {
-        // The invariant the whole addition exists to establish: a `false` in this
-        // payload always has a reason beside it, in every state a record can be in.
+        // THE invariant, and the reason it is asserted as a loop rather than as
+        // scattered one-offs: the property under test is "every action-shaped
+        // boolean is exactly !refusals[action]", in every state, for every
+        // action — not "this one field happened to be right on this one record".
+        // A one-off per case would pass while a seventh state or a fifth verb
+        // quietly broke the rule.
         $service = $this->service();
         $states = [
             'active' => $this->seedRecord(self::TENANT_A, 'live', 'active'),
+            'draft' => $this->seedRecord(self::TENANT_A, 'unfinished', 'draft'),
             'trashed' => $this->seedRecord(self::TENANT_A, 'mistake', 'trashed'),
             'retired' => $this->seedRecord(self::TENANT_A, 'finished', 'retired'),
+            'trashed-and-referenced' => $this->seedRecord(self::TENANT_A, 'guarded', 'trashed'),
         ];
-        $this->seedEntry(self::TENANT_A, $states['trashed']);
+        $this->seedEntry(self::TENANT_A, $states['trashed-and-referenced']);
 
-        foreach ($states as $state => $recordId) {
+        foreach ($states as $label => $recordId) {
             $view = $service->describe(self::TYPE, self::TENANT_A, $recordId);
             self::assertIsArray($view);
-            self::assertSame(
-                !$view['deletable'],
-                isset($view['refusals']['delete']),
-                "A record in '{$state}' must explain an unavailable delete, and must not invent a reason "
-                . 'for an available one.'
-            );
+
+            foreach (['restorable' => 'restore', 'deletable' => 'delete'] as $field => $action) {
+                self::assertSame(
+                    !isset($view['refusals'][$action]),
+                    $view[$field],
+                    "'{$field}' on a '{$label}' record must be exactly !refusals['{$action}'] — a false "
+                    . 'without a reason is the unexplained dead control this payload exists to prevent.'
+                );
+            }
         }
+    }
+
+    public function testARecordThatIsNotInTheTrashSaysWhyItCannotBeRestored(): void
+    {
+        // This was the silent one: an ACTIVE record is not restorable, no state
+        // rule refuses restore (only retirement does), so `restorable: false`
+        // arrived with nothing beside it. The verdict is unchanged; it now names
+        // itself.
+        $view = $this->service()->describe(
+            self::TYPE,
+            self::TENANT_A,
+            $this->seedRecord(self::TENANT_A, 'live', 'active')
+        );
+        self::assertIsArray($view);
+
+        self::assertFalse($view['restorable']);
+        self::assertSame('nothing_to_restore', $view['refusals']['restore']['reason']);
+        self::assertNotSame('', $view['refusals']['restore']['message']);
+    }
+
+    public function testAnActionTheTypeDoesNotOfferIsReportedFalseWithTheNotOfferedReason(): void
+    {
+        // A type declaring no delete permission never had a delete endpoint —
+        // yet `deletable` reported what the lifecycle WOULD have permitted, so a
+        // trashed record read `deletable: true` while DELETE answered 405. The
+        // field now answers the question its name asks.
+        $trashed = $this->seedRecord(self::TENANT_A, 'mistake', 'trashed');
+        $service = $this->service(['read' => 'acme:read', 'trash' => 'acme:manage']);
+
+        $view = $service->describe(self::TYPE, self::TENANT_A, $trashed);
+        self::assertIsArray($view);
+
+        self::assertFalse($view['deletable']);
+        self::assertSame('delete_not_offered', $view['refusals']['delete']['reason']);
+        self::assertFalse($view['restorable']);
+        self::assertSame('restore_not_offered', $view['refusals']['restore']['reason']);
+        self::assertSame(
+            'retire_not_offered',
+            $view['refusals']['retire']['reason'],
+            'Every mutating action gets the same treatment — the vocabulary is uniform or it is not a contract.'
+        );
+        self::assertArrayNotHasKey(
+            'trash',
+            $view['refusals'],
+            'Trash IS offered here, and an offered action must be unaffected by the not-offered rule.'
+        );
+    }
+
+    public function testATypeThatOffersTheActionIsUnaffected(): void
+    {
+        // The regression guard for the case above: with the full permission map,
+        // every verdict is the state's, exactly as before.
+        $service = $this->service();
+        $trashed = $this->seedRecord(self::TENANT_A, 'mistake', 'trashed');
+
+        $view = $service->describe(self::TYPE, self::TENANT_A, $trashed);
+        self::assertIsArray($view);
+
+        self::assertTrue($view['deletable']);
+        self::assertTrue($view['restorable']);
+        self::assertSame(
+            ['retire'],
+            array_keys($view['refusals']),
+            'The only refusal on an offered-everything trashed record is the state rule that was always there.'
+        );
+    }
+
+    public function testTheNotOfferedPreviewMatchesTheStatusTheMutationStillReturns(): void
+    {
+        // The design constraint, pinned: `offers()` is consulted by the PREVIEW,
+        // never by the shared state evaluator. A mutation of a non-offered action
+        // must stay UNSUPPORTED/405 — folding the check into `statePolicy()`
+        // would have turned it into REFUSED/409 and broken every caller that
+        // branches on the status.
+        $recordId = $this->seedRecord(self::TENANT_A, 'mistake', 'trashed');
+        $service = $this->service(['read' => 'acme:read', 'trash' => 'acme:manage']);
+
+        foreach (['restore', 'retire', 'delete'] as $action) {
+            $result = match ($action) {
+                'restore' => $service->restore(self::TYPE, self::TENANT_A, $recordId),
+                'retire' => $service->retire(self::TYPE, self::TENANT_A, $recordId),
+                default => $service->delete(self::TYPE, self::TENANT_A, $recordId),
+            };
+
+            self::assertSame(LifecycleResult::UNSUPPORTED, $result->outcome(), $action);
+            self::assertSame(405, $result->httpStatus(), "A non-offered '{$action}' must stay a 405, not a 409.");
+            self::assertSame($action . '_not_offered', $result->reason());
+        }
+
+        self::assertSame(
+            'trashed',
+            $service->stateOf(self::TYPE, self::TENANT_A, $recordId),
+            'And none of them may touch the record.'
+        );
     }
 
     public function testThePredictedRefusalIsTheOneTheTransitionActuallyReturns(): void
@@ -362,6 +465,13 @@ final class DataTypeLifecycleRealEngineTest extends TestCase
         // One evaluator serves both, so a screen that greys out a control for a
         // stated reason and the endpoint that refuses the click cannot drift into
         // giving different answers.
+        //
+        // The implication runs refusal-first: whenever the transition refuses,
+        // the preview predicted that refusal, reason and sentence alike. The
+        // converse has exactly one documented exception — `nothing_to_restore`,
+        // where the preview reports an unavailable affordance over a call the
+        // mutator still answers as an idempotent no-op. That is asserted here
+        // rather than excluded, so the exception cannot grow silently.
         $service = $this->service();
 
         foreach (['active', 'trashed', 'retired'] as $state) {
@@ -379,16 +489,79 @@ final class DataTypeLifecycleRealEngineTest extends TestCase
                     default => $service->delete(self::TYPE, self::TENANT_A, $recordId),
                 };
 
-                self::assertSame(
-                    $result->isOk() ? null : $result->reason(),
-                    $view['refusals'][$action]['reason'] ?? null,
-                    "The preview of '{$action}' on a '{$state}' record must match what the transition did."
-                );
+                $predicted = $view['refusals'][$action]['reason'] ?? null;
+
                 if (!$result->isOk()) {
+                    self::assertSame(
+                        $result->reason(),
+                        $predicted,
+                        "The preview of '{$action}' on a '{$state}' record must match what the transition did."
+                    );
                     self::assertSame($result->message(), $view['refusals'][$action]['message'] ?? null);
+                    continue;
+                }
+
+                self::assertContains(
+                    $predicted,
+                    [null, 'nothing_to_restore'],
+                    "The transition of '{$action}' on a '{$state}' record succeeded, so the preview may only "
+                    . 'report the one documented no-op affordance.'
+                );
+                if ($predicted !== null) {
+                    self::assertSame('restore', $action);
+                    self::assertSame(
+                        $state,
+                        $service->stateOf(self::TYPE, self::TENANT_A, $recordId),
+                        'A no-op is a no-op: the succeeding call must not have moved the record.'
+                    );
                 }
             }
         }
+    }
+
+    public function testAPropertyThatIsFalseCarriesNoRefusalAndThatIsIntended(): void
+    {
+        // Deliberate, not an oversight, and documented as such in
+        // docs/wiki/Plugin-Data-Types.md ("Why an action is unavailable"):
+        // `referenceable` and `pending_removal` are PROPERTIES of the state, not
+        // actions. There is no control to disable and nothing to refuse, and the
+        // `state` that explains them is published in the same payload. Inventing
+        // `refusals['referenceable']` would mean inventing an action that does
+        // not exist — and would put a non-action into a map whose keys are the
+        // vocabulary of {@see LifecycleAction::mutating()}.
+        $service = $this->service();
+
+        foreach (['trashed', 'retired'] as $state) {
+            $view = $service->describe(
+                self::TYPE,
+                self::TENANT_A,
+                $this->seedRecord(self::TENANT_A, 'record', $state)
+            );
+            self::assertIsArray($view);
+
+            self::assertFalse($view['referenceable'], "A '{$state}' record accepts no new references.");
+            self::assertSame(
+                [],
+                array_intersect(['referenceable', 'pending_removal'], array_keys($view['refusals'])),
+                'A property is explained by `state`, which the caller already has — never by a refusal.'
+            );
+            self::assertSame($state, $view['state'], 'And `state` is right there to explain it.');
+        }
+
+        // The same on the other side: `pending_removal: false` on a live record
+        // is a fact about the state, not a refused action.
+        $live = $service->describe(
+            self::TYPE,
+            self::TENANT_A,
+            $this->seedRecord(self::TENANT_A, 'live', 'active')
+        );
+        self::assertIsArray($live);
+        self::assertTrue($live['referenceable']);
+        self::assertFalse($live['pending_removal']);
+        self::assertSame(
+            [],
+            array_intersect(['referenceable', 'pending_removal'], array_keys($live['refusals']))
+        );
     }
 
     public function testTransitionsAreIdempotent(): void

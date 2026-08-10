@@ -192,6 +192,7 @@ final class LifecycleResult
                 'retired_records_cannot_be_trashed' => 'A retired record cannot be trashed — retirement is not a mistake to undo',
                 'restore_before_retiring' => 'Restore this record before retiring it — a trashed record is a mistake, not an achievement',
                 'trash_before_deleting' => 'Move this record to the trash before deleting it',
+                'nothing_to_restore' => 'This record is not in the trash, so there is nothing to restore',
                 default => 'The record\'s current state does not allow this action',
             },
             default => 'This data type does not offer that action',

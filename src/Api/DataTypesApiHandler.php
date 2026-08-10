@@ -105,9 +105,14 @@ final class DataTypesApiHandler
      * This is what lets a generated screen refuse honestly BEFORE the user
      * clicks: the blockers arrive with the plugin's own labels attached, and
      * `refusals` carries a stable reason key per action so a disabled control
-     * can explain itself rather than sitting there greyed out. A `false` in this
-     * payload is never unexplained — `deletable: false` always has a matching
-     * `refusals['delete']`, whether the cause is a reference or a policy.
+     * can explain itself rather than sitting there greyed out.
+     *
+     * Every ACTION-shaped boolean is exactly `!isset($refusals[$action])` —
+     * `restorable` and `deletable` alike — so a `false` on an action is never
+     * unexplained, whether the cause is a reference, the record's state, or the
+     * type not offering the action at all. `referenceable` and `pending_removal`
+     * are not actions: they are properties of the state that is published beside
+     * them, so they carry no refusal and none is invented for them.
      *
      * @param Request               $request The incoming request.
      * @param array<string, string> $params  Captured path parameters.
