@@ -542,7 +542,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Read one record's lifecycle state and the declared references that block deleting it */
+        /** Read one record's lifecycle state, the declared references that block deleting it, and the stable reason key behind every action its current state refuses */
         get: operations["get_api_v1_data_types_type_id"];
         put?: never;
         post?: never;
@@ -2637,12 +2637,27 @@ export interface components {
                 restorable: boolean;
                 deletable: boolean;
                 blockers: components["schemas"]["DataTypeBlocker"][];
+                refusals: components["schemas"]["DataTypeRefusals"];
             };
         };
         DataTypeReference: {
             table: string;
             column: string;
             label: string;
+            ignore_when: {
+                [key: string]: string[];
+            };
+        };
+        DataTypeRefusal: {
+            /** @enum {string} */
+            reason: "still_referenced" | "trash_before_deleting" | "retired_records_are_permanent" | "retired_records_cannot_be_trashed" | "retirement_is_permanent" | "restore_before_retiring";
+            message: string;
+        };
+        DataTypeRefusals: {
+            trash?: components["schemas"]["DataTypeRefusal"];
+            restore?: components["schemas"]["DataTypeRefusal"];
+            retire?: components["schemas"]["DataTypeRefusal"];
+            delete?: components["schemas"]["DataTypeRefusal"];
         };
         DataTypeTransitionResponse: {
             data: {

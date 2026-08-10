@@ -264,9 +264,70 @@ final class DataTypeRegistryTest extends TestCase
 
         self::assertSame(['read', 'trash', 'restore'], $payload['actions']);
         self::assertSame(
-            [['table' => 'acme_entries', 'column' => 'record_id', 'label' => 'recorded entries']],
+            [[
+                'table' => 'acme_entries',
+                'column' => 'record_id',
+                'label' => 'recorded entries',
+                'ignore_when' => [],
+            ]],
             $payload['blocks_delete'],
             'The reference graph is published as metadata so a screen can explain a refusal.'
+        );
+    }
+
+    public function testThePublishedEntryRoundTripsTheGuardsIgnoreWhenFilter(): void
+    {
+        // `ignore_when` is parsed, validated and enforced — but until it was
+        // published, the ONLY way to confirm the host had honoured it rather
+        // than dropped it was to read core's source. An entry that echoes the
+        // declaration turns that source dive into a diff.
+        $declared = ['status' => ['trashed', 'void'], 'archived' => ['yes']];
+
+        $registry = $this->registry();
+        $registry->register('Acme', [
+            'record' => $this->declaration([
+                'blocks_delete' => [[
+                    'table' => 'acme_entries',
+                    'column' => 'record_id',
+                    'label' => 'recorded entries',
+                    'ignore_when' => $declared,
+                ]],
+            ]),
+        ]);
+
+        $definition = $registry->get('acme:record');
+        self::assertNotNull($definition);
+
+        self::assertSame(
+            $declared,
+            $definition->toArray()['blocks_delete'][0]['ignore_when'],
+            'What a plugin declared must be reconstructable from what the host publishes.'
+        );
+    }
+
+    public function testThePublishedIgnoreWhenShowsTheNormalisationCoreApplied(): void
+    {
+        // Round-tripping the DECLARATION means echoing what was ACCEPTED, not
+        // what was written: core casts guard values to strings so they bind as
+        // parameters, and a declarer should be able to see that it did.
+        $registry = $this->registry();
+        $registry->register('Acme', [
+            'record' => $this->declaration([
+                'blocks_delete' => [[
+                    'table' => 'acme_entries',
+                    'column' => 'record_id',
+                    'label' => 'recorded entries',
+                    'ignore_when' => ['archived' => [1, true]],
+                ]],
+            ]),
+        ]);
+
+        $definition = $registry->get('acme:record');
+        self::assertNotNull($definition);
+
+        self::assertSame(
+            ['archived' => ['1', '1']],
+            $definition->toArray()['blocks_delete'][0]['ignore_when']
         );
     }
 

@@ -47,6 +47,22 @@ final class LifecycleAction
     }
 
     /**
+     * The actions that CHANGE a record, in the order a UI would present them.
+     *
+     * These are the four the record's current state can refuse — {@see READ}
+     * cannot, because a caller who may read at all may always read. Anything
+     * evaluating "what would happen if this were called right now" iterates
+     * this list, so a fifth verb could never be added to the vocabulary and
+     * quietly skipped by the pre-flight answer.
+     *
+     * @return list<string>
+     */
+    public static function mutating(): array
+    {
+        return [self::TRASH, self::RESTORE, self::RETIRE, self::DELETE];
+    }
+
+    /**
      * Whether a string names a known action.
      *
      * @param string $action The candidate action name.

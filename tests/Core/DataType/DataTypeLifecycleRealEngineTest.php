@@ -255,6 +255,142 @@ final class DataTypeLifecycleRealEngineTest extends TestCase
         self::assertFalse($retiredView['deletable']);
     }
 
+    // ==================== A refused action explains itself ====================
+
+    public function testAPolicyRefusalCarriesAReasonWhileTheBlockerListStaysEmpty(): void
+    {
+        // `deletable: false` with an empty blocker list used to be silent, and
+        // silence reads as a bug: nothing distinguished "the policy forbids this"
+        // from "the guard evaluation is broken" without reading core's source.
+        // The two causes are DIFFERENT things and are reported separately — a
+        // policy refusal is not a reference, and folding it into `blockers`
+        // would make "how many rows point at this?" unanswerable.
+        $live = $this->seedRecord(self::TENANT_A, 'live', 'active');
+
+        $view = $this->service()->describe(self::TYPE, self::TENANT_A, $live);
+        self::assertIsArray($view);
+
+        self::assertFalse($view['deletable']);
+        self::assertSame([], $view['blockers'], 'Nothing references it — the refusal is a policy, not a reference.');
+        self::assertSame('trash_before_deleting', $view['refusals']['delete']['reason']);
+        self::assertNotSame(
+            '',
+            $view['refusals']['delete']['message'],
+            'The stable key is the contract; the sentence is the fallback, and both are offered.'
+        );
+    }
+
+    public function testAReferenceBlockedDeleteStillReportsItsBlockers(): void
+    {
+        // The pre-existing behaviour, unchanged: a delete blocked by rows still
+        // answers with those rows and the plugin's own label for them.
+        $recordId = $this->seedRecord(self::TENANT_A, 'guarded', 'trashed');
+        $this->seedEntry(self::TENANT_A, $recordId);
+
+        $view = $this->service()->describe(self::TYPE, self::TENANT_A, $recordId);
+        self::assertIsArray($view);
+
+        self::assertFalse($view['deletable']);
+        self::assertSame(
+            [['table' => 'acme_entries', 'label' => 'recorded entries', 'count' => 1]],
+            $view['blockers']
+        );
+        self::assertSame('still_referenced', $view['refusals']['delete']['reason']);
+    }
+
+    public function testARetiredRecordExplainsEveryActionItRefuses(): void
+    {
+        // The sibling actions get the same treatment as delete: a retired record
+        // is never restorable, never deletable and never trashable, and each of
+        // those three "no"s names itself.
+        $retired = $this->seedRecord(self::TENANT_A, 'finished', 'retired');
+
+        $view = $this->service()->describe(self::TYPE, self::TENANT_A, $retired);
+        self::assertIsArray($view);
+
+        self::assertSame('retired_records_cannot_be_trashed', $view['refusals']['trash']['reason']);
+        self::assertSame('retirement_is_permanent', $view['refusals']['restore']['reason']);
+        self::assertSame('retired_records_are_permanent', $view['refusals']['delete']['reason']);
+        self::assertArrayNotHasKey(
+            'retire',
+            $view['refusals'],
+            'Retiring an already-retired record is an idempotent success, not a refusal.'
+        );
+    }
+
+    public function testATrashedRecordExplainsWhyRetiringItIsRefused(): void
+    {
+        $trashed = $this->seedRecord(self::TENANT_A, 'mistake', 'trashed');
+
+        $view = $this->service()->describe(self::TYPE, self::TENANT_A, $trashed);
+        self::assertIsArray($view);
+
+        self::assertSame('restore_before_retiring', $view['refusals']['retire']['reason']);
+        self::assertSame(
+            [],
+            array_diff(array_keys($view['refusals']), ['retire']),
+            'A trashed record with nothing pointing at it refuses retirement and nothing else.'
+        );
+    }
+
+    public function testNoUnavailableActionIsLeftUnexplained(): void
+    {
+        // The invariant the whole addition exists to establish: a `false` in this
+        // payload always has a reason beside it, in every state a record can be in.
+        $service = $this->service();
+        $states = [
+            'active' => $this->seedRecord(self::TENANT_A, 'live', 'active'),
+            'trashed' => $this->seedRecord(self::TENANT_A, 'mistake', 'trashed'),
+            'retired' => $this->seedRecord(self::TENANT_A, 'finished', 'retired'),
+        ];
+        $this->seedEntry(self::TENANT_A, $states['trashed']);
+
+        foreach ($states as $state => $recordId) {
+            $view = $service->describe(self::TYPE, self::TENANT_A, $recordId);
+            self::assertIsArray($view);
+            self::assertSame(
+                !$view['deletable'],
+                isset($view['refusals']['delete']),
+                "A record in '{$state}' must explain an unavailable delete, and must not invent a reason "
+                . 'for an available one.'
+            );
+        }
+    }
+
+    public function testThePredictedRefusalIsTheOneTheTransitionActuallyReturns(): void
+    {
+        // One evaluator serves both, so a screen that greys out a control for a
+        // stated reason and the endpoint that refuses the click cannot drift into
+        // giving different answers.
+        $service = $this->service();
+
+        foreach (['active', 'trashed', 'retired'] as $state) {
+            foreach (['trash', 'restore', 'retire', 'delete'] as $action) {
+                // A FRESH record per action: performing one transition would move
+                // the record out of the state whose prediction is under test.
+                $recordId = $this->seedRecord(self::TENANT_A, 'record', $state);
+                $view = $service->describe(self::TYPE, self::TENANT_A, $recordId);
+                self::assertIsArray($view);
+
+                $result = match ($action) {
+                    'trash' => $service->trash(self::TYPE, self::TENANT_A, $recordId),
+                    'restore' => $service->restore(self::TYPE, self::TENANT_A, $recordId),
+                    'retire' => $service->retire(self::TYPE, self::TENANT_A, $recordId),
+                    default => $service->delete(self::TYPE, self::TENANT_A, $recordId),
+                };
+
+                self::assertSame(
+                    $result->isOk() ? null : $result->reason(),
+                    $view['refusals'][$action]['reason'] ?? null,
+                    "The preview of '{$action}' on a '{$state}' record must match what the transition did."
+                );
+                if (!$result->isOk()) {
+                    self::assertSame($result->message(), $view['refusals'][$action]['message'] ?? null);
+                }
+            }
+        }
+    }
+
     public function testTransitionsAreIdempotent(): void
     {
         $recordId = $this->seedRecord(self::TENANT_A, 'thing', 'active');

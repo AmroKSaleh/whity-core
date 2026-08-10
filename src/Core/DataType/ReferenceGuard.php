@@ -125,7 +125,16 @@ final class ReferenceGuard
     /**
      * The declaration as data, for the generated-UI contract.
      *
-     * @return array{table: string, column: string, label: string}
+     * `ignore_when` is published even though no renderer needs it. The entry is
+     * the ONLY place an adopter can see what the host actually accepted, and a
+     * guard filter that is enforced but never echoed is indistinguishable from
+     * one that was silently dropped — the reader has to go and audit core's
+     * source to tell "correct and quiet" from "broken". Echoing it costs a
+     * renderer nothing (it ignores the field) and buys the declarer a diff
+     * against their own declaration. It is published POST-VALIDATION, so the
+     * normalisation core applied — scalars cast to strings — is visible too.
+     *
+     * @return array{table: string, column: string, label: string, ignore_when: array<string, list<string>>}
      */
     public function toArray(): array
     {
@@ -133,6 +142,7 @@ final class ReferenceGuard
             'table' => $this->table,
             'column' => $this->column,
             'label' => $this->label,
+            'ignore_when' => $this->ignoreWhen,
         ];
     }
 }

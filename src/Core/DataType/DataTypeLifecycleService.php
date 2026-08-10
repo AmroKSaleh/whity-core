@@ -162,15 +162,17 @@ class DataTypeLifecycleService implements DataTypeGuard
             return LifecycleResult::unsupported('trash_not_offered');
         }
 
-        $state = $this->readState($definition, $tenantId, $id);
         if (!$this->exists($definition, $tenantId, $id)) {
             return LifecycleResult::notFound();
         }
 
-        $lifecycle = $definition->lifecycle();
-        if ($lifecycle->isRetired($state)) {
-            return LifecycleResult::refused('retired_records_cannot_be_trashed', $state);
+        $state = $this->readState($definition, $tenantId, $id);
+        $evaluation = self::statePolicy($definition, LifecycleAction::TRASH, $state);
+        if (!$evaluation->isOk()) {
+            return $evaluation;
         }
+
+        $lifecycle = $definition->lifecycle();
         if ($lifecycle->isTrashed($state)) {
             return LifecycleResult::ok($state);
         }
@@ -200,15 +202,17 @@ class DataTypeLifecycleService implements DataTypeGuard
             return LifecycleResult::unsupported('restore_not_offered');
         }
 
-        $state = $this->readState($definition, $tenantId, $id);
         if (!$this->exists($definition, $tenantId, $id)) {
             return LifecycleResult::notFound();
         }
 
-        $lifecycle = $definition->lifecycle();
-        if ($lifecycle->isRetired($state)) {
-            return LifecycleResult::refused('retirement_is_permanent', $state);
+        $state = $this->readState($definition, $tenantId, $id);
+        $evaluation = self::statePolicy($definition, LifecycleAction::RESTORE, $state);
+        if (!$evaluation->isOk()) {
+            return $evaluation;
         }
+
+        $lifecycle = $definition->lifecycle();
         if (!$lifecycle->isTrashed($state)) {
             return LifecycleResult::ok($state);
         }
@@ -236,17 +240,19 @@ class DataTypeLifecycleService implements DataTypeGuard
             return LifecycleResult::unsupported('retire_not_offered');
         }
 
-        $state = $this->readState($definition, $tenantId, $id);
         if (!$this->exists($definition, $tenantId, $id)) {
             return LifecycleResult::notFound();
+        }
+
+        $state = $this->readState($definition, $tenantId, $id);
+        $evaluation = self::statePolicy($definition, LifecycleAction::RETIRE, $state);
+        if (!$evaluation->isOk()) {
+            return $evaluation;
         }
 
         $lifecycle = $definition->lifecycle();
         if ($lifecycle->isRetired($state)) {
             return LifecycleResult::ok($state);
-        }
-        if ($lifecycle->isTrashed($state)) {
-            return LifecycleResult::refused('restore_before_retiring', $state);
         }
 
         $target = (string) $lifecycle->retiredState();
@@ -291,14 +297,31 @@ class DataTypeLifecycleService implements DataTypeGuard
     }
 
     /**
-     * Read a record's lifecycle state and the guards currently blocking its
-     * deletion — the payload a generated screen renders before offering
-     * anything destructive.
+     * Read a record's lifecycle state, the guards currently blocking its
+     * deletion, and WHY each unavailable action is unavailable — the payload a
+     * generated screen renders before offering anything destructive.
+     *
+     * Refusals are reported separately from blockers, and both are reported
+     * ------------------------------------------------------------------------
+     * `blockers` answers one question and only one: how many rows point at this
+     * record. `refusals` answers a different one: which actions the record's
+     * current STATE forbids, and under what stable reason key. Folding a policy
+     * refusal into `blockers` as a synthetic entry would make the row-count
+     * question unanswerable, so the two stay apart.
+     *
+     * The invariant worth relying on: a `false` here is never unexplained.
+     * `deletable: false` ALWAYS carries `refusals['delete']` — whether the cause
+     * is a reference (`still_referenced`, with `blockers` populated) or a policy
+     * (`trash_before_deleting`, with `blockers` empty). A renderer can therefore
+     * always say why a control is disabled instead of showing a dead button.
+     *
+     * Nothing new is exposed: every reason is a pure function of `state` and the
+     * type's declared lifecycle, both of which the caller can already read.
      *
      * @param string     $dataType The namespaced type key.
      * @param int        $tenantId The resolved tenant id.
      * @param int|string $id       The record's key.
-     * @return array{state: ?string, referenceable: bool, pending_removal: bool, restorable: bool, deletable: bool, blockers: list<array{table: string, label: string, count: int}>}|null
+     * @return array{state: ?string, referenceable: bool, pending_removal: bool, restorable: bool, deletable: bool, blockers: list<array{table: string, label: string, count: int}>, refusals: array<string, array{reason: string, message: string}>}|null
      *         Null when the record does not exist in this tenant.
      */
     public function describe(string $dataType, int $tenantId, int|string $id): ?array
@@ -310,23 +333,41 @@ class DataTypeLifecycleService implements DataTypeGuard
 
         $state = $this->readState($definition, $tenantId, $id);
         $lifecycle = $definition->lifecycle();
+        $blockers = $this->blockingReferences($dataType, $tenantId, $id);
+
+        $refusals = [];
+        foreach (LifecycleAction::mutating() as $action) {
+            $result = self::statePolicy($definition, $action, $state);
+            if ($result->isOk() && $action === LifecycleAction::DELETE && $blockers !== []) {
+                $result = LifecycleResult::blocked($blockers, $state);
+            }
+            if (!$result->isOk()) {
+                $refusals[$action] = [
+                    'reason' => (string) $result->reason(),
+                    'message' => $result->message(),
+                ];
+            }
+        }
 
         return [
             'state' => $state,
             'referenceable' => $lifecycle->acceptsNewReferences($state),
             'pending_removal' => $lifecycle->isPendingRemoval($state),
             'restorable' => $definition->offers(LifecycleAction::RESTORE) && $lifecycle->isTrashed($state),
-            'deletable' => $this->evaluateDelete($definition, $tenantId, $id)->isOk(),
-            'blockers' => $this->blockingReferences($dataType, $tenantId, $id),
+            'deletable' => !isset($refusals[LifecycleAction::DELETE]),
+            'blockers' => $blockers,
+            'refusals' => $refusals,
         ];
     }
 
     /**
      * Decide whether a delete may proceed, without performing it.
      *
-     * Shared by {@see self::delete()}, {@see self::canDelete()} and
-     * {@see self::describe()} so the button, the pre-flight answer and the
-     * enforcement can never disagree about what is permitted.
+     * Shared by {@see self::delete()} and {@see self::canDelete()} so the
+     * pre-flight answer and the enforcement can never disagree about what is
+     * permitted. {@see self::describe()} reaches the same verdict through
+     * {@see self::statePolicy()} from a state and a blocker count it has already
+     * read, rather than reading them a second time.
      *
      * @param int|string $id The record's key.
      */
@@ -337,19 +378,10 @@ class DataTypeLifecycleService implements DataTypeGuard
         }
 
         $state = $this->readState($definition, $tenantId, $id);
-        $lifecycle = $definition->lifecycle();
 
-        // Retirement is permanent. Not "permanent until nothing references it" —
-        // permanent. The record is part of what happened.
-        if ($lifecycle->isRetired($state)) {
-            return LifecycleResult::refused('retired_records_are_permanent', $state);
-        }
-
-        // When a type is trashable there is no live → gone path. This is what
-        // stops a delete route (or an empty-trash sweep) from skipping the
-        // reversible step the lifecycle promises.
-        if ($lifecycle->isTrashable() && !$lifecycle->isTrashed($state)) {
-            return LifecycleResult::refused('trash_before_deleting', $state);
+        $policy = self::statePolicy($definition, LifecycleAction::DELETE, $state);
+        if (!$policy->isOk()) {
+            return $policy;
         }
 
         $blockers = $this->blockingReferences($definition->key(), $tenantId, $id);
@@ -358,6 +390,63 @@ class DataTypeLifecycleService implements DataTypeGuard
         }
 
         return LifecycleResult::ok($state);
+    }
+
+    /**
+     * What the record's CURRENT STATE permits, before any reference is counted.
+     *
+     * The five state rules of the lifecycle live here and nowhere else. Every
+     * mutator consults it before writing, and {@see self::describe()} consults
+     * it to explain a disabled control — which is the point: a refusal a screen
+     * predicts and a refusal an endpoint delivers are the same function, so they
+     * cannot drift into disagreeing.
+     *
+     * Pure, and deliberately unaware of {@see DataTypeDefinition::offers()}: an
+     * action the type never offered is not "refused by this record's state", it
+     * was never on the table, and the mutators reject that case earlier as
+     * UNSUPPORTED.
+     *
+     * @param string      $action A {@see LifecycleAction} constant.
+     * @param string|null $state  The record's current state.
+     */
+    private static function statePolicy(
+        DataTypeDefinition $definition,
+        string $action,
+        ?string $state
+    ): LifecycleResult {
+        $lifecycle = $definition->lifecycle();
+
+        return match ($action) {
+            // "This served its purpose" does not decay into "this should not exist".
+            LifecycleAction::TRASH => $lifecycle->isRetired($state)
+                ? LifecycleResult::refused('retired_records_cannot_be_trashed', $state)
+                : LifecycleResult::ok($state),
+
+            // Retirement is not a mistake, so there is no way back from it.
+            LifecycleAction::RESTORE => $lifecycle->isRetired($state)
+                ? LifecycleResult::refused('retirement_is_permanent', $state)
+                : LifecycleResult::ok($state),
+
+            // A mistake is not an achievement — restore before retiring.
+            LifecycleAction::RETIRE => $lifecycle->isTrashed($state)
+                ? LifecycleResult::refused('restore_before_retiring', $state)
+                : LifecycleResult::ok($state),
+
+            LifecycleAction::DELETE => match (true) {
+                // Retirement is permanent. Not "permanent until nothing
+                // references it" — permanent. The record is part of what happened.
+                $lifecycle->isRetired($state)
+                    => LifecycleResult::refused('retired_records_are_permanent', $state),
+                // When a type is trashable there is no live → gone path. This is
+                // what stops a delete route (or an empty-trash sweep) from
+                // skipping the reversible step the lifecycle promises.
+                $lifecycle->isTrashable() && !$lifecycle->isTrashed($state)
+                    => LifecycleResult::refused('trash_before_deleting', $state),
+                default => LifecycleResult::ok($state),
+            },
+
+            default => LifecycleResult::ok($state),
+        };
     }
 
     /**

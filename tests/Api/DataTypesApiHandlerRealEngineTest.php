@@ -1,0 +1,418 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Api;
+
+use PDO;
+use PHPUnit\Framework\TestCase;
+use Tests\Support\SchemaFromMigrations;
+use Whity\Api\DataTypesApiHandler;
+use Whity\Auth\RoleChecker;
+use Whity\Core\DataType\DataTypeLifecycleService;
+use Whity\Core\DataType\DataTypeRegistry;
+use Whity\Core\RBAC\PermissionRegistry;
+use Whity\Core\Request;
+use Whity\Core\Tenant\TableOwnershipRegistry;
+use Whity\Core\Tenant\TenantContext;
+use Whity\Database\Database;
+use Whity\Sdk\Http\Response;
+
+/**
+ * WC-723 Door 2, at the PUBLISHED BOUNDARY: what an adopter can actually read
+ * back out of `/api/data-types`.
+ *
+ * The service tests pin the behaviour; these pin the CONTRACT, which is a
+ * different thing and was the thinner of the two. Two properties matter here
+ * and neither is observable from inside the service:
+ *
+ *  1. the published entry ROUND-TRIPS the declaration — every field a plugin
+ *     declared can be reconstructed from the response, so "did the host honour
+ *     my `ignore_when`?" is a diff rather than a read of core's source;
+ *  2. an unavailable action EXPLAINS itself — `deletable: false` never arrives
+ *     bare, and the explanation is a stable key a renderer can branch on, kept
+ *     separate from `blockers` so the row count stays answerable.
+ *
+ * And one property that must NOT have changed: a caller who may not read a type
+ * gets 404, never 403. Existence is not something a reason string may leak.
+ */
+final class DataTypesApiHandlerRealEngineTest extends TestCase
+{
+    private const TENANT_A = 1;
+    private const TENANT_B = 2;
+
+    /** Holds acme:read + acme:manage + acme:retire in tenant 1. */
+    private const MANAGER_A = 10;
+
+    /** An active member of tenant 1 holding NO acme permission at all. */
+    private const OUTSIDER_A = 11;
+
+    private PDO $pdo;
+
+    private DataTypesApiHandler $handler;
+
+    protected function setUp(): void
+    {
+        RoleChecker::clearCache();
+        $this->pdo = SchemaFromMigrations::make(true);
+        $this->seedTenantsAndRoles();
+        $this->seedPluginTables();
+
+        $permissions = new PermissionRegistry();
+        $permissions->register('Acme', ['acme:read', 'acme:manage', 'acme:retire']);
+
+        $registry = $this->dataTypes();
+
+        $this->handler = new DataTypesApiHandler(
+            $registry,
+            new DataTypeLifecycleService($this->pdo, $registry),
+            new RoleChecker($this->wrap($this->pdo), $permissions)
+        );
+    }
+
+    protected function tearDown(): void
+    {
+        TenantContext::reset();
+        RoleChecker::clearCache();
+    }
+
+    // ==================== 1. The entry round-trips the declaration ====================
+
+    public function testThePublishedEntryRoundTripsTheGuardsIgnoreWhenFilter(): void
+    {
+        // `ignore_when` is parsed, validated and enforced, and was the one part
+        // of a declaration the entry did not echo. Its absence is not readable
+        // as "correct and quiet" — it reads as "silently not enforced", and the
+        // only way to tell the two apart was to go and read core's source.
+        $response = $this->handler->list($this->request(self::MANAGER_A, self::TENANT_A));
+        self::assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        $entry = $this->onlyEntry($response);
+
+        self::assertSame(
+            [[
+                'table' => 'acme_entries',
+                'column' => 'record_id',
+                'label' => 'recorded entries',
+                'ignore_when' => ['status' => ['trashed', 'void']],
+            ]],
+            $entry['blocks_delete'],
+            'The declaration must be reconstructable from the response, filter included.'
+        );
+    }
+
+    public function testTheWholeDeclarationIsReconstructableFromTheResponse(): void
+    {
+        // Round-trippability is the guarantee, not one field of it: an adopter
+        // diffs the entry against what they wrote and needs every part of it.
+        $entry = $this->onlyEntry($this->handler->list($this->request(self::MANAGER_A, self::TENANT_A)));
+
+        self::assertSame('acme:record', $entry['key']);
+        self::assertSame('Acme', $entry['source']);
+        self::assertSame(['en' => 'Record'], $entry['label']);
+        self::assertSame('status', $entry['lifecycle']['column']);
+        self::assertSame(['draft', 'active', 'retired', 'trashed'], $entry['lifecycle']['states']);
+        self::assertSame('active', $entry['lifecycle']['default_state']);
+        self::assertSame('trashed', $entry['lifecycle']['trashed_state']);
+        self::assertSame('retired', $entry['lifecycle']['retired_state']);
+        self::assertSame(
+            ['read' => 'acme:read', 'trash' => 'acme:manage', 'restore' => 'acme:manage',
+                'retire' => 'acme:retire', 'delete' => 'acme:manage'],
+            $entry['permissions']
+        );
+        self::assertSame(['read', 'trash', 'restore', 'retire', 'delete'], $entry['actions']);
+    }
+
+    // ==================== 2. An unavailable action explains itself ====================
+
+    public function testAPolicyRefusalIsPublishedWithItsReasonAndAnEmptyBlockerList(): void
+    {
+        // The reported case: `deletable: false, blockers: []` and nothing saying
+        // why. It was `trash_before_deleting` behaving exactly as designed, but
+        // that was only discoverable by reading `evaluateDelete()`.
+        $recordId = $this->seedRecord(self::TENANT_A, 'active');
+
+        $body = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        ));
+
+        self::assertFalse($body['deletable']);
+        self::assertSame([], $body['blockers'], 'A policy refusal is not a reference and must not fake one.');
+        self::assertSame('trash_before_deleting', $body['refusals']['delete']['reason']);
+        self::assertNotSame('', $body['refusals']['delete']['message']);
+    }
+
+    public function testAReferenceBlockedDeleteStillPublishesItsBlockers(): void
+    {
+        // Unchanged behaviour, asserted so the new field cannot quietly displace
+        // the old one: blockers still answer "how many rows point at this?".
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $this->seedEntry(self::TENANT_A, $recordId);
+
+        $body = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        ));
+
+        self::assertFalse($body['deletable']);
+        self::assertSame(
+            [['table' => 'acme_entries', 'label' => 'recorded entries', 'count' => 1]],
+            $body['blockers']
+        );
+        self::assertSame('still_referenced', $body['refusals']['delete']['reason']);
+    }
+
+    public function testTheSiblingActionsExplainTheirRefusalsToo(): void
+    {
+        // Fixing delete alone would leave restore and retire in exactly the state
+        // that caused the report — a dead control with no explanation beside it.
+        $retired = $this->seedRecord(self::TENANT_A, 'retired');
+        $trashed = $this->seedRecord(self::TENANT_A, 'trashed');
+
+        $retiredView = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $retired]
+        ));
+        self::assertFalse($retiredView['restorable']);
+        self::assertSame('retirement_is_permanent', $retiredView['refusals']['restore']['reason']);
+        self::assertSame('retired_records_cannot_be_trashed', $retiredView['refusals']['trash']['reason']);
+        self::assertSame('retired_records_are_permanent', $retiredView['refusals']['delete']['reason']);
+
+        $trashedView = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $trashed]
+        ));
+        self::assertSame('restore_before_retiring', $trashedView['refusals']['retire']['reason']);
+    }
+
+    public function testAnAvailableActionIsGivenNoReason(): void
+    {
+        // The reason map describes refusals and nothing else; a record that can
+        // be deleted must not carry an explanation for a delete that is allowed.
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+
+        $body = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        ));
+
+        self::assertTrue($body['deletable']);
+        self::assertArrayNotHasKey('delete', $body['refusals']);
+    }
+
+    // ==================== 3. The gates are unchanged ====================
+
+    public function testACallerWhoMayNotReadTheTypeStillGets404AndNever403(): void
+    {
+        // Whether a plugin declared `acme:record` is not something an
+        // unauthorized caller may probe by status code — and a refusal reason is
+        // not a new place for that to leak.
+        $recordId = $this->seedRecord(self::TENANT_A, 'active');
+
+        $show = $this->handler->show(
+            $this->request(self::OUTSIDER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        );
+        self::assertSame(404, $show->getStatusCode());
+        self::assertStringNotContainsString('trash_before_deleting', $show->getBody());
+        self::assertStringNotContainsString('acme_entries', $show->getBody());
+
+        $delete = $this->handler->delete(
+            $this->request(self::OUTSIDER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        );
+        self::assertSame(404, $delete->getStatusCode());
+
+        $list = $this->handler->list($this->request(self::OUTSIDER_A, self::TENANT_A));
+        self::assertSame(200, $list->getStatusCode());
+        self::assertSame([], $this->decode($list)['data'], 'A type the caller may not read is not advertised.');
+    }
+
+    public function testAnUnknownTypeAndAnotherTenantsRecordAreBoth404(): void
+    {
+        $foreign = $this->seedRecord(self::TENANT_B, 'active');
+
+        self::assertSame(404, $this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'nope:nothing', 'id' => '1']
+        )->getStatusCode());
+
+        self::assertSame(404, $this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $foreign]
+        )->getStatusCode());
+    }
+
+    // ==================== Helpers ====================
+
+    private function dataTypes(): DataTypeRegistry
+    {
+        $tables = new TableOwnershipRegistry();
+        $tables->register('Acme', [
+            'acme_records' => TableOwnershipRegistry::SCOPE_TENANT,
+            'acme_entries' => TableOwnershipRegistry::SCOPE_TENANT,
+        ]);
+
+        $registry = new DataTypeRegistry($tables);
+        $registry->register('Acme', [
+            'record' => [
+                'table' => 'acme_records',
+                'key' => 'id',
+                'tenant_column' => 'tenant_id',
+                'label' => ['en' => 'Record'],
+                'lifecycle' => [
+                    'column' => 'status',
+                    'states' => ['draft', 'active', 'retired', 'trashed'],
+                    'default_state' => 'active',
+                    'trashable' => true,
+                    'retirable' => true,
+                ],
+                'blocks_delete' => [[
+                    'table' => 'acme_entries',
+                    'column' => 'record_id',
+                    'label' => 'recorded entries',
+                    'ignore_when' => ['status' => ['trashed', 'void']],
+                ]],
+                'permissions' => [
+                    'read' => 'acme:read',
+                    'trash' => 'acme:manage',
+                    'restore' => 'acme:manage',
+                    'retire' => 'acme:retire',
+                    'delete' => 'acme:manage',
+                ],
+            ],
+        ]);
+
+        return $registry;
+    }
+
+    private function seedTenantsAndRoles(): void
+    {
+        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a'), (2, 'b', 'b')");
+        $this->pdo->exec("INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES
+            (101, 'acme-manager-a', '', 1, datetime('now')),
+            (102, 'acme-outsider-a', '', 1, datetime('now'))");
+
+        foreach (['acme:read', 'acme:manage', 'acme:retire'] as $permission) {
+            $this->grant(101, $permission);
+        }
+
+        $this->pdo->exec("
+            INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
+                (10, 'manager-a', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+                (11, 'outsider-a', 'x', false, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ");
+        $this->pdo->exec("
+            INSERT INTO memberships (id, profile_id, tenant_id, role_id, status, created_at) VALUES
+                (1000, 10, 1, 101, 'active', datetime('now')),
+                (1001, 11, 1, 102, 'active', datetime('now'))
+        ");
+    }
+
+    private function seedPluginTables(): void
+    {
+        // No foreign key between them — the convention the declared guard exists
+        // to compensate for.
+        $this->pdo->exec('
+            CREATE TABLE acme_records (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                status VARCHAR(50) NOT NULL DEFAULT \'active\'
+            )
+        ');
+        $this->pdo->exec('
+            CREATE TABLE acme_entries (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                record_id INTEGER NOT NULL,
+                status VARCHAR(50) NOT NULL DEFAULT \'active\'
+            )
+        ');
+    }
+
+    private function grant(int $roleId, string $permission): void
+    {
+        $this->pdo->prepare('INSERT OR IGNORE INTO permissions (name, description, created_at) VALUES (?, ?, NOW())')
+            ->execute([$permission, '']);
+        $select = $this->pdo->prepare('SELECT id FROM permissions WHERE name = ?');
+        $select->execute([$permission]);
+        $this->pdo
+            ->prepare('INSERT OR IGNORE INTO role_permissions (role_id, permission_id, created_at) VALUES (?, ?, NOW())')
+            ->execute([$roleId, (int) $select->fetchColumn()]);
+    }
+
+    private function seedRecord(int $tenantId, string $status): int
+    {
+        $this->pdo->prepare('INSERT INTO acme_records (tenant_id, status) VALUES (?, ?)')
+            ->execute([$tenantId, $status]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function seedEntry(int $tenantId, int $recordId, string $status = 'active'): int
+    {
+        $this->pdo->prepare('INSERT INTO acme_entries (tenant_id, record_id, status) VALUES (?, ?, ?)')
+            ->execute([$tenantId, $recordId, $status]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private function wrap(PDO $pdo): Database
+    {
+        $db = Database::withFactory(static fn (): PDO => $pdo);
+        $db->setMaxLifetimeSeconds(86400);
+        $db->setPingIntervalSeconds(86400);
+        $db->forceConnect();
+
+        return $db;
+    }
+
+    private function request(int $profileId, int $tenantId): Request
+    {
+        TenantContext::reset();
+        TenantContext::setTenantId($tenantId);
+        $request = new Request('GET', '/api/data-types', [], '');
+        $request->user = (object) ['profile_id' => $profileId, 'active_tenant_id' => $tenantId];
+
+        return $request;
+    }
+
+    /**
+     * The single published type entry, asserted to be the only one.
+     *
+     * @return array<string, mixed>
+     */
+    private function onlyEntry(Response $response): array
+    {
+        $decoded = $this->decode($response);
+        self::assertCount(1, $decoded['data']);
+        self::assertIsArray($decoded['data'][0]);
+
+        return $decoded['data'][0];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function data(Response $response): array
+    {
+        self::assertSame(200, $response->getStatusCode(), $response->getBody());
+        $decoded = $this->decode($response);
+        self::assertIsArray($decoded['data']);
+
+        return $decoded['data'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decode(Response $response): array
+    {
+        $decoded = json_decode($response->getBody(), true);
+        self::assertIsArray($decoded);
+        self::assertArrayHasKey('data', $decoded);
+
+        return $decoded;
+    }
+}
