@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\Queue;
 
+use Whity\Core\Container\HostWiredService;
 use Whity\Sdk\JobInterface;
 
 /**
@@ -11,8 +12,14 @@ use Whity\Sdk\JobInterface;
  * register their handlers at boot; {@see JobRunner} resolves a reserved job's
  * `name` to its handler. A job whose name has no registered handler is
  * dead-lettered (it can never run).
+ *
+ * {@see HostWiredService}: an improvised, empty instance would dead-letter
+ * EVERY job and report every handler as non-submittable — both of which are
+ * ordinary answers for an unknown job name, so the caller could not tell an
+ * unwired container from a genuinely unknown job. An unregistered lookup throws
+ * instead.
  */
-final class JobRegistry
+final class JobRegistry implements HostWiredService
 {
     /** @var array<string, JobInterface> */
     private array $handlers = [];

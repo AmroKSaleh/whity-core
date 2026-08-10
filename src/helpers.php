@@ -26,8 +26,8 @@ function register_service(string $class, $instance): void
  * Resolution order:
  *  1. An explicitly registered instance (the only path that can return a
  *     properly WIRED collaborator).
- *  2. Auto-instantiation, but ONLY for a concrete class that needs no
- *     constructor arguments.
+ *  2. Auto-instantiation, but ONLY for a concrete class that takes NO
+ *     constructor parameters at all and does not declare itself host-wired.
  *  3. Otherwise a \RuntimeException.
  *
  * Why step 2 is bounded (WC-712)
@@ -49,6 +49,30 @@ function register_service(string $class, $instance): void
  * unwired service therefore fails CLOSED (throws) rather than resolving to a
  * plausible-looking object.
  *
+ * Why step 2 is bounded TWICE
+ * ---------------------------
+ * "Concrete and argument-free" is a statement about constructor SHAPE, and
+ * shape is the wrong proxy for the property that matters. PermissionRegistry —
+ * concrete, one OPTIONAL argument — walked straight through it: an unregistered
+ * lookup returned a fresh, EMPTY permission catalogue rather than the one the
+ * plugin loader had filled, so a plugin's `exists('its:permission')` answered
+ * false, it failed closed, and nothing threw or logged. Two guards now stand
+ * where one did:
+ *
+ *  - {@see \Whity\Core\Container\HostWiredService} — an explicit, self-declared
+ *    opt-out. A class whose emptiness is indistinguishable from a legitimate
+ *    state (every registry: "no permissions", "no probes", "no handler for this
+ *    job" are all ordinary answers) says so, and is never improvised regardless
+ *    of its constructor.
+ *  - "no constructor parameters AT ALL", tightened from "no REQUIRED
+ *    parameters". An optional constructor argument is a COLLABORATOR the host
+ *    passes (a HookManager, a logger, an ownership registry); building the
+ *    class without it yields an object that is silently deaf — it dispatches no
+ *    events and validates against nothing — which is the same silent-divergence
+ *    failure one level down. The narrow convenience this removes (auto-building
+ *    an unregistered optional-argument class) has no call site in this
+ *    repository; the failure it prevents had one in production.
+ *
  * @throws \RuntimeException When the service is not registered and cannot be
  *                           safely auto-instantiated.
  */
@@ -58,11 +82,25 @@ function app(string $class)
         return $GLOBALS['whity_services'][$class];
     }
 
-    // Fallback: instantiate only a concrete, argument-free class. Interfaces,
-    // abstract classes and anything with required constructor arguments cannot
-    // be built correctly here, so they fail closed instead.
+    // Fallback: instantiate only a concrete, parameter-free class that has not
+    // declared itself host-wired. Interfaces, abstract classes, anything taking
+    // constructor parameters, and anything marked HostWiredService cannot be
+    // built correctly here, so they fail closed instead.
     if (class_exists($class)) {
         $reflection = new \ReflectionClass($class);
+
+        // Checked first: a host-wired service gets the message that says WHY,
+        // whatever its constructor happens to look like.
+        if ($reflection->implementsInterface(\Whity\Core\Container\HostWiredService::class)) {
+            throw new \RuntimeException(
+                "Service '{$class}' is not registered in the container and is marked "
+                . \Whity\Core\Container\HostWiredService::class
+                . ', so it is never auto-instantiated: an improvised instance would be EMPTY '
+                . 'and an empty one is indistinguishable from a legitimately empty one, so the '
+                . 'caller would silently get wrong answers instead of an error. The host entry '
+                . 'point must register the populated instance explicitly.'
+            );
+        }
 
         if (!$reflection->isInstantiable()) {
             throw new \RuntimeException(
@@ -71,10 +109,12 @@ function app(string $class)
         }
 
         $constructor = $reflection->getConstructor();
-        if ($constructor !== null && $constructor->getNumberOfRequiredParameters() > 0) {
+        if ($constructor !== null && $constructor->getNumberOfParameters() > 0) {
             throw new \RuntimeException(
-                "Service '{$class}' is not registered in the container and requires constructor "
-                . 'arguments, so it cannot be auto-instantiated. The host must register it explicitly.'
+                "Service '{$class}' is not registered in the container and declares constructor "
+                . 'parameters, so it cannot be auto-instantiated (an optional parameter is a '
+                . 'collaborator the host supplies, not one the container may drop). The host must '
+                . 'register it explicitly.'
             );
         }
 

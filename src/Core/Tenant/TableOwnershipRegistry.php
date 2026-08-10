@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\Tenant;
 
+use Whity\Core\Container\HostWiredService;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Support\SourceSlug;
 use Whity\Sdk\Tenant\PluginTablesInterface;
@@ -59,7 +60,7 @@ use Whity\Sdk\Tenant\TenantTableRegistry;
  * resolved from the container is rebuilt per boot from the same plugin
  * bootstrap every worker runs, so every worker agrees.
  */
-class TableOwnershipRegistry
+class TableOwnershipRegistry implements HostWiredService
 {
     /** Source name for tables shipped by whity-core's own migrations. Reserved. */
     public const CORE_SOURCE = 'core';

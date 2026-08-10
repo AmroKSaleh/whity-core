@@ -304,6 +304,19 @@ $permissionRegistry = new PermissionRegistry();
 // fallback exists in the registry, but registering up front is cleaner and makes
 // the core catalogue available before the first request.
 $permissionRegistry->registerCorePermissions();
+// Registered as a service so a plugin resolving the permission catalogue gets
+// the SAME instance the plugin loader fills below.
+//
+// It was not, and the failure was silent: the container's auto-instantiation
+// fallback happily built a fresh, EMPTY PermissionRegistry (concrete class, one
+// OPTIONAL constructor argument), so `\Whity\app(PermissionRegistry::class)
+// ->exists('some_plugin:manage')` answered false for a permission the plugin
+// had declared and the loader had accepted. The caller failed closed with
+// nothing thrown and nothing logged. The registry is now marked
+// {@see \Whity\Core\Container\HostWiredService} so a missing registration
+// throws loudly instead of resolving to an empty catalogue — but the fix for
+// THIS host is to register the real one, here and in the CLI kernel alike.
+\Whity\register_service(PermissionRegistry::class, $permissionRegistry); // @phpstan-ignore-line
 
 // 4b. Initialize hook manager (durable event spine wired in) and register it.
 // dispatchAsync now PERSISTS each async event to domain_events + the relay

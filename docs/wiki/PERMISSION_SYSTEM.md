@@ -217,7 +217,23 @@ Properties that make it safe to hand to plugin code:
 - **Same instance the middleware uses.** The implementation (`Whity\Core\RBAC\RoleCheckerPermissionResolver`) wraps the *delegation-aware* `RoleChecker` that `RbacMiddleware` enforces with, in both `public/index.php` and the CLI kernel. A live delegation therefore unlocks an in-handler check exactly as it unlocks a route gate.
 - **Read only.** Three question methods and nothing else — no `clearCache()`, no `\PDO`. Registering `RoleChecker` itself would have exposed both. It grants no authority a plugin lacks; it only lets the plugin ask the question *correctly*.
 - **`effectivePermissions()` is exactly the set `hasPermission()` answers `true` for.** `RoleChecker::getEffectivePermissionsForProfile()` deliberately returns the *raw* set (the document designer stores arbitrary tenant-defined tags in the same column); the resolver filters it through the registry so the two methods can never disagree. Passing the raw set straight through would have recreated the very divergence the contract exists to close.
-- **Fails closed.** `\Whity\app()` throws a `RuntimeException` when a service is not registered, and only ever auto-instantiates a concrete, argument-free class. It will never improvise a security service — an auto-built `RoleChecker` with a different database handle, an empty registry or no delegation resolver would answer differently from the middleware.
+- **Fails closed.** `\Whity\app()` throws a `RuntimeException` when a service is not registered, and only ever auto-instantiates a concrete class that takes no constructor parameters at all and has not declared itself host-wired (see below). It will never improvise a security service — an auto-built `RoleChecker` with a different database handle, an empty registry or no delegation resolver would answer differently from the middleware.
+
+### Host-wired services (`Whity\Core\Container\HostWiredService`)
+
+Failing closed only helps if failing is *visible*. `PermissionRegistry` is concrete and its single constructor argument is optional, so the container's auto-instantiation fallback happily built a fresh, **empty** one: `\Whity\app(PermissionRegistry::class)->exists('some_plugin:manage')` answered `false` for a permission the plugin had declared and the loader had accepted, with nothing thrown, warned or logged. The caller denied access and there was nothing to diagnose from.
+
+Constructor shape was the wrong test. The property that matters is **whether an empty instance is distinguishable from a legitimate one** — and for a registry it never is: "no permissions registered", "no probes contributed", "no handler for this job", "no transport for this channel" are all ordinary answers. So the classes say so themselves:
+
+```php
+final class MyRegistry implements \Whity\Core\Container\HostWiredService {}
+```
+
+A class carrying that marker is **never** auto-instantiated, whatever its constructor looks like; an unregistered lookup raises the documented, catchable `RuntimeException` naming the class. It carries no methods and no behaviour.
+
+Marked today: `PermissionRegistry`, `ResourceTypeRegistry`, `HealthProbeRegistry`, `TableOwnershipRegistry`, `DataTypeRegistry`, `JobRegistry`, `TransportRegistry`, `PromptRegistry`, `LanguageRegistry`. A convention test (`Tests\Core\Container\HostWiredRegistryConventionTest`) fails if a new stateful `*Registry` in `src/` is added without it.
+
+The marker is the safety net, not the fix: a host that *fills* a registry must **register the populated instance in both entry points** — `public/index.php` *and* `BaseCommand::setupKernel()`. A registry wired in only one of them means the same plugin, reached over HTTP and through a CLI command, disagrees about what exists (the divergence behind #717 and #724).
 
 There are intentionally **no** `$resourceType` / `$resourceId` parameters yet. Role grants are currently addressable only to a tenant or an OU, so a resource argument would be accepted and then silently ignored — the caller would believe it had a record-scoped answer while holding the tenant-wide one. That fails *open*. Resource-scoped overloads are additive and arrive with the polymorphic grant table (issue #712 §2).
 

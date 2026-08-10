@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Core\Notification;
 
+use Whity\Core\Container\HostWiredService;
 use Whity\Sdk\Notification\NotificationTransport;
 
 /**
@@ -20,8 +21,14 @@ use Whity\Sdk\Notification\NotificationTransport;
  * SELECTION (tenant_notification_settings, a later task) can layer in without
  * changing callers; today it returns the single transport registered for the
  * channel, tenant-agnostically.
+ *
+ * {@see HostWiredService}: fail-closed only reads as a failure when the
+ * registry is the real one. An improvised, empty instance resolves EVERY
+ * channel to null, so every delivery would be recorded as "no transport for
+ * channel X" — indistinguishable from a genuinely unconfigured channel. An
+ * unregistered lookup throws instead.
  */
-final class TransportRegistry
+final class TransportRegistry implements HostWiredService
 {
     /** @var array<string, NotificationTransport> */
     private array $transports = [];
