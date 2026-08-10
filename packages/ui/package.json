@@ -4,6 +4,7 @@
   "description": "Shared UI primitives for Whity products",
   "license": "UNLICENSED",
   "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },

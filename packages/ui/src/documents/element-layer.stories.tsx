@@ -35,10 +35,33 @@ const STYLE: TextStyle = {
   letterSpacing: 0,
 }
 
+/** Header text, a divider line, an interpolated body line and a body rect. */
+const MULTI_ELEMENT_LAYOUT: DocElement[] = [
+  { id: "title", type: "text", x: 5, y: 5, w: 80, h: 10, rotation: 0, z: 1, text: "Acme Corp", style: { ...STYLE, fontSize: 16, fontWeight: "bold" } },
+  { id: "rule", type: "line", x: 5, y: 16, w: 90, h: 0.5, rotation: 0, z: 2, stroke: "#333333", strokeWidth: 0.5 },
+  {
+    id: "body",
+    type: "dynamicText",
+    x: 5,
+    y: 20,
+    w: 90,
+    h: 12,
+    rotation: 0,
+    z: 3,
+    template: "Invoice {{invoice_no}} — {{date}}",
+    style: STYLE,
+  },
+  { id: "box", type: "rect", x: 5, y: 34, w: 90, h: 20, rotation: 0, z: 4, fill: "#f8fafc", stroke: "#cbd5e1", strokeWidth: 0.3, radius: 1 },
+];
+
 const meta = {
   title: "Documents/ElementLayer",
   component: ElementLayer,
   tags: ["autodocs"],
+  args: {
+    elements: MULTI_ELEMENT_LAYOUT,
+    data: { invoice_no: "INV-1001", date: "2026-01-15" },
+  },
   parameters: {
     docs: {
       description: {
@@ -54,31 +77,11 @@ type Story = StoryObj<typeof meta>
 
 /** A simple multi-element layout: header text, a divider line and a body rect. */
 export const MultiElementLayout: Story = {
-  render: () => {
-    const elements: DocElement[] = [
-      { id: "title", type: "text", x: 5, y: 5, w: 80, h: 10, rotation: 0, z: 1, text: "Acme Corp", style: { ...STYLE, fontSize: 16, fontWeight: "bold" } },
-      { id: "rule", type: "line", x: 5, y: 16, w: 90, h: 0.5, rotation: 0, z: 2, stroke: "#333333", strokeWidth: 0.5 },
-      {
-        id: "body",
-        type: "dynamicText",
-        x: 5,
-        y: 20,
-        w: 90,
-        h: 12,
-        rotation: 0,
-        z: 3,
-        template: "Invoice {{invoice_no}} — {{date}}",
-        style: STYLE,
-      },
-      { id: "box", type: "rect", x: 5, y: 34, w: 90, h: 20, rotation: 0, z: 4, fill: "#f8fafc", stroke: "#cbd5e1", strokeWidth: 0.3, radius: 1 },
-    ];
-    const data = { invoice_no: "INV-1001", date: "2026-01-15" };
-    return (
-      <Page w={100} h={60}>
-        <ElementLayer elements={elements} data={data} />
-      </Page>
-    );
-  },
+  render: (args) => (
+    <Page w={100} h={60}>
+      <ElementLayer {...args} />
+    </Page>
+  ),
 }
 
 const HEADER_BLOCK: DocBlock = {
@@ -107,9 +110,10 @@ const HEADER_BLOCK: DocBlock = {
 
 /** A `blockInstance` resolved to its block's elements, via `BlockInstanceContent`. */
 export const BlockInstanceResolved: Story = {
-  render: () => (
+  args: { data: { company_name: "Acme Corp" } },
+  render: ({ data }) => (
     <Page w={100} h={20}>
-      <BlockInstanceContent block={HEADER_BLOCK} data={{ company_name: "Acme Corp" }} preview />
+      <BlockInstanceContent block={HEADER_BLOCK} data={data} preview />
     </Page>
   ),
 }
@@ -117,9 +121,10 @@ export const BlockInstanceResolved: Story = {
 /** A `blockInstance` whose block was deleted — a visible placeholder while
  * editing, nothing at all in Preview/print. */
 export const MissingBlockPlaceholder: Story = {
-  render: () => (
+  args: { data: {} },
+  render: ({ data }) => (
     <Page w={60} h={20}>
-      <BlockInstanceContent block={undefined} data={{}} preview={false} />
+      <BlockInstanceContent block={undefined} data={data} preview={false} />
     </Page>
   ),
 }

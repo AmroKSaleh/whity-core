@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
+import { fn } from "storybook/test"
 import * as React from "react"
 import { IconBuilding, IconUsersGroup } from "@tabler/icons-react"
 
@@ -19,66 +20,92 @@ const meta = {
   title: "Layout/Switcher",
   component: Switcher,
   tags: ["autodocs"],
+  args: {
+    items: TENANTS,
+    icon: <IconBuilding />,
+    switchLabel: "Tenant",
+    onChange: fn(),
+  },
 } satisfies Meta<typeof Switcher>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-function Controlled({ items, ...props }: Omit<React.ComponentProps<typeof Switcher>, "activeId" | "onChange"> & { items: SwitcherItem[] }) {
+/**
+ * `Switcher` is controlled, so the stories drive it through this wrapper: the
+ * active item is held locally (starting at the first of the `items` arg) and
+ * the `onChange` arg still fires, so the Actions panel logs every switch.
+ */
+function Controlled({ items, onChange, ...props }: React.ComponentProps<typeof Switcher>) {
   const [activeId, setActiveId] = React.useState(items[0]?.id)
-  return <Switcher {...props} items={items} activeId={activeId} onChange={setActiveId} />
+
+  return (
+    <Switcher
+      {...props}
+      items={items}
+      activeId={activeId}
+      onChange={(id) => {
+        setActiveId(id)
+        onChange(id)
+      }}
+    />
+  )
 }
 
 export const TenantSwitcherManyTenants: Story = {
   name: "Tenant switcher — many tenants",
-  render: () => (
+  render: (args) => (
     <div className="w-64">
-      <Controlled items={TENANTS} icon={<IconBuilding />} switchLabel="Tenant" />
+      <Controlled {...args} />
     </div>
   ),
 }
 
 export const TeamSwitcherManyTeams: Story = {
   name: "Team switcher — many teams",
-  render: () => (
+  args: { items: TEAMS, icon: <IconUsersGroup />, switchLabel: "Team" },
+  render: (args) => (
     <div className="w-64">
-      <Controlled items={TEAMS} icon={<IconUsersGroup />} switchLabel="Team" />
+      <Controlled {...args} />
     </div>
   ),
 }
 
 export const SingleItem: Story = {
   name: "Single item — static label, no dropdown",
-  render: () => (
+  args: { items: [TENANTS[0]] },
+  render: (args) => (
     <div className="w-64">
-      <Controlled items={[TENANTS[0]]} icon={<IconBuilding />} switchLabel="Tenant" />
+      <Controlled {...args} />
     </div>
   ),
 }
 
 export const NoItems: Story = {
   name: "No items — static empty label",
-  render: () => (
+  args: { items: [], icon: <IconUsersGroup />, switchLabel: "Team" },
+  render: (args) => (
     <div className="w-64">
-      <Controlled items={[]} icon={<IconUsersGroup />} switchLabel="Team" />
+      <Controlled {...args} />
     </div>
   ),
 }
 
 export const Collapsed: Story = {
-  render: () => (
+  args: { collapsed: true },
+  render: (args) => (
     <div className="w-16">
-      <Controlled items={TENANTS} icon={<IconBuilding />} switchLabel="Tenant" collapsed />
+      <Controlled {...args} />
     </div>
   ),
 }
 
 export const BothStacked: Story = {
   name: "Tenant + team stacked (as used in AppSidebar)",
-  render: () => (
+  render: (args) => (
     <div className="w-64 space-y-1.5">
-      <Controlled items={TENANTS} icon={<IconBuilding />} switchLabel="Tenant" />
-      <Controlled items={TEAMS} icon={<IconUsersGroup />} switchLabel="Team" />
+      <Controlled {...args} />
+      <Controlled {...args} items={TEAMS} icon={<IconUsersGroup />} switchLabel="Team" />
     </div>
   ),
 }

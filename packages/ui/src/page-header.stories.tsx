@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import * as React from "react"
 import { IconDownload, IconPlus, IconUsers } from "@tabler/icons-react"
 
 import { PageHeader } from "./page-header"

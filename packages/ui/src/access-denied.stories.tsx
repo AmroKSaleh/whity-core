@@ -2,7 +2,6 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import * as React from "react"
 import { IconArrowLeft, IconBuilding, IconHome, IconRefresh, IconSettings, IconUsers } from "@tabler/icons-react"
 
-import { Button } from "./button"
 import { AccessDenied, type SearchResultItem } from "./access-denied"
 
 const meta = {
@@ -81,7 +80,19 @@ export const NotFoundWithSearchResults: Story = {
 }
 
 export const NotFoundInteractiveSearch: Story = {
-  render: () => {
+  args: {
+    variant: "not-found",
+    title: "Page Not Found",
+    description: "Try searching for settings, users, or general options:",
+    showSearch: true,
+    searchPlaceholder: "Type 'users' or 'settings'...",
+    primaryAction: {
+      label: "Back to Home",
+      icon: <IconHome />,
+      href: "/",
+    },
+  },
+  render: (args) => {
     const [query, setQuery] = React.useState("")
     const filtered = query.trim()
       ? SAMPLE_RESULTS.filter(
@@ -91,22 +102,7 @@ export const NotFoundInteractiveSearch: Story = {
         )
       : []
 
-    return (
-      <AccessDenied
-        variant="not-found"
-        title="Page Not Found"
-        description="Try searching for settings, users, or general options:"
-        showSearch
-        searchPlaceholder="Type 'users' or 'settings'..."
-        onSearch={setQuery}
-        searchResults={filtered}
-        primaryAction={{
-          label: "Back to Home",
-          icon: <IconHome />,
-          href: "/",
-        }}
-      />
-    )
+    return <AccessDenied {...args} onSearch={setQuery} searchResults={filtered} />
   },
 }
 

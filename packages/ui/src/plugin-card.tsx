@@ -18,7 +18,6 @@ import {
   IconSettings,
   IconShieldCheck,
   IconStarFilled,
-  IconMaximize,
 } from "@tabler/icons-react"
 
 import { cn } from "./utils"
@@ -569,6 +568,16 @@ interface PluginImageGalleryProps {
   bannerGradient?: string
 }
 
+/**
+ * One gallery slide: either a real screenshot, or — when the plugin ships none —
+ * a gradient placeholder standing in for a screenshot that does not exist yet.
+ * The two shapes carry different fields, so the variant is explicit rather than
+ * inferred from a truthy `url`.
+ */
+type PluginGalleryItem =
+  | { kind: "screenshot"; title: string; url: string }
+  | { kind: "placeholder"; title: string; label: string; gradient: string }
+
 function PluginImageGallery({
   screenshots,
   pluginName,
@@ -576,22 +585,28 @@ function PluginImageGallery({
   bannerGradient = "from-primary/20 via-muted to-muted/80",
 }: PluginImageGalleryProps) {
   const [activeIndex, setActiveIndex] = React.useState(0)
-  const [zoomOpen, setZoomOpen] = React.useState(false)
 
-  const items = screenshots && screenshots.length > 0
-    ? screenshots.map((url, i) => ({ title: `${pluginName} Screenshot ${i + 1}`, url }))
+  const items: PluginGalleryItem[] = screenshots && screenshots.length > 0
+    ? screenshots.map((url, i) => ({
+        kind: "screenshot",
+        title: `${pluginName} Screenshot ${i + 1}`,
+        url,
+      }))
     : [
         {
+          kind: "placeholder",
           title: "Main Interface View",
           label: "Dashboard View",
           gradient: bannerGradient,
         },
         {
+          kind: "placeholder",
           title: "Configuration & Settings",
           label: "Rule Engine Settings",
           gradient: "from-blue-600/30 via-slate-800/30 to-muted/80",
         },
         {
+          kind: "placeholder",
           title: "Telemetry & Live Logs",
           label: "Realtime Analytics",
           gradient: "from-emerald-600/30 via-teal-800/30 to-muted/80",
@@ -613,7 +628,7 @@ function PluginImageGallery({
 
       {/* Main Preview Container */}
       <div className="group/gallery relative h-48 w-full overflow-hidden rounded-xl border border-border/60 bg-muted">
-        {currentItem.url ? (
+        {currentItem.kind === "screenshot" ? (
           <img
             src={currentItem.url}
             alt={currentItem.title}
@@ -675,13 +690,13 @@ function PluginImageGallery({
                   : "border-border/50 opacity-70 hover:opacity-100 hover:border-border"
               )}
             >
-              {item.url ? (
+              {item.kind === "screenshot" ? (
                 <img src={item.url} alt={item.title} className="absolute inset-0 size-full object-cover" />
               ) : (
                 <div className={cn("absolute inset-0 bg-linear-to-br", item.gradient)} />
               )}
               <span className="relative z-10 text-[9px] font-semibold text-foreground/90 truncate drop-shadow-xs">
-                {item.label ?? item.title}
+                {item.kind === "placeholder" ? item.label : item.title}
               </span>
             </button>
           ))}
