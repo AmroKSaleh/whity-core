@@ -42,6 +42,20 @@ use Whity\Sdk\DataType\DataTypeGuard;
  * legal from the trashed state, so there is no path from live to gone that skips
  * the reversible step.
  *
+ * A restore is an UNDO, and an undo needs a memory
+ * ------------------------------------------------
+ * `restore` returns a record to the state it actually held, which means that
+ * state has to survive the time it spends in the trash. It does, in
+ * {@see LifecycleStateMemory} — a core-owned side table keyed
+ * `(tenant_id, data_type, record_id)`, so no plugin has to add a column to get
+ * a correct undo. `trash` writes the memory it was already reading (to publish
+ * as the hook's `from`); `restore` spends it; `delete` forgets it, because
+ * nothing else will.
+ *
+ * `defaultState()` is the FALLBACK, used when nothing is remembered or when what
+ * was remembered is no longer a state the type declares. It is not "where a
+ * restore goes".
+ *
  * Tenant isolation
  * ----------------
  * Every statement binds the tenant column. A record in another tenant is
@@ -61,6 +75,18 @@ class DataTypeLifecycleService implements DataTypeGuard
     private ?AuditLoggerInterface $auditLogger;
 
     /**
+     * Where a trashed record's prior state waits for its restore.
+     *
+     * Built from the same connection rather than injected: it is an
+     * implementation detail of how this service keeps its promise that a
+     * restore is an undo, not a collaborator a caller chooses. Injecting it
+     * would put the same object in every wiring site (the HTTP entry point, the
+     * CLI bootstrap, every test) with no decision to make there — and a caller
+     * that passed a different one could only make the undo wrong.
+     */
+    private LifecycleStateMemory $memory;
+
+    /**
      * @param PDO                       $pdo         Live database connection.
      * @param DataTypeRegistry          $registry    The catalogue of declared types.
      * @param HookManager|null          $hookManager Announces transitions on the durable spine.
@@ -76,6 +102,7 @@ class DataTypeLifecycleService implements DataTypeGuard
         $this->registry = $registry;
         $this->hookManager = $hookManager;
         $this->auditLogger = $auditLogger;
+        $this->memory = new LifecycleStateMemory($pdo);
     }
 
     /**
@@ -150,6 +177,15 @@ class DataTypeLifecycleService implements DataTypeGuard
     /**
      * Trash a record: reversible, closed to new references, pending removal.
      *
+     * Reversible means the state being left has to be kept, so this is also
+     * where it is remembered — the same value that has always been published as
+     * the transition's `from`.
+     *
+     * The memory is written only on a REAL trash. Trashing an already-trashed
+     * record returns early (below) and never reaches the write, which is what
+     * stops a second click from remembering `trashed` as the state to restore
+     * to and turning the undo into a no-op.
+     *
      * @param string     $dataType The namespaced type key.
      * @param int        $tenantId The resolved tenant id.
      * @param int|string $id       The record's key.
@@ -178,14 +214,39 @@ class DataTypeLifecycleService implements DataTypeGuard
         }
 
         $target = (string) $lifecycle->trashedState();
-        $this->writeState($definition, $tenantId, $id, $target);
+        $this->transactionally(function () use ($definition, $tenantId, $id, $state, $target): void {
+            // Remembered inside the same transaction as the state change, so
+            // the pair is all-or-nothing: a trashed record with no memory would
+            // silently restore to the default, and a memory for a record that
+            // never moved would misdirect its next real restore.
+            if ($state !== null) {
+                $this->memory->remember($definition->key(), $tenantId, $id, $state);
+            }
+            $this->writeState($definition, $tenantId, $id, $target);
+        });
         $this->announce($definition, LifecycleAction::TRASH, $id, $tenantId, $state, $target, $actorId);
 
         return LifecycleResult::ok($target);
     }
 
     /**
-     * Restore a trashed record to the type's default state.
+     * Restore a trashed record to THE STATE IT HELD before it was trashed.
+     *
+     * Not to the type's default state. That is what this used to do, and it was
+     * a data-loss bug rather than a simplification: a record trashed while
+     * `approved` came back `draft`, so anything with an approval gate quietly
+     * re-entered circulation looking unreviewed — reported as a 200 that is
+     * indistinguishable from a correct undo. The prior state was never unknown;
+     * {@see self::trash()} read it to announce it and now also keeps it.
+     *
+     * The declared default is the FALLBACK, in exactly two situations, both
+     * resolved by {@see self::restoreTarget()}:
+     *
+     *  - nothing is remembered — every record already in the trash when this
+     *    shipped, which is the migration path and therefore documented
+     *    behaviour, not an accident;
+     *  - what was remembered is no longer a state the type declares, or the
+     *    type has since repurposed it as its trashed or retired state.
      *
      * Refused for a retired record: the point of retirement is that there is no
      * way back.
@@ -217,11 +278,53 @@ class DataTypeLifecycleService implements DataTypeGuard
             return LifecycleResult::ok($state);
         }
 
-        $target = $lifecycle->defaultState();
-        $this->writeState($definition, $tenantId, $id, $target);
+        $target = self::restoreTarget($lifecycle, $this->memory->recall($definition->key(), $tenantId, $id));
+        $this->transactionally(function () use ($definition, $tenantId, $id, $target): void {
+            $this->writeState($definition, $tenantId, $id, $target);
+            // The memory is SPENT. Left behind it is stale — the record is no
+            // longer trashed — and the next real trash would overwrite it
+            // anyway, so keeping it buys nothing and can only mislead.
+            $this->memory->forget($definition->key(), $tenantId, $id);
+        });
         $this->announce($definition, LifecycleAction::RESTORE, $id, $tenantId, $state, $target, $actorId);
 
         return LifecycleResult::ok($target);
+    }
+
+    /**
+     * Where a restore should put the record: the remembered state when it is
+     * still a legal destination, and the declared default otherwise.
+     *
+     * Validating the remembered state is not paperwork. A type's state
+     * vocabulary is a DECLARATION, not a schema — it can change on any deploy,
+     * between the trash and the restore — and three ways of writing it back
+     * would each be worse than the bug this fixes:
+     *
+     *  - a state the type no longer declares puts the row outside its own
+     *    vocabulary, where nothing matches on it and no screen can render it;
+     *  - a state the type has since repurposed as its RETIRED one walks the
+     *    record into the single state the lifecycle promises is unreachable by
+     *    restore, through the restore endpoint;
+     *  - a state now meaning TRASHED makes the restore a silent no-op that
+     *    reports success.
+     *
+     * The default is guaranteed to be none of those: {@see DataTypeRegistry}
+     * refuses a declaration whose `default_state` is the trashed or retired
+     * state, for this exact reason.
+     *
+     * @param string|null $remembered The state recalled for this record, if any.
+     */
+    private static function restoreTarget(Lifecycle $lifecycle, ?string $remembered): string
+    {
+        if ($remembered === null || !in_array($remembered, $lifecycle->states(), true)) {
+            return $lifecycle->defaultState();
+        }
+
+        if ($lifecycle->isTrashed($remembered) || $lifecycle->isRetired($remembered)) {
+            return $lifecycle->defaultState();
+        }
+
+        return $remembered;
     }
 
     /**
@@ -265,6 +368,12 @@ class DataTypeLifecycleService implements DataTypeGuard
     /**
      * Delete a record for real, if every declared guard permits it.
      *
+     * Also forgets any state remembered for it. That is not tidiness: the
+     * memory's `record_id` points into a table that varies by data type, so it
+     * carries no foreign key and no cascade will ever fire for it. A row left
+     * behind would be inherited by whatever record next occupies that primary
+     * key — the same id-reuse hazard the taxonomy delete guard had to answer.
+     *
      * @param string     $dataType The namespaced type key.
      * @param int        $tenantId The resolved tenant id.
      * @param int|string $id       The record's key.
@@ -288,8 +397,11 @@ class DataTypeLifecycleService implements DataTypeGuard
         $tenantColumn = self::identifier($definition->tenantColumn());
 
         $sql = "DELETE FROM {$table} WHERE {$keyColumn} = :id AND {$tenantColumn} = :tenant";
-        $statement = $this->pdo->prepare($sql);
-        $statement->execute([':id' => $id, ':tenant' => $tenantId]);
+        $this->transactionally(function () use ($sql, $definition, $tenantId, $id): void {
+            $statement = $this->pdo->prepare($sql);
+            $statement->execute([':id' => $id, ':tenant' => $tenantId]);
+            $this->memory->forget($definition->key(), $tenantId, $id);
+        });
 
         $this->announce($definition, LifecycleAction::DELETE, $id, $tenantId, $state, null, $actorId);
 
@@ -595,6 +707,41 @@ class DataTypeLifecycleService implements DataTypeGuard
             . "WHERE {$keyColumn} = :id AND {$tenantColumn} = :tenant";
         $statement = $this->pdo->prepare($sql);
         $statement->execute([':state' => $state, ':id' => $id, ':tenant' => $tenantId]);
+    }
+
+    /**
+     * Run a pair of statements as one unit.
+     *
+     * Every transition that touches the memory touches the record too, and the
+     * two halves are only meaningful together: a trashed record with no memory
+     * restores to the wrong state, and a memory for a record that never moved
+     * misdirects its next restore. A hard delete has the sharper version — a
+     * surviving memory row is inherited by the next record on that id.
+     *
+     * Joins an OUTER transaction rather than nesting inside it: PDO has no
+     * savepoint-based nesting, so a `beginTransaction()` here would throw when a
+     * caller already opened one, and a commit here would end THEIR unit of work
+     * early. When one is already open, that transaction is the atomicity.
+     *
+     * @param callable(): void $work The statements to run together.
+     */
+    private function transactionally(callable $work): void
+    {
+        if ($this->pdo->inTransaction()) {
+            $work();
+
+            return;
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $work();
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+
+            throw $e;
+        }
     }
 
     /**

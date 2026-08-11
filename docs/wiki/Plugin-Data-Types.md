@@ -26,7 +26,7 @@ The distinction plugins most often lose:
 | | **trashed** | **retired** |
 |---|---|---|
 | What it means | "this should not exist" — a mistake | "this served its purpose" |
-| Reversible? | **yes**, restore returns it to the default state | **never** |
+| Reversible? | **yes**, restore returns it to the state it held | **never** |
 | Accepts new references? | no | no |
 | Pending removal? | **yes** | no |
 | Can be deleted for real? | yes, once nothing references it | **never**, even when unreferenced |
@@ -54,6 +54,40 @@ live ──retire──▶ retired ──▶ (nothing)
 * when a type is trashable, delete is legal **only** from the trashed state
   (`trash_before_deleting`), so no delete path — including a plugin's own
   empty-trash sweep — can skip the reversible step.
+
+### A restore is an undo, so `default_state` is a fallback
+
+`restore` returns a record to **the state it actually held** when it was
+trashed. A record trashed while `approved` comes back `approved`.
+
+This is worth stating plainly because it did not always hold: `restore` used to
+write `default_state` unconditionally, so a trashed `approved` record came back
+`draft` and re-entered circulation looking unreviewed — reported by a `200`
+identical to a correct undo. If you read the old behaviour into your own screens
+(for example by assuming a restored record is always ready for review again),
+re-check that assumption.
+
+Nothing is required of your plugin for this. Core keeps the prior state in its
+own table, keyed by `(tenant, data type, record id)`; your schema is untouched
+and there is no migration to ship. Core removes the row when a restore has spent
+it and when the record is hard-deleted **through core** — it can carry no
+foreign key to your table (the target varies by type), so no cascade will ever
+do it. If you keep your own delete route, delete through
+`DELETE /api/data-types/{type}/{id}` or the SDK guard's evaluator where you can;
+otherwise a primary key that is later re-used may carry a stale memory until its
+next `trash` overwrites it.
+
+`default_state` is now what a restore falls back to, in two cases:
+
+* **nothing was remembered** — every record already sitting in the trash when
+  this shipped, and any record whose `status` was set to your trashed state by
+  something other than the `trash` endpoint. Those restore to `default_state`,
+  exactly as before;
+* **the remembered state is no longer usable** — you changed `states` between
+  the trash and the restore, or repurposed that state as your `trashed_state` or
+  `retired_state`. Writing it back would put the row outside its own vocabulary,
+  or walk it into retirement through the restore endpoint, so core uses
+  `default_state` instead.
 
 ---
 
