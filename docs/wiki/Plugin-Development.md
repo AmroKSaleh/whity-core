@@ -287,6 +287,22 @@ public function archive(Request $request, array $params = []): Response
 `hasRole()` and `effectivePermissions()` are also available;
 `effectivePermissions()` is exactly the set `hasPermission()` returns `true` for,
 so filtering a result set in one pass can never disagree with a per-row check.
+
+All three take an optional `$resourceType` / `$resourceId` pair, so the question
+can be narrowed to **one record** instead of the whole tenant — `hasPermission()`
+and `effectivePermissions()` since SDK 1.17, `hasRole()` since 1.22:
+
+```php
+if (!$rbac->hasRole($profileId, $tenantId, 'approver', 'hello:document', $docId)) {
+    return Response::error('Insufficient permissions', 403);
+}
+```
+
+Pass both or neither (a half-specified resource is not a resource, and collapses
+to the tenant-wide answer), declare the type via `PluginResourceTypesInterface`,
+and note that a record grant only ever **widens** authority — it is never a
+substitute for tenant membership. Per-record role holding therefore needs no
+parallel grant table of your own, and no change to core's `memberships`.
 The contract is read-only — no cache invalidation, no database handle — and it
 grants no authority your plugin does not already have. `\Whity\app()` throws a
 `RuntimeException` if the host never registered a resolver, so an unwired host

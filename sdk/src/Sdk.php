@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.21).
+ * SDK identity (v1.22).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -108,13 +108,21 @@ namespace Whity\Sdk;
  * as a core key, and published on the host's own settings screens only on an
  * explicit `admin => true` opt-in — those screens are gated on core permissions,
  * which are not the plugin's. Secret-shaped declarations are REFUSED rather than
- * downgraded to a readable string, #713 item 1).
+ * downgraded to a readable string, #713 item 1) ->
+ * 1.22 (RESOURCE-SCOPED ROLE checks: the optional `$resourceType`/`$resourceId`
+ * pair 1.17 gave {@see \Whity\Sdk\Rbac\PermissionResolver::hasPermission()} is
+ * now on {@see \Whity\Sdk\Rbac\PermissionResolver::hasRole()} too. Host role
+ * resolution has honoured a resource scope since 1.17, but `hasRole()` asked the
+ * tenant-wide question regardless — so a role granted at ONE record through
+ * `resource_role_assignments` was resolvable and not askable, and reads as
+ * needing a schema change to `memberships` that it does not need. Additive:
+ * omitting them preserves 1.21 behaviour exactly, WC-712 §2).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.21.0';
+    public const VERSION = '1.22.0';
 
     /**
      * Static identity only — never instantiated.

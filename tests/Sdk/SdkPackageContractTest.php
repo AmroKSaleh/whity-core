@@ -167,9 +167,19 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.21.0',
+            '1.22.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.21 adds plugin-declared SETTINGS (Settings\PluginSettingsInterface, '
+            'SDK 1.22 makes the ROLE side of PermissionResolver resource-scoped: '
+            . 'hasRole() takes the same optional $resourceType/$resourceId pair '
+            . '1.17 gave hasPermission(). Host role resolution has honoured a '
+            . 'resource scope since 1.17 (getEffectiveRolesForProfile accepts '
+            . 'one), but hasRole() called it with no resource arguments, so a '
+            . 'role granted at ONE record through resource_role_assignments was '
+            . 'fully representable in storage and fully resolvable — yet '
+            . 'unreachable through the method any caller would use, which reads '
+            . 'as needing a memberships schema change it does not need. Additive: '
+            . 'omitting them preserves 1.21 behaviour exactly (WC-712 §2); '
+            . 'SDK 1.21 adds plugin-declared SETTINGS (Settings\PluginSettingsInterface, '
             . '#713 item 1): a plugin contributes typed, validated, defaulted '
             . 'configuration keys to the settings store the HOST already owns — the same '
             . 'two tables, the same per-tenant ?? global ?? default chain, the same write '
@@ -258,6 +268,36 @@ final class SdkPackageContractTest extends TestCase
             'array',
             (string) (new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, 'effectivePermissions'))
                 ->getReturnType()
+        );
+
+        // SDK 1.22: the resource scope is on the ROLE side too. Every method that
+        // can be asked at a resource must take the SAME pair, or the contract is
+        // asymmetric again — a plugin could narrow a permission question to one
+        // record and not the role question about that same record.
+        $signature = static fn (string $method): array => array_map(
+            static fn (\ReflectionParameter $p): string => $p->getName(),
+            (new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, $method))->getParameters()
+        );
+
+        $this->assertSame(
+            ['profileId', 'tenantId', 'permission', 'resourceType', 'resourceId'],
+            $signature('hasPermission')
+        );
+        $this->assertSame(
+            ['profileId', 'tenantId', 'role', 'resourceType', 'resourceId'],
+            $signature('hasRole')
+        );
+        $this->assertSame(
+            ['profileId', 'tenantId', 'resourceType', 'resourceId'],
+            $signature('effectivePermissions')
+        );
+
+        // Additive only: a plugin written against SDK 1.21 must keep compiling
+        // and keep receiving the tenant-wide answer.
+        $hasRole = new \ReflectionMethod(\Whity\Sdk\Rbac\PermissionResolver::class, 'hasRole');
+        $this->assertTrue(
+            $hasRole->getParameters()[3]->isOptional() && $hasRole->getParameters()[4]->isOptional(),
+            'The role resource arguments must be optional so three-argument callers are unaffected.'
         );
     }
 

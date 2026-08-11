@@ -80,8 +80,13 @@ final class ServiceContainerTest extends TestCase
                 return false;
             }
 
-            public function hasRole(int $profileId, int $tenantId, string $role): bool
-            {
+            public function hasRole(
+                int $profileId,
+                int $tenantId,
+                string $role,
+                ?string $resourceType = null,
+                ?int $resourceId = null
+            ): bool {
                 return false;
             }
 

@@ -176,14 +176,34 @@ class RoleChecker
      * retains platform-wide authority: checks against tenant 0 return true when
      * the profile's system-tenant membership carries the required role.
      *
-     * @param int    $profileId    The profile id (ADR 0005 §1).
-     * @param string $requiredRole The role name to verify against.
-     * @param int    $tenantId     The resolved tenant id (0 = system tenant).
+     * Pass $resourceType and $resourceId together to ask the question AT one
+     * record, so a role granted through `resource_role_assignments` is askable
+     * and not merely resolvable: {@see self::getEffectiveRolesForProfile()} has
+     * honoured resource scope since WC-712 §2, and calling it here with no
+     * resource arguments discarded that capability — "this profile holds role X
+     * at record A" was fully representable in storage, fully resolvable, and
+     * unreachable through the method a caller would naturally use.
+     *
+     * The scoped answer is a SUPERSET of the unscoped one: a resource grant only
+     * ever widens authority at that resource. It is never a substitute for tenant
+     * membership — a profile with no ACTIVE membership resolves to nothing
+     * whatever is granted at the resource.
+     *
+     * @param int         $profileId    The profile id (ADR 0005 §1).
+     * @param string      $requiredRole The role name to verify against.
+     * @param int         $tenantId     The resolved tenant id (0 = system tenant).
+     * @param string|null $resourceType A registered resource type, e.g. `ou`.
+     * @param int|null    $resourceId   The id of that resource.
      * @return bool True if the profile effectively has the required role.
      */
-    public function hasRoleForProfile(int $profileId, string $requiredRole, int $tenantId): bool
-    {
-        $effectiveRoles = $this->getEffectiveRolesForProfile($profileId, $tenantId);
+    public function hasRoleForProfile(
+        int $profileId,
+        string $requiredRole,
+        int $tenantId,
+        ?string $resourceType = null,
+        ?int $resourceId = null
+    ): bool {
+        $effectiveRoles = $this->getEffectiveRolesForProfile($profileId, $tenantId, $resourceType, $resourceId);
         return in_array($requiredRole, $effectiveRoles, true);
     }
 

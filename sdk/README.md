@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications without dragging a host
 framework along.
 
-## Contract surface (v1.4.0)
+## Contract surface (v1.22.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ framework along.
 | `Whity\Sdk\Http\Response` | 1.0 | The response shape handlers return; `Response::json()` / `Response::error()` factories. |
 | `Whity\Sdk\Hooks\Events` | 1.0 | Catalogue of hook event names (`user.creating`, `tenant.deleted`, `worker.request.start`, …). |
 | `Whity\Sdk\Hooks\HookVetoException` | 1.15 | The only Throwable that crosses the host's per-plugin error boundary. Throw it from `*.deleting` / `*.deleted` to REFUSE a deletion (or report failed cleanup): the host rolls the delete back — those hooks run inside the DELETE's transaction — and answers `409 Conflict` with your `reason()`. Every other exception stays isolated. |
-| `Whity\Sdk\Rbac\PermissionResolver` | 1.16 | READ-ONLY access to the host's authoritative permission resolution, resolved from the service container (`\Whity\app(PermissionResolver::class)`). Ask it for an authorization decision INSIDE a handler instead of re-deriving one in SQL: it is backed by the same delegation-aware resolver the host's RBAC middleware enforces with (active-membership gating, OU-ancestor inheritance, role hierarchy, live delegations, catalogue validation), so plugin and platform can never disagree about the same caller. Grants no authority — three question methods, no cache control, no database handle. |
+| `Whity\Sdk\Rbac\PermissionResolver` | 1.16 (resource scope: 1.17, roles 1.22) | READ-ONLY access to the host's authoritative permission resolution, resolved from the service container (`\Whity\app(PermissionResolver::class)`). Ask it for an authorization decision INSIDE a handler instead of re-deriving one in SQL: it is backed by the same delegation-aware resolver the host's RBAC middleware enforces with (active-membership gating, OU-ancestor inheritance, role hierarchy, live delegations, catalogue validation), so plugin and platform can never disagree about the same caller. All three methods take an optional `$resourceType`/`$resourceId` pair that narrows the question to ONE record — `hasPermission()`/`effectivePermissions()` since 1.17, `hasRole()` since 1.22 — so per-record authority needs no private grant table. Pass both or neither; a record grant only ever WIDENS the tenant-wide answer and never substitutes for tenant membership. Grants no authority — three question methods, no cache control, no database handle. |
 | `Whity\Sdk\Sdk` | 1.1 | SDK identity: `Sdk::VERSION`, what hosts evaluate plugin SDK-constraints against. |
 | `Whity\Sdk\PluginRequirementsInterface` | 1.1 (core constraint: 1.4) | OPTIONAL declaration of a required SDK constraint, a host CORE-version constraint (`getCoreConstraint()`, since 1.4), and inter-plugin dependencies (composer constraint syntax). Unsatisfied plugins are quarantined (`PluginState::Failed` + reason); satisfied ones load in topological dependency order. |
 | `Whity\Sdk\PluginFrontendInterface` | 1.2 | OPTIONAL declaration of the admin-UI screens a plugin contributes (frontend feature descriptors). UI metadata only — descriptors grant nothing; the host validates, permission-filters, and serves them via `GET /api/frontend/features`. |
