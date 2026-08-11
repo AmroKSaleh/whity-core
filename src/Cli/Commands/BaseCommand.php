@@ -162,6 +162,13 @@ abstract class BaseCommand
         );
         \Whity\register_service(\Whity\Core\DataType\DataTypeLifecycleService::class, $dataTypeLifecycle);
         \Whity\register_service(\Whity\Sdk\DataType\DataTypeGuard::class, $dataTypeLifecycle);
+        // Same registration as public/index.php, for the same reason the two
+        // above are mirrored here: a plugin reached through a CLI command must be
+        // able to clear a record's remembered restore state after hard-deleting
+        // it outside core. Registered in one entry point only, "clear the memory"
+        // would work over HTTP and throw under the CLI — the divergence bug class
+        // this file has already paid for in #717 and #724.
+        \Whity\register_service(\Whity\Core\DataType\LifecycleStateMemory::class, $dataTypeLifecycle->stateMemory());
 
         $baseDir = dirname(__DIR__, 3);
         // The registries are passed HERE, not just constructed above: this loader

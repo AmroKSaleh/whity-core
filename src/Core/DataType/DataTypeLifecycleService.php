@@ -8,6 +8,7 @@ use PDO;
 use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Hooks\HookManager;
 use Whity\Sdk\DataType\DataTypeGuard;
+use Whity\Sdk\Hooks\HookVetoException;
 
 /**
  * Evaluates declared referential guards and performs declared lifecycle
@@ -56,6 +57,38 @@ use Whity\Sdk\DataType\DataTypeGuard;
  * was remembered is no longer a state the type declares. It is not "where a
  * restore goes".
  *
+ * Two hooks, and why one of them can say no
+ * -----------------------------------------
+ * A transition announces itself twice, and the difference between the two is
+ * the difference between being told and being asked:
+ *
+ *   `datatype.lifecycle.changing`  BEFORE the write — VETOABLE
+ *   `datatype.lifecycle.changed`   AFTER  the write — observation only
+ *
+ * `changed` alone was not enough, and the gap was not cosmetic. Core's refusals
+ * are the ones core can DERIVE: a declared `blocks_delete` guard counts rows,
+ * and the state rules below know that retirement is permanent. Neither can know
+ * a domain rule — that a record is depended on by something that would become
+ * unusable without it, that a particular type must never be trashed once
+ * retired by a rule the type does not declare, that a parent may not move while
+ * its children are mid-flight. Those are not foreign keys, and `blocks_delete`
+ * is about DELETE, not about trash. Without a veto point an adopter's only
+ * option was a parallel route in front of core's — which means two lifecycle
+ * memories for one record, and a restore that disagrees with core's about what
+ * state the record returns to. That split brain is a correctness bug that
+ * reports success, so the veto exists to make the parallel route unnecessary.
+ *
+ * A listener aborts by throwing {@see HookVetoException} — the one Throwable
+ * the host's per-plugin error boundary re-throws instead of swallowing (SDK
+ * 1.15). It arrives here, the write never happens, and the caller gets a 409
+ * carrying the veto's `reason()`. Every OTHER Throwable stays isolated by that
+ * boundary and the transition proceeds, exactly as before: a plugin that
+ * crashes must not become a plugin that blocks.
+ *
+ * The hook fires for ALL FOUR mutating actions, not just delete. An adopter who
+ * can refuse a delete but not a trash has not been given a veto, because a trash
+ * is what their own route was refusing.
+ *
  * Tenant isolation
  * ----------------
  * Every statement binds the tenant column. A record in another tenant is
@@ -66,6 +99,18 @@ use Whity\Sdk\DataType\DataTypeGuard;
  */
 class DataTypeLifecycleService implements DataTypeGuard
 {
+    /**
+     * Dispatched BEFORE the write, for every mutating action. A listener
+     * throwing {@see HookVetoException} aborts the transition.
+     */
+    public const HOOK_CHANGING = 'datatype.lifecycle.changing';
+
+    /**
+     * Dispatched AFTER a transition that actually happened. Observation only —
+     * throwing here cannot undo anything, because there is nothing left to undo.
+     */
+    public const HOOK_CHANGED = 'datatype.lifecycle.changed';
+
     private PDO $pdo;
 
     private DataTypeRegistry $registry;
@@ -103,6 +148,30 @@ class DataTypeLifecycleService implements DataTypeGuard
         $this->hookManager = $hookManager;
         $this->auditLogger = $auditLogger;
         $this->memory = new LifecycleStateMemory($pdo);
+    }
+
+    /**
+     * The restore-state memory this service keeps — the SAME object, not a
+     * second one over the same connection.
+     *
+     * Exposed so the host entry points can register it in the container. A
+     * plugin that hard-deletes a record OUTSIDE core (its own route, its own
+     * SQL, a bulk purge) has to clear the record's memory row, and until this
+     * was reachable it had exactly two options: import a core class the
+     * container refused to build, or `DELETE` from a core-owned table by hand.
+     * Both are worse than a service lookup, and the consequence of doing
+     * neither is not cosmetic — `record_id` carries no foreign key, so a
+     * client-supplied key that a later record re-uses inherits the dead
+     * record's state and can be restored into a state it never held.
+     *
+     * A READ accessor, deliberately, not an injection point: {@see self::$memory}
+     * explains why a caller must not be able to substitute a different memory,
+     * and returning the one in use keeps that true while removing the "which
+     * instance?" question entirely.
+     */
+    public function stateMemory(): LifecycleStateMemory
+    {
+        return $this->memory;
     }
 
     /**
@@ -214,17 +283,28 @@ class DataTypeLifecycleService implements DataTypeGuard
         }
 
         $target = (string) $lifecycle->trashedState();
-        $this->transactionally(function () use ($definition, $tenantId, $id, $state, $target): void {
-            // Remembered inside the same transaction as the state change, so
-            // the pair is all-or-nothing: a trashed record with no memory would
-            // silently restore to the default, and a memory for a record that
-            // never moved would misdirect its next real restore.
-            if ($state !== null) {
-                $this->memory->remember($definition->key(), $tenantId, $id, $state);
+        $veto = $this->apply(
+            $definition,
+            LifecycleAction::TRASH,
+            $tenantId,
+            $id,
+            $state,
+            $target,
+            $actorId,
+            function () use ($definition, $tenantId, $id, $state, $target): void {
+                // Remembered inside the same transaction as the state change, so
+                // the pair is all-or-nothing: a trashed record with no memory would
+                // silently restore to the default, and a memory for a record that
+                // never moved would misdirect its next real restore.
+                if ($state !== null) {
+                    $this->memory->remember($definition->key(), $tenantId, $id, $state);
+                }
+                $this->writeState($definition, $tenantId, $id, $target);
             }
-            $this->writeState($definition, $tenantId, $id, $target);
-        });
-        $this->announce($definition, LifecycleAction::TRASH, $id, $tenantId, $state, $target, $actorId);
+        );
+        if ($veto !== null) {
+            return $veto;
+        }
 
         return LifecycleResult::ok($target);
     }
@@ -279,14 +359,25 @@ class DataTypeLifecycleService implements DataTypeGuard
         }
 
         $target = self::restoreTarget($lifecycle, $this->memory->recall($definition->key(), $tenantId, $id));
-        $this->transactionally(function () use ($definition, $tenantId, $id, $target): void {
-            $this->writeState($definition, $tenantId, $id, $target);
-            // The memory is SPENT. Left behind it is stale — the record is no
-            // longer trashed — and the next real trash would overwrite it
-            // anyway, so keeping it buys nothing and can only mislead.
-            $this->memory->forget($definition->key(), $tenantId, $id);
-        });
-        $this->announce($definition, LifecycleAction::RESTORE, $id, $tenantId, $state, $target, $actorId);
+        $veto = $this->apply(
+            $definition,
+            LifecycleAction::RESTORE,
+            $tenantId,
+            $id,
+            $state,
+            $target,
+            $actorId,
+            function () use ($definition, $tenantId, $id, $target): void {
+                $this->writeState($definition, $tenantId, $id, $target);
+                // The memory is SPENT. Left behind it is stale — the record is no
+                // longer trashed — and the next real trash would overwrite it
+                // anyway, so keeping it buys nothing and can only mislead.
+                $this->memory->forget($definition->key(), $tenantId, $id);
+            }
+        );
+        if ($veto !== null) {
+            return $veto;
+        }
 
         return LifecycleResult::ok($target);
     }
@@ -359,8 +450,21 @@ class DataTypeLifecycleService implements DataTypeGuard
         }
 
         $target = (string) $lifecycle->retiredState();
-        $this->writeState($definition, $tenantId, $id, $target);
-        $this->announce($definition, LifecycleAction::RETIRE, $id, $tenantId, $state, $target, $actorId);
+        $veto = $this->apply(
+            $definition,
+            LifecycleAction::RETIRE,
+            $tenantId,
+            $id,
+            $state,
+            $target,
+            $actorId,
+            function () use ($definition, $tenantId, $id, $target): void {
+                $this->writeState($definition, $tenantId, $id, $target);
+            }
+        );
+        if ($veto !== null) {
+            return $veto;
+        }
 
         return LifecycleResult::ok($target);
     }
@@ -397,13 +501,23 @@ class DataTypeLifecycleService implements DataTypeGuard
         $tenantColumn = self::identifier($definition->tenantColumn());
 
         $sql = "DELETE FROM {$table} WHERE {$keyColumn} = :id AND {$tenantColumn} = :tenant";
-        $this->transactionally(function () use ($sql, $definition, $tenantId, $id): void {
-            $statement = $this->pdo->prepare($sql);
-            $statement->execute([':id' => $id, ':tenant' => $tenantId]);
-            $this->memory->forget($definition->key(), $tenantId, $id);
-        });
-
-        $this->announce($definition, LifecycleAction::DELETE, $id, $tenantId, $state, null, $actorId);
+        $veto = $this->apply(
+            $definition,
+            LifecycleAction::DELETE,
+            $tenantId,
+            $id,
+            $state,
+            null,
+            $actorId,
+            function () use ($sql, $definition, $tenantId, $id): void {
+                $statement = $this->pdo->prepare($sql);
+                $statement->execute([':id' => $id, ':tenant' => $tenantId]);
+                $this->memory->forget($definition->key(), $tenantId, $id);
+            }
+        );
+        if ($veto !== null) {
+            return $veto;
+        }
 
         return LifecycleResult::ok(null);
     }
@@ -446,6 +560,41 @@ class DataTypeLifecycleService implements DataTypeGuard
      * Nothing new is exposed: every reason is a pure function of `state` and the
      * type's declared lifecycle and permissions, all of which the caller can
      * already read.
+     *
+     * WHAT THIS PREVIEW CANNOT PREDICT: a plugin veto
+     * ----------------------------------------------
+     * Read this before relying on "preview and enforcement agree", because that
+     * guarantee is NARROWER than it was, and the narrowing is real rather than
+     * theoretical.
+     *
+     * Everything above is derived from core's own rules — the type's
+     * declaration, the record's state, the declared reference counts — so it
+     * predicts core's refusals exactly, down to the reason key. It does NOT and
+     * CANNOT predict a listener on {@see self::HOOK_CHANGING} refusing the
+     * transition. An action reported here as available may still answer 409 with
+     * `blocked_by_plugin` when it is attempted.
+     *
+     * That is a deliberate choice, not an oversight, and the alternative is
+     * worse. Predicting a veto would mean DISPATCHING the hook from this method
+     * — that is, running arbitrary plugin code inside a `GET`. A read that
+     * executes plugin listeners is surprising (nothing about a preview suggests
+     * it), potentially side-effecting (a listener may write, enqueue, or call
+     * out; nothing in the hook contract forbids it, and `changing` listeners are
+     * written expecting a mutation is underway), and would double every
+     * listener's invocations for a screen that merely rendered. It would also be
+     * a lie of a different kind: a veto is evaluated against the state at the
+     * moment of the attempt, so a "no veto" prediction expires immediately.
+     *
+     * So the honest statement of the property, which a client should design to:
+     *
+     *   this preview predicts CORE's rules completely and exactly;
+     *   a plugin veto is discoverable only by attempting the transition.
+     *
+     * A generated screen should therefore keep rendering from `refusals` — it is
+     * still the complete account of what CORE will refuse — while remaining
+     * able to surface a 409 that arrives from an action it had shown as
+     * available. Silently swallowing that 409, or treating it as an unexpected
+     * error, is the failure mode this note exists to prevent.
      *
      * @param string     $dataType The namespaced type key.
      * @param int        $tenantId The resolved tenant id.
@@ -718,6 +867,11 @@ class DataTypeLifecycleService implements DataTypeGuard
      * misdirects its next restore. A hard delete has the sharper version — a
      * surviving memory row is inherited by the next record on that id.
      *
+     * The pre-transition hook is dispatched INSIDE this unit too (see
+     * {@see self::apply()}), so a veto raised after a listener has already
+     * written takes that write down with it rather than leaving half a cleanup
+     * behind.
+     *
      * Joins an OUTER transaction rather than nesting inside it: PDO has no
      * savepoint-based nesting, so a `beginTransaction()` here would throw when a
      * caller already opened one, and a commit here would end THEIR unit of work
@@ -780,7 +934,127 @@ class DataTypeLifecycleService implements DataTypeGuard
     }
 
     /**
-     * Announce a transition on the hook spine and record it in the audit log.
+     * ASK, then write — as one unit — and announce only what actually happened.
+     *
+     * The single dispatch site for {@see self::HOOK_CHANGING}, shared by all
+     * four mutators. One site rather than four is not tidiness: a veto point
+     * that exists on three actions and not the fourth is worse than none,
+     * because it reads as a guarantee and is not one.
+     *
+     * Where it sits in the sequence, and why
+     * --------------------------------------
+     * AFTER every core check (the type offers the action, the record exists in
+     * this tenant, the state rules permit it, no declared guard blocks a delete)
+     * and AFTER the idempotent no-op returns. So:
+     *
+     *  - core's own refusals keep their existing reason keys and never become
+     *    "blocked by a plugin"; plugin code is not consulted about a transition
+     *    core would refuse anyway;
+     *  - a no-op writes nothing, so there is nothing to veto and nothing to
+     *    announce — trashing an already-trashed record fires NEITHER hook,
+     *    exactly as it fires no `changed` today.
+     *
+     * And BEFORE the write, inside the same transaction as the write. That
+     * pairing is what makes "a veto leaves no partial write" true rather than
+     * merely likely:
+     *
+     *  - the transition's own statements have not run when the veto is raised;
+     *  - a listener that wrote before a LATER listener vetoed is rolled back
+     *    with it, so the unit is all-or-nothing rather than "core's half".
+     *
+     * When a caller already holds a transaction open, {@see self::transactionally()}
+     * joins it rather than nesting, and the veto propagates out with nothing of
+     * ours written. Rolling back somebody else's unit of work is not this
+     * method's call to make — but it has also written nothing that would need
+     * rolling back.
+     *
+     * {@see self::announce()} runs only on success, and outside the
+     * transaction, so `changed` can never report a transition that did not
+     * commit.
+     *
+     * @param string           $action  A {@see LifecycleAction} constant.
+     * @param int|string       $id      The record's key.
+     * @param string|null      $from    The state before.
+     * @param string|null      $to      The state after (null when the row is gone).
+     * @param int|null         $actorId The acting profile.
+     * @param callable(): void $write   The statements this transition performs.
+     * @return LifecycleResult|null Null when the transition went through; the
+     *         refusal to return when a listener vetoed it.
+     */
+    private function apply(
+        DataTypeDefinition $definition,
+        string $action,
+        int $tenantId,
+        int|string $id,
+        ?string $from,
+        ?string $to,
+        ?int $actorId,
+        callable $write
+    ): ?LifecycleResult {
+        $payload = self::payload($definition, $action, $id, $tenantId, $from, $to, $actorId);
+
+        try {
+            $this->transactionally(function () use ($payload, $write): void {
+                $this->hookManager?->dispatch(self::HOOK_CHANGING, $payload);
+                $write();
+            });
+        } catch (HookVetoException $e) {
+            // `reason()`, never `getMessage()` — the client-safe subset, per the
+            // WC-186 leak guard. The state reported is the one the record still
+            // holds, because it never moved.
+            return LifecycleResult::vetoed($e->reason(), $from);
+        }
+
+        $this->announce($definition, $action, $id, $tenantId, $from, $to, $actorId);
+
+        return null;
+    }
+
+    /**
+     * The payload both lifecycle hooks carry.
+     *
+     * Built once and shared so `changing` and `changed` describe the same
+     * transition in the same words: a listener that vetoes on `changing` and one
+     * that reacts on `changed` must not have to read two different shapes to
+     * answer the same question. On `changing` the values are the INTENT (`to` is
+     * where the record is about to go); on `changed` they are the record.
+     *
+     * @param string      $action  A {@see LifecycleAction} constant.
+     * @param int|string  $id      The record's key.
+     * @param string|null $from    The state before.
+     * @param string|null $to      The state after (null when the row is gone).
+     * @param int|null    $actorId The acting profile.
+     * @return array<string, mixed>
+     */
+    private static function payload(
+        DataTypeDefinition $definition,
+        string $action,
+        int|string $id,
+        int $tenantId,
+        ?string $from,
+        ?string $to,
+        ?int $actorId
+    ): array {
+        return [
+            'data_type' => $definition->key(),
+            'source' => $definition->source(),
+            'table' => $definition->table(),
+            'action' => $action,
+            'record_id' => $id,
+            'tenant_id' => $tenantId,
+            'from' => $from,
+            'to' => $to,
+            'actor_profile_id' => $actorId,
+        ];
+    }
+
+    /**
+     * Announce a transition that HAPPENED on the hook spine, and record it in
+     * the audit log.
+     *
+     * Called only from {@see self::apply()}, only after the write committed —
+     * so a vetoed transition produces no `changed` event and no audit entry,
+     * because nothing changed and nothing was audited into existence.
      *
      * @param int|string  $id      The record's key.
      * @param string|null $from    The state before.
@@ -796,19 +1070,10 @@ class DataTypeLifecycleService implements DataTypeGuard
         ?string $to,
         ?int $actorId
     ): void {
-        $payload = [
-            'data_type' => $definition->key(),
-            'source' => $definition->source(),
-            'table' => $definition->table(),
-            'action' => $action,
-            'record_id' => $id,
-            'tenant_id' => $tenantId,
-            'from' => $from,
-            'to' => $to,
-            'actor_profile_id' => $actorId,
-        ];
-
-        $this->hookManager?->dispatch('datatype.lifecycle.changed', $payload);
+        $this->hookManager?->dispatch(
+            self::HOOK_CHANGED,
+            self::payload($definition, $action, $id, $tenantId, $from, $to, $actorId)
+        );
 
         $this->auditLogger?->record('data_type.' . $action, [
             'tenant_id' => $tenantId,

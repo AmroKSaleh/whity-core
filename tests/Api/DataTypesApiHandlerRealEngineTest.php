@@ -11,11 +11,13 @@ use Whity\Api\DataTypesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\DataType\DataTypeLifecycleService;
 use Whity\Core\DataType\DataTypeRegistry;
+use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TableOwnershipRegistry;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
+use Whity\Sdk\Hooks\HookVetoException;
 use Whity\Sdk\Http\Response;
 
 /**
@@ -334,15 +336,169 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         )->getStatusCode());
     }
 
+    // ==================== 4. A plugin veto is a refusal, not a crash ====================
+
+    /**
+     * A listener refusing a transition reaches the caller as `409` carrying the
+     * veto's own sentence — for ALL FOUR mutating actions — and the record is
+     * UNCHANGED in the database.
+     *
+     * Asserted against the row rather than the response, because the failure
+     * being prevented is precisely a response and a database that disagree: a
+     * 409 over a write that happened anyway is worse than no veto at all, since
+     * the caller now believes nothing changed.
+     */
+    public function testAVetoedTransitionIs409WithTheVetosReasonAndChangesNothing(): void
+    {
+        foreach (
+            [
+                'trash' => 'active',
+                'restore' => 'trashed',
+                'retire' => 'active',
+                'delete' => 'trashed',
+            ] as $action => $startingState
+        ) {
+            $handler = $this->handlerFor(null, $this->vetoingHooks());
+            $recordId = $this->seedRecord(self::TENANT_A, $startingState);
+            $params = ['type' => 'acme:record', 'id' => (string) $recordId];
+            $request = $this->request(self::MANAGER_A, self::TENANT_A);
+
+            $response = match ($action) {
+                'trash' => $handler->trash($request, $params),
+                'restore' => $handler->restore($request, $params),
+                'retire' => $handler->retire($request, $params),
+                default => $handler->delete($request, $params),
+            };
+
+            self::assertSame(409, $response->getStatusCode(), "A vetoed '{$action}' must be a 409.");
+
+            $body = json_decode($response->getBody(), true);
+            self::assertIsArray($body);
+            self::assertIsArray($body['details']);
+            self::assertSame(
+                'blocked_by_plugin',
+                $body['details']['reason'],
+                'One stable key, so a client branches on `reason` exactly as it does for a core refusal.'
+            );
+            self::assertSame(
+                'A downstream record depends on this one.',
+                $body['error'],
+                "The plugin's own client-safe sentence is the message; core has nothing better to say."
+            );
+            self::assertSame([], $body['details']['blockers'], 'A veto is not a reference.');
+            self::assertSame($startingState, $body['details']['state']);
+
+            self::assertSame(
+                $startingState,
+                $this->statusOf($recordId),
+                "The row must be untouched after a vetoed '{$action}' — a 409 is not evidence that it is."
+            );
+        }
+    }
+
+    /**
+     * The raw exception text never reaches the client.
+     *
+     * `HookVetoException::getMessage()` prefixes the reason with
+     * `Hook listener vetoed "<event>": …`. #715 established that only `reason()`
+     * crosses to a response (the WC-186 leak guard); this pins that the data-type
+     * surface honours the same boundary rather than re-leaking it.
+     */
+    public function testTheRawVetoExceptionMessageNeverReachesTheClient(): void
+    {
+        $handler = $this->handlerFor(null, $this->vetoingHooks());
+        $recordId = $this->seedRecord(self::TENANT_A, 'active');
+
+        $body = $handler->trash(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        )->getBody();
+
+        self::assertStringNotContainsString('Hook listener vetoed', $body);
+        self::assertStringNotContainsString('datatype.lifecycle.changing', $body);
+    }
+
+    /**
+     * The documented gap, pinned so it cannot be closed by accident: the
+     * pre-flight preview predicts CORE's refusals and cannot predict a veto —
+     * and it must NOT dispatch the hook to find out, because a `GET` running
+     * plugin listeners is surprising and potentially side-effecting.
+     *
+     * So an action the preview publishes as available may still be refused when
+     * attempted. That narrowing is real, and it is documented in
+     * docs/wiki/Plugin-Data-Types.md rather than papered over; this test is the
+     * executable half of that note.
+     */
+    public function testThePreviewDoesNotDispatchTheHookAndCannotPredictAVeto(): void
+    {
+        $dispatched = 0;
+        $hooks = new HookManager();
+        $hooks->listen(
+            DataTypeLifecycleService::HOOK_CHANGING,
+            static function (array $data) use (&$dispatched): array {
+                $dispatched++;
+
+                throw HookVetoException::forEvent(
+                    DataTypeLifecycleService::HOOK_CHANGING,
+                    'A downstream record depends on this one.'
+                );
+            }
+        );
+
+        $handler = $this->handlerFor(null, $hooks);
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $params = ['type' => 'acme:record', 'id' => (string) $recordId];
+
+        $preview = $this->data($handler->show($this->request(self::MANAGER_A, self::TENANT_A), $params));
+
+        self::assertSame(0, $dispatched, 'A GET must never run plugin listeners.');
+        self::assertTrue(
+            $preview['deletable'],
+            'The preview answers for core\'s rules, and by those the delete is available.'
+        );
+        self::assertArrayNotHasKey('delete', $preview['refusals']);
+
+        // And the attempt is nevertheless refused — the gap, made concrete.
+        $response = $handler->delete($this->request(self::MANAGER_A, self::TENANT_A), $params);
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame(1, $dispatched, 'The hook runs at ATTEMPT time, which is the only honest moment.');
+        self::assertSame('trashed', $this->statusOf($recordId));
+    }
+
     // ==================== Helpers ====================
+
+    private function vetoingHooks(): HookManager
+    {
+        $hooks = new HookManager();
+        $hooks->listen(DataTypeLifecycleService::HOOK_CHANGING, static function (array $data): array {
+            throw HookVetoException::forEvent(
+                DataTypeLifecycleService::HOOK_CHANGING,
+                'A downstream record depends on this one.'
+            );
+        });
+
+        return $hooks;
+    }
+
+    private function statusOf(int $recordId): ?string
+    {
+        $statement = $this->pdo->prepare('SELECT status FROM acme_records WHERE id = ?');
+        $statement->execute([$recordId]);
+        $value = $statement->fetchColumn();
+
+        return $value === false ? null : (string) $value;
+    }
+
 
     /**
      * A handler over the declared type, optionally with a REDUCED permission
-     * map — the way a type stops offering an action.
+     * map — the way a type stops offering an action — and optionally with a
+     * live hook manager, the way a plugin gets to veto a transition.
      *
      * @param array<string, string>|null $permissions Override the declaration's permissions.
+     * @param HookManager|null           $hooks       Listeners the lifecycle consults.
      */
-    private function handlerFor(?array $permissions = null): DataTypesApiHandler
+    private function handlerFor(?array $permissions = null, ?HookManager $hooks = null): DataTypesApiHandler
     {
         $registry = new PermissionRegistry();
         $registry->register('Acme', ['acme:read', 'acme:manage', 'acme:retire']);
@@ -351,7 +507,7 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
 
         return new DataTypesApiHandler(
             $types,
-            new DataTypeLifecycleService($this->pdo, $types),
+            new DataTypeLifecycleService($this->pdo, $types, $hooks),
             new RoleChecker($this->wrap($this->pdo), $registry)
         );
     }

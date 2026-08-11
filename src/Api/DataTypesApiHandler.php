@@ -114,6 +114,20 @@ final class DataTypesApiHandler
      * are not actions: they are properties of the state that is published beside
      * them, so they carry no refusal and none is invented for them.
      *
+     * ONE thing this cannot promise: a plugin veto
+     * --------------------------------------------
+     * `refusals` is the complete account of what CORE will refuse. It is NOT the
+     * complete account of what will happen, because a plugin listening on
+     * `datatype.lifecycle.changing` may refuse a transition for a domain reason
+     * core cannot derive, and this endpoint does not dispatch that hook to find
+     * out — a `GET` must not run plugin code (see
+     * {@see DataTypeLifecycleService::describe()} for the full reasoning).
+     *
+     * So an action published here as available can still answer `409` with
+     * `reason: "blocked_by_plugin"` when it is attempted. A client should render
+     * its controls from `refusals` and stay able to surface that 409; treating
+     * it as an unexpected error is the failure this note exists to prevent.
+     *
      * @param Request               $request The incoming request.
      * @param array<string, string> $params  Captured path parameters.
      * @return Response The record's lifecycle description, or 404.
@@ -213,6 +227,12 @@ final class DataTypesApiHandler
      *
      * A refusal keeps its blockers and its stable reason key, so a client can
      * both show the sentence and branch on the cause without parsing prose.
+     *
+     * A plugin veto arrives here as an ordinary refusal and needs no special
+     * case: `409`, `reason: "blocked_by_plugin"`, and the plugin's own
+     * client-safe sentence as the message. That uniformity is the point — one
+     * envelope for "this transition did not happen, and here is why", whether
+     * the reason was core's rule or a plugin's.
      */
     private function respond(DataTypeDefinition $definition, LifecycleResult $result): Response
     {
