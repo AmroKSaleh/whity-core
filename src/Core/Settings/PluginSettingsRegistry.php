@@ -165,18 +165,25 @@ class PluginSettingsRegistry implements HostWiredService
         }
 
         $registered = [];
-        foreach ($declarations as $bareKey => $declaration) {
-            $definition = $this->build($source, $prefix, (string) $bareKey, $declaration);
 
-            $this->definitions[$definition->key()] = $definition;
-            $this->keysBySource[$source] = [
-                ...($this->keysBySource[$source] ?? []),
-                $definition->key(),
-            ];
-            $registered[] = $definition->key();
+        // The announcement must describe what was actually STORED, including
+        // when a later entry is refused. Without the finally, a plugin with one
+        // typo would register its good keys and announce none of them, so a
+        // listener on the spine would see a catalogue it was never told about.
+        try {
+            foreach ($declarations as $bareKey => $declaration) {
+                $definition = $this->build($source, $prefix, (string) $bareKey, $declaration);
+
+                $this->definitions[$definition->key()] = $definition;
+                $this->keysBySource[$source] = [
+                    ...($this->keysBySource[$source] ?? []),
+                    $definition->key(),
+                ];
+                $registered[] = $definition->key();
+            }
+        } finally {
+            $this->dispatch($source, $registered);
         }
-
-        $this->dispatch($source, $registered);
 
         return $registered;
     }

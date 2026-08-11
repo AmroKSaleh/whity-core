@@ -365,6 +365,36 @@ final class PluginSettingsRegistryTest extends TestCase
         self::assertFalse($registry->has('acme:bad_one'));
     }
 
+    /**
+     * The announcement must describe what was actually stored, even when a later
+     * entry is refused — otherwise a plugin with one typo registers its good keys
+     * and tells the spine about none of them.
+     */
+    public function testTheRegistrationAnnouncementCoversWhatSurvivedARefusal(): void
+    {
+        $hooks = new \Whity\Core\Hooks\HookManager();
+        $announced = [];
+        $hooks->listen('settings.declared', function (array $payload) use (&$announced): void {
+            $announced[] = $payload;
+        });
+
+        $registry = new PluginSettingsRegistry($hooks);
+
+        try {
+            $registry->register('Acme', [
+                'good_one' => ['type' => 'string', 'default' => 'a'],
+                'bad_one' => ['type' => 'nonsense', 'default' => 'b'],
+            ]);
+            self::fail('Expected the malformed entry to be refused');
+        } catch (InvalidSettingDeclarationException) {
+            // expected
+        }
+
+        self::assertCount(1, $announced);
+        self::assertSame('Acme', $announced[0]['source'] ?? null);
+        self::assertSame(['acme:good_one'], $announced[0]['settings'] ?? null);
+    }
+
     // ==================== typing, defaults, validation ====================
 
     public function testDeclaredKeysAreTypedAndDefaulted(): void
