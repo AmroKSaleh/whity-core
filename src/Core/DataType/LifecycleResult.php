@@ -30,6 +30,21 @@ final class LifecycleResult
     /** The type does not offer this action at all (undeclared lifecycle or permission). */
     public const UNSUPPORTED = 'unsupported';
 
+    /**
+     * The reason key a plugin's veto carries.
+     *
+     * A veto is published as an ordinary REFUSED outcome under one STABLE key
+     * rather than as a new outcome or as the plugin's own words in `reason`.
+     * Both alternatives were rejected on the same ground: `reason` is the
+     * contract clients branch on (see {@see self::message()} and
+     * docs/wiki/Plugin-Data-Types.md), so it must stay a fixed, enumerable
+     * vocabulary. A plugin-authored string there would turn the branchable field
+     * into free prose, and a per-plugin key would make the set unenumerable.
+     * The plugin's own sentence goes where every other human-readable
+     * explanation goes: `message`.
+     */
+    public const BLOCKED_BY_PLUGIN = 'blocked_by_plugin';
+
     private string $outcome;
 
     /**
@@ -48,17 +63,34 @@ final class LifecycleResult
     private ?string $reason;
 
     /**
-     * @param string                                                $outcome  One of the class constants.
-     * @param string|null                                           $state    Resulting/current state.
-     * @param list<array{table: string, label: string, count: int}> $blockers Blocking references.
-     * @param string|null                                           $reason   Stable reason key.
+     * A sentence supplied by whoever refused, used INSTEAD of core's own.
+     *
+     * Set only for a plugin veto, where the explanation is not core's to write:
+     * the host does not know what "a downstream record would become unusable"
+     * means, and inventing a generic sentence in its place would throw away the
+     * only part of the refusal a human can act on.
      */
-    private function __construct(string $outcome, ?string $state, array $blockers, ?string $reason)
-    {
+    private ?string $explanation;
+
+    /**
+     * @param string                                                $outcome     One of the class constants.
+     * @param string|null                                           $state       Resulting/current state.
+     * @param list<array{table: string, label: string, count: int}> $blockers    Blocking references.
+     * @param string|null                                           $reason      Stable reason key.
+     * @param string|null                                           $explanation Refuser-supplied sentence, if any.
+     */
+    private function __construct(
+        string $outcome,
+        ?string $state,
+        array $blockers,
+        ?string $reason,
+        ?string $explanation = null
+    ) {
         $this->outcome = $outcome;
         $this->state = $state;
         $this->blockers = $blockers;
         $this->reason = $reason;
+        $this->explanation = $explanation;
     }
 
     /**
@@ -99,6 +131,28 @@ final class LifecycleResult
     public static function refused(string $reason, ?string $state = null): self
     {
         return new self(self::REFUSED, $state, [], $reason);
+    }
+
+    /**
+     * A plugin listening on `datatype.lifecycle.changing` refused the transition.
+     *
+     * Deliberately an ordinary REFUSED outcome — the same 409, the same
+     * `{reason, message}` pair, the same envelope as every state refusal — so a
+     * client branches on ONE contract rather than learning a second shape for
+     * the same event: "this transition did not happen, and here is why".
+     *
+     * `$explanation` is the veto's {@see \Whity\Sdk\Hooks\HookVetoException::reason()},
+     * never its `getMessage()`. That boundary is the WC-186 leak guard and it is
+     * not negotiable: `getMessage()` is raw exception text that may carry
+     * internal detail, while `reason()` is the trimmed, control-character-
+     * stripped, length-capped subset a plugin author wrote FOR the client.
+     *
+     * @param string      $explanation The veto's client-safe sentence.
+     * @param string|null $state       The record's state, unchanged by the refusal.
+     */
+    public static function vetoed(string $explanation, ?string $state = null): self
+    {
+        return new self(self::REFUSED, $state, [], self::BLOCKED_BY_PLUGIN, $explanation);
     }
 
     /**
@@ -176,9 +230,19 @@ final class LifecycleResult
      *
      * Built from the plugin's own labels: core never learns what
      * `acme_entries` is, only that the refusal should say "3 recorded entries".
+     *
+     * A refuser-supplied sentence wins outright. That is the whole point of a
+     * veto: only the plugin knows why, so core replacing its words with a
+     * generic "the record's current state does not allow this action" would
+     * discard the only actionable part of the refusal. `reason` remains the
+     * stable key to branch on either way.
      */
     public function message(): string
     {
+        if ($this->explanation !== null) {
+            return $this->explanation;
+        }
+
         return match ($this->outcome) {
             self::OK => 'Done',
             self::NOT_FOUND => 'Not found',

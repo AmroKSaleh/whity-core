@@ -1638,6 +1638,16 @@ $dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
 \Whity\register_service(\Whity\Core\DataType\DataTypeLifecycleService::class, $dataTypeLifecycle); // @phpstan-ignore-line
 \Whity\register_service(\Whity\Sdk\DataType\DataTypeGuard::class, $dataTypeLifecycle); // @phpstan-ignore-line
 
+// The restore-state memory, registered so a plugin that hard-deletes a record
+// OUTSIDE core can clear its row. It is the service's OWN instance, not a second
+// one over the same connection. Without this registration the class existed and
+// was simply unreachable — the container refuses to build it (it takes a PDO) —
+// so an adopter's only remaining option was a hand-written DELETE against a
+// core-owned table. The row it leaves behind carries no foreign key and no
+// cascade, so for a client-supplied key a later record re-using that key
+// inherits a dead record's state and can be restored into a state it never held.
+\Whity\register_service(\Whity\Core\DataType\LifecycleStateMemory::class, $dataTypeLifecycle->stateMemory()); // @phpstan-ignore-line
+
 $dataTypesHandler = new \Whity\Api\DataTypesApiHandler($dataTypeRegistry, $dataTypeLifecycle, $roleChecker);
 $router->register('GET',    '/api/data-types',                       [$dataTypesHandler, 'list']);
 $router->register('GET',    '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'show']);

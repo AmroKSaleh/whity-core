@@ -95,6 +95,21 @@ final class DataTypeEntryPointWiringTest extends TestCase
         );
     }
 
+    public function testHttpEntryPointRegistersTheRestoreStateMemory(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Core\\\\DataType\\\\LifecycleStateMemory::class/',
+            $source,
+            'A plugin that hard-deletes a record OUTSIDE core has to clear its remembered restore '
+            . 'state, and the container refuses to build the class itself (it takes a PDO). '
+            . 'Unregistered, the only remaining option is a hand-written DELETE against a '
+            . 'core-owned table — and the row left behind when nobody does it carries no foreign '
+            . 'key, so a re-used key inherits a dead record\'s state.'
+        );
+    }
+
     public function testHttpEntryPointExposesTheGeneratedLifecycleRoutes(): void
     {
         $source = $this->read(__DIR__ . '/../../public/index.php');
@@ -156,6 +171,38 @@ final class DataTypeEntryPointWiringTest extends TestCase
             $source,
             'A plugin reached through a CLI command must resolve the same guard contract.'
         );
+    }
+
+    public function testCliEntryPointRegistersTheRestoreStateMemoryToo(): void
+    {
+        $source = $this->read(__DIR__ . '/../../src/Cli/Commands/BaseCommand.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Core\\\\DataType\\\\LifecycleStateMemory::class/',
+            $source,
+            'Registered in one entry point only, "clear the memory" would work over HTTP and throw '
+            . 'under the CLI — the divergence bug class #717 and #724 already paid for.'
+        );
+    }
+
+    /**
+     * Both entry points must register the memory the lifecycle service actually
+     * uses, not a second instance built beside it.
+     *
+     * Two handles over one connection would behave identically today, so this
+     * is not about behaviour — it is about there being no second object for a
+     * later change (a cache, a batched write, a per-request buffer) to make
+     * diverge. The accessor makes "which instance?" a question with one answer.
+     */
+    public function testBothEntryPointsRegisterTheServicesOwnMemoryInstance(): void
+    {
+        foreach (['/../../public/index.php', '/../../src/Cli/Commands/BaseCommand.php'] as $path) {
+            self::assertMatchesRegularExpression(
+                '/LifecycleStateMemory::class,\s*\$dataTypeLifecycle->stateMemory\(\)/',
+                $this->read(__DIR__ . $path),
+                "{$path} must register the lifecycle service's OWN memory."
+            );
+        }
     }
 
     private function read(string $path): string

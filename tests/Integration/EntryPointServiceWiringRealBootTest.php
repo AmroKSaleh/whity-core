@@ -205,6 +205,128 @@ final class EntryPointServiceWiringRealBootTest extends TestCase
         self::assertStringContainsString('HostWiredService', $result['message']);
     }
 
+    /**
+     * The restore-state memory must be RESOLVABLE and USABLE from a booted HTTP
+     * host.
+     *
+     * `LifecycleStateMemory::forget()` is what a plugin calls after hard-deleting
+     * a record outside core. The class existed and was simply unreachable: the
+     * container refuses to build it (it takes a PDO), so an unregistered lookup
+     * threw and the only remaining option was a hand-written `DELETE` against a
+     * core-owned table. The row nobody deletes carries no foreign key and no
+     * cascade — for a client-supplied key, a later record re-using that key
+     * inherits the dead record's state and can be restored into a state it never
+     * held.
+     *
+     * The probe resolves it, checks it is the lifecycle service's OWN instance,
+     * and CALLS `forget()` against the live database for a record id that does
+     * not exist — harmless, and the only way to prove the object is wired to a
+     * real connection rather than merely constructed.
+     */
+    public function testHttpEntryPointResolvesAUsableRestoreStateMemory(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            $_SERVER['REQUEST_URI']    = '/api/health';
+            $_SERVER['HTTP_HOST']      = 'localhost';
+            $_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            $memory = \Whity\app(\Whity\Core\DataType\LifecycleStateMemory::class);
+
+            // The very object the lifecycle service uses, not a second one.
+            $sameAsServices = $memory === \Whity\app(
+                \Whity\Core\DataType\DataTypeLifecycleService::class
+            )->stateMemory();
+
+            // Proof it holds a live connection: a forget() for a record that was
+            // never remembered is a no-op against the real table, and a
+            // recall() straight after must agree.
+            $called = false;
+            $error = '';
+            try {
+                $memory->forget('probe:none', 0, 'no-such-record');
+                $called = $memory->recall('probe:none', 0, 'no-such-record') === null;
+            } catch (\Throwable $e) {
+                $error = $e->getMessage();
+            }
+
+            whity_probe_emit([
+                'same_as_services' => $sameAsServices,
+                'forget_worked'    => $called,
+                'error'            => $error,
+            ]);
+            PHP);
+
+        self::assertTrue(
+            $result['same_as_services'],
+            'The container must hand back the memory the lifecycle service keeps, so there is no '
+            . 'second instance for a later change to make diverge.'
+        );
+        self::assertTrue(
+            $result['forget_worked'],
+            'forget() must run against the live connection. Error: ' . (string) $result['error']
+        );
+    }
+
+    /**
+     * The same property through the CLI kernel. A capability wired in only one
+     * entry point is the divergence this file exists to catch: "clear the
+     * memory" would work over HTTP and throw under a command.
+     */
+    public function testCliEntryPointResolvesAUsableRestoreStateMemory(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            require __DIR__ . '/vendor/autoload.php';
+            require __DIR__ . '/src/helpers.php';
+
+            $command = new class extends \Whity\Cli\Commands\BaseCommand {
+                public function execute(array $argv): int
+                {
+                    return 0;
+                }
+
+                public function boot(): void
+                {
+                    $this->setupKernel();
+                }
+            };
+
+            ob_start();
+            $command->boot();
+            ob_end_clean();
+
+            $memory = \Whity\app(\Whity\Core\DataType\LifecycleStateMemory::class);
+
+            $called = false;
+            $error = '';
+            try {
+                $memory->forget('probe:none', 0, 'no-such-record');
+                $called = $memory->recall('probe:none', 0, 'no-such-record') === null;
+            } catch (\Throwable $e) {
+                $error = $e->getMessage();
+            }
+
+            whity_probe_emit([
+                'same_as_services' => $memory === \Whity\app(
+                    \Whity\Core\DataType\DataTypeLifecycleService::class
+                )->stateMemory(),
+                'forget_worked'    => $called,
+                'error'            => $error,
+            ]);
+            PHP);
+
+        self::assertTrue($result['same_as_services']);
+        self::assertTrue(
+            $result['forget_worked'],
+            'A plugin reached through a CLI command must be able to clear a memory row too. Error: '
+            . (string) $result['error']
+        );
+    }
+
     // ─── probe plumbing ──────────────────────────────────────────────────────
 
     /**

@@ -350,6 +350,7 @@ prose is not an API, and the sentences may be reworded without notice.
 | `retirement_is_permanent` | a retired record is never restorable |
 | `restore_before_retiring` | restore a trashed record before retiring it |
 | `nothing_to_restore` | the record is not in the trash |
+| `blocked_by_plugin` | a plugin refused the transition; the sentence is in `message` — **never predicted here**, see [below](#the-one-thing-this-preview-cannot-predict) |
 | `trash_not_offered` · `restore_not_offered` · `retire_not_offered` · `delete_not_offered` | the type does not offer that action |
 
 The state keys are produced by the **same evaluator** the endpoints enforce
@@ -367,6 +368,197 @@ Nothing new is disclosed: every reason is derivable from `state` and the type's
 published lifecycle and permissions, all of which the caller already reads. The
 permission and ownership gates are untouched — a caller who may not read the
 type gets `404`, and never learns the type exists.
+
+### The one thing this preview cannot predict
+
+> **Read this before relying on "preview and enforcement agree".** That property
+> still holds for core's rules — completely and exactly. It does **not** extend
+> to a plugin veto, and the difference is not academic: an action published here
+> as available can still answer `409 blocked_by_plugin` when it is attempted.
+
+`GET /api/data-types/{type}/{id}` derives every refusal from facts core owns —
+the declaration, the record's state, the declared reference counts. It cannot
+derive a [veto](#refusing-a-transition-datatypelifecyclechanging), because a
+veto is a plugin's domain judgement made at the moment of the attempt.
+
+**It also deliberately does not dispatch the hook to find out.** Doing so would
+mean a `GET` executing arbitrary plugin listeners: surprising (nothing about a
+preview suggests it), potentially side-effecting (a `changing` listener is
+written expecting a mutation is underway, and nothing forbids it from writing,
+enqueuing or calling out), and doubling every listener's invocations for a
+screen that merely rendered. It would also expire instantly — a "no veto"
+prediction is only true until the next write anywhere in the system.
+
+So state the guarantee precisely:
+
+* the preview predicts **core's** rules — complete, exact, stable keys;
+* a **plugin veto is discoverable only by attempting the transition**.
+
+For a client this means: keep rendering controls from `refusals`, and stay able
+to surface a `409` from an action you had shown as available. Swallowing that
+`409`, or treating it as an unexpected error, is the failure this note exists to
+prevent.
+
+---
+
+## Refusing a transition (`datatype.lifecycle.changing`)
+
+A lifecycle transition announces itself **twice**, and the difference between
+the two is the difference between being told and being asked:
+
+| event | when | can it stop the transition? |
+|---|---|---|
+| `datatype.lifecycle.changing` | **before** the write | **yes** — throw `HookVetoException` |
+| `datatype.lifecycle.changed` | **after** the write | no; observation only |
+
+### Why the veto exists
+
+Core refuses what core can *derive*: a declared `blocks_delete` guard counts
+rows, and the state rules above know that retirement is permanent. Neither
+reaches a **domain** rule — a record something downstream would be unusable
+without, a per-type rule that a retired record is not trashable, a parent whose
+children are mid-flight. Those are not foreign keys, and `blocks_delete` governs
+`delete`, not `trash`.
+
+Without a veto point the only option was your own route in front of core's — and
+that means **two lifecycle memories for one record**, yours and
+`data_type_restore_states`, disagreeing about which state a restore returns it
+to. Both report `200`. That split brain is what this closes; if you are running
+a parallel route for this reason, this is what replaces it.
+
+The hook fires for **all four** mutating actions. A veto that covered `delete`
+alone would leave a parallel *trash* route exactly where it was.
+
+### The contract
+
+```php
+public function getHooks(): array
+{
+    return ['datatype.lifecycle.changing' => [$this, 'onLifecycleChanging']];
+}
+
+public function onLifecycleChanging(array $data, array $context): array
+{
+    if ($data['data_type'] === 'acme:record' && $data['action'] === 'trash') {
+        if ($this->hasLiveDependants((int) $data['record_id'], (int) $data['tenant_id'])) {
+            throw \Whity\Sdk\Hooks\HookVetoException::forEvent(
+                'datatype.lifecycle.changing',
+                'A downstream record depends on this one.'   // shown to the caller
+            );
+        }
+    }
+
+    return $data;
+}
+```
+
+The payload is identical to `datatype.lifecycle.changed`, so one listener shape
+serves both. On `changing` the values describe the **intent**:
+
+```jsonc
+{
+  "data_type": "acme:record",
+  "source": "Acme",
+  "table": "acme_records",
+  "action": "trash",              // trash | restore | retire | delete
+  "record_id": 42,
+  "tenant_id": 7,
+  "from": "approved",             // the state the record holds now
+  "to": "trashed",                // where it is about to go — null for delete
+  "actor_profile_id": 10
+}
+```
+
+`to` on a **restore** is the state the record will actually be returned to (the
+remembered one, or the fallback), not `default_state` — which is exactly what a
+listener deciding whether to allow the restore needs to know.
+
+### What a veto does, precisely
+
+* **No write happens.** The hook is dispatched before the transition's own
+  statements *and inside the same transaction as them*, so a listener that wrote
+  before a later listener vetoed is rolled back with it. When you call a
+  lifecycle method inside a transaction **you** opened, core joins it rather than
+  nesting — it never ends a unit of work it did not begin, and it has written
+  nothing that would need undoing.
+* **The caller gets `409`**, in the same envelope as every other refusal:
+
+```json
+{
+  "error": "A downstream record depends on this one.",
+  "details": {
+    "reason": "blocked_by_plugin",
+    "state": "approved",
+    "blockers": []
+  }
+}
+```
+
+  `reason` stays a **stable key** — that is the field clients branch on, so it
+  must remain enumerable; your sentence goes in `message` (the `error` field),
+  where every other human-readable explanation goes. It is
+  `HookVetoException::reason()`, never `getMessage()`: trimmed, control
+  characters collapsed, capped at 300 characters, and free of the raw exception
+  text a response must never carry.
+* **No `changed` event fires**, and no audit entry is written. Nothing happened.
+* **Your plugin is not penalised.** A veto does **not** count toward the
+  three-strikes failure breaker — it is a healthy plugin doing its job, and
+  disabling it would silently stop the very refusals you rely on.
+
+### What a veto is not
+
+* **Not a substitute for a crash.** Any other `Throwable` is caught by the
+  per-plugin error boundary, logged, counted toward the breaker, and **the
+  transition proceeds** — unchanged behaviour, and deliberate: a plugin that
+  crashes is broken, not objecting, and promoting every exception to a veto
+  would let one bad deploy freeze an install's whole lifecycle surface.
+* **Not consulted for a refusal core already makes.** Core's checks run first —
+  the type offers the action, the record exists in this tenant, the state rules
+  permit it, no declared guard blocks a delete — so a core refusal keeps its own
+  reason key and your listener is never asked about a transition that was not
+  going to happen anyway.
+* **Not fired for a no-op.** Trashing an already-trashed record writes nothing,
+  so there is nothing to veto; neither hook fires, exactly as neither fires for
+  `changed` today.
+* **Not predictable from the pre-flight endpoint** — see
+  [above](#the-one-thing-this-preview-cannot-predict).
+
+Never throw a veto from an `*.async` listener: those run in the relay worker,
+long after the request committed, and there is nothing left to refuse.
+
+---
+
+## Clearing a record's remembered state
+
+Core removes the memory row itself when a restore spends it and when the record
+is hard-deleted **through core**. If you hard-delete a record **outside** core —
+your own route, your own SQL, a bulk purge — nothing else will:
+
+```php
+\Whity\app(\Whity\Core\DataType\LifecycleStateMemory::class)
+    ->forget('acme:record', $tenantId, $id);
+```
+
+Registered in both entry points, so it resolves identically over HTTP and inside
+a `whity-cli` command. **Do not `DELETE` from `data_type_restore_states`
+directly** — it is a core-owned table and its shape is not part of any contract.
+
+This matters most for **client-supplied keys**. `record_id` can carry no foreign
+key (the target table varies by type), so no cascade will ever fire: a row left
+behind is inherited by whatever record next occupies that key, and a later record
+re-using it can be restored into a state it never held. With a `SERIAL` key the
+window is narrower but not closed — restored dumps and reset sequences re-use
+ids too.
+
+**Why this is not on `DataTypeGuard`.** That contract is documented as read-only
+— "every method answers a question; none trashes, retires or deletes anything" —
+and holding it confers no authority a plugin does not already have. `forget()`
+writes. Putting it there would falsify the one sentence that makes the guard safe
+to hand out, so it is reached as its own service instead. It is a core class
+rather than an SDK interface deliberately: no SDK version bump is spent on it
+while the shape of "I deleted this outside core" is still settling, and the
+better long-term answer for most plugins is not to reach for `forget()` at all
+but to delete through `DELETE /api/data-types/{type}/{id}`, which already forgets.
 
 ## Keeping your own delete route
 
