@@ -26,14 +26,23 @@ concurrency:
 
 jobs:
   e2e:
-    name: Playwright shard ${{ matrix.shard }}/3
+    # Keep this `/4`, the matrix below and the `--shard=` flag at the bottom in
+    # step with each other — Playwright derives the split from the flag, the
+    # other two only label it.
+    name: Playwright shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     strategy:
       fail-fast: false
+      # Widened from 3 to 4 (WC-ci-wallclock). A shard measured ~5m50s, of which
+      # ~2m25s is fixed setup (compose up, npm ci, browser restore) and ~3m25s is
+      # the tests themselves; a fourth runner splits the variable part four ways
+      # while the fixed part stays constant, so this workflow keeps finishing
+      # inside the now-much-shorter Automated Tests run rather than becoming the
+      # new critical path.
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout code
@@ -116,8 +125,9 @@ jobs:
 
       # Playwright browser binaries are versioned by the @playwright/test
       # release and live in ~/.cache/ms-playwright. Cache them keyed on that
-      # version so all three shards reuse one download instead of fetching
-      # Chromium independently on every run. The key changes only when
+      # version — deliberately with NO shard component — so every shard reuses
+      # one download instead of fetching Chromium independently on every run.
+      # (Widening the matrix must never widen this key.) The key changes only when
       # @playwright/test is bumped, so the cache refreshes exactly when the
       # browser actually changes (a calendar TTL would re-download daily for
       # nothing); GitHub also evicts caches untouched for 7 days, so a quiet
@@ -149,9 +159,9 @@ jobs:
 
       # The Playwright config starts the Next dev server itself (webServer on
       # port 3010) and proxies /api/* to the stack at localhost:8000.
-      - name: Run the E2E suite (shard ${{ matrix.shard }}/3)
+      - name: Run the E2E suite (shard ${{ matrix.shard }}/4)
         working-directory: web
-        run: npx playwright test --shard=${{ matrix.shard }}/3
+        run: npx playwright test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       - name: Upload Playwright report and traces
         if: failure()
