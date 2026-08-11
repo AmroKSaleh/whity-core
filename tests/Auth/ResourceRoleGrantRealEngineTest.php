@@ -254,6 +254,200 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
             ),
             'A resource grant must not become a back door into a tenant the profile does not belong to.'
         );
+
+        // The ROLE question must fail closed for the same reason: membership is
+        // gated BEFORE resource grants are consulted, so there is nothing to
+        // widen. Resolution stops at "no active membership" and returns nothing.
+        $this->assertFalse(
+            $this->resolver()->hasRole(
+                $outsiderId,
+                self::TENANT_A,
+                'editor',
+                self::TYPE_DOCUMENT,
+                self::DOC_ID
+            ),
+            'A resource ROLE grant must not admit a profile with no membership in the tenant.'
+        );
+        $this->assertSame(
+            [],
+            $this->checker()->getEffectiveRolesForProfile(
+                $outsiderId,
+                self::TENANT_A,
+                self::TYPE_DOCUMENT,
+                self::DOC_ID
+            ),
+            'A profile with no active membership resolves to no roles at all, whatever is granted at the resource.'
+        );
+    }
+
+    // ==================== The ROLE side of the same grant (SDK 1.22) ====================
+
+    /**
+     * The gap this closes: `resource_role_assignments` could always express
+     * "this profile holds role R at record X", and
+     * {@see RoleChecker::getEffectiveRolesForProfile()} could always resolve it —
+     * but {@see RoleChecker::hasRoleForProfile()} called that resolver with no
+     * resource arguments, so the grant was unreachable through the method any
+     * caller would naturally use.
+     */
+    public function testRoleGrantedOnlyAtAResourceIsVisibleOnlyToTheScopedQuestion(): void
+    {
+        $profileId = $this->seedProfile('role-scope@a.example', 'viewer', self::TENANT_A);
+
+        $this->repository()->grant(
+            self::TENANT_A,
+            self::TYPE_DOCUMENT,
+            self::DOC_ID,
+            $this->roleId('editor'),
+            $profileId
+        );
+
+        $resolver = $this->resolver();
+
+        self::assertTrue(
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, self::DOC_ID),
+            'A role granted at the resource must be visible to the scoped question.'
+        );
+        self::assertFalse(
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor'),
+            'It must NOT be visible tenant-wide — that would turn a per-record grant into blanket authority.'
+        );
+        self::assertFalse(
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, self::DOC_ID + 1),
+            'It must not answer for a DIFFERENT record of the same type.'
+        );
+    }
+
+    /**
+     * Two roles at two different records, for one profile in one tenant — the
+     * shape an adopter concluded required a `memberships` schema change (and a
+     * second row per record, which UNIQUE(profile_id, tenant_id) forbids). It
+     * needs no schema change: it needs these two arguments.
+     */
+    public function testOneProfileCanHoldDifferentRolesAtDifferentRecords(): void
+    {
+        $profileId = $this->seedProfile('multi-record@a.example', 'viewer', self::TENANT_A);
+        $otherDocId = self::DOC_ID + 7;
+
+        $this->repository()->grant(
+            self::TENANT_A,
+            self::TYPE_DOCUMENT,
+            self::DOC_ID,
+            $this->roleId('editor'),
+            $profileId
+        );
+        $this->repository()->grant(
+            self::TENANT_A,
+            self::TYPE_DOCUMENT,
+            $otherDocId,
+            $this->roleId('approver'),
+            $profileId
+        );
+
+        $resolver = $this->resolver();
+
+        self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, self::DOC_ID));
+        self::assertFalse($resolver->hasRole($profileId, self::TENANT_A, 'approver', self::TYPE_DOCUMENT, self::DOC_ID));
+
+        self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'approver', self::TYPE_DOCUMENT, $otherDocId));
+        self::assertFalse($resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, $otherDocId));
+
+        // The one membership row is untouched and still the tenant-wide answer.
+        self::assertTrue($resolver->hasRole($profileId, self::TENANT_A, 'viewer'));
+    }
+
+    public function testScopedRoleSetIsASupersetOfTheUnscopedOne(): void
+    {
+        $profileId = $this->seedProfile('role-superset@a.example', 'viewer', self::TENANT_A);
+
+        $this->repository()->grant(
+            self::TENANT_A,
+            self::TYPE_DOCUMENT,
+            self::DOC_ID,
+            $this->roleId('editor'),
+            $profileId
+        );
+
+        $checker = $this->checker();
+        $unscoped = $checker->getEffectiveRolesForProfile($profileId, self::TENANT_A);
+        $scoped = $checker->getEffectiveRolesForProfile(
+            $profileId,
+            self::TENANT_A,
+            self::TYPE_DOCUMENT,
+            self::DOC_ID
+        );
+
+        self::assertSame(
+            [],
+            array_diff($unscoped, $scoped),
+            'A resource grant may only WIDEN the role set — the scoped set must contain the unscoped one.'
+        );
+        self::assertContains('editor', $scoped);
+        self::assertNotContains('editor', $unscoped);
+        self::assertContains('viewer', $unscoped, 'The membership role is still there at both scopes.');
+        self::assertContains('viewer', $scoped);
+    }
+
+    public function testHalfSpecifiedScopeCollapsesToTheUnscopedRoleAnswer(): void
+    {
+        $profileId = $this->seedProfile('role-half@a.example', 'viewer', self::TENANT_A);
+
+        $this->repository()->grant(
+            self::TENANT_A,
+            self::TYPE_DOCUMENT,
+            self::DOC_ID,
+            $this->roleId('editor'),
+            $profileId
+        );
+
+        $resolver = $this->resolver();
+        $unscopedAnswer = $resolver->hasRole($profileId, self::TENANT_A, 'editor');
+
+        // Matching one column and ignoring the other would return grants from the
+        // WRONG resource, so a half-specified scope is no scope at all.
+        self::assertSame(
+            $unscopedAnswer,
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor', self::TYPE_DOCUMENT, null),
+            'A resource type without an id must collapse to the unscoped answer.'
+        );
+        self::assertSame(
+            $unscopedAnswer,
+            $resolver->hasRole($profileId, self::TENANT_A, 'editor', null, self::DOC_ID),
+            'A resource id without a type must collapse to the unscoped answer.'
+        );
+        self::assertFalse($unscopedAnswer, 'And the unscoped answer here is a denial.');
+    }
+
+    /**
+     * The three-argument form of the host method keeps behaving exactly as it did:
+     * omitting the pair must be indistinguishable from passing nulls, or every
+     * existing call site (RbacMiddleware, the MCP handlers, the settings and
+     * navigation handlers) silently changes meaning.
+     */
+    public function testExistingThreeArgumentCallersAreUnaffected(): void
+    {
+        $profileId = $this->seedProfile('legacy-caller@a.example', 'viewer', self::TENANT_A);
+
+        $this->repository()->grant(
+            self::TENANT_A,
+            self::TYPE_DOCUMENT,
+            self::DOC_ID,
+            $this->roleId('editor'),
+            $profileId
+        );
+
+        $checker = $this->checker();
+
+        foreach (['viewer', 'editor', 'approver'] as $role) {
+            self::assertSame(
+                $checker->hasRoleForProfile($profileId, $role, self::TENANT_A, null, null),
+                $checker->hasRoleForProfile($profileId, $role, self::TENANT_A),
+                "The three-argument call must equal the explicitly-null one for '{$role}'."
+            );
+        }
+
+        self::assertTrue($checker->hasRoleForProfile($profileId, 'viewer', self::TENANT_A));
+        self::assertFalse($checker->hasRoleForProfile($profileId, 'editor', self::TENANT_A));
     }
 
     // ==================== Resolver parity ====================
@@ -299,6 +493,34 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
                     self::DOC_ID
                 ),
                 "Scoped parity must hold for {$permission}."
+            );
+        }
+
+        // The SAME identity on the role side (SDK 1.22). It is stated against the
+        // host's effective-role set rather than an SDK method because the contract
+        // publishes no effectiveRoles() counterpart — a deployment's role
+        // vocabulary is not something a plugin should filter on.
+        $checker = $this->checker();
+        foreach (['viewer', 'editor', 'approver'] as $role) {
+            self::assertSame(
+                in_array($role, $checker->getEffectiveRolesForProfile($profileId, self::TENANT_A), true),
+                $resolver->hasRole($profileId, self::TENANT_A, $role),
+                "Unscoped role parity must hold for '{$role}'."
+            );
+
+            self::assertSame(
+                in_array(
+                    $role,
+                    $checker->getEffectiveRolesForProfile(
+                        $profileId,
+                        self::TENANT_A,
+                        self::TYPE_DOCUMENT,
+                        self::DOC_ID
+                    ),
+                    true
+                ),
+                $resolver->hasRole($profileId, self::TENANT_A, $role, self::TYPE_DOCUMENT, self::DOC_ID),
+                "Scoped role parity must hold for '{$role}'."
             );
         }
     }
@@ -598,7 +820,7 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         $pdo = SchemaFromMigrations::make();
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
         $pdo->exec("INSERT OR IGNORE INTO roles (id, name, created_at) VALUES
-            (3, 'editor', NOW()), (4, 'viewer', NOW())");
+            (3, 'editor', NOW()), (4, 'viewer', NOW()), (5, 'approver', NOW())");
 
         return $pdo;
     }

@@ -162,6 +162,48 @@ final class PermissionResolverTest extends TestCase
         $this->assertSame(['profileId', 'tenantId', 'resourceType', 'resourceId'], $effective);
     }
 
+    /**
+     * SDK 1.22: the ROLE side takes the same pair.
+     *
+     * 1.17 fitted the resource scope to hasPermission()/effectivePermissions()
+     * only. RoleChecker::getEffectiveRolesForProfile() accepted a scope from the
+     * same change, but hasRoleForProfile() called it with no resource arguments —
+     * so a role granted at ONE record was representable in storage, resolvable by
+     * the machinery, and unreachable through the method a caller would use. The
+     * asymmetry, not any missing storage, is what made per-record role holding
+     * look like it needed a `memberships` schema change.
+     */
+    public function testContractExposesResourceScopeOnTheRoleSideToo(): void
+    {
+        $method = new \ReflectionMethod(PermissionResolver::class, 'hasRole');
+
+        $this->assertSame(
+            ['profileId', 'tenantId', 'role', 'resourceType', 'resourceId'],
+            array_map(
+                static fn (\ReflectionParameter $p): string => $p->getName(),
+                $method->getParameters()
+            )
+        );
+
+        // Additive: every existing three-argument caller must keep compiling and
+        // keep getting the tenant-wide answer.
+        $this->assertTrue(
+            $method->getParameters()[3]->isOptional() && $method->getParameters()[4]->isOptional(),
+            'Resource arguments must be optional so three-argument callers are unaffected.'
+        );
+
+        // The host method behind it must accept the scope as well — passing it
+        // through is the whole change.
+        $checkerParameters = array_map(
+            static fn (\ReflectionParameter $p): string => $p->getName(),
+            (new \ReflectionMethod(RoleChecker::class, 'hasRoleForProfile'))->getParameters()
+        );
+        $this->assertSame(
+            ['profileId', 'requiredRole', 'tenantId', 'resourceType', 'resourceId'],
+            $checkerParameters
+        );
+    }
+
     // =========================================================================
     // Parity with the enforcement path (the whole point)
     // =========================================================================
@@ -283,6 +325,64 @@ final class PermissionResolverTest extends TestCase
                 "hasRole() and the middleware's requiredRole gate disagree about '{$role}'."
             );
         }
+    }
+
+    /**
+     * The same agreement, asked AT one record (SDK 1.22).
+     *
+     * The route-level `requiredRole` gate is FLAT — it asks the tenant-wide
+     * question and knows nothing about a record — so a role held only at a
+     * resource is invisible to it, exactly as it should be. What must hold is
+     * that hasRole() agrees with the EFFECTIVE ROLE SET at whichever scope it is
+     * asked, and that the two scopes cannot be confused for one another:
+     *
+     *     in_array($r, getEffectiveRolesForProfile($p, $t, $ty, $rid), true)
+     *         === hasRole($p, $t, $r, $ty, $rid)
+     *
+     * Before this change the right-hand side could not express the scope at all.
+     */
+    public function testHasRoleAgreesWithTheEffectiveRoleSetAtBothScopes(): void
+    {
+        $profileId = $this->seedProfile('scoped-roles@example.com');
+        $this->addMembership($profileId, self::TENANT_A, 'viewer');
+
+        // 'editor' is held ONLY at this one record.
+        $this->grantRoleAtResource($profileId, self::TENANT_A, 'doc', 4242, 'editor');
+
+        RoleChecker::clearCache();
+
+        foreach (['viewer', 'editor', 'admin'] as $role) {
+            $this->assertSame(
+                in_array(
+                    $role,
+                    $this->roleChecker->getEffectiveRolesForProfile($profileId, self::TENANT_A),
+                    true
+                ),
+                $this->resolver->hasRole($profileId, self::TENANT_A, $role),
+                "Unscoped parity must hold for '{$role}'."
+            );
+
+            $this->assertSame(
+                in_array(
+                    $role,
+                    $this->roleChecker->getEffectiveRolesForProfile($profileId, self::TENANT_A, 'doc', 4242),
+                    true
+                ),
+                $this->resolver->hasRole($profileId, self::TENANT_A, $role, 'doc', 4242),
+                "Scoped parity must hold for '{$role}'."
+            );
+        }
+
+        // The capability itself: askable at the record, absent tenant-wide.
+        $this->assertTrue($this->resolver->hasRole($profileId, self::TENANT_A, 'editor', 'doc', 4242));
+        $this->assertFalse($this->resolver->hasRole($profileId, self::TENANT_A, 'editor'));
+
+        // And the flat route gate is untouched by a grant it cannot address.
+        $this->assertFalse(
+            $this->middlewareAllowsRole($profileId, self::TENANT_A, 'editor'),
+            "The route-level requiredRole gate asks the tenant-wide question; a record-scoped "
+            . 'grant must not silently open a whole route.'
+        );
     }
 
     // =========================================================================
@@ -525,6 +625,27 @@ final class PermissionResolverTest extends TestCase
                  (tenant_id, grantor_profile_id, grantee_type, grantee_id, permission, granted_at)
              VALUES (?, ?, 'profile', ?, ?, datetime('now'))"
         )->execute([$tenantId, $grantorProfileId, $granteeProfileId, $permission]);
+    }
+
+    /**
+     * Write a role grant addressed at ONE record, straight to the table.
+     *
+     * Deliberately not through ResourceRoleAssignmentRepository: this test is
+     * about what RESOLUTION does with a grant row, not about the registry gate
+     * the write boundary applies (which ResourceRoleGrantRealEngineTest covers).
+     */
+    private function grantRoleAtResource(
+        int $profileId,
+        int $tenantId,
+        string $resourceType,
+        int $resourceId,
+        string $roleName
+    ): void {
+        $this->pdo->prepare(
+            "INSERT INTO resource_role_assignments
+                 (tenant_id, resource_type, resource_id, role_id, profile_id, created_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))"
+        )->execute([$tenantId, $resourceType, $resourceId, $this->roleId($roleName), $profileId]);
     }
 
     private function registry(): PermissionRegistry
