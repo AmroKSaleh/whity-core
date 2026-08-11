@@ -51,6 +51,7 @@ final class CoreTables
         'audit_log' => '016_create_audit_log.php',
         'backup_codes' => '007_add_two_factor_support.php',
         'core_schema_migrations' => '003_create_core_schema_migrations.php',
+        'data_type_restore_states' => '089_create_data_type_restore_states.php',
         'deployments' => '004_create_deployment_tables.php',
         'devices' => '044_create_devices.php',
         'document_blocks' => '059_create_document_designer_tables.php',

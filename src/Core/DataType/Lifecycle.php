@@ -45,7 +45,20 @@ final class Lifecycle
     private array $states;
 
     /**
-     * The state a restored record returns to.
+     * The FALLBACK state a restore uses when the record's own prior state is
+     * unavailable.
+     *
+     * This docblock used to read "the state a restored record returns to", and
+     * that sentence was the bug: it describes a restore as a jump to a constant
+     * rather than as an undo, and `restore()` was written to match it — so a
+     * record trashed while `approved` came back `draft`, silently. A restore
+     * returns a record to THE STATE IT HELD, remembered across the trash by
+     * {@see LifecycleStateMemory}.
+     *
+     * This value is consulted in exactly two cases, and neither is the normal
+     * one: nothing was remembered (every record already in the trash when that
+     * memory shipped), or what was remembered is no longer a state this
+     * lifecycle declares.
      */
     private string $defaultState;
 
@@ -62,7 +75,7 @@ final class Lifecycle
     /**
      * @param string|null  $column       Column holding the state (null = no lifecycle).
      * @param list<string> $states       Every declared state.
-     * @param string       $defaultState The state a restore returns to.
+     * @param string       $defaultState Fallback for a restore with no usable memory.
      * @param string|null  $trashedState The trashed state, or null if not trashable.
      * @param string|null  $retiredState The retired state, or null if not retirable.
      */
@@ -119,7 +132,13 @@ final class Lifecycle
     }
 
     /**
-     * The state a restored record returns to.
+     * The fallback a restore uses when the record's own prior state is not
+     * available — NOT "the state a restore returns to".
+     *
+     * A restore returns a record to the state it held. This answers the
+     * narrower question of what to do when that state was never remembered, or
+     * is no longer one this lifecycle declares. See
+     * {@see DataTypeLifecycleService::restoreTarget()} for the resolution.
      */
     public function defaultState(): string
     {

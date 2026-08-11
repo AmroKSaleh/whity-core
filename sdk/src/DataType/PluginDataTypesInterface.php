@@ -31,6 +31,19 @@ namespace Whity\Sdk\DataType;
  * Declaring `retirable` without `trashable` is perfectly valid, and so is the
  * reverse. They are independent axes, not two points on one scale.
  *
+ * `default_state` is a FALLBACK, not where a restore goes
+ * ------------------------------------------------------
+ * A restore is an undo: the host returns the record to the state it actually
+ * held when it was trashed, so a record trashed while `approved` comes back
+ * `approved`. It keeps that state in its own table — your schema is untouched
+ * and there is no migration to ship for it.
+ *
+ * `default_state` is consulted only when the held state is unavailable: nothing
+ * was remembered (a record trashed before this behaviour shipped, or one whose
+ * state column was moved to your trashed state by something other than the
+ * `trash` endpoint), or the state is no longer one you declare — including when
+ * you have since repurposed it as your `trashed_state` or `retired_state`.
+ *
  * Declaration shape
  * -----------------
  *     public function getDataTypes(): array
