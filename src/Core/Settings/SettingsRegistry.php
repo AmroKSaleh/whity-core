@@ -737,6 +737,19 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
+            // Error tracking. These five were declared with defaults, types,
+            // enum options and a global-only marking, but never given a
+            // validate() arm — so every one of them fell through to `default`
+            // below and the admin Error-tracking tab's PATCH was refused as
+            // "Unknown setting key" for keys the registry plainly knows.
+            // Found by the catalogue pin added with #713 item 1.
+            self::ERROR_TRACKING_ENABLED,
+            self::ERROR_TRACKING_NOTIFY_ADMINS => self::validateBoolean($value, $key),
+            self::ERROR_TRACKING_PROVIDER => self::validateEnum($key, $value),
+            // Free-form deployment label ('production', 'staging'); empty leaves
+            // it unset, exactly like the other optional string settings above.
+            self::ERROR_TRACKING_ENVIRONMENT => null,
+            self::ERROR_TRACKING_RETENTION_DAYS => self::validateRetentionDays($value),
             default => "Unknown setting key: {$key}",
         };
     }
@@ -777,6 +790,31 @@ final class SettingsRegistry
         $port = (int) $value;
         if ($port < 1 || $port > 65535) {
             return 'mail.smtp.port must be between 1 and 65535.';
+        }
+
+        return null;
+    }
+
+    /**
+     * How long captured error groups are retained: a whole number of days, at
+     * least 1, capped at 3650 (10 years) — the same sanity ceiling
+     * {@see validateGraceDays()} applies.
+     *
+     * At least 1 rather than 0: zero would mean the pruner deletes every group
+     * on its next pass, which is indistinguishable from error tracking being
+     * broken. An operator who wants that turns the feature off.
+     */
+    private static function validateRetentionDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return 'error_tracking.retention_days must be a whole number of days.';
+        }
+        $days = (int) $value;
+        if ($days < 1) {
+            return 'error_tracking.retention_days must be at least 1.';
+        }
+        if ($days > 3650) {
+            return 'error_tracking.retention_days must be 3650 or fewer.';
         }
 
         return null;

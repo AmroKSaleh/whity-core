@@ -16,6 +16,7 @@ use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
+use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
 
 /**
@@ -54,7 +55,8 @@ final class DemoCatalogPlugin implements
     PluginFrontendInterface,
     PluginResourceTypesInterface,
     PluginTablesInterface,
-    PluginDataTypesInterface
+    PluginDataTypesInterface,
+    PluginSettingsInterface
 {
     /**
      * @inheritDoc
@@ -298,6 +300,60 @@ final class DemoCatalogPlugin implements
         return [
             'demo_catalog:view',
             'demo_catalog:manage',
+        ];
+    }
+
+    /**
+     * The settings this plugin owns (#713 item 1).
+     *
+     * Declared as BARE keys; the host namespaces them under this plugin's name,
+     * so `sync_page_size` is stored as `democatalog:sync_page_size` in CORE'S
+     * `app_settings` / `tenant_settings` tables and resolves through core's own
+     * per-tenant ?? global ?? declared-default chain. There is no plugin-private
+     * settings table, and there is no migration: an undisturbed key simply
+     * resolves to the default below.
+     *
+     * The three keys illustrate the three decisions a declaration makes:
+     *
+     *  - `sync_page_size` is a bounded int an operator legitimately tunes per
+     *    tenant, so it is admin-visible and NOT global-only.
+     *  - `sync_mode` is an enum whose options core enforces on every write; a
+     *    value outside them is a 422, not a row.
+     *  - `last_sync_cursor` is this plugin's own bookkeeping. It opts OUT of the
+     *    admin surface (no `admin => true`): it is stored, resolved and
+     *    validated exactly like the other two, but it has no business on a
+     *    screen gated by core's settings permissions, and an operator editing it
+     *    by hand would only corrupt a sync.
+     *
+     * @inheritDoc
+     */
+    public function getSettings(): array
+    {
+        return [
+            'sync_page_size' => [
+                'type' => 'int',
+                'default' => 100,
+                'min' => 1,
+                'max' => 1000,
+                'label' => ['en' => 'Sync page size', 'ar' => 'حجم صفحة المزامنة'],
+                'description' => 'How many catalogue items the changes feed returns per page.',
+                'admin' => true,
+            ],
+            'sync_mode' => [
+                'type' => 'enum',
+                'options' => ['off', 'incremental', 'full'],
+                'default' => 'incremental',
+                'label' => ['en' => 'Sync mode', 'ar' => 'وضع المزامنة'],
+                'description' => 'Whether clients sync nothing, only changes, or the whole catalogue.',
+                'admin' => true,
+            ],
+            'last_sync_cursor' => [
+                'type' => 'string',
+                'default' => '',
+                'max_length' => 64,
+                'label' => ['en' => 'Last sync cursor'],
+                'description' => 'Internal bookkeeping; managed by the plugin, not by an operator.',
+            ],
         ];
     }
 

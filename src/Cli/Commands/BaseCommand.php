@@ -155,6 +155,28 @@ abstract class BaseCommand
         $dataTypeRegistry = new \Whity\Core\DataType\DataTypeRegistry($tableOwnershipRegistry, $hookManager);
         \Whity\register_service(\Whity\Core\DataType\DataTypeRegistry::class, $dataTypeRegistry);
 
+        // Plugin-declared SETTINGS (#713 item 1), registered as services exactly
+        // as public/index.php does. The divergence this guards against is the
+        // quietest one yet: without the catalogue here, a key a plugin declared
+        // would exist over HTTP and simply not exist under the CLI, so a command
+        // reading it would resolve the registry DEFAULT while the web host
+        // resolved the operator's configured value — two different answers to
+        // the same question, neither of which throws.
+        $pluginSettingsRegistry = new \Whity\Core\Settings\PluginSettingsRegistry($hookManager);
+        \Whity\register_service(\Whity\Core\Settings\PluginSettingsRegistry::class, $pluginSettingsRegistry);
+
+        $settingsCatalog = new \Whity\Core\Settings\SettingsCatalog($pluginSettingsRegistry);
+        \Whity\register_service(\Whity\Core\Settings\SettingsCatalog::class, $settingsCatalog);
+
+        \Whity\register_service(
+            \Whity\Core\Settings\SettingsService::class,
+            new \Whity\Core\Settings\SettingsService(
+                new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
+                new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo()),
+                $settingsCatalog
+            )
+        );
+
         $dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
             $db->getPdo(),
             $dataTypeRegistry,
@@ -186,7 +208,8 @@ abstract class BaseCommand
             $resourceTypeRegistry,
             $healthProbeRegistry,
             $tableOwnershipRegistry,
-            $dataTypeRegistry
+            $dataTypeRegistry,
+            $pluginSettingsRegistry
         );
         $pluginLoader->load();
 

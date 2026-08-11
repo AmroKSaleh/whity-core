@@ -245,8 +245,14 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
 
   const global = data?.global as SettingsMap | undefined;
   const registry = useMemo<RegistryEntry[]>(() => data?.registry ?? [], [data]);
+  // General + Integrations are core's own platform-wide fields; `plugins` is the
+  // section holding whatever the installed plugins declared with `admin => true`
+  // (#713 item 1). The remaining sections live on their own dedicated tabs.
   const sections = useMemo(
-    () => groupRegistry(registry).filter((s) => s.section.id === 'general' || s.section.id === 'integrations'),
+    () =>
+      groupRegistry(registry).filter(
+        (s) => s.section.id === 'general' || s.section.id === 'integrations' || s.section.id === 'plugins'
+      ),
     [registry]
   );
   const dirty = Object.keys(draft).length > 0;

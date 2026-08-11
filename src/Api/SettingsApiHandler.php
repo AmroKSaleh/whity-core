@@ -8,7 +8,6 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
-use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\SettingsValidationException;
 use Whity\Core\Tenant\TenantContext;
@@ -31,6 +30,24 @@ use Whity\Http\JsonBody;
  * `tenant_id` predicate for the tenant-owned `tenant_settings` table. The
  * tenant always comes from {@see TenantContext}, never from the request body, so
  * a caller can only ever edit ITS OWN tenant's overrides.
+ *
+ * Plugin-declared keys (#713 item 1)
+ * ----------------------------------
+ * Every read and write here goes through {@see \Whity\Core\Settings\SettingsCatalog}
+ * — the union of core's static registry and whatever the loaded plugins
+ * declared — rather than the core registry alone. A plugin key that opted in
+ * with `admin => true` therefore appears in the same `registry` descriptor list
+ * and the same `effective`/`global` value maps as `site_name`, with the same
+ * type, default and validation. That is the point: one settings store, one
+ * catalogue, one screen.
+ *
+ * A plugin key that did NOT opt in is absent from BOTH the read and the write
+ * surface, and the two must stay in lockstep. A key that is writable here but
+ * invisible here would be exactly the failure this whole change removes — a
+ * value you can set and cannot see. These endpoints are gated on the core
+ * `settings:read`/`write`/`manage` permissions, which are not the same
+ * population as the holders of a plugin's own permissions, so publication is the
+ * plugin's decision to make and not the installer's.
  *
  * The route-level guard ({@see \Whity\Http\RbacMiddleware}) enforces the
  * required permission; this handler RE-checks it against the authoritative
@@ -167,7 +184,8 @@ final class SettingsApiHandler
         try {
             // Per-tenant surface: text keys MINUS global-only governance keys
             // (those are operator-level, edited on /settings/global only, WC-696206d8).
-            $textKeys = array_flip(SettingsRegistry::tenantTextKeys());
+            $catalog = $this->settings->catalog();
+            $textKeys = array_flip($catalog->tenantTextKeys());
             $allEffective = $this->settings->effective($tenantId);
             $allOverridden = $this->settings->overriddenKeys($tenantId);
 
@@ -177,7 +195,7 @@ final class SettingsApiHandler
                     // they are managed via the branding endpoints. Only text-kind
                     // keys are visible here (WC-233).
                     'effective' => array_intersect_key($allEffective, $textKeys),
-                    'registry' => SettingsRegistry::describeTenantText(),
+                    'registry' => $catalog->describeTenantText(),
                     'overridden' => array_values(array_filter(
                         $allOverridden,
                         static fn (string $k): bool => isset($textKeys[$k])
@@ -215,7 +233,7 @@ final class SettingsApiHandler
             fn (string $key, ?string $value): null => $this->writeTenant($tenantId, $key, $value),
             fn (int $tenantIdInner): array => array_intersect_key(
                 $this->settings->effective($tenantIdInner),
-                array_flip(SettingsRegistry::tenantTextKeys())
+                array_flip($this->settings->catalog()->tenantTextKeys())
             ),
             $tenantId,
             // Per-tenant path: reject global-only governance keys (managed globally).
@@ -234,14 +252,15 @@ final class SettingsApiHandler
         }
 
         try {
-            $textKeys = array_flip(SettingsRegistry::textKeys());
+            $catalog = $this->settings->catalog();
+            $textKeys = array_flip($catalog->textKeys());
             $allGlobal = $this->settings->getGlobal();
 
             return Response::json([
                 'data' => [
                     // Asset-kind keys excluded from the settings API surface (WC-233).
                     'global' => array_intersect_key($allGlobal, $textKeys),
-                    'registry' => SettingsRegistry::describeText(),
+                    'registry' => $catalog->describeText(),
                 ],
             ], 200);
         } catch (\Throwable $e) {
@@ -268,7 +287,7 @@ final class SettingsApiHandler
             fn (string $key, ?string $value): null => $this->writeGlobal($key, $value),
             fn (): array => array_intersect_key(
                 $this->settings->getGlobal(),
-                array_flip(SettingsRegistry::textKeys())
+                array_flip($this->settings->catalog()->textKeys())
             )
         );
     }
@@ -291,6 +310,7 @@ final class SettingsApiHandler
         int $tenantId = 0,
         bool $allowGlobalOnly = true
     ): Response {
+        $catalog = $this->settings->catalog();
         $body = JsonBody::parsed($request);
         $settings = $body['settings'] ?? null;
 
@@ -310,11 +330,27 @@ final class SettingsApiHandler
                 $details['_'] = 'Setting keys must be strings.';
                 continue;
             }
-            if (!SettingsRegistry::isKnown($key)) {
+            if (!$catalog->isKnown($key)) {
                 $details[$key] = "Unknown setting key: {$key}";
                 continue;
             }
-            if (!$allowGlobalOnly && SettingsRegistry::isGlobalOnly($key)) {
+            // A plugin key that did not opt in with `admin => true` is stored,
+            // resolved and validated exactly like any other — it is simply not
+            // managed HERE. These endpoints are gated on the core `settings:*`
+            // permissions, so accepting a write for an unpublished key would
+            // hand a plugin's configuration to a population the plugin never
+            // agreed to; the declaring plugin manages it on its own RBAC-gated
+            // surface. Refused rather than silently written, so the caller
+            // learns which surface owns the key instead of watching a write
+            // vanish from a screen that never showed it.
+            if (!$catalog->isCoreKey($key) && !$catalog->isAdminVisible($key)) {
+                $details[$key] = "{$key} is declared by the '"
+                    . (string) $catalog->sourceOf($key)
+                    . "' plugin and is not published on the settings API; "
+                    . 'the declaring plugin manages it.';
+                continue;
+            }
+            if (!$allowGlobalOnly && $catalog->isGlobalOnly($key)) {
                 // Governance key submitted on the per-tenant surface — reject
                 // rather than silently write an inert per-tenant override.
                 $details[$key] = "{$key} is a global instance setting and cannot be set per-tenant.";
@@ -332,7 +368,7 @@ final class SettingsApiHandler
             }
 
             $stringValue = (string) $value;
-            $reason = SettingsRegistry::validate($key, $stringValue);
+            $reason = $catalog->validate($key, $stringValue);
             if ($reason !== null) {
                 $details[$key] = $reason;
                 continue;

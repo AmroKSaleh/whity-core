@@ -380,6 +380,27 @@ $tableOwnershipRegistry->registerCoreTables();
 $dataTypeRegistry = new \Whity\Core\DataType\DataTypeRegistry($tableOwnershipRegistry, $hookManager);
 \Whity\register_service(\Whity\Core\DataType\DataTypeRegistry::class, $dataTypeRegistry); // @phpstan-ignore-line
 
+// 4c-quinquies. Plugin-declared SETTINGS catalogue (#713 item 1): the keys a
+// plugin contributes to core's OWN settings tables, so a plugin stops building a
+// private `tenant_settings` look-alike with no typing and no validation.
+//
+// Two objects, because there are two different things:
+//
+//  - PluginSettingsRegistry holds the MUTABLE half — the plugin contributions —
+//    as an instance rebuilt per boot from the plugins actually loaded. It is not
+//    a static, because a static is per FrankenPHP worker and a key missing from
+//    one worker's catalogue does not throw, it reads as "unknown setting" (the
+//    #701 / #727 hazard, landing in a layer that fails quietly).
+//  - SettingsCatalog is the UNION VIEW over it and core's static const
+//    catalogue. Core's ~330 static call sites keep resolving core-only and are
+//    untouched; only consumers that treat keys as data — the settings service
+//    and the settings API — see both halves.
+$pluginSettingsRegistry = new \Whity\Core\Settings\PluginSettingsRegistry($hookManager);
+\Whity\register_service(\Whity\Core\Settings\PluginSettingsRegistry::class, $pluginSettingsRegistry); // @phpstan-ignore-line
+
+$settingsCatalog = new \Whity\Core\Settings\SettingsCatalog($pluginSettingsRegistry);
+\Whity\register_service(\Whity\Core\Settings\SettingsCatalog::class, $settingsCatalog); // @phpstan-ignore-line
+
 // 4b-bis. Durable async queue (WC-queue): the producer-side QueueService is
 // registered so core services, hooks, and plugins enqueue work into the durable
 // `jobs` table instead of the old log-only Queue stub. The consumer side
@@ -809,7 +830,8 @@ $pluginLoader = new PluginLoader(
     $resourceTypeRegistry,
     $healthProbeRegistry,
     $tableOwnershipRegistry,
-    $dataTypeRegistry
+    $dataTypeRegistry,
+    $pluginSettingsRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -838,8 +860,13 @@ $twoFactorPolicyResolver = new TwoFactorPolicyResolver($db, $logger);
 $globalSettingsRepository = new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo());
 $settingsService = new \Whity\Core\Settings\SettingsService(
     $globalSettingsRepository,
-    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo())
+    new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo()),
+    // #713 item 1: resolve against the UNION of core's keys and the loaded
+    // plugins' declarations, so a plugin key lands in these same two tables and
+    // resolves through this same per-tenant ?? global ?? default chain.
+    $settingsCatalog
 );
+\Whity\register_service(\Whity\Core\Settings\SettingsService::class, $settingsService); // @phpstan-ignore-line
 $authHandler = new AuthHandler($db->getPdo(), $jwtParser, null, null, $totpService, $logger, $auditLogger, $loginThrottle, $twoFactorPolicyResolver, $settingsService);
 $router->register('POST', '/api/login', [$authHandler, 'handle'], null);
 // WC-235: public self-service registration — provisions a new tenant + owner
