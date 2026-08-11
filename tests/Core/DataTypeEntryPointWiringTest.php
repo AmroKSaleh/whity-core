@@ -75,7 +75,7 @@ final class DataTypeEntryPointWiringTest extends TestCase
         $source = $this->read(__DIR__ . '/../../public/index.php');
 
         self::assertMatchesRegularExpression(
-            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\s*\)/s',
+            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\b/s',
             $source,
             'The loader is what STAMPS ownership from $plugin->getName(); a registry that never '
             . 'reaches it is a registry no plugin can ever register with.'
@@ -155,7 +155,7 @@ final class DataTypeEntryPointWiringTest extends TestCase
         $source = $this->read(__DIR__ . '/../../src/Cli/Commands/BaseCommand.php');
 
         self::assertMatchesRegularExpression(
-            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\s*\)/s',
+            '/new PluginLoader\((?:[^;]*?)\$tableOwnershipRegistry,\s*\$dataTypeRegistry\b/s',
             $source,
             'Same omission as #724: constructing the registries without passing them to the loader '
             . 'leaves the CLI with an empty catalogue while HTTP has a full one.'

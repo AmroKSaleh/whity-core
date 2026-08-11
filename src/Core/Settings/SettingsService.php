@@ -8,8 +8,8 @@ namespace Whity\Core\Settings;
  * Resolves and mutates website settings across the global + per-tenant layers
  * (Website Settings feature).
  *
- * Resolution precedence for {@see effective()}, per known registry key:
- *   tenant_settings[key] ?? app_settings[key] ?? SettingsRegistry::default(key)
+ * Resolution precedence for {@see effective()}, per known catalogue key:
+ *   tenant_settings[key] ?? app_settings[key] ?? the key's declared default
  *
  * The SYSTEM tenant (id 0) has no per-tenant override layer, so its effective
  * values resolve from globals (then registry defaults) only — it skips the
@@ -20,6 +20,20 @@ namespace Whity\Core\Settings;
  * nothing is persisted. All SQL goes through the two repositories — the service
  * issues none directly — and the tenant repository binds an explicit `tenant_id`
  * predicate on every statement.
+ *
+ * Plugin-declared keys (#713 item 1)
+ * ----------------------------------
+ * The catalogue this service resolves against is {@see SettingsCatalog}, the
+ * union of core's static registry and whatever the loaded plugins declared. That
+ * is the whole point of routing plugin settings through here: a plugin key lands
+ * in the SAME two tables, resolves through the SAME three-step chain, and is
+ * validated by the SAME write path as `site_name`. There is one settings store,
+ * not one per plugin.
+ *
+ * The catalogue is an OPTIONAL constructor argument, defaulting to
+ * {@see SettingsCatalog::coreOnly()}. A host — or any of the many tests — that
+ * passes nothing gets precisely the behaviour it had before plugin settings
+ * existed.
  *
  * Stateless beyond its injected repositories: safe for a FrankenPHP worker.
  */
@@ -32,11 +46,30 @@ final class SettingsService
 
     private GlobalSettingsRepository $globals;
     private TenantSettingsRepository $tenants;
+    private SettingsCatalog $catalog;
 
-    public function __construct(GlobalSettingsRepository $globals, TenantSettingsRepository $tenants)
-    {
+    public function __construct(
+        GlobalSettingsRepository $globals,
+        TenantSettingsRepository $tenants,
+        ?SettingsCatalog $catalog = null
+    ) {
         $this->globals = $globals;
         $this->tenants = $tenants;
+        $this->catalog = $catalog ?? SettingsCatalog::coreOnly();
+    }
+
+    /**
+     * The catalogue this service resolves against — core's keys unioned with
+     * whatever the loaded plugins declared.
+     *
+     * Exposed so a caller that already holds the service (a plugin reading its
+     * own configuration, the settings API building its payload) can ask about a
+     * key's type, default or options without separately resolving the catalogue
+     * and risking a different instance.
+     */
+    public function catalog(): SettingsCatalog
+    {
+        return $this->catalog;
     }
 
     /**
@@ -52,13 +85,13 @@ final class SettingsService
         $tenant = $tenantId === self::SYSTEM_TENANT_ID ? [] : $this->tenants->allForTenant($tenantId);
 
         $effective = [];
-        foreach (SettingsRegistry::keys() as $key) {
+        foreach ($this->catalog->keys() as $key) {
             if (array_key_exists($key, $tenant)) {
                 $effective[$key] = $tenant[$key];
             } elseif (array_key_exists($key, $global)) {
                 $effective[$key] = $global[$key];
             } else {
-                $effective[$key] = SettingsRegistry::defaultFor($key);
+                $effective[$key] = $this->catalog->defaultFor($key);
             }
         }
 
@@ -82,7 +115,7 @@ final class SettingsService
 
         $tenant = $this->tenants->allForTenant($tenantId);
         $overridden = [];
-        foreach (SettingsRegistry::keys() as $key) {
+        foreach ($this->catalog->keys() as $key) {
             if (array_key_exists($key, $tenant)) {
                 $overridden[] = $key;
             }
@@ -102,10 +135,10 @@ final class SettingsService
         $global = $this->globals->all();
 
         $out = [];
-        foreach (SettingsRegistry::keys() as $key) {
+        foreach ($this->catalog->keys() as $key) {
             $out[$key] = array_key_exists($key, $global)
                 ? $global[$key]
-                : SettingsRegistry::defaultFor($key);
+                : $this->catalog->defaultFor($key);
         }
 
         return $out;
@@ -125,7 +158,7 @@ final class SettingsService
     {
         $this->assertKnown($key);
 
-        if (SettingsRegistry::kindFor($key) === 'asset') {
+        if ($this->catalog->kindFor($key) === 'asset') {
             throw new SettingsValidationException(
                 $key,
                 "{$key} is an uploaded asset; use the branding upload endpoint, not a text write."
@@ -138,7 +171,7 @@ final class SettingsService
         }
 
         $this->assertValid($key, $value);
-        $this->globals->set($key, SettingsRegistry::normalize($key, $value));
+        $this->globals->set($key, $this->catalog->normalize($key, $value));
     }
 
     /**
@@ -160,7 +193,7 @@ final class SettingsService
     {
         $this->assertKnown($key);
 
-        if (SettingsRegistry::kindFor($key) === 'asset') {
+        if ($this->catalog->kindFor($key) === 'asset') {
             throw new SettingsValidationException(
                 $key,
                 "{$key} is an uploaded asset; use the branding upload endpoint, not a text write."
@@ -180,7 +213,7 @@ final class SettingsService
         }
 
         $this->assertValid($key, $value);
-        $this->tenants->set($tenantId, $key, SettingsRegistry::normalize($key, $value));
+        $this->tenants->set($tenantId, $key, $this->catalog->normalize($key, $value));
     }
 
     /**
@@ -228,7 +261,7 @@ final class SettingsService
     private function assertAssetKey(string $key): void
     {
         $this->assertKnown($key);
-        if (SettingsRegistry::kindFor($key) !== 'asset') {
+        if ($this->catalog->kindFor($key) !== 'asset') {
             throw new SettingsValidationException($key, "{$key} is not an asset key.");
         }
     }
@@ -238,7 +271,7 @@ final class SettingsService
      */
     private function assertKnown(string $key): void
     {
-        if (!SettingsRegistry::isKnown($key)) {
+        if (!$this->catalog->isKnown($key)) {
             throw new SettingsValidationException($key, "Unknown setting key: {$key}");
         }
     }
@@ -248,7 +281,7 @@ final class SettingsService
      */
     private function assertValid(string $key, string $value): void
     {
-        $reason = SettingsRegistry::validate($key, $value);
+        $reason = $this->catalog->validate($key, $value);
         if ($reason !== null) {
             throw new SettingsValidationException($key, $reason);
         }

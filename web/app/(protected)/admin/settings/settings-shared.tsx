@@ -55,7 +55,28 @@ export type AddToast = ReturnType<typeof useToast>['addToast'];
 export type RegistryEntry = components['schemas']['SettingsRegistryEntry'] & {
   options?: string[];
   isFlag?: boolean;
+  /**
+   * Plugin-declared keys (#713 item 1) additionally carry their own
+   * presentation and attribution, because core cannot hardcode either:
+   *   - `source` — the plugin that declared the key. Shown beside the control,
+   *     so an operator changing `acme:mode` on a shared screen knows whose
+   *     setting it is and which plugin to remove to make it go away.
+   *   - `label` / `description` — locale => text, supplied by the declaration.
+   *     Core keys carry neither (their copy lives in FIELD_META below).
+   * All optional: a core descriptor is unchanged.
+   */
+  source?: string;
+  label?: Record<string, string>;
+  description?: string;
 };
+
+/** The namespace separator the host puts between a plugin and its key. */
+export const PLUGIN_KEY_SEPARATOR = ':';
+
+/** Whether a registry key was declared by a plugin rather than by core. */
+export function isPluginKey(key: string): boolean {
+  return key.includes(PLUGIN_KEY_SEPARATOR);
+}
 
 /**
  * The value map is registry-driven and open-ended: beyond the four typed
@@ -250,6 +271,23 @@ export const SETTINGS_SECTIONS: readonly SectionDef[] = [
   },
 ];
 
+/**
+ * Catch-all for PLUGIN-declared keys (#713 item 1).
+ *
+ * Grouped rather than scattered through core's sections deliberately: an
+ * operator reading this page needs to know which switches belong to the
+ * platform and which arrived with a plugin, because uninstalling the plugin
+ * takes its keys with it. Only keys whose declaration opted in with
+ * `admin => true` are published by the backend at all, so anything reaching
+ * this section is here because its author chose to put it here.
+ */
+const PLUGIN_SECTION: SectionDef = {
+  id: 'plugins',
+  title: 'Plugin settings',
+  description: 'Settings declared by the plugins installed on this instance.',
+  keys: [],
+};
+
 /** Catch-all for registry keys not claimed by a named section above. */
 const OTHER_SECTION: SectionDef = {
   id: 'other',
@@ -287,6 +325,15 @@ export function groupRegistry(registry: readonly RegistryEntry[]): RegistrySecti
     }
   }
 
+  // Plugin-declared keys form their own section, in declaration order.
+  const pluginEntries = registry.filter((entry) => !claimed.has(entry.key) && isPluginKey(entry.key));
+  for (const entry of pluginEntries) {
+    claimed.add(entry.key);
+  }
+  if (pluginEntries.length > 0) {
+    sections.push({ section: PLUGIN_SECTION, entries: pluginEntries });
+  }
+
   // `mail.*` keys are managed on the dedicated Email settings page (transport-
   // conditional layout + write-only password + test-send), so they are excluded
   // from this generic form rather than dumped into "Other settings".
@@ -312,7 +359,13 @@ export function featureFlagEntries(registry: readonly RegistryEntry[]): Registry
 
 /** Turn a raw key (`storage.s3.public_base_url`) into a readable label. */
 export function humanizeKey(key: string): string {
-  const tail = key.includes('.') ? key.slice(key.lastIndexOf('.') + 1) : key;
+  // Drop the plugin namespace first, so `acme:sync.interval` humanises from
+  // `interval` rather than from `acme:sync.interval` — this is only the
+  // FALLBACK path; a plugin that declared a label gets its own text instead.
+  const bare = key.includes(PLUGIN_KEY_SEPARATOR)
+    ? key.slice(key.lastIndexOf(PLUGIN_KEY_SEPARATOR) + 1)
+    : key;
+  const tail = bare.includes('.') ? bare.slice(bare.lastIndexOf('.') + 1) : bare;
   return tail
     .replace(/[_.]+/g, ' ')
     .trim()
@@ -322,6 +375,26 @@ export function humanizeKey(key: string): string {
 /** The label + help for a key, falling back to a humanised label. */
 export function fieldMetaFor(key: string): FieldMeta {
   return FIELD_META[key] ?? { label: humanizeKey(key) };
+}
+
+/**
+ * Label + help for one descriptor, preferring what the DECLARATION said.
+ *
+ * Core keys keep their curated copy in FIELD_META. A plugin key cannot — core
+ * has never heard of it — so the declaration carries its own label and
+ * description and they win here. A plugin that declared neither still renders,
+ * labelled from the humanised bare key.
+ */
+export function entryMetaFor(entry: RegistryEntry): FieldMeta {
+  const declared = entry.label?.en ?? Object.values(entry.label ?? {})[0];
+  if (declared || entry.description) {
+    return {
+      label: declared || humanizeKey(entry.key),
+      help: entry.description || undefined,
+    };
+  }
+
+  return fieldMetaFor(entry.key);
 }
 
 /** A boolean setting is the literal string 'true'. */
@@ -584,8 +657,8 @@ export function RegistrySettingControl({
   onChange,
 }: RegistrySettingControlProps) {
   const { key, type } = entry;
-  const meta = fieldMetaFor(key);
-  const id = `${idPrefix}-${key.replace(/\./g, '-')}`;
+  const meta = entryMetaFor(entry);
+  const id = `${idPrefix}-${key.replace(/[.:]/g, '-')}`;
   const helpId = meta.help ? `${id}-help` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const describedBy = [helpId, errorId].filter(Boolean).join(' ') || undefined;
@@ -602,6 +675,20 @@ export function RegistrySettingControl({
     </p>
   ) : null;
 
+  // Attribution for a plugin-declared key (#713 item 1). Not decoration: these
+  // controls sit on the same screen as core's own, and an operator about to
+  // change one needs to know it belongs to a plugin — that its meaning is the
+  // plugin's, and that removing the plugin removes the setting.
+  const sourceNode = entry.source ? (
+    <Badge
+      data-testid={`setting-source-${key}`}
+      variant="outline"
+      className="text-[10px] font-medium"
+    >
+      {entry.source}
+    </Badge>
+  ) : null;
+
   // Boolean flags: label + help on the left, a toggle on the right.
   if (type === 'bool') {
     return (
@@ -610,9 +697,12 @@ export function RegistrySettingControl({
         className="flex items-start justify-between gap-4 rounded-lg border border-border bg-muted/20 p-4"
       >
         <div className="space-y-0.5">
-          <label htmlFor={id} className="text-sm font-medium text-foreground">
-            {meta.label}
-          </label>
+          <div className="flex items-center gap-2">
+            <label htmlFor={id} className="text-sm font-medium text-foreground">
+              {meta.label}
+            </label>
+            {sourceNode}
+          </div>
           {helpNode}
           {errorNode}
         </div>
@@ -632,9 +722,12 @@ export function RegistrySettingControl({
   return (
     <div data-testid={`setting-row-${key}`} className="space-y-1.5">
       <div className="flex items-center justify-between gap-2">
-        <label htmlFor={id} className="text-sm font-medium text-foreground">
-          {meta.label}
-        </label>
+        <div className="flex items-center gap-2">
+          <label htmlFor={id} className="text-sm font-medium text-foreground">
+            {meta.label}
+          </label>
+          {sourceNode}
+        </div>
         {status && (
           <Badge
             data-testid={`status-${key}`}

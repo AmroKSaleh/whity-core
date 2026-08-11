@@ -167,9 +167,21 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.20.0',
+            '1.21.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.20 adds the plugin-owned data-type contracts (WC-723 Door 2): '
+            'SDK 1.21 adds plugin-declared SETTINGS (Settings\PluginSettingsInterface, '
+            . '#713 item 1): a plugin contributes typed, validated, defaulted '
+            . 'configuration keys to the settings store the HOST already owns — the same '
+            . 'two tables, the same per-tenant ?? global ?? default chain, the same write '
+            . 'validation — instead of rebuilding the settings layer as a private table '
+            . 'with no declared keys and no validation. Host-namespaced under the plugin '
+            . 'name the loader supplies, so two plugins cannot collide and none can '
+            . 'shadow a core key. Publication on the core settings screens is an explicit '
+            . '`admin => true` opt-in, because those screens are gated on CORE settings '
+            . 'permissions rather than on the declaring plugin permissions. '
+            . 'Secret-shaped declarations are REFUSED rather than downgraded to a '
+            . 'readable string; '
+            . 'SDK 1.20 adds the plugin-owned data-type contracts (WC-723 Door 2): '
             . 'Tenant\PluginTablesInterface, by which a plugin declares WHICH '
             . 'tables it owns while the host stamps WHO owns them; '
             . 'DataType\PluginDataTypesInterface, by which it declares a record\'s '
@@ -290,6 +302,32 @@ final class SdkPackageContractTest extends TestCase
         );
         $this->assertSame('degraded', \Whity\Sdk\Health\ProbeResult::degraded('slow')->status);
         $this->assertSame('down', \Whity\Sdk\Health\ProbeResult::down('gone')->status);
+    }
+
+    /**
+     * SDK 1.21 (#713 item 1): the settings contribution point. It must live in
+     * the SDK — not in core — so an out-of-repo plugin, which depends on
+     * whity/plugin-sdk alone, can declare its configuration keys without
+     * referencing a single host type. The declaration is plain arrays for
+     * exactly that reason: the host owns SettingDefinition, the plugin owns
+     * nothing but data.
+     */
+    public function testSettingsContributionPointLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\Settings\PluginSettingsInterface::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Settings\PluginSettingsInterface::class))->getMethods()
+        );
+        $this->assertSame(['getSettings'], $methods);
+        $this->assertSame(
+            'array',
+            (string) (new \ReflectionMethod(
+                \Whity\Sdk\Settings\PluginSettingsInterface::class,
+                'getSettings'
+            ))->getReturnType()
+        );
     }
 
     public function testPluginMcpInterface_existsWithGetMcpPromptsMethod(): void

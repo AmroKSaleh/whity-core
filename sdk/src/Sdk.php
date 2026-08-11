@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.20).
+ * SDK identity (v1.21).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -99,13 +99,22 @@ namespace Whity\Sdk;
  * {@see \Whity\Sdk\DataType\DataTypeGuard} exposes the host's own guard
  * evaluation so a plugin's custom delete route enforces through the same path
  * the generated one does. Trashed and retired are kept distinct: reversible-and
- * -pending-removal versus permanent-and-closed-to-new-references, WC-723).
+ * -pending-removal versus permanent-and-closed-to-new-references, WC-723) ->
+ * 1.21 (plugin-declared SETTINGS: {@see \Whity\Sdk\Settings\PluginSettingsInterface},
+ * by which a plugin contributes typed, validated, defaulted configuration keys to
+ * the HOST'S own settings store instead of rebuilding one as a private table with
+ * no declared keys and no validation. Host-namespaced under the plugin name the
+ * loader supplies, resolved through the same per-tenant ?? global ?? default chain
+ * as a core key, and published on the host's own settings screens only on an
+ * explicit `admin => true` opt-in — those screens are gated on core permissions,
+ * which are not the plugin's. Secret-shaped declarations are REFUSED rather than
+ * downgraded to a readable string, #713 item 1).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.20.0';
+    public const VERSION = '1.21.0';
 
     /**
      * Static identity only — never instantiated.

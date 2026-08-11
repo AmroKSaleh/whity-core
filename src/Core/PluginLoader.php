@@ -18,6 +18,9 @@ use Whity\Core\DataType\DataTypeRegistry;
 use Whity\Core\DataType\InvalidDataTypeException;
 use Whity\Core\Tenant\TableOwnershipException;
 use Whity\Core\Tenant\TableOwnershipRegistry;
+use Whity\Core\Settings\InvalidSettingDeclarationException;
+use Whity\Core\Settings\PluginSettingsRegistry;
+use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
@@ -123,6 +126,14 @@ class PluginLoader
      * names must be one this plugin owns.
      */
     private ?DataTypeRegistry $dataTypeRegistry = null;
+
+    /**
+     * Optional catalogue of plugin-declared SETTINGS (#713 item 1).
+     *
+     * Null in hosts that have not wired one; declarations are then skipped
+     * rather than failing, matching how a null permission registry behaves.
+     */
+    private ?PluginSettingsRegistry $pluginSettingsRegistry = null;
 
     /**
      * @var HookManager|null Hook manager instance
@@ -316,6 +327,7 @@ class PluginLoader
      * @param ResourceTypeRegistry|null $resourceTypeRegistry Optional catalogue of plugin resource types
      * @param TableOwnershipRegistry|null $tableOwnershipRegistry Optional loader-stamped table-ownership map
      * @param DataTypeRegistry|null $dataTypeRegistry   Optional catalogue of plugin-declared data types
+     * @param PluginSettingsRegistry|null $pluginSettingsRegistry Optional catalogue of plugin-declared settings
      */
     public function __construct(
         string $pluginDir,
@@ -327,7 +339,8 @@ class PluginLoader
         ?ResourceTypeRegistry $resourceTypeRegistry = null,
         ?HealthProbeRegistry $healthProbeRegistry = null,
         ?TableOwnershipRegistry $tableOwnershipRegistry = null,
-        ?DataTypeRegistry $dataTypeRegistry = null
+        ?DataTypeRegistry $dataTypeRegistry = null,
+        ?PluginSettingsRegistry $pluginSettingsRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
@@ -336,6 +349,7 @@ class PluginLoader
         $this->healthProbeRegistry = $healthProbeRegistry;
         $this->tableOwnershipRegistry = $tableOwnershipRegistry;
         $this->dataTypeRegistry = $dataTypeRegistry;
+        $this->pluginSettingsRegistry = $pluginSettingsRegistry;
         $this->hookManager = $hookManager;
         $this->logger = $logger;
         $this->roleSeeder = $roleSeeder;
@@ -2485,6 +2499,31 @@ class PluginLoader
                 $this->dataTypeRegistry->register($plugin->getName(), $plugin->getDataTypes());
             } catch (InvalidDataTypeException $e) {
                 $this->logWarning("Plugin {$pluginKey} declares an invalid data type: " . $e->getMessage());
+            }
+        }
+
+        // 2a-quinquies. Register declared SETTINGS (#713 item 1). Same shape as
+        //     every declaration above: an OPTIONAL interface, so a plugin that
+        //     needs no configuration implements nothing and is skipped, and the
+        //     source is $plugin->getName() — supplied here, never taken from the
+        //     plugin's return value — so a key is namespaced under its real
+        //     owner and can neither collide with another plugin's nor shadow a
+        //     core key such as `mail.transport`.
+        //
+        //     Registration is per setting, so one malformed declaration does not
+        //     discard the plugin's other keys; the first failure is logged
+        //     against the plugin. Two boundaries for two different failures: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps
+        //     serving, it simply contributes no settings), while a getSettings()
+        //     that THROWS is plugin code misbehaving and goes through the
+        //     lifecycle error boundary that can eventually fail the plugin.
+        if ($this->pluginSettingsRegistry !== null && $plugin instanceof PluginSettingsInterface) {
+            try {
+                $this->pluginSettingsRegistry->register($plugin->getName(), $plugin->getSettings());
+            } catch (InvalidSettingDeclarationException $e) {
+                $this->logWarning("Plugin {$pluginKey} declares an invalid setting: " . $e->getMessage());
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getSettings');
             }
         }
 
