@@ -253,8 +253,8 @@ final class SchemaFromMigrations
      * How many recent clone databases to keep alive.  Clones are dropped
      * lazily on the next make(), never during the test that owns one; the lag
      * covers a test that legitimately holds two engines at once (two make()
-     * calls in one test method).  Each clone is ~8 MB on disk, so the cap
-     * matters — an unpruned 700-test shard would leave 5+ GB behind.
+     * calls in one test method).  Each clone measures ~11 MB on disk, so the cap
+     * matters — an unpruned 700-test shard would leave ~7 GB behind.
      */
     private const PG_CLONE_KEEP = 2;
 
