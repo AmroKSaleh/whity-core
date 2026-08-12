@@ -207,6 +207,15 @@ abstract class BaseCommand
             )
         );
 
+        // The host-owned sequence allocator (migration 092), mirrored here for
+        // the same reason as everything above it: a plugin reached through a CLI
+        // command — a queue worker running a numbering job, an import — must be
+        // able to allocate a number. Registered in one entry point only, document
+        // numbering would work over HTTP and throw under `queue:work`.
+        $sequenceCounters = new \Whity\Database\SequenceCounters($db->getPdo());
+        \Whity\register_service(\Whity\Sdk\Sql\SequenceAllocator::class, $sequenceCounters);
+        \Whity\register_service(\Whity\Database\SequenceCounters::class, $sequenceCounters);
+
         $baseDir = dirname(__DIR__, 3);
         // The registries are passed HERE, not just constructed above: this loader
         // previously received neither, so plugin-declared permissions were never

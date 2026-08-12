@@ -8,6 +8,7 @@ use DemoCatalog\Api\DemoCatalogApiHandler;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Database\SequenceCounters;
 use Whity\Sdk\Http\Request;
 
 require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Api/DemoCatalogApiHandler.php';
@@ -166,7 +167,7 @@ final class DemoCatalogSyncRealEngineTest extends TestCase
 
     private function handler(): DemoCatalogApiHandler
     {
-        return new DemoCatalogApiHandler($this->pdo);
+        return new DemoCatalogApiHandler($this->pdo, new SequenceCounters($this->pdo));
     }
 
     /**
@@ -208,8 +209,18 @@ final class DemoCatalogSyncRealEngineTest extends TestCase
         $pdo->exec(
             'CREATE UNIQUE INDEX idx_demo_catalog_items_tenant_uuid ON demo_catalog_items(tenant_id, client_uuid)'
         );
-        $pdo->exec('CREATE TABLE demo_catalog_change_seq (seq BIGINT NOT NULL)');
-        $pdo->exec('INSERT INTO demo_catalog_change_seq (seq) VALUES (0)');
+        // The change-feed cursor is allocated by the HOST now, so this schema
+        // carries the host's counter table (migration 092) rather than a
+        // plugin-owned one.
+        $pdo->exec('
+            CREATE TABLE sequence_counters (
+                tenant_id INTEGER NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                value BIGINT NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, name)
+            )
+        ');
 
         return $pdo;
     }

@@ -167,9 +167,17 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.24.0',
+            '1.25.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.24 adds the lifecycle WRITE contract (DataType\DataTypeLifecycle '
+            'SDK 1.25 adds the portable writes: Sql\Upsert, whose tenantScoped() '
+            . 'takes the tenant id as a required separate argument and prepends it to '
+            . 'the conflict target, so an ON CONFLICT (client_uuid) that should have '
+            . 'been ON CONFLICT (tenant_id, client_uuid) — cross-tenant data loss '
+            . 'written as an ordinary create — cannot be expressed; and '
+            . 'Sql\SequenceAllocator, the host contract that deletes the '
+            . 'read-then-write counter a plugin would otherwise migrate and maintain '
+            . 'for itself; '
+            . 'SDK 1.24 adds the lifecycle WRITE contract (DataType\DataTypeLifecycle '
             . 'and the DataType\LifecycleOutcome it answers with). Core told adopters '
             . 'to route their lifecycle writes through core and then published only '
             . 'the read-only DataType\DataTypeGuard, so a plugin that needed to '
@@ -654,6 +662,34 @@ final class SdkPackageContractTest extends TestCase
             ],
             $methods
         );
+    }
+
+    /**
+     * SDK 1.24: the portable write shapes. `Upsert` is pure SQL construction
+     * and belongs in the SDK; `SequenceAllocator` is an INTERFACE here because
+     * the storage behind it is the host's, and a plugin must be able to name
+     * the contract without depending on core.
+     */
+    public function testPortableWriteShapesLiveInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Sql\Upsert::class),
+            'The portable upsert builder must live in the SDK'
+        );
+        $this->assertTrue(
+            interface_exists(\Whity\Sdk\Sql\SequenceAllocator::class),
+            'The sequence-allocation contract must live in the SDK — a plugin references '
+            . 'the interface, and the host registers its own implementation.'
+        );
+
+        // The tenant id is a REQUIRED, separately typed parameter. If it were
+        // ever folded into the $values array the unscoped conflict target would
+        // become reachable by omission, which is the whole failure this guards.
+        $tenantScoped = new \ReflectionMethod(\Whity\Sdk\Sql\Upsert::class, 'tenantScoped');
+        $parameters = $tenantScoped->getParameters();
+        $this->assertSame('tenantId', $parameters[2]->getName());
+        $this->assertSame('int', (string) $parameters[2]->getType());
+        $this->assertFalse($parameters[2]->isOptional(), 'The tenant id must not be omittable.');
     }
 
     /**

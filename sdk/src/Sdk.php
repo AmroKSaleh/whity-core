@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.24).
+ * SDK identity (v1.25).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -154,13 +154,32 @@ namespace Whity\Sdk;
  * The outcome is the vocabulary the HTTP layer already publishes (`reason` as
  * the stable key, `message` as the fallback sentence, `blockers`, and the
  * status), so one branch serves both call paths. Bulk work is a LOOP over these
- * calls; a bulk statement bypasses every guard, veto and hook at once).
+ * calls; a bulk statement bypasses every guard, veto and hook at once) ->
+ * 1.25 (PORTABLE WRITES: {@see \Whity\Sdk\Sql\Upsert}, and
+ * {@see \Whity\Sdk\Sql\SequenceAllocator} — the host-provided contract for
+ * "hand me the next number, and never hand the same one twice".
+ * `INSERT … ON CONFLICT … DO UPDATE … RETURNING` is the most repeated statement
+ * shape in an adopting plugin — one codebase carries 58 — and each one
+ * hand-builds four lists that must stay in step. `Upsert::tenantScoped()` builds
+ * them, and takes the tenant id as a REQUIRED separate argument that it writes
+ * into the value list AND prepends to the conflict target: an
+ * `ON CONFLICT (client_uuid)` where the intent was
+ * `ON CONFLICT (tenant_id, client_uuid)` is cross-tenant data loss written as an
+ * ordinary create, and it is now unrepresentable. `Upsert::unscoped()` serves
+ * declared-global tables, and its name is a declaration a reviewer can grep for.
+ * `buildSql()` is public, so nothing is hidden: the exact statement is
+ * inspectable, loggable and assertable.
+ * SequenceAllocator goes further than a helper and deletes the SQL entirely — a
+ * plugin that needs uniquely numbered records now declares nothing, migrates
+ * nothing and writes no SQL; it asks the host for a number, and the host
+ * allocates it in one statement with no read-then-write window for two clients
+ * to both observe. Gaps are possible and documented; duplicates are not).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.24.0';
+    public const VERSION = '1.25.0';
 
     /**
      * Static identity only — never instantiated.

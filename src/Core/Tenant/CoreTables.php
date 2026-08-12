@@ -89,6 +89,7 @@ final class CoreTables
         'role_permissions' => '002_create_permissions.php',
         'roles' => '001_create_users_roles.php',
         'scheduled_jobs' => '069_create_scheduled_jobs.php',
+        'sequence_counters' => '092_create_sequence_counters.php',
         'sessions' => '045_create_sessions.php',
         'shared_store' => '032_create_shared_store.php',
         'tag_groups' => '063_create_taxonomy_tables.php',

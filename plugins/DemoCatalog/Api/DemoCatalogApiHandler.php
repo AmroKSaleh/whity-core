@@ -8,6 +8,7 @@ use PDO;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\Sql\SequenceAllocator;
 
 /**
  * Tenant-scoped, SYNC-CAPABLE CRUD over the plugin's `demo_catalog_items` table.
@@ -27,8 +28,15 @@ use Whity\Sdk\Http\Response;
  * Tenant scoping is unchanged: every non-system-tenant statement carries an
  * explicit `tenant_id` predicate from {@see TenantContext}; the SYSTEM tenant
  * (id 0) is the documented unscoped "sees all" exception (each such branch
- * annotated `@tenant-guard-ignore:`). The `demo_catalog_change_seq` counter is a
- * sanctioned GLOBAL table (declared in the conformance registry).
+ * annotated `@tenant-guard-ignore:`).
+ *
+ * The change-feed cursor is allocated by the host
+ * ({@see \Whity\Sdk\Sql\SequenceAllocator}). This plugin used to own a one-row
+ * `demo_catalog_change_seq` table for it, created by its own migration and read
+ * through a driver branch whose SQLite half was a read-then-write across two
+ * statements — so two concurrent writers could stamp two rows with one cursor
+ * and a puller would see one of them and never the other. That table, that
+ * migration and that branch are gone; the plugin asks for a number.
  */
 final class DemoCatalogApiHandler
 {
@@ -47,12 +55,19 @@ final class DemoCatalogApiHandler
 
     private PDO $db;
 
+    /**
+     * The host's sequence allocator, injected rather than reached for: the
+     * plugin names the SDK contract and never the host class behind it.
+     */
+    private SequenceAllocator $sequences;
+
     /** Set by {@see validatedInput()} on failure; read by callers to build the 400. */
     private string $lastValidationError = '';
 
-    public function __construct(PDO $db)
+    public function __construct(PDO $db, SequenceAllocator $sequences)
     {
         $this->db = $db;
+        $this->sequences = $sequences;
     }
 
     // ==================== reads ====================
@@ -407,21 +422,24 @@ final class DemoCatalogApiHandler
     // ==================== internals ====================
 
     /**
-     * Bump and return the next global change sequence. Gaps are harmless (the
-     * feed cursor is `change_seq > since`), so this needs no transaction — a
-     * write that fails after bumping simply leaves a skipped number.
+     * The next global change-feed cursor value.
+     *
+     * This used to be a plugin-owned one-row table plus a driver branch —
+     * `UPDATE … RETURNING seq` on PostgreSQL, `UPDATE` then a separate `SELECT`
+     * on SQLite. The SQLite half was a read-then-write across two statements,
+     * so two concurrent writers could both read the same value and stamp two
+     * rows with one cursor; a puller would then see one of them and never the
+     * other, which for a sync feed is silent data loss rather than a
+     * duplicate number.
+     *
+     * Now it is one call to the host's allocator: no table, no migration, no
+     * SQL, and no branch. Gaps stay harmless here — the feed cursor is
+     * `change_seq > since` — which is exactly the guarantee the allocator
+     * offers: unique and monotonic, possibly skipping.
      */
     private function nextChangeSeq(): int
     {
-        $driver = (string) $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
-        if ($driver === 'pgsql') {
-            // demo_catalog_change_seq is a sanctioned GLOBAL counter (no tenant_id).
-            $stmt = $this->db->query('UPDATE demo_catalog_change_seq SET seq = seq + 1 RETURNING seq');
-            return $stmt === false ? 0 : (int) $stmt->fetchColumn();
-        }
-        $this->db->exec('UPDATE demo_catalog_change_seq SET seq = seq + 1');
-        $stmt = $this->db->query('SELECT seq FROM demo_catalog_change_seq');
-        return $stmt === false ? 0 : (int) $stmt->fetchColumn();
+        return $this->sequences->nextPlatformWide('democatalog:change_seq');
     }
 
     /**
