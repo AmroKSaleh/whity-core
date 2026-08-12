@@ -32,6 +32,11 @@ final class PersonsApiHandlerRealEngineTest extends TestCase
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make(true);
+        // Tenant 1 must exist before a person can reference it. The migrations
+        // create only the system tenant (id 0), so seedPerson() was writing rows
+        // whose `tenant_id` pointed at nothing — SQLite does not enforce foreign
+        // keys unless asked to, PostgreSQL refuses (`persons_tenant_id_fkey`).
+        $this->pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'persons-test-tenant')");
         TenantContext::setTenantId(1);
         $_GET = [];
     }

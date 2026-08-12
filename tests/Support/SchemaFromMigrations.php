@@ -27,17 +27,24 @@ use Whity\Database\Database;
  *     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
  *     SchemaFromMigrations::apply($pdo);
  *
- * PostgreSQL real-engine mode (CI: postgres-integration job):
+ * PostgreSQL real-engine mode (CI: postgres-integration / postgres-dialect jobs):
  *
  *   When PHPUNIT_PG_DSN is set (e.g. "pgsql:host=localhost;port=5432;dbname=whity_core")
  *   together with PHPUNIT_PG_USER / PHPUNIT_PG_PASSWORD, make() returns a real
- *   PostgreSQL PDO instead of SQLite.  A fresh per-call schema is created inside
- *   the target database (one Postgres schema per make() invocation, dropped at
- *   process exit via a shutdown function), so parallel test processes are isolated
- *   and the main whity_core database left intact after the suite completes.
+ *   PostgreSQL PDO instead of SQLite.  Every make() call gets its own throwaway
+ *   database, dropped again as the suite moves on, so parallel test processes are
+ *   isolated and the main whity_core database is left intact.
  *   The returned PDO wrapper translates SQLite-only DML idioms that appear in test
  *   seed helpers (INSERT OR IGNORE, datetime('now'), etc.) so individual test
  *   files need no modification.
+ *
+ *   That throwaway database is a `CREATE DATABASE … TEMPLATE` copy of a cached,
+ *   fully-migrated template keyed on a fingerprint of database/migrations — 0.54 s
+ *   instead of the 58.9 s it takes to re-run all 89 migrations, which is what
+ *   makes running non-Integration suites on real Postgres affordable at all.  If
+ *   the template cannot be used (role without CREATEDB, Postgres < 13, a DSN with
+ *   no dbname, or PHPUNIT_PG_NO_TEMPLATE=1) the original per-make() schema build
+ *   is used instead — slower, identical result, and the reason is logged to stderr.
  *
  * SQLite limitations handled automatically (SQLite path only):
  *   - SERIAL / BIGSERIAL → INTEGER AUTOINCREMENT
@@ -91,6 +98,56 @@ final class SchemaFromMigrations
         self::runMigrations($pdo, $db);
     }
 
+    /**
+     * Move every auto-increment sequence past the largest id its table holds.
+     *
+     * Call this in a fixture AFTER seeding rows at EXPLICIT ids. SQLite's
+     * `INTEGER PRIMARY KEY AUTOINCREMENT` derives the next value from the table
+     * itself, so an explicit id moves the counter and a later id-less INSERT is
+     * safe. PostgreSQL's `SERIAL` is a SEPARATE sequence that an explicit id
+     * does not touch — so the next id-less INSERT hands back a number the
+     * fixture already used, and the test dies on `duplicate key value violates
+     * unique constraint`, having tested nothing.
+     *
+     * A no-op on SQLite, so a fixture calls it unconditionally.
+     */
+    public static function syncSequences(PDO $pdo): void
+    {
+        if ((string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'pgsql') {
+            return;
+        }
+
+        $stmt = $pdo->query(
+            "SELECT table_name, column_name,
+                    pg_get_serial_sequence(quote_ident(table_name), column_name) AS seq
+             FROM information_schema.columns
+             WHERE table_schema = current_schema()
+               AND column_default LIKE 'nextval(%'"
+        );
+        if ($stmt === false) {
+            return;
+        }
+
+        /** @var list<array{table_name: string, column_name: string, seq: ?string}> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $seq = $row['seq'] ?? null;
+            if (!is_string($seq) || $seq === '') {
+                continue;
+            }
+
+            $table  = '"' . str_replace('"', '""', $row['table_name']) . '"';
+            $column = '"' . str_replace('"', '""', $row['column_name']) . '"';
+            $max    = "COALESCE((SELECT MAX({$column}) FROM {$table}), 0)";
+
+            // Third argument false when the table is empty so the sequence still
+            // hands out 1 next; true otherwise so it hands out MAX + 1.
+            $pdo->exec(
+                'SELECT setval(' . $pdo->quote($seq) . ', GREATEST(' . $max . ', 1), ' . $max . ' > 0)'
+            );
+        }
+    }
+
     // ─── PostgreSQL real-engine path ─────────────────────────────────────────
 
     /**
@@ -103,11 +160,24 @@ final class SchemaFromMigrations
      * The returned PDO subclass also translates the SQLite-only DML idioms that
      * appear in test seed helpers (INSERT OR IGNORE → INSERT … ON CONFLICT DO
      * NOTHING; datetime('now') → NOW(); etc.) so test files need no changes.
+     *
+     * This per-schema build is the FALLBACK.  It re-runs every production
+     * migration on every make() call, which is what made the real-Postgres suites
+     * expensive (measured 58.9 s per build against a containerised PG 15; 89
+     * migrations, cost spread evenly across all of them — no single hot
+     * migration to optimise).  The fast path is
+     * {@see makeFromTemplateDatabase()}, which pays that once per server and then
+     * hands out file-level copies.
      */
     private static function buildPostgresPdo(string $dsn): PDO
     {
         $user     = (string) ($_ENV['PHPUNIT_PG_USER']     ?? getenv('PHPUNIT_PG_USER')     ?: 'whity');
         $password = (string) ($_ENV['PHPUNIT_PG_PASSWORD'] ?? getenv('PHPUNIT_PG_PASSWORD') ?: 'whity_dev');
+
+        $fromTemplate = self::makeFromTemplateDatabase($dsn, $user, $password);
+        if ($fromTemplate !== null) {
+            return $fromTemplate;
+        }
 
         // Each make() call gets its own Postgres schema so tests are fully
         // isolated from the main whity_core schema AND from each other.
@@ -148,6 +218,413 @@ final class SchemaFromMigrations
 
         // Return a DML-translating wrapper so SQLite seed idioms work on PG.
         return self::buildPgTranslatingWrapper($dsn, $user, $password, $schemaName);
+    }
+
+    // ─── PostgreSQL template-database fast path ──────────────────────────────
+    //
+    // Re-running ~90 migrations per make() is what made real-Postgres coverage
+    // unaffordable: measured 58.9 s per build locally, 102 Integration classes
+    // taking 30m18s in CI, and it is why the #735 veto tests were left
+    // SQLite-only.  Measured alternatives on the same box:
+    //
+    //     per-schema migration run (status quo)     58.9 s
+    //     …with synchronous_commit = off            34.8 s
+    //     CREATE DATABASE … TEMPLATE (this path)     0.54 s
+    //
+    // Postgres' CREATE DATABASE … TEMPLATE is a file-level copy of an existing
+    // database, so it is O(schema size) rather than O(migrations) and is exact
+    // by construction — the clone IS the migrated schema, not a reconstruction
+    // of it.  The template is built once per Postgres server and keyed on a
+    // fingerprint of everything the schema depends on — the migration files AND
+    // the environment they read — so it survives across PHPUnit processes
+    // (every CI shard after the first pays nothing) and rebuilds itself
+    // automatically the moment either input changes.
+
+    /** Prefix for the cached, migration-fingerprinted template databases. */
+    private const PG_TEMPLATE_PREFIX = 'whity_phpunit_tpl_';
+
+    /** Prefix for the throwaway per-make() clone databases. */
+    private const PG_CLONE_PREFIX = 'whity_phpunit_db_';
+
+    /** Marker written as the template database's comment once it is fully built. */
+    private const PG_TEMPLATE_READY = 'whity-phpunit-template-ready';
+
+    /**
+     * How many recent clone databases to keep alive.  Clones are dropped
+     * lazily on the next make(), never during the test that owns one; the lag
+     * covers a test that legitimately holds two engines at once (two make()
+     * calls in one test method).  Each clone measures ~11 MB on disk, so the cap
+     * matters — an unpruned 700-test shard would leave ~7 GB behind.
+     */
+    private const PG_CLONE_KEEP = 2;
+
+    /** Maintenance connection (to the `postgres` database), opened once. */
+    private static ?PDO $pgAdmin = null;
+
+    /**
+     * Clone databases created by this process, oldest first.
+     *
+     * @var list<string>
+     */
+    private static array $pgClones = [];
+
+    /** Set once the template path is known to be unusable, to stop retrying it. */
+    private static bool $pgTemplateUnavailable = false;
+
+    /**
+     * Template databases this process has confirmed ready, keyed by fingerprint.
+     *
+     * A map rather than a single name because the fingerprint covers the
+     * environment the migrations read, and a test may change that mid-run — see
+     * {@see PG_TEMPLATE_ENV_INPUTS}. Each distinct input set gets its own
+     * template, built once, and none of them evicts another.
+     *
+     * @var array<string, string>
+     */
+    private static array $pgTemplates = [];
+
+    /**
+     * Fast path: hand out a throwaway copy of a cached, fully-migrated template
+     * database.
+     *
+     * Returns null — and permanently falls back to the per-schema build — when
+     * the template path is not usable: no `dbname=` in the DSN to rewrite, a
+     * role without CREATEDB, a Postgres older than 13 (no `DROP DATABASE …
+     * WITH (FORCE)`), or `PHPUNIT_PG_NO_TEMPLATE=1`.  The fallback is slow, not
+     * wrong, so the reason is written to stderr rather than thrown: a silent
+     * 100× slowdown is the thing worth being loud about.
+     */
+    private static function makeFromTemplateDatabase(string $dsn, string $user, string $password): ?PDO
+    {
+        if (self::$pgTemplateUnavailable) {
+            return null;
+        }
+
+        $optOut = $_ENV['PHPUNIT_PG_NO_TEMPLATE'] ?? getenv('PHPUNIT_PG_NO_TEMPLATE') ?: null;
+        if (is_string($optOut) && $optOut !== '' && $optOut !== '0') {
+            self::$pgTemplateUnavailable = true;
+            return null;
+        }
+
+        $adminDsn = self::dsnWithDatabase($dsn, 'postgres');
+        if ($adminDsn === null) {
+            return self::disableTemplatePath('PHPUNIT_PG_DSN has no dbname= to rewrite');
+        }
+
+        try {
+            $admin    = self::pgAdminConnection($adminDsn, $user, $password);
+            $template = self::ensureTemplateDatabase($admin, $dsn, $user, $password);
+
+            // Reclaim the disk of clones whose test has long since finished.
+            self::pruneClones($admin);
+
+            $clone = self::PG_CLONE_PREFIX . bin2hex(random_bytes(8));
+            self::withTemplateLock($admin, static function () use ($admin, $clone, $template): void {
+                $admin->exec("CREATE DATABASE \"{$clone}\" TEMPLATE \"{$template}\"");
+            });
+            self::$pgClones[] = $clone;
+            self::registerCloneCleanup();
+
+            $cloneDsn = self::dsnWithDatabase($dsn, $clone);
+            if ($cloneDsn === null) {
+                return self::disableTemplatePath('could not build a DSN for the clone database');
+            }
+
+            // The clone's tables live in its own `public` schema — the isolation
+            // boundary is the database now, not a schema namespace.
+            return self::buildPgTranslatingWrapper($cloneDsn, $user, $password, 'public');
+        } catch (\Throwable $e) {
+            return self::disableTemplatePath($e->getMessage());
+        }
+    }
+
+    /**
+     * Create (or reuse) the migration-fingerprinted template database and return
+     * its name.
+     *
+     * Readiness is recorded as the database's COMMENT rather than as anything
+     * inside it, so the check costs one catalogue lookup on the maintenance
+     * connection and never opens a session against the template — a session
+     * there would make `CREATE DATABASE … TEMPLATE` fail for everyone else.  A
+     * process killed mid-build therefore leaves an un-commented database that
+     * the next run detects and rebuilds, rather than a half-migrated schema that
+     * every later clone would silently inherit.
+     */
+    private static function ensureTemplateDatabase(PDO $admin, string $dsn, string $user, string $password): string
+    {
+        $fingerprint = self::migrationsFingerprint();
+        if (isset(self::$pgTemplates[$fingerprint])) {
+            return self::$pgTemplates[$fingerprint];
+        }
+
+        $name = self::PG_TEMPLATE_PREFIX . $fingerprint;
+
+        if (self::templateIsReady($admin, $name)) {
+            return self::$pgTemplates[$fingerprint] = $name;
+        }
+
+        self::$pgTemplates[$fingerprint] = self::withTemplateLock($admin, static function () use ($admin, $name, $dsn, $user, $password): string {
+            // Another process may have built it while we waited for the lock.
+            if (self::templateIsReady($admin, $name)) {
+                return $name;
+            }
+
+            // Any leftover (a crashed build, or an interrupted earlier run) is
+            // not trustworthy — start from scratch.
+            self::dropDatabase($admin, $name);
+            $admin->exec("CREATE DATABASE \"{$name}\"");
+
+            try {
+                $build = new PDO((string) self::dsnWithDatabase($dsn, $name), $user, $password, [
+                    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                ]);
+                // Durability is worthless for a schema we can rebuild from the
+                // migrations; skipping the per-DDL WAL flush is most of the
+                // difference between a 59 s and a 35 s build.
+                $build->exec('SET synchronous_commit = off');
+                self::runMigrationsOnPg($build);
+                // MUST close before anyone clones it: CREATE DATABASE … TEMPLATE
+                // refuses to run while another session is attached to the source.
+                unset($build);
+            } catch (\Throwable $e) {
+                self::dropDatabase($admin, $name);
+                throw $e;
+            }
+
+            $admin->exec('COMMENT ON DATABASE "' . $name . '" IS ' . $admin->quote(self::PG_TEMPLATE_READY));
+
+            // Belt and braces against the "source database is being accessed by
+            // other users" failure: template0 is unconnectable for the same
+            // reason.  Best-effort — a role that cannot ALTER it can still clone.
+            try {
+                $admin->exec("ALTER DATABASE \"{$name}\" WITH ALLOW_CONNECTIONS false");
+            } catch (\Throwable) {
+                // not fatal: nothing connects to the template on the happy path
+            }
+
+            self::dropStaleTemplates($admin, $name);
+
+            return $name;
+        });
+
+        return self::$pgTemplates[$fingerprint];
+    }
+
+    /** Whether the named database exists AND carries the "fully built" marker. */
+    private static function templateIsReady(PDO $admin, string $name): bool
+    {
+        $stmt = $admin->prepare(
+            'SELECT shobj_description(oid, \'pg_database\') AS note FROM pg_database WHERE datname = :name'
+        );
+        $stmt->execute([':name' => $name]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) && ($row['note'] ?? null) === self::PG_TEMPLATE_READY;
+    }
+
+    /**
+     * Environment variables the migrations READ, and therefore bake into the
+     * schema they produce.
+     *
+     * Migration 010/036 hash INITIAL_SYSTEM_ADMIN_PASSWORD into the seeded
+     * system-admin credential, and at least one test
+     * (SystemTenantProfileSeederRealEngineTest) sets that variable in setUp()
+     * precisely so the schema it gets back carries ITS password and it can then
+     * log in with it. A cache keyed only on the migration files would hand that
+     * test somebody else's hash and turn its 200 into a 401 — so these are part
+     * of the key, and a test that varies one simply gets its own template.
+     *
+     * @var list<string>
+     */
+    private const PG_TEMPLATE_ENV_INPUTS = [
+        'INITIAL_SYSTEM_ADMIN_PASSWORD',
+        'INITIAL_ADMIN_PASSWORD',
+        'INITIAL_USER_PASSWORD',
+        'INITIAL_SUPERUSER_PASSWORD',
+    ];
+
+    /** Content hash of database/migrations, computed once per process. */
+    private static ?string $migrationsHash = null;
+
+    /**
+     * A stable fingerprint of everything the built schema depends on: the
+     * migration set, and the environment the migrations read.
+     *
+     * File CONTENTS, not mtimes: a fresh CI checkout rewrites every mtime but
+     * must still hit the template another shard built moments earlier, while a
+     * one-character edit to a migration must miss it. The file half is hashed
+     * once per process; the environment half is re-read on every call, because
+     * a test may have changed it since the last one.
+     */
+    private static function migrationsFingerprint(): string
+    {
+        if (self::$migrationsHash === null) {
+            $dir   = dirname(__DIR__, 2) . '/database/migrations';
+            $files = glob($dir . '/*.php') ?: [];
+            sort($files);
+
+            $hash = hash_init('sha256');
+            foreach ($files as $file) {
+                hash_update($hash, basename($file));
+                hash_update_file($hash, $file);
+            }
+            self::$migrationsHash = hash_final($hash);
+        }
+
+        $env = '';
+        foreach (self::PG_TEMPLATE_ENV_INPUTS as $name) {
+            $value = $_ENV[$name] ?? getenv($name);
+            $env .= $name . '=' . (is_string($value) ? $value : '') . "\n";
+        }
+
+        return substr(hash('sha256', self::$migrationsHash . "\n" . $env), 0, 16);
+    }
+
+    /**
+     * Serialise template creation/cloning across processes.
+     *
+     * Two shards racing to build the same template would both run the whole
+     * migration set; worse, some Postgres versions reject a `CREATE DATABASE …
+     * TEMPLATE` that overlaps another copy of the same source.  A session-level
+     * advisory lock is the right tool: it is released automatically if the
+     * process dies, so a crashed build cannot wedge the next run.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return T
+     */
+    private static function withTemplateLock(PDO $admin, callable $work): mixed
+    {
+        // A fixed key: the lock guards "one template build / clone at a time on
+        // this server", not one per template name.
+        $admin->exec('SELECT pg_advisory_lock(4207310001)');
+        try {
+            return $work();
+        } finally {
+            try {
+                $admin->exec('SELECT pg_advisory_unlock(4207310001)');
+            } catch (\Throwable) {
+                // session teardown releases it anyway
+            }
+        }
+    }
+
+    /** Maintenance connection to the `postgres` database, opened at most once. */
+    private static function pgAdminConnection(string $adminDsn, string $user, string $password): PDO
+    {
+        return self::$pgAdmin ??= new PDO($adminDsn, $user, $password, [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+    }
+
+    /** Rewrite the `dbname=` component of a PDO pgsql DSN; null when there is none. */
+    private static function dsnWithDatabase(string $dsn, string $database): ?string
+    {
+        if (!preg_match('/\bdbname=/i', $dsn)) {
+            return null;
+        }
+
+        return preg_replace('/\bdbname=[^;]*/i', 'dbname=' . $database, $dsn);
+    }
+
+    /** Drop all but the {@see PG_CLONE_KEEP} most recent clones of this process. */
+    private static function pruneClones(PDO $admin): void
+    {
+        while (count(self::$pgClones) > self::PG_CLONE_KEEP) {
+            $stale = array_shift(self::$pgClones);
+            self::dropDatabase($admin, (string) $stale);
+        }
+    }
+
+    /**
+     * Drop a database, evicting any session still attached to it.
+     *
+     * `WITH (FORCE)` (Postgres 13+) matters here: a finished test's PDO may not
+     * have been garbage-collected yet, and without eviction the drop fails and
+     * the clone's disk is never reclaimed.
+     */
+    private static function dropDatabase(PDO $admin, string $name): void
+    {
+        try {
+            $admin->exec("DROP DATABASE IF EXISTS \"{$name}\" WITH (FORCE)");
+        } catch (\Throwable) {
+            try {
+                $admin->exec("DROP DATABASE IF EXISTS \"{$name}\"");
+            } catch (\Throwable) {
+                // best-effort; a leftover database never fails a test run
+            }
+        }
+    }
+
+    /**
+     * Remove templates built from an older migration set.  Without this, every
+     * migration added during a day of local work leaves another ~8 MB database
+     * behind on the developer's server.
+     *
+     * Every template THIS process is using is kept, not just the one just built:
+     * a run whose fingerprint alternates (a test that varies one of the
+     * environment inputs, then one that does not) would otherwise have each
+     * template evict the other and pay the full migration run every time — the
+     * exact cost this cache exists to remove.
+     */
+    private static function dropStaleTemplates(PDO $admin, string $justBuilt): void
+    {
+        $keep = array_values(self::$pgTemplates);
+        $keep[] = $justBuilt;
+
+        try {
+            $stmt = $admin->prepare(
+                'SELECT datname FROM pg_database WHERE datname LIKE :prefix'
+            );
+            $stmt->execute([':prefix' => self::PG_TEMPLATE_PREFIX . '%']);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $candidate) {
+                if (!in_array((string) $candidate, $keep, true)) {
+                    self::dropDatabase($admin, (string) $candidate);
+                }
+            }
+        } catch (\Throwable) {
+            // best-effort housekeeping
+        }
+    }
+
+    /** Drop every clone this process created, once, at process exit. */
+    private static function registerCloneCleanup(): void
+    {
+        static $registered = false;
+        if ($registered) {
+            return;
+        }
+        $registered = true;
+
+        register_shutdown_function(static function (): void {
+            $admin = self::$pgAdmin;
+            if ($admin === null) {
+                return;
+            }
+            foreach (self::$pgClones as $clone) {
+                self::dropDatabase($admin, $clone);
+            }
+            self::$pgClones = [];
+        });
+    }
+
+    /**
+     * Turn the template path off for the rest of the process and say why.
+     *
+     * stderr, not stdout: PHPUnit runs with beStrictAboutOutputDuringTests, so
+     * anything echoed here would fail the very tests this is trying to speed up.
+     */
+    private static function disableTemplatePath(string $reason): null
+    {
+        self::$pgTemplateUnavailable = true;
+        error_log(
+            '[whity] PostgreSQL template-database cache unavailable (' . $reason . '); '
+            . 'falling back to re-running every migration per test — this is ~100x slower.'
+        );
+
+        return null;
     }
 
     /**

@@ -573,6 +573,15 @@ final class LanguagesApiHandlerTest extends TestCase
      */
     private function grantPermission(int $profileId, int $tenantId, string $permission): void
     {
+        // The tenant has to EXIST before a role can point at it. Only the system
+        // tenant (id 0) comes out of the migrations, so a grant in tenant 1 was
+        // writing a role whose `tenant_id` referenced nothing — accepted by
+        // SQLite, which does not enforce foreign keys unless asked to, and
+        // rejected outright by PostgreSQL (`roles_tenant_id_fkey`). The fixture
+        // was building a row production could never hold.
+        $this->pdo->prepare('INSERT OR IGNORE INTO tenants (id, name) VALUES (?, ?)')
+            ->execute([$tenantId, 'lang-test-tenant-' . $tenantId]);
+
         $roleId = 90000 + $profileId;
         $this->pdo->prepare(
             'INSERT INTO roles (id, name, description, tenant_id, created_at) VALUES (?, ?, ?, ?, NOW())'

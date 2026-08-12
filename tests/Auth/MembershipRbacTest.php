@@ -670,6 +670,11 @@ final class MembershipRbacTest extends TestCase
             (2, 'user',   '', NULL, datetime('now')),
             (3, 'viewer', '', NULL, datetime('now'))");
 
+        // Explicit ids leave PostgreSQL's sequence untouched; any later id-less
+        // INSERT would be handed one of them back. Cheap here, load-bearing the
+        // moment this fixture grows a role it does not name the id of.
+        SchemaFromMigrations::syncSequences($pdo);
+
         return $pdo;
     }
 

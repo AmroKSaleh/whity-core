@@ -39,6 +39,7 @@ concurrency:
 #             ├─ static-analysis
 #             ├─ postgres-migrations
 #             ├─ postgres-integration (shard 1..5)
+#             ├─ postgres-dialect (shard 1..2)
 #             ├─ web
 #             └─ render-service
 #
@@ -567,6 +568,160 @@ jobs:
 
           echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} Integration test files"
           vendor/bin/phpunit "${files[@]}"
+
+  # ---------------------------------------------------------------------------
+  # The dialect gate: run the real-engine tests that live OUTSIDE tests/Integration
+  # and tests/Security against real PostgreSQL as well as SQLite.
+  #
+  # Why this job exists
+  # -------------------
+  # Tests run SQLite, production runs PostgreSQL, and a whole class of defect is
+  # invisible in that gap. Two that an adopter hit in one week:
+  #
+  #   * `GROUP_CONCAT(x SEPARATOR ',')` — valid SQLite, a syntax error on
+  #     PostgreSQL (`string_agg`). Reached production; the endpoint 500'd.
+  #   * removing a `CAST(id AS TEXT)` from a comparison — every test stayed green,
+  #     because SQLite happily compares INTEGER to VARCHAR. PostgreSQL refuses:
+  #     `operator does not exist: character varying = integer`.
+  #
+  # The second is the one that matters for design: NO helper library or query
+  # builder can catch it, because nothing about the statement is malformed — it
+  # is the engine's type-comparison semantics that differ. Only executing it on
+  # the real engine finds it. Hence a job, not a lint.
+  #
+  # What it selects, and why by grep
+  # --------------------------------
+  # Every test file that builds a real engine (SchemaFromMigrations, or
+  # RelationsSchema which delegates to it) and is not already covered by the
+  # postgres-integration / postgres-migrations jobs above. Selecting by CONTENT
+  # rather than by a hand-listed directory set means a new real-engine test is
+  # picked up the day it is written — the failure mode of a curated list is that
+  # it silently stops covering what people add, which is exactly the gap this job
+  # exists to close. Files that never touch SQL are deliberately NOT re-run: the
+  # cost of this job should track the SQL surface, not the suite size.
+  #
+  # What made it affordable
+  # -----------------------
+  # Re-running ~90 migrations per test is what previously priced real-Postgres
+  # coverage out (30m18s for the 102 Integration classes; the #735 veto tests were
+  # left SQLite-only for the same reason). SchemaFromMigrations now builds ONE
+  # migration-fingerprinted template database per Postgres server and hands each
+  # test a `CREATE DATABASE … TEMPLATE` copy — measured 58.9 s → 0.54 s per
+  # engine. The template is keyed on the content of database/migrations, so it
+  # rebuilds itself the moment a migration changes and is shared by every process
+  # on the runner.
+  # ---------------------------------------------------------------------------
+  postgres-dialect:
+    # Keep the `/2` here in step with the matrix below; the shard arithmetic
+    # itself reads `strategy.job-total`, so only this label is manual.
+    name: Dialect shard ${{ matrix.shard }}/2 (real-engine suites on PostgreSQL)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    # Its own Postgres service per shard, like postgres-integration: the template
+    # database and the throwaway clones are per-server state, so two shards
+    # sharing one server would contend on the same advisory lock for no gain.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: whity
+          POSTGRES_PASSWORD: whity_dev
+          POSTGRES_DB: whity_core
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U whity -d whity_core"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, pdo, pdo_pgsql, pgsql
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      # No `migrate run` / `seed` here, unlike postgres-integration: these tests
+      # provision their own engine through SchemaFromMigrations and never read the
+      # shared whity_core schema. The database exists only to host the template
+      # and its clones.
+      - name: Run the real-engine suites on real PostgreSQL (shard ${{ matrix.shard }})
+        env:
+          PHPUNIT_PG_DSN: "pgsql:host=localhost;port=5432;dbname=whity_core"
+          PHPUNIT_PG_USER: whity
+          PHPUNIT_PG_PASSWORD: whity_dev
+          JWT_SECRET: ci_jwt_secret_min_32_chars_for_hs256_aaaa
+          ENCRYPTION_KEY: ci_encryption_key_min_32_chars_bbbbbbbb
+        run: |
+          mapfile -t all < <(
+            grep -rlE 'SchemaFromMigrations|RelationsSchema' tests --include='*Test.php' \
+              | grep -v '^tests/Integration/' \
+              | grep -v '^tests/Security/' \
+              | LC_ALL=C sort
+          )
+          total=${#all[@]}
+          # A refactor that renames the schema helper would otherwise turn this
+          # gate into a silent no-op that still reports green.
+          if [ "$total" -lt 40 ]; then
+            echo "::error::selected only ${total} real-engine test files (expected 40+) — the selection is broken, not the suite"
+            exit 1
+          fi
+
+          shards=${{ strategy.job-total }}
+          index=$(( ${{ matrix.shard }} - 1 ))
+          files=()
+          for i in "${!all[@]}"; do
+            if [ $(( i % shards )) -eq "$index" ]; then
+              files+=("${all[$i]}")
+            fi
+          done
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::shard ${{ matrix.shard }}/${shards} selected 0 of ${total} real-engine test files"
+            exit 1
+          fi
+
+          echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} real-engine test files"
+          vendor/bin/phpunit --no-coverage "${files[@]}"
+
+      # The whole job is worthless if the template cache quietly fell back to the
+      # per-test migration run: the suite would still be green, just 100x slower,
+      # and the next person would conclude dual-engine coverage is unaffordable.
+      # SchemaFromMigrations logs that fallback to stderr; fail loudly instead.
+      - name: Assert the template cache was actually used
+        if: always()
+        env:
+          PGPASSWORD: whity_dev
+        run: |
+          templates=$(psql -h localhost -U whity -d whity_core -tAc \
+            "SELECT count(*) FROM pg_database WHERE datname LIKE 'whity_phpunit_tpl_%'")
+          echo "cached template databases on the server: ${templates}"
+          if [ "${templates}" -lt 1 ]; then
+            echo "::error::no template database was built — SchemaFromMigrations fell back to re-running every migration per test (see the stderr notice above for the reason)"
+            exit 1
+          fi
 
   # NOTE: Infection mutation testing moved OFF the per-PR path to a 6-hourly
   # scheduled run — see .github/workflows/mutation-testing.yml (WC-232ec317).

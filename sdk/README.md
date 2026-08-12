@@ -171,14 +171,59 @@ The case enforces three checks (each a separate test):
 2. **Handler-scoping scanner** — every tenant-table query in your source binds
    a `tenant_id` predicate, honouring `// @tenant-guard-ignore: <reason>` for
    sanctioned exceptions (e.g. a system-tenant "sees all" branch).
-3. **RealEngine** — your migrations are applied to a real SQL engine (in-memory
-   SQLite by default; override `makePdo()` to point at Postgres in CI) and each
-   declared tenant table is asserted to physically carry `tenant_id`.
+3. **RealEngine** — your migrations are applied to a real SQL engine and each
+   declared tenant table is asserted to physically carry `tenant_id`. Which
+   engine is an **environment** decision, not a code one — see below.
 
 You can also run the linter / scanner directly (no PHPUnit) in a CI script —
 see `scripts/ci-plugin-tenant-conformance.php` in whity-core for the pattern.
 PHPUnit is a **dev-only** requirement (`suggest`); the runtime SDK still
 depends on nothing but PHP.
+
+### Running your tests against real PostgreSQL
+
+Your tests run SQLite. Your users run PostgreSQL. A whole class of defect lives
+in that gap and cannot be found by adding assertions:
+
+- `GROUP_CONCAT(x SEPARATOR ',')` parses on SQLite; PostgreSQL has no
+  `GROUP_CONCAT` at all (`string_agg`).
+- `WHERE varchar_col = 42` matches on SQLite; PostgreSQL refuses with
+  `operator does not exist: character varying = integer`. Nothing about the
+  statement is malformed — it is the engine's type semantics that differ, so no
+  wrapper or query builder can catch it. Only running it on PostgreSQL can.
+
+`Whity\Sdk\Testing\RealEnginePdo` is the harness. Set `PHPUNIT_PG_DSN` and the
+same suite runs against real PostgreSQL; leave it unset for the fast local loop:
+
+```bash
+docker run -d --name plugin_pg -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=plugin_test postgres:15-alpine
+
+vendor/bin/phpunit                                     # SQLite
+PHPUNIT_PG_DSN="pgsql:host=127.0.0.1;port=5432;dbname=plugin_test" \
+PHPUNIT_PG_USER=postgres PHPUNIT_PG_PASSWORD=postgres \
+  vendor/bin/phpunit                                   # real PostgreSQL
+```
+
+`TenantIsolationConformanceTestCase::makePdo()` already delegates to it, so a
+plugin extending the base case needs **no code change** — the variable is the
+whole switch. Use it directly in your own data-layer tests too:
+
+```php
+use Whity\Sdk\Testing\RealEnginePdo;
+
+$pdo = RealEnginePdo::make();
+foreach ($this->migrations() as $migration) {
+    $migration->up($pdo);
+}
+```
+
+Each call gets its own auto-dropped schema in the target database, so parallel
+runs never collide. Keep BOTH jobs in CI: the SQLite one for speed, the
+PostgreSQL one for truth. Run the dual-engine job against a deliberately broken
+query once (drop a `CAST`) to confirm it can actually fail — see
+[Testing Against PostgreSQL](../docs/wiki/Testing-Against-PostgreSQL.md) for the
+full trap catalogue and a copy-paste CI workflow.
 
 ## Minimal plugin
 
