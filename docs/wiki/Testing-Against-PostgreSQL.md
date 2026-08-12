@@ -254,6 +254,10 @@ after seeding:
 SELECT setval('roles_id_seq', (SELECT MAX(id) FROM roles));
 ```
 
+In whity-core's own fixtures, call `SchemaFromMigrations::syncSequences($pdo)`
+right after seeding at explicit ids — it fixes every sequence in the schema and
+is a no-op on SQLite, so it goes in unconditionally.
+
 ### Transactions
 
 | Behaviour | SQLite | PostgreSQL |
