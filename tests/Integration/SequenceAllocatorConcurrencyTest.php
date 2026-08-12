@@ -330,20 +330,28 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
         $dsn = $_ENV['PHPUNIT_PG_DSN'] ?? getenv('PHPUNIT_PG_DSN') ?: null;
 
         if ($dsn !== null) {
-            // The PostgreSQL harness builds a private schema per make() call and
-            // locks the search path to it. A second connection has to be pointed
-            // at that SAME schema, which it discovers rather than reconstructs.
             $a = SchemaFromMigrations::make();
-            $schema = (string) $this->scalar($a, "SELECT current_schema()");
+
+            // B FOLLOWS A, rather than being rebuilt from the same env DSN.
+            // The PostgreSQL harness has used more than one isolation strategy —
+            // a private schema inside the configured database, and a whole
+            // database cloned from a template with `dbname=` rewritten — and a
+            // second connection built from the raw env DSN lands in the WRONG
+            // one under the second strategy. Asking A where it actually is
+            // survives both, and any third.
+            $database = (string) $this->scalar($a, 'SELECT current_database()');
+            $schema = (string) $this->scalar($a, 'SELECT current_schema()');
 
             $user = (string) ($_ENV['PHPUNIT_PG_USER'] ?? getenv('PHPUNIT_PG_USER') ?: 'whity');
             $password = (string) ($_ENV['PHPUNIT_PG_PASSWORD'] ?? getenv('PHPUNIT_PG_PASSWORD') ?: 'whity_dev');
 
-            $b = new PDO((string) $dsn, $user, $password, [
+            $b = new PDO(self::withDatabase((string) $dsn, $database), $user, $password, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);
-            $b->exec('SET search_path TO "' . $schema . '"');
+            $b->exec('SET search_path TO "' . $schema . '", public');
+
+            $this->assertConnectionsShareOneDatabase($a, $b);
 
             return [$a, $b];
         }
@@ -395,6 +403,50 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
         $a->commit();
 
         return [$a, $b];
+    }
+
+    /**
+     * Point a PDO pgsql DSN at a specific database, whether or not it already
+     * names one.
+     */
+    private static function withDatabase(string $dsn, string $database): string
+    {
+        if (preg_match('/\bdbname=/i', $dsn) === 1) {
+            return (string) preg_replace('/\bdbname=[^;]*/i', 'dbname=' . $database, $dsn);
+        }
+
+        return rtrim($dsn, ';') . ';dbname=' . $database;
+    }
+
+    /**
+     * Refuse to run at all unless the two connections really do share one
+     * database.
+     *
+     * Without this the whole file degrades into a permanently green no-op: two
+     * connections that cannot see each other never block each other, so every
+     * "the second caller is blocked" assertion would have to be inverted to
+     * pass — and the version that PASSES is the one that proves nothing. This
+     * has already happened once, when the harness switched from a private
+     * schema to a cloned database and a second connection built from the env
+     * DSN silently landed somewhere else.
+     */
+    private function assertConnectionsShareOneDatabase(PDO $a, PDO $b): void
+    {
+        $a->exec('DROP TABLE IF EXISTS seq_shared_link_probe');
+        $a->exec('CREATE TABLE seq_shared_link_probe (x INTEGER NOT NULL)');
+        $a->exec('INSERT INTO seq_shared_link_probe (x) VALUES (99)');
+
+        try {
+            self::assertSame(
+                99,
+                (int) $this->scalar($b, 'SELECT x FROM seq_shared_link_probe'),
+                'The two connections must see ONE database. They do not, so nothing in this '
+                . 'file is testing concurrency — check how the PostgreSQL test harness isolates '
+                . 'runs and make connection B follow connection A.'
+            );
+        } finally {
+            $a->exec('DROP TABLE IF EXISTS seq_shared_link_probe');
+        }
     }
 
     /**
