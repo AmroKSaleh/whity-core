@@ -41,6 +41,18 @@ final class UpsertTest extends TestCase
         );
     }
 
+    /**
+     * `PDO::query()` is typed `PDOStatement|false`; chaining off it reports a
+     * confusing "call on false" rather than naming the statement that failed.
+     */
+    private function countItems(): int
+    {
+        $stmt = $this->pdo->query('SELECT COUNT(*) FROM acme_items');
+        self::assertNotFalse($stmt, 'Could not count acme_items.');
+
+        return (int) $stmt->fetchColumn();
+    }
+
     // ==================== the tenant key cannot be left out ====================
 
     /**
@@ -224,7 +236,7 @@ final class UpsertTest extends TestCase
             'The conflict must have updated the SAME row, not inserted a second.'
         );
 
-        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM acme_items')->fetchColumn());
+        self::assertSame(1, $this->countItems());
     }
 
     /**
@@ -236,7 +248,7 @@ final class UpsertTest extends TestCase
         Upsert::tenantScoped($this->pdo, 'acme_items', 7, ['client_uuid' => 'u-1', 'name' => 'seven'], ['client_uuid']);
         Upsert::tenantScoped($this->pdo, 'acme_items', 8, ['client_uuid' => 'u-1', 'name' => 'eight'], ['client_uuid']);
 
-        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM acme_items')->fetchColumn());
+        self::assertSame(2, $this->countItems());
 
         $stmt = $this->pdo->prepare('SELECT name FROM acme_items WHERE tenant_id = :t AND client_uuid = :u');
         $stmt->execute([':t' => 7, ':u' => 'u-1']);

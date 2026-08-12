@@ -112,6 +112,35 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
         $this->clearLockTimeout($pdo);
     }
 
+    /**
+     * One scalar from a query, with the statement checked.
+     *
+     * `PDO::query()` is typed `PDOStatement|false`, and chaining off it turns a
+     * failed statement into a confusing "call on false" rather than naming what
+     * failed — which in a concurrency test is exactly the wrong error to be
+     * looking at.
+     */
+    private function scalar(PDO $pdo, string $sql): mixed
+    {
+        $stmt = $pdo->query($sql);
+        self::assertNotFalse($stmt, "Statement failed: {$sql}");
+
+        return $stmt->fetchColumn();
+    }
+
+    /**
+     * Every row of a query, with the statement checked.
+     *
+     * @return list<mixed>
+     */
+    private function rows(PDO $pdo, string $sql, int $mode): array
+    {
+        $stmt = $pdo->query($sql);
+        self::assertNotFalse($stmt, "Statement failed: {$sql}");
+
+        return array_values($stmt->fetchAll($mode));
+    }
+
     // ==================== the control experiment ====================
 
     /**
@@ -129,8 +158,8 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
 
         // Two clients, each doing the obvious thing: read the counter, add one,
         // write it back, use the number.
-        $readByA = (int) $this->a->query('SELECT value FROM naive_counter')->fetchColumn();
-        $readByB = (int) $this->b->query('SELECT value FROM naive_counter')->fetchColumn();
+        $readByA = (int) $this->scalar($this->a, 'SELECT value FROM naive_counter');
+        $readByB = (int) $this->scalar($this->b, 'SELECT value FROM naive_counter');
 
         $numberForA = $readByA + 1;
         $numberForB = $readByB + 1;
@@ -146,7 +175,7 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
         );
         self::assertSame(
             4,
-            (int) $this->a->query('SELECT value FROM naive_counter')->fetchColumn(),
+            (int) $this->scalar($this->a, 'SELECT value FROM naive_counter'),
             'And one of the two increments is lost outright.'
         );
     }
@@ -178,20 +207,25 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
         // presented unhelpfully.
         $this->armShortLockTimeout($this->b);
 
-        $blocked = false;
+        $blocked = null;
         try {
             $allocatorB->next(self::TENANT, 'invoice');
-        } catch (PDOException) {
-            $blocked = true;
+        } catch (\Throwable $e) {
+            $blocked = $e;
         } finally {
             $this->clearLockTimeout($this->b);
         }
 
-        self::assertTrue(
+        // Caught as Throwable and narrowed here, rather than caught as
+        // PDOException: the assertion is what makes it a LOCK failure and not
+        // some other error the allocator happened to raise.
+        self::assertInstanceOf(
+            PDOException::class,
             $blocked,
             "On {$this->driver} the second caller must WAIT for the first allocation to "
-            . 'commit. Completing here would mean it evaluated the counter against a value '
-            . 'the first caller had already claimed — the duplicate-number bug.'
+            . 'commit, and be killed by the short timeout armed above. Completing here would '
+            . 'mean it evaluated the counter against a value the first caller had already '
+            . 'claimed — the duplicate-number bug.'
         );
 
         $this->a->commit();
@@ -222,16 +256,23 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
         self::assertSame(2, $second);
 
         $this->armShortLockTimeout($this->b);
-        $blocked = false;
+        $blocked = null;
         try {
             $allocatorB->next(self::TENANT, 'invoice');
-        } catch (PDOException) {
-            $blocked = true;
+        } catch (\Throwable $e) {
+            $blocked = $e;
         } finally {
             $this->clearLockTimeout($this->b);
         }
 
-        self::assertTrue($blocked, "DO UPDATE must also exclude on {$this->driver}.");
+        // Caught as Throwable and narrowed here, rather than caught as
+        // PDOException: the assertion is what makes it a LOCK failure and not
+        // some other error the allocator happened to raise.
+        self::assertInstanceOf(
+            PDOException::class,
+            $blocked,
+            "DO UPDATE must also exclude on {$this->driver}."
+        );
 
         $this->a->commit();
         self::assertSame(3, $allocatorB->next(self::TENANT, 'invoice'));
@@ -293,7 +334,7 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
             // locks the search path to it. A second connection has to be pointed
             // at that SAME schema, which it discovers rather than reconstructs.
             $a = SchemaFromMigrations::make();
-            $schema = (string) $a->query('SELECT current_schema()')->fetchColumn();
+            $schema = (string) $this->scalar($a, "SELECT current_schema()");
 
             $user = (string) ($_ENV['PHPUNIT_PG_USER'] ?? getenv('PHPUNIT_PG_USER') ?: 'whity');
             $password = (string) ($_ENV['PHPUNIT_PG_PASSWORD'] ?? getenv('PHPUNIT_PG_PASSWORD') ?: 'whity_dev');
@@ -327,9 +368,11 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
         // TABLE would.
         $template = SchemaFromMigrations::make();
 
-        $objects = $template
-            ->query("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'")
-            ->fetchAll(PDO::FETCH_COLUMN);
+        $objects = $this->rows(
+            $template,
+            "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'",
+            PDO::FETCH_COLUMN
+        );
 
         // In ONE transaction: a file-backed SQLite fsyncs per autocommitted
         // statement, and 167 of those took 82 seconds on a container filesystem
@@ -343,9 +386,10 @@ final class SequenceAllocatorConcurrencyTest extends TestCase
 
         // Plus the rows the migrations seed that this test depends on — the
         // system tenant (010), which sequence_counters.tenant_id references.
-        $tenants = $template->query('SELECT id, name FROM tenants')->fetchAll(PDO::FETCH_ASSOC);
+        $tenants = $this->rows($template, 'SELECT id, name FROM tenants', PDO::FETCH_ASSOC);
         $insert = $a->prepare('INSERT INTO tenants (id, name) VALUES (:id, :name)');
         foreach ($tenants as $tenant) {
+            self::assertIsArray($tenant);
             $insert->execute([':id' => $tenant['id'], ':name' => $tenant['name']]);
         }
         $a->commit();

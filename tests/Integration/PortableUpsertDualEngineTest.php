@@ -77,6 +77,19 @@ final class PortableUpsertDualEngineTest extends TestCase
         $this->pdo->exec('DROP TABLE IF EXISTS pu_items');
     }
 
+    /**
+     * `PDO::query()` is typed `PDOStatement|false`, and a test that chains
+     * straight off it reports a confusing "call on false" instead of naming the
+     * statement that failed.
+     */
+    private function countRows(string $table): int
+    {
+        $stmt = $this->pdo->query('SELECT COUNT(*) FROM ' . $table);
+        self::assertNotFalse($stmt, "Could not count rows in {$table}.");
+
+        return (int) $stmt->fetchColumn();
+    }
+
     // ==================== upsert ====================
 
     public function testInsertThenUpdateReturnsTheSameRowOnBothEngines(): void
@@ -108,7 +121,7 @@ final class PortableUpsertDualEngineTest extends TestCase
             'The conflict updated the existing row; `id` was not in the update list, so it kept its value.'
         );
 
-        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM pu_items')->fetchColumn());
+        self::assertSame(1, $this->countRows('pu_items'));
     }
 
     public function testDoNothingReturnsNothingOnBothEngines(): void
@@ -134,7 +147,7 @@ final class PortableUpsertDualEngineTest extends TestCase
         );
 
         self::assertNull($skipped, $this->driver);
-        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM pu_items')->fetchColumn());
+        self::assertSame(1, $this->countRows('pu_items'));
     }
 
     public function testNamedReturningColumnsComeBackOnBothEngines(): void
@@ -174,7 +187,7 @@ final class PortableUpsertDualEngineTest extends TestCase
             ['name']
         );
 
-        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM pu_items')->fetchColumn(), $this->driver);
+        self::assertSame(2, $this->countRows('pu_items'), $this->driver);
 
         $stmt = $this->pdo->prepare('SELECT name FROM pu_items WHERE tenant_id = :t AND client_uuid = :u');
         $stmt->execute([':t' => self::TENANT, ':u' => 'shared']);
