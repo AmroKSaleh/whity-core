@@ -8,11 +8,12 @@ with a way back. Core already generates part of that from a plugin's OpenAPI
 declarations. What it could not generate is anything that depends on knowing
 **what a record's states mean** and **what still points at it**.
 
-A data-type declaration supplies exactly those two facts, as data. Core never
+A data-type declaration supplies exactly those facts, as data. Core never
 learns what any of it means; it learns that `acme_entries` references
-`acme_records.id`, and that a blocked delete should say "recorded entries".
-That is enough to enforce the guard, phrase the refusal, and generate the
-trash / restore / retire affordances.
+`acme_records.id` and that a blocked delete should say "recorded entries", and
+that `acme_lines` rows are *part of* a record and go when it goes. That is
+enough to enforce the guard, phrase the refusal, delete the composition, and
+generate the trash / restore / retire affordances.
 
 The plugin keeps its storage, its own routes and its own screens. This raises
 the floor; it does not cap the ceiling.
@@ -149,6 +150,13 @@ public function getDataTypes(): array
                     'ignore_when' => ['status' => ['trashed']],
                 ],
             ],
+            'cascade_delete' => [                    // rows that DIE WITH the record
+                [
+                    'table'  => 'acme_lines',
+                    'column' => 'record_id',
+                    'label'  => 'line items',        // what the preview calls them
+                ],
+            ],
             'permissions' => [
                 'read'    => 'acme:read',
                 'trash'   => 'acme:manage',
@@ -166,14 +174,129 @@ Keys are namespaced under the plugin name, so two plugins may both declare
 [resource-scoped role grants](PERMISSION_SYSTEM.md) use, deliberately:
 `acme:record` means one thing across the install.
 
-Every table named — the type's own and every `blocks_delete` table — must be
-one this plugin declared above, and must be tenant-scoped. A guard is an
-aggregate over the referencing table, so a guard over somebody else's table
-would be a way to count rows the plugin cannot otherwise read.
+Every table named — the type's own, every `blocks_delete` table and every
+`cascade_delete` table — must be one this plugin declared above, and must be
+tenant-scoped. A guard is an aggregate over the referencing table, so a guard
+over somebody else's table would be a way to count rows the plugin cannot
+otherwise read. A cascade is a `DELETE` over it, which is worse, and passes the
+same gate for that reason.
 
 `ignore_when` matters more than it looks: without it, a referencing row that is
 itself trashed would pin its parent alive forever, and the guard would be a
 leak rather than a protection.
+
+---
+
+## What outlives a record, and what dies with it
+
+`blocks_delete` and `cascade_delete` answer the **same question with opposite
+answers**, and you need both:
+
+| | `blocks_delete` | `cascade_delete` |
+|---|---|---|
+| What those rows are | somebody's data that points here | **part of** this record |
+| On delete | the delete is **refused** | the rows are **deleted with it** |
+| `ignore_when` | supported | **refused** — see below |
+| Missing declaration means | nothing refuses the delete | **the rows are orphaned** |
+
+Nothing about a table's shape says which one you mean. In the example above
+`acme_entries` and `acme_lines` are shaped identically — a tenant column, a
+`record_id`, a payload — and must be handled in opposite ways. With no foreign
+keys between plugin tables (the convention here) the database will not choose
+either, which is why both halves are declared.
+
+### The gap this closed
+
+Until this shipped, `DataTypeLifecycleService::delete()` ran exactly one
+statement:
+
+```sql
+DELETE FROM <table> WHERE <key> = :id AND <tenant> = :tenant
+```
+
+One row. An adopter proved live that deleting a record through
+`DELETE /api/data-types/{type}/{id}` left its own child rows behind — pointing
+at an id that no longer resolves, in a state no screen lists and no guard
+protects. It answered `200`. `blocks_delete` could not have caught it, because
+it declares the opposite relationship.
+
+If you worked around this in a `changing` listener, that still works and nothing
+forces you off it — but you can now declare the composition and delete the
+listener, and core will do it inside the transition's own transaction.
+
+### `ignore_when` is refused on a composition
+
+A guard legitimately disregards some referencing rows. A cascade that
+disregarded some would leave exactly the orphans it exists to remove, so the
+field is **rejected at registration** rather than accepted and ignored. If some
+of those rows must survive the delete, they are a reference and belong in
+`blocks_delete`.
+
+For the same reason a table may not appear in **both** lists, and a type may not
+cascade onto its **own** table.
+
+### What core refuses rather than cascading
+
+Three conditions are checked **before anything is written**, and each refuses
+instead of doing a partial job. All three are ordinary `409` refusals with
+stable reason keys, and all three are predicted by the pre-flight endpoint.
+
+* **`cascade_would_nest`** — a table you own is *itself* a declared type that
+  declares its own `cascade_delete`. **Nesting is not supported in this pass.**
+  Core deletes one level, so the level below would be orphaned: the identical
+  bug, one step further down and harder to notice. Rather than silently doing
+  one level, core refuses the delete.
+
+  This is refused at **delete time**, not at registration, and deliberately: it
+  is a fact about *two* declarations, and the second may not exist yet when the
+  first registers — types arrive from different plugins in load order. Refusing
+  at registration would reject whichever declaration happened to arrive second,
+  so which plugin lost its whole lifecycle surface would depend on load order.
+  By delete time the catalogue is complete, so the answer is deterministic for
+  the install and derived purely from declarations — which is why the preview
+  can predict it exactly.
+
+* **`composition_is_permanent`** — a row you own is **retired** under its own
+  declared type. "A retired record is never deleted" is the strongest promise
+  this lifecycle makes; a cascade that quietly removed one would make it
+  conditional on nobody having declared a composition over its table.
+
+* **`composition_still_referenced`** — a row you own is protected by its own
+  type's `blocks_delete`. Deleting it through the parent would defeat a declared
+  guard by approaching it from above, which is the "bypassed through a secondary
+  path" failure declared guards exist to end. The refusal carries `blockers`
+  under the usual shape, with the declaring plugin's label.
+
+  It is a **separate key** from `still_referenced`, because the two send you to
+  different places: one means "detach what points at this record", the other
+  "something points at one of its parts". A caller shown the first for the
+  second goes looking for references that do not exist.
+
+Only rows that are themselves a **declared data type** can produce the last two.
+That is not a gap: both promises being protected are properties a table only has
+by being declared.
+
+### Ordering, atomicity and tenant scoping
+
+* **Children first, then the parent**, both inside the transition's own unit of
+  work — the same one the vetoable `changing` hook is dispatched in. A veto, or
+  a failure part-way through the cascade, leaves the whole composition exactly
+  where it was rather than half-removed. When you call a lifecycle method inside
+  a transaction **you** opened, core joins it rather than nesting, so your
+  rollback takes the cascade with it.
+* **Every cascade statement binds `tenant_id`**, on the owned table and on both
+  halves of the guard check. A cascade is the most destructive statement core
+  generates; an unscoped one would delete another tenant's rows for a record it
+  cannot even see.
+* **Composition affects `delete` only.** Trashing or retiring a record writes
+  nothing to its parts — composition is about a record's existence, not its
+  state. If you want children to follow their parent into the trash, that is a
+  domain rule, and the [`changing` hook](#refusing-a-transition-datatypelifecyclechanging)
+  is where it belongs.
+* A cascade announces the **parent's** transition only. No `changed` event and
+  no separate audit entry is emitted per owned row; the parent's audit entry
+  records what went with it (`metadata.cascaded`), which is the only place that
+  count survives the write.
 
 ## The published entry round-trips your declaration
 
@@ -201,6 +324,9 @@ a field took effect: diff the entry against what you wrote.
       "label": "recorded entries",
       "ignore_when": { "status": ["trashed"] }   // echoed, so you can verify it
     }
+  ],
+  "cascade_delete": [                            // [] when none is declared
+    { "table": "acme_lines", "column": "record_id", "label": "line items" }
   ],
   "actions": ["read", "trash", "restore", "retire", "delete"],
   "permissions": { "read": "acme:read", "…": "…" }
@@ -287,6 +413,9 @@ why a control is disabled instead of rendering a dead button:
     "restorable": false,
     "deletable": false,
     "blockers": [],
+    "cascade": [
+      { "table": "acme_lines", "label": "line items", "count": 4 }
+    ],
     "refusals": {
       "restore": {
         "reason": "nothing_to_restore",
@@ -301,12 +430,25 @@ why a control is disabled instead of rendering a dead button:
 }
 ```
 
-**`blockers` and `refusals` are different questions and stay apart.**
-`blockers` answers only *how many rows point at this record* — the count a
-"3 catalogue notes still reference this" message is built from. `refusals`
-answers *which actions are unavailable on this record right now, and why*. A
-refusal is not a reference, so it never appears as a synthetic blocker; if it
-did, the row count would stop being answerable.
+**`blockers`, `cascade` and `refusals` are three different questions and stay
+apart.**
+
+* **`blockers`** — *what is in the way of deleting this, and what to call it*:
+  the count a "3 catalogue notes still reference this" message is built from.
+  Those rows point either at the record or at something it owns; `reason` says
+  which (`still_referenced` vs `composition_still_referenced`).
+* **`cascade`** — *what else this delete would remove*: the rows the record
+  owns, with the declaring plugin's label and a count. A record with composition
+  is still **deletable**; this is the field a confirmation dialog is built from
+  ("this will also delete 4 line items"). Edges with no rows are omitted, so
+  `[]` means "nothing else goes".
+* **`refusals`** — *which actions are unavailable on this record right now, and
+  why*.
+
+A refusal is not a reference, so it never appears as a synthetic blocker; if it
+did, the row count would stop being answerable. And a composition is neither: it
+does not stop the delete, so folding it into `blockers` would make
+`deletable: true` sit beside a non-empty blocker list.
 
 ### The invariant, precisely
 
@@ -344,6 +486,9 @@ prose is not an API, and the sentences may be reworded without notice.
 | key | meaning |
 |---|---|
 | `still_referenced` | rows still point at this record; see `blockers` |
+| `composition_still_referenced` | rows still point at something this record **owns**; see `blockers` |
+| `composition_is_permanent` | a row this record owns is retired, and retirement is permanent |
+| `cascade_would_nest` | a table this record owns declares a composition of its own; core does not cascade more than one level |
 | `trash_before_deleting` | a trashable type has no live → gone path |
 | `retired_records_are_permanent` | a retired record is never deletable |
 | `retired_records_cannot_be_trashed` | retirement is not a mistake to undo |
@@ -584,6 +729,8 @@ axis on which the two states agree.
 ## Reference implementation
 
 `plugins/DemoCatalog` declares `democatalog:item` over `demo_catalog_items`,
-guarded by `demo_catalog_item_notes.item_id`. See also
+guarded by `demo_catalog_item_notes.item_id` and composed of
+`demo_catalog_item_lines.item_id`. The two child tables are shaped identically
+and handled in opposite ways, which is the whole point. See also
 [Plugin-Development.md](Plugin-Development.md) and
 [TENANT_ISOLATION.md](TENANT_ISOLATION.md).

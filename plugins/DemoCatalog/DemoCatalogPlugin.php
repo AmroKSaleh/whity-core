@@ -6,6 +6,7 @@ namespace DemoCatalog;
 
 use DemoCatalog\Api\DemoCatalogApiHandler;
 use DemoCatalog\Migrations\AddSyncColumnsToDemoCatalogItems;
+use DemoCatalog\Migrations\CreateDemoCatalogItemLinesTable;
 use DemoCatalog\Migrations\CreateDemoCatalogItemNotesTable;
 use DemoCatalog\Migrations\CreateDemoCatalogItemsTable;
 use DemoCatalog\Migrations\GrantDemoCatalogPermissionsToAdmin;
@@ -395,6 +396,7 @@ final class DemoCatalogPlugin implements
         return [
             'demo_catalog_items' => self::SCOPE_TENANT,
             'demo_catalog_item_notes' => self::SCOPE_TENANT,
+            'demo_catalog_item_lines' => self::SCOPE_TENANT,
             'demo_catalog_change_seq' => self::SCOPE_GLOBAL,
         ];
     }
@@ -404,7 +406,7 @@ final class DemoCatalogPlugin implements
      * (WC-723).
      *
      * One bare slug, `item`, which the host namespaces to `democatalog:item`.
-     * The declaration hands core exactly three things and nothing more:
+     * The declaration hands core exactly four things and nothing more:
      *
      *  - WHERE the record lives (`demo_catalog_items`, keyed by `id`, scoped by
      *    `tenant_id`);
@@ -412,10 +414,23 @@ final class DemoCatalogPlugin implements
      *    removal, `retired` is a finished item that other rows still resolve
      *    against, and the two are not the same thing;
      *  - WHICH rows still point at it (`demo_catalog_item_notes.item_id`), and
-     *    what to CALL them when refusing a delete ("catalogue notes").
+     *    what to CALL them when refusing a delete ("catalogue notes");
+     *  - WHICH rows are PART of it (`demo_catalog_item_lines.item_id`), so a
+     *    delete takes them with it instead of leaving them pointing at an id
+     *    that no longer resolves.
+     *
+     * The last two are the halves an adopter has to see together. The two tables
+     * are shaped identically and are handled in opposite ways: a note must
+     * outlive the item and refuses the delete while it exists; a line is part of
+     * the item and dies with it. Nothing in the schema says which is which —
+     * there are no foreign keys here, by convention — so both are declared, and
+     * a table may not appear in both lists.
      *
      * `ignore_when` says a note that is itself trashed does not keep its item
-     * alive — without it a trashed child would pin its parent forever.
+     * alive — without it a trashed child would pin its parent forever. It has no
+     * counterpart on `cascade_delete` and is refused there: a cascade that
+     * skipped some of the rows it owns would orphan exactly what it exists to
+     * remove.
      *
      * Note on the sync tombstone: `deleted_at` remains the offline-sync
      * transport's own concern (it is how a deletion propagates to a client) and
@@ -451,6 +466,14 @@ final class DemoCatalogPlugin implements
                         'ignore_when' => ['status' => ['trashed']],
                     ],
                 ],
+                'cascade_delete' => [
+                    [
+                        'table' => 'demo_catalog_item_lines',
+                        'column' => 'item_id',
+                        'label' => 'line items',
+                        'tenant_column' => 'tenant_id',
+                    ],
+                ],
                 'permissions' => [
                     'read' => 'demo_catalog:view',
                     'trash' => 'demo_catalog:manage',
@@ -482,6 +505,7 @@ final class DemoCatalogPlugin implements
             AddSyncColumnsToDemoCatalogItems::class,
             GrantDemoCatalogPermissionsToAdmin::class,
             CreateDemoCatalogItemNotesTable::class,
+            CreateDemoCatalogItemLinesTable::class,
         ];
     }
 

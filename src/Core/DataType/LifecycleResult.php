@@ -123,6 +123,29 @@ final class LifecycleResult
     }
 
     /**
+     * The record itself is free, but a row it OWNS is still referenced.
+     *
+     * A distinct reason key rather than a second flavour of `still_referenced`,
+     * because the two send the caller to different places: `still_referenced`
+     * means "detach what points at this record", while this one means "something
+     * points at one of its parts". Reporting the first for the second would send
+     * a user hunting for references to a record that has none.
+     *
+     * The blockers ride along under the same shape and the same rule — a table,
+     * the declaring plugin's label for it, and a count — so a renderer needs no
+     * second code path to say what is in the way. What widened is only WHERE
+     * those rows point: at this record, or at something it owns. `reason` is what
+     * says which, and it is the field clients branch on.
+     *
+     * @param list<array{table: string, label: string, count: int}> $blockers Blocking references.
+     * @param string|null                                           $state    The record's current state.
+     */
+    public static function compositionBlocked(array $blockers, ?string $state = null): self
+    {
+        return new self(self::BLOCKED, $state, $blockers, 'composition_still_referenced');
+    }
+
+    /**
      * The transition is not legal from the record's current state.
      *
      * @param string      $reason A stable reason key.
@@ -246,10 +269,12 @@ final class LifecycleResult
         return match ($this->outcome) {
             self::OK => 'Done',
             self::NOT_FOUND => 'Not found',
-            self::BLOCKED => 'Still referenced by ' . implode(', ', array_map(
-                static fn (array $b): string => $b['count'] . ' ' . $b['label'],
-                $this->blockers
-            )),
+            self::BLOCKED => ($this->reason === 'composition_still_referenced'
+                ? 'Rows belonging to this record are still referenced by '
+                : 'Still referenced by ') . implode(', ', array_map(
+                    static fn (array $b): string => $b['count'] . ' ' . $b['label'],
+                    $this->blockers
+                )),
             self::REFUSED => match ($this->reason) {
                 'retirement_is_permanent' => 'A retired record cannot be restored — retirement is permanent',
                 'retired_records_are_permanent' => 'A retired record cannot be deleted — existing references still resolve to it',
@@ -257,6 +282,9 @@ final class LifecycleResult
                 'restore_before_retiring' => 'Restore this record before retiring it — a trashed record is a mistake, not an achievement',
                 'trash_before_deleting' => 'Move this record to the trash before deleting it',
                 'nothing_to_restore' => 'This record is not in the trash, so there is nothing to restore',
+                'composition_is_permanent' => 'This record owns a retired record, and a retired record is never deleted',
+                'cascade_would_nest' => 'This record owns rows that own rows of their own. Core deletes one level of '
+                    . 'composition, so removing this record would orphan the level below it',
                 default => 'The record\'s current state does not allow this action',
             },
             default => 'This data type does not offer that action',

@@ -43,6 +43,23 @@ use Whity\Sdk\Hooks\HookVetoException;
  * legal from the trashed state, so there is no path from live to gone that skips
  * the reversible step.
  *
+ * What a delete removes: the record, and the record's PARTS
+ * ---------------------------------------------------------
+ * A delete used to be one statement over one row. With no foreign keys between
+ * plugin tables, that left every child row a record owned pointing at an id that
+ * no longer resolves — invisibly, and reported as a 200. `blocks_delete` could
+ * not catch it because it answers the opposite question: it names rows that must
+ * OUTLIVE the record. So composition is declared too, as `cascade_delete`, and
+ * {@see self::delete()} removes it — children first, parent second, one
+ * transaction, tenant-bound at every statement.
+ *
+ * Core refuses rather than cascading in three cases, all evaluated before any
+ * write and all predicted by {@see self::describe()}: an owned table that owns
+ * rows of its OWN (nesting is not supported in this pass), an owned row that is
+ * retired, and an owned row somebody's `blocks_delete` protects. Each of those
+ * would otherwise be a way to defeat a guarantee core makes elsewhere by
+ * approaching it from above. See {@see self::evaluateDelete()}.
+ *
  * A restore is an UNDO, and an undo needs a memory
  * ------------------------------------------------
  * `restore` returns a record to the state it actually held, which means that
@@ -470,13 +487,51 @@ class DataTypeLifecycleService implements DataTypeGuard
     }
 
     /**
-     * Delete a record for real, if every declared guard permits it.
+     * Delete a record for real — and the rows it OWNS — if every declared guard
+     * permits it.
      *
-     * Also forgets any state remembered for it. That is not tidiness: the
-     * memory's `record_id` points into a table that varies by data type, so it
-     * carries no foreign key and no cascade will ever fire for it. A row left
-     * behind would be inherited by whatever record next occupies that primary
-     * key — the same id-reuse hazard the taxonomy delete guard had to answer.
+     * The composition is deleted here, not left to the database
+     * ---------------------------------------------------------
+     * This used to be one statement: `DELETE FROM <table> WHERE <key> AND
+     * <tenant>`, exactly one row. With no foreign keys between plugin tables —
+     * the established convention here, and the reason `blocks_delete` exists at
+     * all — nothing else was ever going to remove a record's parts, so a record
+     * with children left them behind: rows pointing at an id that no longer
+     * resolves, in a state no screen lists and no guard protects. An adopter
+     * proved it live. It reported 200.
+     *
+     * `blocks_delete` could not have caught it, because it answers the OPPOSITE
+     * question. A guard names rows that must OUTLIVE the record; a composition
+     * names rows that must DIE WITH it. Nothing about a table's shape says which
+     * a plugin means, so the second half had to be declarable too — see
+     * {@see CascadeEdge}.
+     *
+     * Order and atomicity
+     * -------------------
+     * Children first, then the parent, all inside the SAME unit of work as the
+     * pre-transition hook (see {@see self::apply()} and
+     * {@see self::transactionally()}) — so a veto, or a failure part-way through
+     * the cascade, leaves the whole composition exactly where it was rather than
+     * half-removed. When a caller already holds a transaction open, that one is
+     * the atomicity; core never ends a unit of work it did not begin.
+     *
+     * The order is not arbitrary even though both statements are in one
+     * transaction: it is the order that stays correct under a caller who does
+     * NOT hold one open and whose connection dies mid-flight.
+     *
+     * What core refuses rather than cascades
+     * -------------------------------------
+     * Three conditions are checked BEFORE anything is written, in
+     * {@see self::evaluateDelete()}, and each of them refuses instead of doing a
+     * partial job — a cascade that silently defeats another guarantee would be
+     * worse than the orphans it replaced. See there for the reasoning.
+     *
+     * Also forgets any state remembered for the record AND for every owned row
+     * that is itself a declared type. That is not tidiness: the memory's
+     * `record_id` points into a table that varies by data type, so it carries no
+     * foreign key and no cascade will ever fire for it. A row left behind would
+     * be inherited by whatever record next occupies that primary key — the same
+     * id-reuse hazard the taxonomy delete guard had to answer.
      *
      * @param string     $dataType The namespaced type key.
      * @param int        $tenantId The resolved tenant id.
@@ -500,6 +555,11 @@ class DataTypeLifecycleService implements DataTypeGuard
         $keyColumn = self::identifier($definition->keyColumn());
         $tenantColumn = self::identifier($definition->tenantColumn());
 
+        // Counted BEFORE the write, because afterwards there is nothing left to
+        // count. The audit entry is the only durable record that a delete took
+        // four other rows with it.
+        $cascaded = $this->composition($definition, $tenantId, $id);
+
         $sql = "DELETE FROM {$table} WHERE {$keyColumn} = :id AND {$tenantColumn} = :tenant";
         $veto = $this->apply(
             $definition,
@@ -510,10 +570,13 @@ class DataTypeLifecycleService implements DataTypeGuard
             null,
             $actorId,
             function () use ($sql, $definition, $tenantId, $id): void {
+                $this->cascade($definition, $tenantId, $id);
+
                 $statement = $this->pdo->prepare($sql);
                 $statement->execute([':id' => $id, ':tenant' => $tenantId]);
                 $this->memory->forget($definition->key(), $tenantId, $id);
-            }
+            },
+            $cascaded === [] ? [] : ['cascaded' => $cascaded]
         );
         if ($veto !== null) {
             return $veto;
@@ -596,10 +659,33 @@ class DataTypeLifecycleService implements DataTypeGuard
      * available. Silently swallowing that 409, or treating it as an unexpected
      * error, is the failure mode this note exists to prevent.
      *
+     * A THIRD question, kept apart from the other two: `cascade`
+     * ---------------------------------------------------------
+     * `blockers` says what stops this delete. `refusals` says which actions are
+     * unavailable and why. `cascade` says what ELSE this delete would remove —
+     * the rows the record owns, with the plugin's own label and a count.
+     *
+     * It is published because a composition is invisible otherwise, and
+     * invisible destruction is the worst kind. A record with four owned rows and
+     * a record with none are identical in every other field of this payload, yet
+     * one of them is about to take four rows with it. A generated screen can now
+     * say "this will also delete 4 line items" before the user clicks, which is
+     * the entire reason a confirmation dialog exists.
+     *
+     * It is NOT a refusal and NOT a blocker: a record with composition is still
+     * deletable, and folding it into either would break the property #731/#732
+     * pinned — that `blockers` answers a row count and every action-shaped false
+     * carries a refusal. A composition entry answers neither question.
+     *
+     * Zero-count edges are omitted, exactly as `blockers` omits guards with
+     * nothing behind them: `cascade: []` then means "nothing else goes", which is
+     * what a renderer needs to decide whether to warn at all, rather than a list
+     * of noughts it has to filter.
+     *
      * @param string     $dataType The namespaced type key.
      * @param int        $tenantId The resolved tenant id.
      * @param int|string $id       The record's key.
-     * @return array{state: ?string, referenceable: bool, pending_removal: bool, restorable: bool, deletable: bool, blockers: list<array{table: string, label: string, count: int}>, refusals: array<string, array{reason: string, message: string}>}|null
+     * @return array{state: ?string, referenceable: bool, pending_removal: bool, restorable: bool, deletable: bool, blockers: list<array{table: string, label: string, count: int}>, cascade: list<array{table: string, label: string, count: int}>, refusals: array<string, array{reason: string, message: string}>}|null
      *         Null when the record does not exist in this tenant.
      */
     public function describe(string $dataType, int $tenantId, int|string $id): ?array
@@ -612,10 +698,12 @@ class DataTypeLifecycleService implements DataTypeGuard
         $state = $this->readState($definition, $tenantId, $id);
         $lifecycle = $definition->lifecycle();
         $blockers = $this->blockingReferences($dataType, $tenantId, $id);
+        $nesting = $this->cascadeNesting($definition, $state);
+        $owned = $nesting !== null ? null : $this->compositionRefusal($definition, $tenantId, $id, $state);
 
         $refusals = [];
         foreach (LifecycleAction::mutating() as $action) {
-            $result = self::availability($definition, $action, $state, $blockers);
+            $result = self::availability($definition, $action, $state, $blockers, $nesting, $owned);
             if (!$result->isOk()) {
                 $refusals[$action] = [
                     'reason' => (string) $result->reason(),
@@ -631,6 +719,7 @@ class DataTypeLifecycleService implements DataTypeGuard
             'restorable' => !isset($refusals[LifecycleAction::RESTORE]),
             'deletable' => !isset($refusals[LifecycleAction::DELETE]),
             'blockers' => $blockers,
+            'cascade' => $this->composition($definition, $tenantId, $id),
             'refusals' => $refusals,
         ];
     }
@@ -648,7 +737,19 @@ class DataTypeLifecycleService implements DataTypeGuard
      *     before any record is read, so this outranks anything about the record;
      *  2. the record's state forbids it — {@see self::statePolicy()}, the same
      *     pure evaluator the mutators consult;
-     *  3. for a delete, rows still reference it.
+     *  3. for a delete, the declared composition cannot be removed at all —
+     *     `cascade_would_nest`, a fact about DECLARATIONS that no change to the
+     *     data can clear. It is reported ahead of the row-level causes for
+     *     exactly that reason: telling a user to detach three references first,
+     *     when the delete would still be refused afterwards, is worse than
+     *     saying nothing;
+     *  4. for a delete, rows still reference the record itself;
+     *  5. for a delete, rows still reference something the record OWNS.
+     *
+     * The last two are separate causes, not one with two spellings. "Detach what
+     * points at this record" and "something points at one of its parts" send the
+     * reader to different places, and a caller shown the first for the second
+     * goes looking for references that do not exist.
      *
      * Why the `offers()` check is HERE and not in {@see self::statePolicy()}
      * ---------------------------------------------------------------------
@@ -669,15 +770,19 @@ class DataTypeLifecycleService implements DataTypeGuard
      * verdict is unchanged, it now says `nothing_to_restore`. The mutator is
      * untouched and still answers such a call with an idempotent success.
      *
-     * @param string                                                $action   A {@see LifecycleAction} constant.
-     * @param string|null                                           $state    The record's current state.
-     * @param list<array{table: string, label: string, count: int}> $blockers Rows already counted by the caller.
+     * @param string                                                $action    A {@see LifecycleAction} constant.
+     * @param string|null                                           $state     The record's current state.
+     * @param list<array{table: string, label: string, count: int}> $blockers  Rows already counted by the caller.
+     * @param LifecycleResult|null                                  $nesting   The structural composition refusal, if any.
+     * @param LifecycleResult|null                                  $owned     The row-level composition refusal, if any.
      */
     private static function availability(
         DataTypeDefinition $definition,
         string $action,
         ?string $state,
-        array $blockers
+        array $blockers,
+        ?LifecycleResult $nesting = null,
+        ?LifecycleResult $owned = null
     ): LifecycleResult {
         if (!$definition->offers($action)) {
             // The SAME key the 405 body carries, deliberately: the preview
@@ -694,8 +799,16 @@ class DataTypeLifecycleService implements DataTypeGuard
             return LifecycleResult::refused('nothing_to_restore', $state);
         }
 
-        if ($action === LifecycleAction::DELETE && $blockers !== []) {
-            return LifecycleResult::blocked($blockers, $state);
+        if ($action === LifecycleAction::DELETE) {
+            if ($nesting !== null) {
+                return $nesting;
+            }
+            if ($blockers !== []) {
+                return LifecycleResult::blocked($blockers, $state);
+            }
+            if ($owned !== null) {
+                return $owned;
+            }
         }
 
         return LifecycleResult::ok($state);
@@ -709,6 +822,28 @@ class DataTypeLifecycleService implements DataTypeGuard
      * permitted. {@see self::describe()} reaches the same verdict through
      * {@see self::availability()} from a state and a blocker count it has
      * already read, rather than reading them a second time.
+     *
+     * The three composition checks live here, ahead of any write, so a cascade
+     * that cannot be performed cleanly is REFUSED rather than performed
+     * half-way. Each replaces a silent defeat of a guarantee core makes
+     * elsewhere:
+     *
+     *  - {@see self::cascadeNesting()} — an owned table that owns rows of its
+     *    own. Core deletes ONE level, so the level below would be orphaned:
+     *    precisely the bug this whole mechanism exists to close, one step down;
+     *  - a retired owned row. "A retired record is never deleted" is the
+     *    strongest promise this lifecycle makes, and a cascade that quietly
+     *    removed one would make it conditional on nobody having declared a
+     *    composition over its table;
+     *  - an owned row that somebody's `blocks_delete` protects. Deleting it
+     *    through the parent would be a way to defeat a declared guard by
+     *    approaching from above, which is exactly the "bypassed through a
+     *    secondary path" failure declared guards exist to eliminate.
+     *
+     * The order matters and mirrors {@see self::availability()} exactly, so the
+     * refusal a screen predicts is the refusal a click gets: state, then the
+     * structural composition fault, then the record's own references, then its
+     * composition's.
      *
      * @param int|string $id The record's key.
      */
@@ -725,12 +860,354 @@ class DataTypeLifecycleService implements DataTypeGuard
             return $policy;
         }
 
+        $nesting = $this->cascadeNesting($definition, $state);
+        if ($nesting !== null) {
+            return $nesting;
+        }
+
         $blockers = $this->blockingReferences($definition->key(), $tenantId, $id);
         if ($blockers !== []) {
             return LifecycleResult::blocked($blockers, $state);
         }
 
+        $owned = $this->compositionRefusal($definition, $tenantId, $id, $state);
+        if ($owned !== null) {
+            return $owned;
+        }
+
         return LifecycleResult::ok($state);
+    }
+
+    /**
+     * Refuse a delete whose composition is itself composed of something.
+     *
+     * Nesting is NOT supported in this pass, and this is where that is enforced
+     * rather than silently approximated. If an owned table is itself a declared
+     * data type that declares its OWN `cascade_delete`, deleting the parent
+     * would remove the children and leave the grandchildren pointing at ids that
+     * no longer resolve — the identical orphaning this mechanism exists to
+     * close, moved one level down and made harder to notice.
+     *
+     * Why this is refused HERE rather than at registration
+     * ---------------------------------------------------
+     * It is a fact about TWO declarations, and the second one may not exist yet
+     * when the first is registered — types arrive from different plugins in load
+     * order. Refusing at registration would therefore reject whichever
+     * declaration happened to arrive second, so which plugin lost its entire
+     * lifecycle surface would change with load order. {@see DataTypeRegistry}
+     * deliberately avoids exactly that: ownership never depends on iteration
+     * order.
+     *
+     * By delete time the catalogue is complete, so the answer is deterministic
+     * for the install — and because it is derived purely from declarations, it
+     * is a fact core owns and {@see self::describe()} predicts it exactly, like
+     * every other core refusal.
+     *
+     * Nesting is a real requirement and this is not a claim that it is
+     * unnecessary. It needs decisions this pass does not make — depth limits,
+     * cycles, and whether a veto at one level aborts the levels above it — and
+     * refusing loudly is the only honest interim answer.
+     *
+     * @param string|null $state The record's current state, carried into the refusal.
+     * @return LifecycleResult|null Null when the composition is flat.
+     */
+    private function cascadeNesting(DataTypeDefinition $definition, ?string $state): ?LifecycleResult
+    {
+        foreach ($definition->cascades() as $edge) {
+            foreach ($this->typesOver($edge->table()) as $owned) {
+                if ($owned->cascades() !== []) {
+                    return LifecycleResult::refused('cascade_would_nest', $state);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Refuse a delete whose owned rows are not core's to remove.
+     *
+     * Only rows that are THEMSELVES a declared data type can produce a refusal
+     * here, and that is not a gap: the two promises being protected — "a retired
+     * record is never deleted" and "a declared guard refuses a delete" — are
+     * both properties a table only has by being declared. An undeclared owned
+     * table has neither, and core has nothing to weigh.
+     *
+     * Permanence is checked before references because it can never be cleared:
+     * telling a caller to detach three rows when the delete would still be
+     * refused afterwards is worse than telling them nothing.
+     *
+     * @param int|string  $id    The owning record's key.
+     * @param string|null $state The record's current state, carried into the refusal.
+     * @return LifecycleResult|null Null when the composition may be removed.
+     */
+    private function compositionRefusal(
+        DataTypeDefinition $definition,
+        int $tenantId,
+        int|string $id,
+        ?string $state
+    ): ?LifecycleResult {
+        foreach ($definition->cascades() as $edge) {
+            foreach ($this->typesOver($edge->table()) as $owned) {
+                $retired = $owned->lifecycle()->retiredState();
+                $column = $owned->lifecycle()->column();
+                if (
+                    $retired !== null
+                    && $column !== null
+                    && $this->countOwnedRowsInState($edge, $column, $retired, $tenantId, $id) > 0
+                ) {
+                    return LifecycleResult::refused('composition_is_permanent', $state);
+                }
+            }
+        }
+
+        // Collected across every edge rather than returned on the first hit: a
+        // refusal that names one of the three things in the way, and goes quiet
+        // about the other two, produces a user who fixes one and clicks again.
+        $blockers = [];
+        foreach ($definition->cascades() as $edge) {
+            foreach ($this->typesOver($edge->table()) as $owned) {
+                foreach ($owned->guards() as $guard) {
+                    $count = $this->countReferencesToOwnedRows($edge, $owned, $guard, $tenantId, $id);
+                    if ($count > 0) {
+                        $blockers[] = [
+                            'table' => $guard->table(),
+                            'label' => $guard->label(),
+                            'count' => $count,
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $blockers === [] ? null : LifecycleResult::compositionBlocked($blockers, $state);
+    }
+
+    /**
+     * Every registered type stored in a given table.
+     *
+     * A list rather than one definition because nothing forbids two types over
+     * one table (a plugin may declare narrower views of the same rows), and a
+     * check that consulted only the first would enforce whichever declaration
+     * happened to register earliest.
+     *
+     * @param string $table The table to look up.
+     * @return list<DataTypeDefinition>
+     */
+    private function typesOver(string $table): array
+    {
+        $found = [];
+        foreach ($this->registry->all() as $definition) {
+            if ($definition->table() === $table) {
+                $found[] = $definition;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * What this record OWNS right now: one entry per declared edge that
+     * currently has rows, with the plugin's own label for them.
+     *
+     * Used twice, for the two moments it is answerable: by
+     * {@see self::describe()} to warn before the click, and by
+     * {@see self::delete()} to record in the audit log what the delete took with
+     * it. After the write there is nothing left to count, which is exactly why
+     * the audit entry has to carry it.
+     *
+     * @param int|string $id The owning record's key.
+     * @return list<array{table: string, label: string, count: int}>
+     */
+    private function composition(DataTypeDefinition $definition, int $tenantId, int|string $id): array
+    {
+        $owned = [];
+        foreach ($definition->cascades() as $edge) {
+            $count = $this->countOwnedRows($edge, $tenantId, $id);
+            if ($count > 0) {
+                $owned[] = [
+                    'table' => $edge->table(),
+                    'label' => $edge->label(),
+                    'count' => $count,
+                ];
+            }
+        }
+
+        return $owned;
+    }
+
+    /**
+     * Delete the rows this record owns, one declared edge at a time.
+     *
+     * Called only from inside {@see self::delete()}'s write closure, so it runs
+     * in the transition's unit of work: a failure here rolls the parent back
+     * with it, and a veto raised before it means it never runs at all.
+     *
+     * Every statement binds the tenant column. A cascade is the most destructive
+     * statement core generates, and an unscoped one would delete another
+     * tenant's rows for a record it cannot even see.
+     *
+     * The memory rows go first, and only for owned tables that are themselves
+     * declared types — those are the only rows that can have one. It is done
+     * per row rather than by a join because `data_type_restore_states.record_id`
+     * carries no foreign key and lives in a core table the owned table knows
+     * nothing about; the alternative is leaving the same id-reuse hazard
+     * {@see LifecycleStateMemory} exists to close, one level down.
+     *
+     * @param int|string $id The owning record's key.
+     */
+    private function cascade(DataTypeDefinition $definition, int $tenantId, int|string $id): void
+    {
+        foreach ($definition->cascades() as $edge) {
+            foreach ($this->typesOver($edge->table()) as $owned) {
+                foreach ($this->ownedIds($edge, $owned, $tenantId, $id) as $ownedId) {
+                    $this->memory->forget($owned->key(), $tenantId, $ownedId);
+                }
+            }
+
+            $table = self::identifier($edge->table());
+            $column = self::identifier($edge->column());
+            $tenantColumn = self::identifier($edge->tenantColumn());
+
+            $sql = "DELETE FROM {$table} WHERE {$column} = :id AND {$tenantColumn} = :tenant";
+            $statement = $this->pdo->prepare($sql);
+            $statement->execute([':id' => $id, ':tenant' => $tenantId]);
+        }
+    }
+
+    /**
+     * How many rows one declared edge currently owns.
+     *
+     * @param int|string $id The owning record's key.
+     */
+    private function countOwnedRows(CascadeEdge $edge, int $tenantId, int|string $id): int
+    {
+        $table = self::identifier($edge->table());
+        $column = self::identifier($edge->column());
+        $tenantColumn = self::identifier($edge->tenantColumn());
+
+        $sql = "SELECT COUNT(*) FROM {$table} WHERE {$column} = :id AND {$tenantColumn} = :tenant";
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute([':id' => $id, ':tenant' => $tenantId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * How many of the owned rows sit in a given lifecycle state.
+     *
+     * @param string     $stateColumn The owned type's lifecycle column.
+     * @param string     $state       The state being looked for.
+     * @param int|string $id          The owning record's key.
+     */
+    private function countOwnedRowsInState(
+        CascadeEdge $edge,
+        string $stateColumn,
+        string $state,
+        int $tenantId,
+        int|string $id
+    ): int {
+        $table = self::identifier($edge->table());
+        $column = self::identifier($edge->column());
+        $tenantColumn = self::identifier($edge->tenantColumn());
+        $lifecycleColumn = self::identifier($stateColumn);
+
+        $sql = "SELECT COUNT(*) FROM {$table} "
+            . "WHERE {$column} = :id AND {$tenantColumn} = :tenant AND {$lifecycleColumn} = :state";
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute([':id' => $id, ':tenant' => $tenantId, ':state' => $state]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * The keys of the rows one edge owns.
+     *
+     * @param DataTypeDefinition $owned The type stored in the owned table, whose
+     *                                  key column names the rows.
+     * @param int|string         $id    The owning record's key.
+     * @return list<string>
+     */
+    private function ownedIds(CascadeEdge $edge, DataTypeDefinition $owned, int $tenantId, int|string $id): array
+    {
+        $table = self::identifier($edge->table());
+        $column = self::identifier($edge->column());
+        $tenantColumn = self::identifier($edge->tenantColumn());
+        $keyColumn = self::identifier($owned->keyColumn());
+
+        $sql = "SELECT {$keyColumn} FROM {$table} WHERE {$column} = :id AND {$tenantColumn} = :tenant";
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute([':id' => $id, ':tenant' => $tenantId]);
+
+        $ids = [];
+        foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $value) {
+            if (is_scalar($value)) {
+                $ids[] = (string) $value;
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * How many rows one guard of the OWNED type still points at rows this record
+     * owns.
+     *
+     * One statement rather than a guard evaluation per owned row: the answer is
+     * "does anything block any of them", and a per-row loop would turn a
+     * pre-flight check into an N+1 that grows with the composition.
+     *
+     * Both halves bind their own tenant column — the outer guard table and the
+     * inner owned table — under DISTINCT placeholder names. Reusing one name
+     * twice is handled differently by PDO's named-parameter rewriting depending
+     * on driver and emulation, and a cascade check that throws on PostgreSQL
+     * while passing on SQLite would be worse than no check at all.
+     *
+     * @param DataTypeDefinition $owned The type stored in the owned table.
+     * @param ReferenceGuard     $guard One of that type's declared guards.
+     * @param int|string         $id    The owning record's key.
+     */
+    private function countReferencesToOwnedRows(
+        CascadeEdge $edge,
+        DataTypeDefinition $owned,
+        ReferenceGuard $guard,
+        int $tenantId,
+        int|string $id
+    ): int {
+        $guardTable = self::identifier($guard->table());
+        $guardColumn = self::identifier($guard->column());
+        $guardTenant = self::identifier($guard->tenantColumn());
+
+        $ownedTable = self::identifier($edge->table());
+        $ownedColumn = self::identifier($edge->column());
+        $ownedTenant = self::identifier($edge->tenantColumn());
+        $ownedKey = self::identifier($owned->keyColumn());
+
+        $sql = "SELECT COUNT(*) FROM {$guardTable} "
+            . "WHERE {$guardTenant} = :gtenant AND {$guardColumn} IN ("
+            . "SELECT {$ownedKey} FROM {$ownedTable} "
+            . "WHERE {$ownedColumn} = :id AND {$ownedTenant} = :tenant)";
+        $bindings = [':id' => $id, ':tenant' => $tenantId, ':gtenant' => $tenantId];
+
+        // The same filter the guard applies on its own type: a referencing row
+        // that is itself trashed does not pin its parent alive, and it must not
+        // pin a grandparent alive either.
+        $ignoreIndex = 0;
+        foreach ($guard->ignoreWhen() as $ignoreColumn => $values) {
+            $name = self::identifier($ignoreColumn);
+            $placeholders = [];
+            foreach ($values as $value) {
+                $placeholder = ':cig' . $ignoreIndex++;
+                $placeholders[] = $placeholder;
+                $bindings[$placeholder] = $value;
+            }
+            $sql .= " AND ({$name} IS NULL OR {$name} NOT IN (" . implode(', ', $placeholders) . '))';
+        }
+
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute($bindings);
+
+        return (int) $statement->fetchColumn();
     }
 
     /**
@@ -859,13 +1336,15 @@ class DataTypeLifecycleService implements DataTypeGuard
     }
 
     /**
-     * Run a pair of statements as one unit.
+     * Run a transition's statements as one unit.
      *
      * Every transition that touches the memory touches the record too, and the
      * two halves are only meaningful together: a trashed record with no memory
      * restores to the wrong state, and a memory for a record that never moved
      * misdirects its next restore. A hard delete has the sharper version — a
-     * surviving memory row is inherited by the next record on that id.
+     * surviving memory row is inherited by the next record on that id, and a
+     * cascade that removed a record's parts without removing the record leaves
+     * a row whose composition has been emptied out from under it.
      *
      * The pre-transition hook is dispatched INSIDE this unit too (see
      * {@see self::apply()}), so a veto raised after a listener has already
@@ -976,8 +1455,9 @@ class DataTypeLifecycleService implements DataTypeGuard
      * @param int|string       $id      The record's key.
      * @param string|null      $from    The state before.
      * @param string|null      $to      The state after (null when the row is gone).
-     * @param int|null         $actorId The acting profile.
-     * @param callable(): void $write   The statements this transition performs.
+     * @param int|null             $actorId  The acting profile.
+     * @param callable(): void     $write    The statements this transition performs.
+     * @param array<string, mixed> $metadata Extra audit detail this transition carries.
      * @return LifecycleResult|null Null when the transition went through; the
      *         refusal to return when a listener vetoed it.
      */
@@ -989,7 +1469,8 @@ class DataTypeLifecycleService implements DataTypeGuard
         ?string $from,
         ?string $to,
         ?int $actorId,
-        callable $write
+        callable $write,
+        array $metadata = []
     ): ?LifecycleResult {
         $payload = self::payload($definition, $action, $id, $tenantId, $from, $to, $actorId);
 
@@ -1005,7 +1486,7 @@ class DataTypeLifecycleService implements DataTypeGuard
             return LifecycleResult::vetoed($e->reason(), $from);
         }
 
-        $this->announce($definition, $action, $id, $tenantId, $from, $to, $actorId);
+        $this->announce($definition, $action, $id, $tenantId, $from, $to, $actorId, $metadata);
 
         return null;
     }
@@ -1056,10 +1537,21 @@ class DataTypeLifecycleService implements DataTypeGuard
      * so a vetoed transition produces no `changed` event and no audit entry,
      * because nothing changed and nothing was audited into existence.
      *
-     * @param int|string  $id      The record's key.
-     * @param string|null $from    The state before.
-     * @param string|null $to      The state after (null when the row is gone).
-     * @param int|null    $actorId The acting profile.
+     * The audit metadata carries anything the transition removed BESIDES the
+     * record — `cascaded`, for a delete that took a composition with it. After
+     * the write those rows cannot be counted from anywhere, so the audit entry
+     * is the only place the blast radius survives.
+     *
+     * The HOOK payload is deliberately not widened with it. It is the shape
+     * `changing` and `changed` share and that listeners are written against, and
+     * a listener already owns the tables in question — it can count them itself,
+     * with an answer that is current rather than sampled.
+     *
+     * @param int|string           $id       The record's key.
+     * @param string|null          $from     The state before.
+     * @param string|null          $to       The state after (null when the row is gone).
+     * @param int|null             $actorId  The acting profile.
+     * @param array<string, mixed> $metadata Extra audit detail.
      */
     private function announce(
         DataTypeDefinition $definition,
@@ -1068,7 +1560,8 @@ class DataTypeLifecycleService implements DataTypeGuard
         int $tenantId,
         ?string $from,
         ?string $to,
-        ?int $actorId
+        ?int $actorId,
+        array $metadata = []
     ): void {
         $this->hookManager?->dispatch(
             self::HOOK_CHANGED,
@@ -1080,7 +1573,7 @@ class DataTypeLifecycleService implements DataTypeGuard
             'actor_user_id' => $actorId,
             'target_type' => $definition->key(),
             'target_id' => is_numeric($id) ? (int) $id : null,
-            'metadata' => ['from' => $from, 'to' => $to, 'record_id' => (string) $id],
+            'metadata' => ['from' => $from, 'to' => $to, 'record_id' => (string) $id] + $metadata,
         ]);
     }
 

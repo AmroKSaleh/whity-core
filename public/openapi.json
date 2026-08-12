@@ -18934,6 +18934,12 @@
                             "$ref": "#/components/schemas/DataTypeReference"
                         }
                     },
+                    "cascade_delete": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DataTypeComposition"
+                        }
+                    },
                     "actions": {
                         "type": "array",
                         "items": {
@@ -18960,6 +18966,7 @@
                     "label",
                     "lifecycle",
                     "blocks_delete",
+                    "cascade_delete",
                     "actions"
                 ]
             },
@@ -18980,6 +18987,25 @@
                     "table",
                     "label",
                     "count"
+                ]
+            },
+            "DataTypeComposition": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string"
+                    },
+                    "column": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "table",
+                    "column",
+                    "label"
                 ]
             },
             "DataTypeLifecycle": {
@@ -19068,6 +19094,12 @@
                                     "$ref": "#/components/schemas/DataTypeBlocker"
                                 }
                             },
+                            "cascade": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/DataTypeBlocker"
+                                }
+                            },
                             "refusals": {
                                 "$ref": "#/components/schemas/DataTypeRefusals"
                             }
@@ -19080,6 +19112,7 @@
                             "restorable",
                             "deletable",
                             "blockers",
+                            "cascade",
                             "refusals"
                         ]
                     }
@@ -19124,6 +19157,9 @@
                         "type": "string",
                         "enum": [
                             "still_referenced",
+                            "composition_still_referenced",
+                            "composition_is_permanent",
+                            "cascade_would_nest",
                             "trash_before_deleting",
                             "retired_records_are_permanent",
                             "retired_records_cannot_be_trashed",
