@@ -442,6 +442,71 @@ final class SdkPackageContractTest extends TestCase
             class_exists(\Whity\Sdk\Testing\TenantIsolationConformanceTestCase::class),
             'The shared base conformance test case must live in the SDK'
         );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Testing\RealEnginePdo::class),
+            'The real-engine PDO harness must live in the SDK: a plugin can only '
+            . 'run its conformance/data-layer tests against the engine it actually '
+            . 'ships against if the harness ships with the contract it depends on'
+        );
+    }
+
+    /**
+     * The engine a plugin's real-engine tests run against must be an ENVIRONMENT
+     * decision, not a code one.
+     *
+     * A plugin that has to override `makePdo()` to reach Postgres will not do
+     * it, and its whole suite stays on SQLite — where an INTEGER-vs-VARCHAR
+     * comparison silently passes and then 500s in production. So the base case's
+     * default must itself honour PHPUNIT_PG_DSN: setting one variable moves the
+     * suite onto the real dialect with no subclass edit anywhere.
+     */
+    public function testConformanceCaseDefaultsToPostgresWhenADsnIsConfigured(): void
+    {
+        $source = (string) file_get_contents(
+            self::SDK_DIR . '/src/Testing/TenantIsolationConformanceTestCase.php'
+        );
+        $this->assertStringContainsString(
+            'RealEnginePdo::make()',
+            $source,
+            'makePdo() must delegate to the shared harness rather than hard-coding SQLite'
+        );
+
+        $harness = (string) file_get_contents(self::SDK_DIR . '/src/Testing/RealEnginePdo.php');
+        foreach (['PHPUNIT_PG_DSN', 'PHPUNIT_PG_USER', 'PHPUNIT_PG_PASSWORD'] as $var) {
+            $this->assertStringContainsString(
+                $var,
+                $harness,
+                "The harness must honour {$var} — the same variable name whity-core's "
+                . 'own real-engine suites use, so one environment drives both'
+            );
+        }
+
+        // Absent a DSN the harness must stay on SQLite: the fast local loop is
+        // what keeps the dual-engine habit affordable. Asserted with the variable
+        // explicitly cleared, because this very suite may itself be running under
+        // a DSN.
+        $saved = $_ENV['PHPUNIT_PG_DSN'] ?? null;
+        unset($_ENV['PHPUNIT_PG_DSN']);
+        $savedProcess = getenv('PHPUNIT_PG_DSN');
+        putenv('PHPUNIT_PG_DSN');
+
+        try {
+            $this->assertFalse(
+                \Whity\Sdk\Testing\RealEnginePdo::isPostgres(),
+                'With no PHPUNIT_PG_DSN set, the harness must fall back to SQLite'
+            );
+            $this->assertSame(
+                'sqlite',
+                \Whity\Sdk\Testing\RealEnginePdo::make()->getAttribute(\PDO::ATTR_DRIVER_NAME)
+            );
+        } finally {
+            if ($saved !== null) {
+                $_ENV['PHPUNIT_PG_DSN'] = $saved;
+            }
+            if (is_string($savedProcess)) {
+                putenv('PHPUNIT_PG_DSN=' . $savedProcess);
+            }
+        }
     }
 
     /**
