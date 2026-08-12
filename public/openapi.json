@@ -7505,11 +7505,19 @@
                                                     },
                                                     "name": {
                                                         "type": "string"
+                                                    },
+                                                    "direction": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "ltr",
+                                                            "rtl"
+                                                        ]
                                                     }
                                                 },
                                                 "required": [
                                                     "code",
-                                                    "name"
+                                                    "name",
+                                                    "direction"
                                                 ]
                                             }
                                         }
@@ -14673,11 +14681,19 @@
                                                     },
                                                     "name": {
                                                         "type": "string"
+                                                    },
+                                                    "direction": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "ltr",
+                                                            "rtl"
+                                                        ]
                                                     }
                                                 },
                                                 "required": [
                                                     "code",
-                                                    "name"
+                                                    "name",
+                                                    "direction"
                                                 ]
                                             }
                                         }
@@ -20579,6 +20595,13 @@
                     "name": {
                         "type": "string"
                     },
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "ltr",
+                            "rtl"
+                        ]
+                    },
                     "enabled": {
                         "type": "boolean"
                     },
@@ -20593,6 +20616,7 @@
                     "id",
                     "code",
                     "name",
+                    "direction",
                     "enabled",
                     "created_at",
                     "updated_at"
@@ -20606,6 +20630,13 @@
                     },
                     "name": {
                         "type": "string"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "ltr",
+                            "rtl"
+                        ]
                     },
                     "enabled": {
                         "type": "boolean"
@@ -20646,6 +20677,13 @@
                 "properties": {
                     "name": {
                         "type": "string"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "ltr",
+                            "rtl"
+                        ]
                     },
                     "enabled": {
                         "type": "boolean"

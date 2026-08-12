@@ -1451,10 +1451,14 @@ final class CoreApiSchemas
      */
     private static function languageRoutes(): array
     {
+        // The public language shape. `direction` travels WITH the language —
+        // the client sets <html dir> from it, so switching language flips the
+        // interface direction and there is no separate direction preference.
         $languageObject = self::object([
             'code' => self::str(),
             'name' => self::str(),
-        ], ['code', 'name']);
+            'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
+        ], ['code', 'name', 'direction']);
 
         return [
             [
@@ -2271,24 +2275,30 @@ final class CoreApiSchemas
 
             // ── i18n admin management (WC-583) ────────────────────────────────
             // A language row (admin shape — the public GET /api/languages list
-            // returns only {code, name}, declared inline in languageRoutes()).
+            // returns {code, name, direction}, declared inline in languageRoutes()).
+            // `direction` is the interface writing direction the client applies
+            // to <html dir>; it is a property of the LANGUAGE, so adding a
+            // right-to-left language is a POST here rather than a code change.
             'Language' => self::object([
                 'id' => self::int(),
                 'code' => self::str(),
                 'name' => self::str(),
+                'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
                 'enabled' => self::bool(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
-            ], ['id', 'code', 'name', 'enabled', 'created_at', 'updated_at']),
+            ], ['id', 'code', 'name', 'direction', 'enabled', 'created_at', 'updated_at']),
             'LanguageDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Language')),
             'LanguageListResponse' => self::listEnvelope('Language'),
             'LanguageCreateRequest' => self::object([
                 'code' => self::str(),
                 'name' => self::str(),
+                'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
                 'enabled' => self::bool(),
             ], ['code', 'name']),
             'LanguageUpdateRequest' => self::object([
                 'name' => self::str(),
+                'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
                 'enabled' => self::bool(),
             ], []),
             // A translation row. tenant_id is nullable: NULL = system default,

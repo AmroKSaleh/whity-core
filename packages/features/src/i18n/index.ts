@@ -5,12 +5,22 @@
  * - LanguageProvider: Context provider that wraps your app
  * - useTranslation: Hook to translate strings in a domain
  * - useCurrentLanguage: Hook to get/set the current language
+ * - useLanguageDirection: Hook for the resolved language's writing direction
  *
  * Architecture:
  * - LanguageProvider initializes on mount, fetches available languages and user preference
+ * - Language resolution: profile preference → locally remembered code → defaultLanguage
+ * - DIRECTION IS A PROPERTY OF THE LANGUAGE: each language record carries
+ *   'ltr'/'rtl' and the app sets <html dir> from it. There is no separate
+ *   direction toggle, and no code anywhere branches on a language code.
+ * - Domains load ON DEMAND: useTranslation(domain) registers the domain and the
+ *   provider fetches that bundle once per language. No central domain list.
+ * - Domain naming: core domains are bare ('auth', 'common'); a plugin's are
+ *   namespaced with its source slug ('acme:catalog') — see
+ *   src/Core/i18n/TranslationDomain.php for the rule.
  * - Translations are cached in localStorage per language/domain (24-hour TTL)
  * - API endpoints: GET /api/v1/languages, GET/PATCH /api/v1/settings/language, GET /api/v1/translations/{lang}/{domain}
- * - Fallback chain: translation → English → key
+ * - Fallback chain: translation → supplied fallback → key
  * - Bilingual support: multiple languages cached simultaneously in localStorage
  *
  * Usage:
@@ -26,10 +36,25 @@
  */
 
 export { LanguageProvider, type LanguageProviderProps } from './LanguageProvider'
-export { useTranslation } from './useTranslation'
+export { useTranslation, interpolate, type TranslateFn } from './useTranslation'
 export { useCurrentLanguage, type UseCurrentLanguageReturn } from './useCurrentLanguage'
+export { useLanguageDirection } from './useLanguageDirection'
 export { LanguageSwitcher, type LanguageSwitcherProps } from './LanguageSwitcher'
-export type { Language, LanguageSettings, LanguageContextValue, TranslationMap } from './types'
+export type {
+  Direction,
+  Language,
+  LanguageSettings,
+  LanguageContextValue,
+  TranslationMap,
+} from './types'
 
 // Re-export storage utilities for advanced use cases (testing, cache invalidation)
-export { getCachedTranslations, setCachedTranslations, clearLanguageCache, clearAllTranslationCaches } from './localStorage'
+export {
+  getCachedTranslations,
+  setCachedTranslations,
+  clearLanguageCache,
+  clearAllTranslationCaches,
+  getRememberedLanguage,
+  setRememberedLanguage,
+  LANGUAGE_PREFERENCE_KEY,
+} from './localStorage'

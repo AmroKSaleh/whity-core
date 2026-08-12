@@ -427,6 +427,143 @@ final class LanguagesApiHandlerTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
     }
 
+    // ============ direction as a property of the LANGUAGE (migration 090) ============
+
+    /**
+     * The seeded base languages carry their own direction, and the PUBLIC list
+     * serves it — this is what the client sets <html dir> from, so the switcher
+     * changing the language is also what changes the direction.
+     */
+    public function testPublicLanguageListCarriesEachLanguagesDirection(): void
+    {
+        $response = $this->handler->list(new Request('GET', '/api/languages'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $byCode = [];
+        foreach (json_decode($response->getBody(), true)['languages'] as $language) {
+            $byCode[$language['code']] = $language;
+        }
+
+        $this->assertSame('ltr', $byCode['en']['direction'], 'English is left-to-right.');
+        $this->assertSame('rtl', $byCode['ar']['direction'], 'Arabic is right-to-left.');
+    }
+
+    /**
+     * The per-user settings payload carries direction too, so a client that
+     * only calls the authenticated endpoint still resolves a direction.
+     */
+    public function testLanguageSettingsPayloadCarriesDirection(): void
+    {
+        $request = new Request('GET', '/api/settings/language');
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->getLanguage($request);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $directions = array_column(
+            json_decode($response->getBody(), true)['available_languages'],
+            'direction',
+            'code'
+        );
+        $this->assertSame('rtl', $directions['ar']);
+        $this->assertSame('ltr', $directions['en']);
+    }
+
+    /**
+     * THE POINT OF THE COLUMN: a THIRD right-to-left language is DATA. Creating
+     * Hebrew through the admin API with direction 'rtl' makes the interface
+     * mirror for it — no branch anywhere tests the code 'he', or 'ar' for that
+     * matter.
+     */
+    public function testANewRightToLeftLanguageNeedsNoCodeChange(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode([
+            'code' => 'he',
+            'name' => 'עברית',
+            'direction' => 'rtl',
+        ]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('rtl', json_decode($response->getBody(), true)['data']['direction']);
+
+        // And it reaches the public list the client actually reads.
+        $this->languageRegistry->invalidateCache();
+        $listed = array_column(
+            json_decode($this->handler->list(new Request('GET', '/api/languages'))->getBody(), true)['languages'],
+            'direction',
+            'code'
+        );
+        $this->assertSame('rtl', $listed['he']);
+    }
+
+    public function testCreateLanguageDefaultsToLeftToRightWhenDirectionOmitted(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode(['code' => 'fr', 'name' => 'Français']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(201, $response->getStatusCode());
+        $this->assertSame('ltr', json_decode($response->getBody(), true)['data']['direction']);
+    }
+
+    /**
+     * A typo'd direction is REFUSED rather than coerced: silently handing an
+     * admin a left-to-right interface for a right-to-left language is worse
+     * than a 422 they can act on.
+     */
+    public function testCreateLanguageRejectsAnUnsupportedDirection(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $request = new Request('POST', '/api/languages', [], (string) json_encode([
+            'code' => 'fa',
+            'name' => 'فارسی',
+            'direction' => 'rlt',
+        ]));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->create($request);
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertNull($this->languageRepository->findByCode('fa'), 'Nothing is written on a rejected direction.');
+    }
+
+    public function testUpdateLanguageChangesDirection(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $english = $this->languageRepository->findByCode('en');
+        self::assertNotNull($english);
+
+        $request = new Request('PATCH', '/api/languages/' . $english->id, [], (string) json_encode(['direction' => 'rtl']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->update($request, ['id' => (string) $english->id]);
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $this->assertSame('rtl', json_decode($response->getBody(), true)['data']['direction']);
+        $this->assertSame('rtl', $this->languageRepository->findByCode('en')?->direction);
+    }
+
+    public function testUpdateLanguageRejectsAnUnsupportedDirection(): void
+    {
+        $this->grantPermission($this->testProfileId, 0, CorePermissions::LANGUAGES_MANAGE);
+        $arabic = $this->languageRepository->findByCode('ar');
+        self::assertNotNull($arabic);
+
+        $request = new Request('PATCH', '/api/languages/' . $arabic->id, [], (string) json_encode(['direction' => 'sideways']));
+        $request->user = (object) ['profile_id' => $this->testProfileId];
+
+        $response = $this->handler->update($request, ['id' => (string) $arabic->id]);
+
+        $this->assertSame(422, $response->getStatusCode());
+        $this->assertSame('rtl', $this->languageRepository->findByCode('ar')?->direction, 'Unchanged.');
+    }
+
     // Helper methods
 
     /**

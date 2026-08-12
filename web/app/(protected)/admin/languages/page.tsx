@@ -78,9 +78,55 @@ export default function LanguagesPage() {
     }
   };
 
+  /**
+   * Direction is a property of the LANGUAGE, so it is edited here alongside the
+   * name — never as a per-user toggle. Changing it re-mirrors the interface for
+   * everyone who has selected that language; nothing infers it from the code.
+   */
+  const handleDirectionChange = async (language: Language, direction: 'ltr' | 'rtl') => {
+    setTogglingId(language.id);
+    try {
+      const { error } = await api.PATCH('/api/v1/languages/{id}', {
+        params: { path: { id: language.id } },
+        body: { direction },
+      });
+      if (error) {
+        throw new Error(errorMessage(error, 'Failed to update language'));
+      }
+      addToast(
+        `${language.name} now reads ${direction === 'rtl' ? 'right to left' : 'left to right'}.`,
+        'success'
+      );
+      fetchLanguages();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to update language', 'error');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   const columns: DataTableColumn<Language>[] = [
     { accessorKey: 'code', header: 'Code', enableSorting: true, enableColumnFilter: true },
     { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
+    {
+      id: 'direction',
+      header: 'Direction',
+      enableSorting: true,
+      cell: (language) => (
+        <select
+          value={language.direction}
+          disabled={togglingId === language.id}
+          onChange={(e) =>
+            void handleDirectionChange(language, e.target.value as 'ltr' | 'rtl')
+          }
+          aria-label={`Writing direction for ${language.name}`}
+          className="h-8 rounded-md border border-input bg-input/20 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        >
+          <option value="ltr">Left to right</option>
+          <option value="rtl">Right to left</option>
+        </select>
+      ),
+    },
     {
       id: 'enabled',
       header: 'Enabled',
@@ -134,7 +180,7 @@ export default function LanguagesPage() {
     <div className="space-y-8">
       <AdminHeader
         title="Languages"
-        description="Manage which languages are available across the platform."
+        description="Manage which languages are available across the platform. Each language carries its own writing direction — the interface mirrors automatically for right-to-left languages."
         action={
           <Button onClick={() => setIsCreateModalOpen(true)} className="gap-2">
             <IconPlus size={18} />

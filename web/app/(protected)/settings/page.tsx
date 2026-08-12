@@ -38,12 +38,16 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Language (WHIT-582) — independent of interface direction (RTL/LTR),
-          which lives in the sidebar; see lib/direction-context.tsx. */}
+      {/* Language. This also sets the interface DIRECTION: each language
+          carries its own 'ltr'/'rtl', so choosing Arabic mirrors the interface.
+          See lib/direction-context.tsx — there is no separate toggle. */}
       <Card>
         <CardHeader>
           <CardTitle>Language</CardTitle>
-          <CardDescription>Choose the language used across the interface</CardDescription>
+          <CardDescription>
+            Choose the language used across the interface. Right-to-left languages mirror the
+            layout automatically.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <LanguageSwitcher

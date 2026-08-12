@@ -14,7 +14,7 @@ import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
 import { ThemeModeProvider, ThemeModeInitScript } from "@/lib/theme-mode-context";
-import { LanguageProvider } from "@amroksaleh/features/i18n";
+import { AppLanguageProvider } from "@/lib/app-language-provider";
 
 // Design-token font families (see src/design/tokens/base.json): Noto Sans
 // (latin) + Noto Sans Arabic together drive --font-sans / --font-heading (see
@@ -94,9 +94,17 @@ export default async function RootLayout({
         {overrideCss !== "" && <style>{`:root{${overrideCss}}`}</style>}
         <BrandingProvider initial={branding}>
           <ThemeModeProvider>
-            <DirectionProvider>
-              <AuthProvider>
-                <LanguageProvider>
+            <AuthProvider>
+              {/*
+                The language provider is ABOVE DirectionProvider deliberately:
+                direction is derived from the resolved language's `direction`
+                property, so the language must resolve first. See
+                lib/direction-context.tsx. It sits INSIDE AuthProvider because
+                it re-resolves the preference when the signed-in identity
+                changes — see lib/app-language-provider.tsx.
+              */}
+              <AppLanguageProvider>
+                <DirectionProvider>
                   <CapabilitiesProvider>
                     <ToastProvider>
                       <NavigationProvider>
@@ -107,9 +115,9 @@ export default async function RootLayout({
                       </NavigationProvider>
                     </ToastProvider>
                   </CapabilitiesProvider>
-                </LanguageProvider>
-              </AuthProvider>
-            </DirectionProvider>
+                </DirectionProvider>
+              </AppLanguageProvider>
+            </AuthProvider>
           </ThemeModeProvider>
         </BrandingProvider>
       </body>

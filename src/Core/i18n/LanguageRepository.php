@@ -81,13 +81,18 @@ final class LanguageRepository implements LanguageRepositoryInterface
      * the source of truth; this is a defence against a lost race, not the
      * primary check.
      *
-     * @param string $code    The language code (e.g., 'en', 'ar'). Must be unique.
-     * @param string $name    The display name (e.g., 'English').
-     * @param bool   $enabled Whether the language is enabled. Defaults to true.
+     * @param string $code      The language code (e.g., 'en', 'ar'). Must be unique.
+     * @param string $name      The display name (e.g., 'English').
+     * @param bool   $enabled   Whether the language is enabled. Defaults to true.
+     * @param string $direction The writing direction ('ltr'|'rtl'). Defaults to 'ltr'.
      * @return Language|null The created Language, or null on a duplicate code.
      */
-    public function create(string $code, string $name, bool $enabled = true): ?Language
-    {
+    public function create(
+        string $code,
+        string $name,
+        bool $enabled = true,
+        string $direction = Language::DIRECTION_LTR
+    ): ?Language {
         // $enabled is a trusted derived boolean; inject as a SQL LITERAL (not a
         // bound param) so it types correctly on both Postgres and the SQLite
         // test engine — mirrors NotificationPreferenceRepository::set().
@@ -95,12 +100,13 @@ final class LanguageRepository implements LanguageRepositoryInterface
 
         try {
             $stmt = $this->pdo->prepare(
-                "INSERT INTO languages (code, name, enabled, created_at, updated_at)
-                 VALUES (:code, :name, {$enabledSql}, NOW(), NOW())"
+                "INSERT INTO languages (code, name, enabled, direction, created_at, updated_at)
+                 VALUES (:code, :name, {$enabledSql}, :direction, NOW(), NOW())"
             );
             $stmt->execute([
                 ':code' => $code,
                 ':name' => $name,
+                ':direction' => Language::normalizeDirection($direction),
             ]);
 
             return $this->findById((int) $this->pdo->lastInsertId());
@@ -113,15 +119,16 @@ final class LanguageRepository implements LanguageRepositoryInterface
     }
 
     /**
-     * Update a language's name and/or enabled status. Passing null for a
-     * parameter leaves that field unchanged.
+     * Update a language's name, enabled status and/or writing direction.
+     * Passing null for a parameter leaves that field unchanged.
      *
-     * @param int         $id      The language ID.
-     * @param string|null $name    The new display name, or null to leave unchanged.
-     * @param bool|null   $enabled The new enabled status, or null to leave unchanged.
+     * @param int         $id        The language ID.
+     * @param string|null $name      The new display name, or null to leave unchanged.
+     * @param bool|null   $enabled   The new enabled status, or null to leave unchanged.
+     * @param string|null $direction The new direction ('ltr'|'rtl'), or null to leave unchanged.
      * @return Language|null The updated Language, or null when no language matched.
      */
-    public function update(int $id, ?string $name, ?bool $enabled): ?Language
+    public function update(int $id, ?string $name, ?bool $enabled, ?string $direction = null): ?Language
     {
         $sets = [];
         $params = [':id' => $id];
@@ -133,6 +140,10 @@ final class LanguageRepository implements LanguageRepositoryInterface
         if ($enabled !== null) {
             // Trusted derived boolean injected as a SQL LITERAL — see create().
             $sets[] = 'enabled = ' . ($enabled ? 'TRUE' : 'FALSE');
+        }
+        if ($direction !== null) {
+            $sets[] = 'direction = :direction';
+            $params[':direction'] = Language::normalizeDirection($direction);
         }
 
         if ($sets === []) {

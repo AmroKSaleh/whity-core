@@ -19,6 +19,7 @@ import {
   FormItem,
   FormLabel,
   FormControl,
+  FormDescription,
   FormMessage,
 } from '@amroksaleh/ui/form';
 import { useForm } from 'react-hook-form';
@@ -32,6 +33,10 @@ const createLanguageSchema = z.object({
     .min(1, 'Code is required')
     .regex(/^[a-z]{2,10}(-[A-Za-z]{2,10})?$/, 'Use a language code like "en", "ar", or "en-US"'),
   name: z.string().min(1, 'Name is required'),
+  // Direction is a property of the LANGUAGE (languages.direction), which is
+  // exactly why it is asked for HERE: adding Hebrew, Farsi or Urdu is this
+  // form, not a release. Nothing in the codebase infers direction from a code.
+  direction: z.enum(['ltr', 'rtl']),
 });
 
 type CreateLanguageFormData = z.infer<typeof createLanguageSchema>;
@@ -48,14 +53,19 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
 
   const form = useForm<CreateLanguageFormData>({
     resolver: zodResolver(createLanguageSchema),
-    defaultValues: { code: '', name: '' },
+    defaultValues: { code: '', name: '', direction: 'ltr' },
   });
 
   const onSubmit = async (values: CreateLanguageFormData) => {
     setIsSubmitting(true);
     try {
       const { error } = await api.POST('/api/v1/languages', {
-        body: { code: values.code, name: values.name, enabled: true },
+        body: {
+          code: values.code,
+          name: values.name,
+          direction: values.direction,
+          enabled: true,
+        },
       });
       if (error) {
         throw new Error(errorMessage(error, 'Failed to create language'));
@@ -113,6 +123,30 @@ export function CreateLanguageModal({ isOpen, onOpenChange, onSuccess }: CreateL
                   <FormControl>
                     <Input placeholder="e.g., Français" {...field} />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="direction"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Writing Direction</FormLabel>
+                  <FormControl>
+                    <select
+                      {...field}
+                      className="h-9 w-full rounded-md border border-input bg-input/20 px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                    >
+                      <option value="ltr">Left to right</option>
+                      <option value="rtl">Right to left</option>
+                    </select>
+                  </FormControl>
+                  <FormDescription>
+                    The interface mirrors automatically for anyone who selects this language —
+                    there is no separate setting.
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

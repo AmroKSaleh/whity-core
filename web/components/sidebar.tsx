@@ -6,7 +6,6 @@ import { useAuth } from '@/lib/auth-context';
 import type { Membership } from '@/lib/auth-context';
 import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
-import { useDirection } from '@/lib/direction-context';
 import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
@@ -22,7 +21,6 @@ import {
   IconDashboard,
   IconUserCog,
   IconBuilding,
-  IconLanguage,
   IconWorld,
   IconSun,
   IconMoon,
@@ -126,7 +124,6 @@ export function Sidebar() {
   const { logout, user, memberships } = useAuth();
   const { items: navItemsFlat, getGroupedItems } = useNavigation();
   const branding = useBranding();
-  const { dir, toggle: toggleDirection } = useDirection();
   const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeMode();
   const groupedItems = getGroupedItems();
 
@@ -347,10 +344,14 @@ export function Sidebar() {
             collapsed={isCollapsed && !isMobile}
           />
           {/*
-            Interface language (WHIT-582) — deliberately independent of the
-            direction toggle below: switching language does NOT flip `dir`
-            (see lib/direction-context.tsx), so a right-to-left reader can
-            still run the UI in English LTR and vice versa.
+            Interface language. This is ALSO the direction control: each
+            language carries its own writing direction, so choosing Arabic
+            mirrors the interface and choosing English un-mirrors it (see
+            lib/direction-context.tsx). There is deliberately no separate
+            direction toggle — a language and a direction that disagree is not
+            a state a user can usefully be in, and the pair used to drift
+            apart. The choice is stored on the profile, so it follows the user
+            across devices.
           */}
           {(!isCollapsed || isMobile) && (
             <div
@@ -364,19 +365,6 @@ export function Sidebar() {
               />
             </div>
           )}
-          {/* Interface direction (LTR / RTL) — Arabic support (WC-rtl). */}
-          <Button
-            onClick={toggleDirection}
-            variant="outline"
-            size={isCollapsed && !isMobile ? 'icon' : 'default'}
-            className={`w-full ${isCollapsed && !isMobile ? 'justify-center' : 'justify-start'}`}
-            title={dir === 'rtl' ? 'Switch to left-to-right' : 'التبديل إلى العربية (RTL)'}
-            aria-label="Toggle interface direction"
-            data-testid="direction-toggle"
-          >
-            <IconLanguage size={20} className={isCollapsed && !isMobile ? '' : 'me-3 shrink-0'} />
-            {(!isCollapsed || isMobile) && (dir === 'rtl' ? 'English (LTR)' : 'العربية (RTL)')}
-          </Button>
           {/* Light / dark color scheme (see lib/theme-mode-context.tsx). */}
           <Button
             onClick={toggleTheme}
