@@ -167,9 +167,18 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.22.0',
+            '1.23.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.22 makes the ROLE side of PermissionResolver resource-scoped: '
+            'SDK 1.23 adds the portable schema predicates (Schema\SchemaInspector '
+            . 'and the Schema\MigrationSchema trait). The SDK asks every migration '
+            . 'to be idempotent and the host runs them on PostgreSQL and SQLite, '
+            . 'but ALTER TABLE … ADD COLUMN IF NOT EXISTS is a PostgreSQL extension '
+            . 'SQLite rejects — so every plugin author ends up hand-writing the same '
+            . 'driver branch over information_schema and PRAGMA table_info, and a '
+            . 'wrong answer there gates DDL: it passes on the engine the author '
+            . 'develops against and fails on the other one, at enable time, on '
+            . 'somebody else\'s deployment; '
+            . 'SDK 1.22 makes the ROLE side of PermissionResolver resource-scoped: '
             . 'hasRole() takes the same optional $resourceType/$resourceId pair '
             . '1.17 gave hasPermission(). Host role resolution has honoured a '
             . 'resource scope since 1.17 (getEffectiveRolesForProfile accepts '
@@ -432,6 +441,46 @@ final class SdkPackageContractTest extends TestCase
         $this->assertTrue(
             class_exists(\Whity\Sdk\Testing\TenantIsolationConformanceTestCase::class),
             'The shared base conformance test case must live in the SDK'
+        );
+    }
+
+    /**
+     * SDK 1.23: the portable schema predicates. These have to live in the SDK
+     * rather than in core, because the code that needs them — a plugin's
+     * migration — depends on the SDK and nothing else.
+     */
+    public function testSchemaPredicatesLiveInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Schema\SchemaInspector::class),
+            'The portable schema inspector must live in the SDK'
+        );
+        $this->assertTrue(
+            trait_exists(\Whity\Sdk\Schema\MigrationSchema::class),
+            'The migration schema trait must live in the SDK'
+        );
+
+        // A trait rather than a base class: MigrationInterface is an interface
+        // precisely so a plugin keeps its one inheritance slot.
+        $this->assertTrue(
+            (new \ReflectionClass(\Whity\Sdk\Schema\MigrationSchema::class))->isTrait()
+        );
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Schema\MigrationSchema::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(
+            [
+                'addColumnIfMissing',
+                'columnExists',
+                'dropColumnIfExists',
+                'indexExists',
+                'tableColumns',
+                'tableExists',
+            ],
+            $methods
         );
     }
 

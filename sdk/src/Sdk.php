@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.22).
+ * SDK identity (v1.23).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -116,13 +116,32 @@ namespace Whity\Sdk;
  * tenant-wide question regardless — so a role granted at ONE record through
  * `resource_role_assignments` was resolvable and not askable, and reads as
  * needing a schema change to `memberships` that it does not need. Additive:
- * omitting them preserves 1.21 behaviour exactly, WC-712 §2).
+ * omitting them preserves 1.21 behaviour exactly, WC-712 §2) ->
+ * 1.23 (PORTABLE SCHEMA PREDICATES: {@see \Whity\Sdk\Schema\SchemaInspector}
+ * and the {@see \Whity\Sdk\Schema\MigrationSchema} trait that puts it on
+ * `$this` inside a migration. The SDK asks every migration to be idempotent and
+ * the host runs them on PostgreSQL and SQLite, but `ALTER TABLE … ADD COLUMN IF
+ * NOT EXISTS` is a PostgreSQL extension SQLite rejects — so the moment a plugin
+ * adds a column to a table it already shipped, the author has to hand-write a
+ * driver-branching `tableExists()`/`columnExists()` over `information_schema`
+ * and `PRAGMA table_info`. That pair has been written four times in one session
+ * in a single adopter's codebase, identically each time, and a wrong answer
+ * gates DDL: it passes on the engine the author develops against and fails on
+ * the other one, at enable time, on somebody else's deployment. Written once
+ * here, proven on both engines, and correct in two places the hand-written copy
+ * is not — lookups are confined to the connection's own search path rather than
+ * matching a same-named table in any schema, and read from `pg_catalog` rather
+ * than the privilege-filtered `information_schema`.
+ * `addColumnIfMissing()`/`dropColumnIfExists()` go one step further and remove
+ * the branch entirely: the migration states the shape it wants instead of
+ * asking a question and acting on the answer. Additive; no SQL is hidden behind
+ * a builder, so the tenant-isolation guards still read every statement).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.22.0';
+    public const VERSION = '1.23.0';
 
     /**
      * Static identity only — never instantiated.

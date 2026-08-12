@@ -509,6 +509,68 @@ final class CreateHelloGreetingsTable implements MigrationInterface
 Keep statements idempotent (`IF NOT EXISTS` / `IF EXISTS`) so the migration is
 safe to re-run, and always scope tenant data with a `tenant_id` column.
 
+### Adding a column later — don't hand-write the driver branch
+
+`CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS` parse on both
+PostgreSQL and SQLite. `ALTER TABLE … ADD COLUMN IF NOT EXISTS` does **not** —
+it is a PostgreSQL extension SQLite rejects. So the first time you add a column
+to a table you already shipped, the idempotency rule above stops being free and
+you need an existence check, which is dialect-specific.
+
+Do not write that check. Use the SDK's
+[`Whity\Sdk\Schema\MigrationSchema`](../../sdk/src/Schema/MigrationSchema.php)
+trait (SDK 1.23):
+
+```php
+use Whity\Sdk\MigrationInterface;
+use Whity\Sdk\Schema\MigrationSchema;
+
+final class AddArchivedAtToAcmeItems implements MigrationInterface
+{
+    use MigrationSchema;
+
+    public function up(\PDO $pdo): void
+    {
+        $this->addColumnIfMissing($pdo, 'acme_items', 'archived_at', 'TIMESTAMP NULL');
+    }
+
+    public function down(\PDO $pdo): void
+    {
+        $this->dropColumnIfExists($pdo, 'acme_items', 'archived_at');
+    }
+}
+```
+
+`addColumnIfMissing()` / `dropColumnIfExists()` state the shape you want and
+leave no branch at the call site. The predicates behind them are available too,
+with the same signatures the hand-written versions usually have, so adopting the
+trait is deleting a private method and adding a `use` line:
+
+| Method | Answers |
+| --- | --- |
+| `tableExists($pdo, $table)` | Is there a base table of this name? (Views are not tables.) |
+| `columnExists($pdo, $table, $column)` | Does the table have this column? (`false` if the table is absent.) |
+| `indexExists($pdo, $index)` | Is there an index of this name? |
+| `tableColumns($pdo, $table)` | The table's columns, lowercased, in declaration order. |
+| `addColumnIfMissing($pdo, $table, $column, $definition)` | Adds it if absent; returns whether it added. |
+| `dropColumnIfExists($pdo, $table, $column)` | Drops it if present; returns whether it dropped. |
+
+Not writing this yourself buys more than the keystrokes. The usual hand-written
+PostgreSQL query filters on `table_name` alone, with no schema predicate, so it
+answers for a same-named table in **any** schema; and `information_schema` is
+privilege-filtered, so a table your role cannot see reads as absent and the
+migration tries to create it again. The SDK version reads `pg_catalog` and
+confines every lookup to the connection's own search path. Both engines answer
+case-insensitively, so your constants' casing cannot change the answer per
+engine.
+
+If you are not inside a migration instance — a repair command, a test — call
+[`Whity\Sdk\Schema\SchemaInspector`](../../sdk/src/Schema/SchemaInspector.php)
+statically; the trait is a thin forward to it. Identifiers are validated
+(`[A-Za-z_][A-Za-z0-9_]*`, ≤ 63 chars) because they cannot be bound as
+parameters; `$definition` is raw DDL you author and is never a place for a
+runtime value. An unsupported driver is refused loudly rather than guessed at.
+
 ---
 
 ## Step 6 — Test the plugin
