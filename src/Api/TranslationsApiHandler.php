@@ -12,6 +12,7 @@ use Whity\Core\Response;
 use Whity\Core\i18n\LanguageRegistry;
 use Whity\Core\i18n\LanguageRepository;
 use Whity\Core\i18n\Translation;
+use Whity\Core\i18n\TranslationDomain;
 use Whity\Core\i18n\TranslationRepository;
 use Whity\Core\Tenant\TenantContextInterface;
 use Whity\Http\InputLimits;
@@ -34,6 +35,12 @@ use Whity\Http\JsonBody;
  *
  * This endpoint allows clients to fetch translated strings for any language and domain.
  * Translations are cached client-side in localStorage for performance.
+ *
+ * DOMAIN NAMING is decided in exactly one place, {@see TranslationDomain}: core
+ * domains are bare (`auth`, `common`), a plugin's are prefixed with its source
+ * slug (`acme:catalog`), matching the resource-type registry's `acme:record`.
+ * Every path here validates through that helper, so a domain that can be
+ * written can always be read back.
  *
  * Fallback behavior (read path):
  *  1. Tenant-specific override (if a custom translation is set for this tenant)
@@ -106,8 +113,9 @@ final class TranslationsApiHandler
             return Response::error('Missing or invalid domain parameter', 400);
         }
 
-        // Validate domain (basic sanitation — must be alphanumeric with underscores/hyphens)
-        if (!preg_match('/^[a-z0-9_-]+$/i', $domain)) {
+        // Validate the domain against the ONE naming rule — a bare core slug
+        // ('auth') or a plugin-namespaced one ('acme:catalog').
+        if (!TranslationDomain::isValid($domain)) {
             return Response::error('Invalid domain format', 400);
         }
 
@@ -183,7 +191,7 @@ final class TranslationsApiHandler
         if ($languageCode === '' || $domain === '') {
             return Response::error('language_code and domain query parameters are required', 400);
         }
-        if (!preg_match('/^[a-z0-9_-]+$/i', $domain)) {
+        if (!TranslationDomain::isValid($domain)) {
             return Response::error('Invalid domain format', 400);
         }
 
@@ -251,8 +259,12 @@ final class TranslationsApiHandler
         if ($languageCode === '') {
             return Response::error('language_code is required', 422);
         }
-        if ($domain === '' || !preg_match('/^[a-z0-9_-]+$/i', $domain)) {
-            return Response::error('domain is required and must be alphanumeric with underscores/hyphens', 422);
+        if (!TranslationDomain::isValid($domain)) {
+            return Response::error(
+                'domain is required and must be a bare slug (core, e.g. "auth") or a '
+                . 'plugin-namespaced one (e.g. "acme:catalog")',
+                422
+            );
         }
         if ($key === '') {
             return Response::error('key is required', 422);

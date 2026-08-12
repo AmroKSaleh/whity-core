@@ -39,23 +39,30 @@ interface LanguageRepositoryInterface
     /**
      * Create a new language.
      *
-     * @param string $code    The language code (e.g., 'en', 'ar'). Must be unique.
-     * @param string $name    The display name (e.g., 'English').
-     * @param bool   $enabled Whether the language is enabled. Defaults to true.
+     * @param string $code      The language code (e.g., 'en', 'ar'). Must be unique.
+     * @param string $name      The display name (e.g., 'English').
+     * @param bool   $enabled   Whether the language is enabled. Defaults to true.
+     * @param string $direction The writing direction ('ltr'|'rtl'). Defaults to 'ltr'.
      * @return Language|null The created Language, or null when a language with
      *                       this code already exists (caller returns 409).
      */
-    public function create(string $code, string $name, bool $enabled = true): ?Language;
+    public function create(
+        string $code,
+        string $name,
+        bool $enabled = true,
+        string $direction = Language::DIRECTION_LTR
+    ): ?Language;
 
     /**
-     * Update a language's name and/or enabled status.
+     * Update a language's name, enabled status and/or writing direction.
      *
      * Passing null for a parameter leaves that field unchanged.
      *
-     * @param int         $id      The language ID.
-     * @param string|null $name    The new display name, or null to leave unchanged.
-     * @param bool|null   $enabled The new enabled status, or null to leave unchanged.
+     * @param int         $id        The language ID.
+     * @param string|null $name      The new display name, or null to leave unchanged.
+     * @param bool|null   $enabled   The new enabled status, or null to leave unchanged.
+     * @param string|null $direction The new direction ('ltr'|'rtl'), or null to leave unchanged.
      * @return Language|null The updated Language, or null when no language matched.
      */
-    public function update(int $id, ?string $name, ?bool $enabled): ?Language;
+    public function update(int $id, ?string $name, ?bool $enabled, ?string $direction = null): ?Language;
 }

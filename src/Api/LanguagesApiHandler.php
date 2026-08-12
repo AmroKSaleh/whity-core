@@ -36,6 +36,12 @@ use Whity\Http\JsonBody;
  *  - NULL = use tenant default language
  *  - explicit code (e.g., 'ar') = user has opted for a specific language
  *
+ * DIRECTION travels WITH the language. Every language payload carries the
+ * record's `direction` ('ltr'|'rtl', migration 090) and the client sets `dir`
+ * on <html> from it — there is no separate direction preference and no code
+ * anywhere that tests a language code to guess one. Adding a right-to-left
+ * language is therefore a POST to this handler, not a release.
+ *
  * Tenant scoping: languages are global (not tenant-specific) — there is no
  * `tenant_id` column on the `languages` table at all, so create/update is a
  * PLATFORM capability restricted to the SYSTEM tenant (id 0), mirroring
@@ -70,7 +76,8 @@ final class LanguagesApiHandler
      *
      * No authentication required. Returns all enabled languages in the system.
      *
-     * Response: { languages: [ { code: 'en', name: 'English' }, { code: 'ar', name: 'العربية' } ] }
+     * Response: { languages: [ { code: 'en', name: 'English', direction: 'ltr' },
+     *                          { code: 'ar', name: 'العربية', direction: 'rtl' } ] }
      */
     public function list(Request $request): Response
     {
@@ -83,6 +90,7 @@ final class LanguagesApiHandler
                 static fn ($lang): array => [
                     'code' => $lang->code,
                     'name' => $lang->name,
+                    'direction' => $lang->direction,
                 ],
                 $languages
             );
@@ -133,7 +141,7 @@ final class LanguagesApiHandler
      * Returns the current user's language preference and the list of available languages.
      * If the user has no explicit language_code set (NULL), returns null for language_code.
      *
-     * Response: { language_code: 'ar'|null, available_languages: [...] }
+     * Response: { language_code: 'ar'|null, available_languages: [ { code, name, direction }, ... ] }
      */
     public function getLanguage(Request $request): Response
     {
@@ -160,6 +168,7 @@ final class LanguagesApiHandler
                 static fn ($lang): array => [
                     'code' => $lang->code,
                     'name' => $lang->name,
+                    'direction' => $lang->direction,
                 ],
                 $languages
             );
@@ -262,8 +271,20 @@ final class LanguagesApiHandler
             return $tooLong;
         }
 
+        // A new right-to-left language (Hebrew, Farsi, Urdu…) is DATA: declare
+        // its direction here and the interface follows, with no code change.
+        $direction = self::readDirection($body);
+        if ($direction instanceof Response) {
+            return $direction;
+        }
+
         try {
-            $language = $this->languageRepository->create($code, $name, $enabled);
+            $language = $this->languageRepository->create(
+                $code,
+                $name,
+                $enabled,
+                $direction ?? Language::DIRECTION_LTR
+            );
             if ($language === null) {
                 return Response::error('A language with this code already exists', 409);
             }
@@ -299,8 +320,12 @@ final class LanguagesApiHandler
         $id = (int) ($params['id'] ?? 0);
         $body = JsonBody::parsed($request);
 
-        if (!array_key_exists('name', $body) && !array_key_exists('enabled', $body)) {
-            return Response::error('No updatable fields supplied (name, enabled)', 422);
+        if (
+            !array_key_exists('name', $body)
+            && !array_key_exists('enabled', $body)
+            && !array_key_exists('direction', $body)
+        ) {
+            return Response::error('No updatable fields supplied (name, enabled, direction)', 422);
         }
 
         $name = null;
@@ -322,8 +347,13 @@ final class LanguagesApiHandler
             $enabled = $body['enabled'];
         }
 
+        $direction = self::readDirection($body);
+        if ($direction instanceof Response) {
+            return $direction;
+        }
+
         try {
-            $language = $this->languageRepository->update($id, $name, $enabled);
+            $language = $this->languageRepository->update($id, $name, $enabled, $direction);
             if ($language === null) {
                 return Response::error('Language not found', 404);
             }
@@ -372,7 +402,7 @@ final class LanguagesApiHandler
     }
 
     /**
-     * @return array{id: int, code: string, name: string, enabled: bool, created_at: string, updated_at: string}
+     * @return array{id: int, code: string, name: string, direction: string, enabled: bool, created_at: string, updated_at: string}
      */
     private static function languagePayload(Language $language): array
     {
@@ -380,10 +410,40 @@ final class LanguagesApiHandler
             'id' => $language->id,
             'code' => $language->code,
             'name' => $language->name,
+            'direction' => $language->direction,
             'enabled' => $language->enabled,
             'created_at' => $language->createdAt,
             'updated_at' => $language->updatedAt,
         ];
+    }
+
+    /**
+     * Read and validate a `direction` field from a request body.
+     *
+     * Returns the direction string, null when the field is absent (leave
+     * unchanged / take the default), or a 422 Response when present but not one
+     * of {@see Language::DIRECTIONS}. Rejecting rather than coercing matters:
+     * an admin who typos 'rlt' when adding Hebrew must be told, not silently
+     * given a left-to-right interface.
+     *
+     * @param array<string, mixed> $body
+     */
+    private static function readDirection(array $body): string|Response|null
+    {
+        if (!array_key_exists('direction', $body)) {
+            return null;
+        }
+
+        $direction = $body['direction'];
+        if (!is_string($direction) || !in_array($direction, Language::DIRECTIONS, true)) {
+            return Response::error(
+                'direction must be one of: ' . implode(', ', Language::DIRECTIONS),
+                422,
+                ['direction' => $direction]
+            );
+        }
+
+        return $direction;
     }
 
     /**

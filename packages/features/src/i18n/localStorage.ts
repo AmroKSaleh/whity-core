@@ -10,6 +10,18 @@
 export const CACHE_NAMESPACE = 'i18n_translations'
 export const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
 
+/**
+ * Where the last resolved language code is remembered for SIGNED-OUT visitors.
+ *
+ * The durable preference lives on the profile (`profiles.language_code`, via
+ * PATCH /api/v1/settings/language) and always wins once a session exists — this
+ * key is only how the public screens (sign-in, registration, password reset)
+ * stay in the language the visitor last chose, since there is no profile to
+ * read there. Signing in overwrites it with whatever the profile says, so the
+ * two can never disagree for long.
+ */
+export const LANGUAGE_PREFERENCE_KEY = 'i18n_language'
+
 interface CacheEntry {
   version: 1
   timestamp: number
@@ -147,6 +159,39 @@ export function clearLanguageCache(languageCode: string): void {
   } catch (e) {
     // Silently fail
     console.warn('Failed to clear language cache:', e)
+  }
+}
+
+/**
+ * Read the language code remembered for a signed-out visitor.
+ *
+ * Returns null when nothing is stored or storage is unavailable. The caller
+ * still validates the code against the live language list — a code that has
+ * since been removed or disabled must not resurrect itself from storage.
+ */
+export function getRememberedLanguage(): string | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return null
+    }
+    return window.localStorage.getItem(LANGUAGE_PREFERENCE_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Remember a language code locally so the public screens keep it across
+ * reloads. Best effort — a storage failure never blocks a language change.
+ */
+export function setRememberedLanguage(languageCode: string): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return
+    }
+    window.localStorage.setItem(LANGUAGE_PREFERENCE_KEY, languageCode)
+  } catch {
+    // Private mode / quota — the language still applies for this session.
   }
 }
 

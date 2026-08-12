@@ -3040,6 +3040,8 @@ export interface components {
             id: number;
             code: string;
             name: string;
+            /** @enum {string} */
+            direction: "ltr" | "rtl";
             enabled: boolean;
             created_at: string;
             updated_at: string;
@@ -3047,6 +3049,8 @@ export interface components {
         LanguageCreateRequest: {
             code: string;
             name: string;
+            /** @enum {string} */
+            direction?: "ltr" | "rtl";
             enabled?: boolean;
         };
         LanguageDataResponse: {
@@ -3057,6 +3061,8 @@ export interface components {
         };
         LanguageUpdateRequest: {
             name?: string;
+            /** @enum {string} */
+            direction?: "ltr" | "rtl";
             enabled?: boolean;
         };
         Login2faRequiredResponse: {
@@ -10216,6 +10222,8 @@ export interface operations {
                         languages: {
                             code: string;
                             name: string;
+                            /** @enum {string} */
+                            direction: "ltr" | "rtl";
                         }[];
                     };
                 };
@@ -16096,6 +16104,8 @@ export interface operations {
                         available_languages: {
                             code: string;
                             name: string;
+                            /** @enum {string} */
+                            direction: "ltr" | "rtl";
                         }[];
                     };
                 };
