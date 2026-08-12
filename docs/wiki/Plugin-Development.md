@@ -573,6 +573,93 @@ runtime value. An unsupported driver is refused loudly rather than guessed at.
 
 ---
 
+## Step 5b — Writes: upserts and numbering
+
+### Upserts — let the tenant key be added for you
+
+`INSERT … ON CONFLICT … DO UPDATE … RETURNING` is the statement plugins write
+most, and the one with the most expensive way to get it slightly wrong. Writing
+`ON CONFLICT (client_uuid)` where you meant `ON CONFLICT (tenant_id,
+client_uuid)` stops the upsert being a per-tenant operation: another tenant's
+insert finds **your** row, takes the `DO UPDATE` branch, and overwrites it. The
+unique index will not object if it does not lead with `tenant_id`, and the
+tenant-predicate scanner will not either — the statement *does* mention
+`tenant_id`, in the value list.
+
+[`Whity\Sdk\Sql\Upsert`](../../sdk/src/Sql/Upsert.php) (SDK 1.24) takes the
+tenant id as its own required argument, writes it into the inserted columns
+**and** prepends it to the conflict target, so the unscoped form cannot be
+expressed:
+
+```php
+use Whity\Sdk\Sql\Upsert;
+
+$row = Upsert::tenantScoped(
+    $pdo,
+    'acme_items',
+    $tenantId,
+    ['client_uuid' => $uuid, 'name' => $name, 'status' => 'active'],
+    ['client_uuid'],       // tenant_id is prepended for you
+    ['name', 'status'],    // what a conflict overwrites; null = everything above
+    ['id', 'version']      // RETURNING; ['*'] by default, [] to omit
+);
+```
+
+- An **empty** update list means `DO NOTHING`. When the conflict then fires,
+  both engines return **no row**, so `null` means "already there" — not
+  "failed". Read that twice; it is the trap.
+- For a table with no tenant column (a declared-global counter or catalogue),
+  use `Upsert::unscoped()`. The name is the declaration, and unlike an omission
+  a reviewer can grep for it.
+- Nothing is hidden: `Upsert::buildSql()` returns the exact statement, so you can
+  log it, assert on it, or paste it into `psql`.
+- Your unique index must actually lead with the tenant column, or the engine
+  will refuse the conflict target. That is the schema telling you the truth.
+
+### Numbering — don't build a counter, ask for a number
+
+Do **not** write this:
+
+```php
+$current = /* SELECT value FROM my_counters WHERE name = 'invoice' */;
+/* UPDATE my_counters SET value = :next … */
+return $current + 1;
+```
+
+Two clients read `3`. Two clients write `4`. Two documents whose entire purpose
+is to be uniquely numbered come out numbered the same, and nothing errors.
+
+The host allocates numbers for you, so there is no table to migrate and no SQL
+to get wrong. Resolve
+[`Whity\Sdk\Sql\SequenceAllocator`](../../sdk/src/Sql/SequenceAllocator.php)
+from the container:
+
+```php
+$sequences = \Whity\app(\Whity\Sdk\Sql\SequenceAllocator::class);
+
+$number = $sequences->next($tenantId, 'invoice');          // 1, then 2, then 3 …
+$block  = $sequences->nextBlock($tenantId, 'import', 50);  // ['first' => 4, 'last' => 53]
+$now    = $sequences->peek($tenantId, 'invoice');          // read without allocating
+$cursor = $sequences->nextPlatformWide('acme:change_seq'); // one series for the whole instance
+```
+
+Counters are keyed per tenant **and** per name, and are created on first use.
+Name them with your plugin's prefix (`acme:invoice`) if a collision with another
+plugin's `invoice` would matter to you.
+
+**Guaranteed:** no two successful calls for the same `(tenant, name)` ever
+return the same number, under any concurrency, on PostgreSQL and on SQLite.
+
+**Not guaranteed:** gaplessness. Allocation joins your transaction, so a
+rollback releases the number — and a concurrent caller that already took the
+next one leaves a hole. Unique, monotonic, may skip. If you need a legally
+gapless series, that is a domain problem solved with a compensating record, not
+an allocation problem.
+
+`peek() + 1` is not a way to get the next number. That is the bug again.
+
+---
+
 ## Step 6 — Test the plugin
 
 Plugin tests live under `tests/` and run in the standard PHPUnit suite. Because

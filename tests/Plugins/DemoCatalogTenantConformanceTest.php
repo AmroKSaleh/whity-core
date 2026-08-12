@@ -6,6 +6,7 @@ namespace Tests\Plugins;
 
 use DemoCatalog\Migrations\AddSyncColumnsToDemoCatalogItems;
 use DemoCatalog\Migrations\CreateDemoCatalogItemsTable;
+use DemoCatalog\Migrations\RetireDemoCatalogChangeSeqTable;
 use Whity\Core\Tenant\CoreTenantTableRegistry;
 use Whity\Sdk\MigrationInterface;
 use Whity\Sdk\Tenant\TenantTableRegistry;
@@ -13,6 +14,7 @@ use Whity\Sdk\Testing\TenantIsolationConformanceTestCase;
 
 require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Migrations/CreateDemoCatalogItemsTable.php';
 require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Migrations/AddSyncColumnsToDemoCatalogItems.php';
+require_once dirname(__DIR__, 2) . '/plugins/DemoCatalog/Migrations/RetireDemoCatalogChangeSeqTable.php';
 
 /**
  * Conformance fixture (mirrors HelloWorldTenantConformanceTest, WC-194): proves
@@ -44,7 +46,12 @@ final class DemoCatalogTenantConformanceTest extends TenantIsolationConformanceT
             'demo_catalog_items' => 'DemoCatalog items; carries tenant_id (CreateDemoCatalogItemsTable).',
         ])->withGlobal(
             'demo_catalog_change_seq',
-            'Global monotonic change-sequence counter for the sync changes-feed cursor; holds no tenant data (AddSyncColumnsToDemoCatalogItems).'
+            'RETIRED: the plugin-owned monotonic change-sequence counter. The changes-feed '
+            . 'cursor now comes from the host allocator and the table is dropped by '
+            . 'RetireDemoCatalogChangeSeqTable — but AddSyncColumnsToDemoCatalogItems (and '
+            . 'the retirement rollback) still contain a CREATE TABLE for it, which the '
+            . 'migration linter reads, so the exemption stays declared for as long as that '
+            . 'historical statement does. It held no tenant data.'
         )->merge(CoreTenantTableRegistry::build());
     }
 
@@ -66,7 +73,11 @@ final class DemoCatalogTenantConformanceTest extends TenantIsolationConformanceT
      */
     protected function schemaMigrations(): array
     {
-        return [new CreateDemoCatalogItemsTable(), new AddSyncColumnsToDemoCatalogItems()];
+        return [
+            new CreateDemoCatalogItemsTable(),
+            new AddSyncColumnsToDemoCatalogItems(),
+            new RetireDemoCatalogChangeSeqTable(),
+        ];
     }
 
     /**

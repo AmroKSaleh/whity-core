@@ -24,14 +24,18 @@ use Whity\Sdk\Schema\MigrationSchema;
  *                    stamped on every write — the incremental-pull cursor. A
  *                    clock-skew-immune integer, unlike `updated_at`.
  *
- * The sequence source is a one-row global counter table `demo_catalog_change_seq`
- * (holds no tenant data — declared global in the conformance registry). Every
- * write bumps it and stamps the row, so a per-tenant `change_seq > :cursor` feed
- * is a correct incremental pull. Known limitation (documented): under concurrent
- * long transactions a higher seq can commit before a lower one, so a reader could
- * skip the late-committing lower seq; mitigated by stamping seq inside the short
- * write transaction. A fully rigorous log would use commit-ordered capture — out
- * of scope for this pilot.
+ * The sequence source is now the HOST's allocator
+ * ({@see \Whity\Sdk\Sql\SequenceAllocator}). It used to be the one-row
+ * `demo_catalog_change_seq` table this migration creates, read through a driver
+ * branch — `UPDATE … RETURNING` on PostgreSQL, `UPDATE` then a separate `SELECT`
+ * on SQLite, which is a read-then-write two clients could interleave to stamp
+ * two rows with one cursor. {@see RetireDemoCatalogChangeSeqTable} drops it.
+ *
+ * Known limitation, unchanged and unrelated to where the number comes from:
+ * under concurrent long transactions a higher seq can commit before a lower one,
+ * so a reader could skip the late-committing lower seq; mitigated by stamping
+ * seq inside the short write transaction. A fully rigorous log would use
+ * commit-ordered capture — out of scope for this pilot.
  *
  * Idempotent + SQLite/Postgres-safe: each column is DECLARED through
  * {@see MigrationSchema::addColumnIfMissing()} rather than guarded by a
@@ -85,7 +89,13 @@ final class AddSyncColumnsToDemoCatalogItems implements MigrationInterface
              ON demo_catalog_items(tenant_id, change_seq)'
         );
 
-        // Global monotonic change-sequence counter (one row; holds no tenant data).
+        // The plugin's own one-row change-sequence counter. Superseded by the
+        // host allocator and dropped by RetireDemoCatalogChangeSeqTable — which
+        // is a SEPARATE migration rather than an edit here, because this one has
+        // already been applied and recorded on any deployment that ran it, so an
+        // edit would never execute there. Left creating the table so that
+        // migration has the same thing to drop on a fresh install as on an old
+        // one, and so `down()` still reverses exactly what `up()` did.
         $pdo->exec('CREATE TABLE IF NOT EXISTS demo_catalog_change_seq (seq BIGINT NOT NULL)');
         $countStmt = $pdo->query('SELECT COUNT(*) FROM demo_catalog_change_seq');
         $seeded = $countStmt === false ? 0 : (int) $countStmt->fetchColumn();

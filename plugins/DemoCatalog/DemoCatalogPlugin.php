@@ -10,6 +10,7 @@ use DemoCatalog\Migrations\CreateDemoCatalogItemLinesTable;
 use DemoCatalog\Migrations\CreateDemoCatalogItemNotesTable;
 use DemoCatalog\Migrations\CreateDemoCatalogItemsTable;
 use DemoCatalog\Migrations\GrantDemoCatalogPermissionsToAdmin;
+use DemoCatalog\Migrations\RetireDemoCatalogChangeSeqTable;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
@@ -384,10 +385,11 @@ final class DemoCatalogPlugin implements
      * says which tables, never who said so — and refuses anything core or an
      * earlier plugin already claimed.
      *
-     * `demo_catalog_change_seq` is deliberately GLOBAL: it is a one-row
-     * monotonic counter with no tenant column, so no tenant predicate could be
-     * bound to it. Declaring that honestly is what stops a data type or a guard
-     * ever being built over it.
+     * This list used to include `demo_catalog_change_seq`, a one-row monotonic
+     * counter declared GLOBAL because it had no tenant column and no tenant
+     * predicate could be bound to it. The change-feed cursor now comes from the
+     * host's allocator, so the table is gone — and with it the one table here
+     * that no isolation guard could say anything useful about.
      *
      * @inheritDoc
      */
@@ -397,7 +399,6 @@ final class DemoCatalogPlugin implements
             'demo_catalog_items' => self::SCOPE_TENANT,
             'demo_catalog_item_notes' => self::SCOPE_TENANT,
             'demo_catalog_item_lines' => self::SCOPE_TENANT,
-            'demo_catalog_change_seq' => self::SCOPE_GLOBAL,
         ];
     }
 
@@ -506,6 +507,7 @@ final class DemoCatalogPlugin implements
             GrantDemoCatalogPermissionsToAdmin::class,
             CreateDemoCatalogItemNotesTable::class,
             CreateDemoCatalogItemLinesTable::class,
+            RetireDemoCatalogChangeSeqTable::class,
         ];
     }
 
@@ -580,7 +582,28 @@ final class DemoCatalogPlugin implements
      */
     private function handler(): DemoCatalogApiHandler
     {
-        return new DemoCatalogApiHandler($this->resolvePdo());
+        return new DemoCatalogApiHandler($this->resolvePdo(), $this->resolveSequences());
+    }
+
+    /**
+     * Resolve the host's sequence allocator from the service container.
+     *
+     * Named by its SDK INTERFACE, never by the host class implementing it: that
+     * is what lets an out-of-repo plugin depend on `whity/plugin-sdk` alone and
+     * still get correctly-allocated numbers.
+     */
+    private function resolveSequences(): \Whity\Sdk\Sql\SequenceAllocator
+    {
+        $sequences = \Whity\app(\Whity\Sdk\Sql\SequenceAllocator::class);
+        if (!$sequences instanceof \Whity\Sdk\Sql\SequenceAllocator) {
+            throw new \RuntimeException(
+                'Host did not provide a Whity\Sdk\Sql\SequenceAllocator. Without it a '
+                . 'change-feed cursor would have to be allocated by hand, which is the '
+                . 'read-then-write race this plugin stopped shipping.'
+            );
+        }
+
+        return $sequences;
     }
 
     /**

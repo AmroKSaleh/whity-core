@@ -1697,6 +1697,16 @@ $dataTypesHandler = new \Whity\Api\DataTypesApiHandler(
     $dataTypeLifecycle,
     $gatedDataTypeLifecycle
 );
+
+// The host-owned sequence allocator (migration 092). Registered under the SDK
+// INTERFACE, which is the name a plugin can reference without depending on
+// core; the concrete class is registered too so host code can ask for it by its
+// own type. Both entry points register it — a service wired in only one of them
+// is the divergence bug class #717 and #724 already paid for.
+$sequenceCounters = new \Whity\Database\SequenceCounters($db->getPdo());
+\Whity\register_service(\Whity\Sdk\Sql\SequenceAllocator::class, $sequenceCounters); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Database\SequenceCounters::class, $sequenceCounters); // @phpstan-ignore-line
+
 $router->register('GET',    '/api/data-types',                       [$dataTypesHandler, 'list']);
 $router->register('GET',    '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'show']);
 $router->register('POST',   '/api/data-types/{type}/{id}/trash',     [$dataTypesHandler, 'trash']);

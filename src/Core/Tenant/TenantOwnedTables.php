@@ -200,6 +200,17 @@ final class TenantOwnedTables
         // tenant's record ids, so an unscoped lookup would read across tenants.
         'data_type_restore_states' => '089_create_data_type_restore_states.php',
 
+        // The host-owned counters behind Whity\Sdk\Sql\SequenceAllocator
+        // (migration 092), keyed (tenant_id, name). Core-owned so a plugin that
+        // needs uniquely numbered records ships no table and writes no SQL, and
+        // so the read-then-write allocation race is impossible in ONE place
+        // rather than avoidable in N. tenant_id is a real column with a real
+        // cascade precisely so this guard polices it: one tenant's `invoice`
+        // counter must not be advanceable by naming it from another tenant.
+        // A platform-wide counter is the system tenant's (id 0) counter, which
+        // keeps one storage shape rather than a second, unpoliceable global one.
+        'sequence_counters' => '092_create_sequence_counters.php',
+
         // WC-i18n — per-tenant translation overrides (migration 081).
         // Translations are global-scoped (tenant_id NULL = system defaults) but
         // also support tenant-specific overrides (tenant_id > 0). Every query
