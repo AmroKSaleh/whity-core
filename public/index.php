@@ -1675,7 +1675,28 @@ $dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
 // inherits a dead record's state and can be restored into a state it never held.
 \Whity\register_service(\Whity\Core\DataType\LifecycleStateMemory::class, $dataTypeLifecycle->stateMemory()); // @phpstan-ignore-line
 
-$dataTypesHandler = new \Whity\Api\DataTypesApiHandler($dataTypeRegistry, $dataTypeLifecycle, $roleChecker);
+// The WRITE half of the plugin-facing lifecycle surface. `DataTypeGuard` above
+// is read-only by design and stays that way — it answers questions and changes
+// nothing — but core told adopters to route their writes through core and then
+// published only a read contract, so they duck-typed DataTypeLifecycleService, a
+// core internal. This registers the supported path.
+//
+// It is the SAME object the generated endpoints gate themselves with (passed to
+// the handler below), which is what makes "an in-process call cannot skip a check
+// the endpoint enforces" true by construction rather than by two implementations
+// written to agree.
+$gatedDataTypeLifecycle = new \Whity\Core\DataType\GatedDataTypeLifecycle(
+    $dataTypeRegistry,
+    $dataTypeLifecycle,
+    $roleChecker
+);
+\Whity\register_service(\Whity\Sdk\DataType\DataTypeLifecycle::class, $gatedDataTypeLifecycle); // @phpstan-ignore-line
+
+$dataTypesHandler = new \Whity\Api\DataTypesApiHandler(
+    $dataTypeRegistry,
+    $dataTypeLifecycle,
+    $gatedDataTypeLifecycle
+);
 $router->register('GET',    '/api/data-types',                       [$dataTypesHandler, 'list']);
 $router->register('GET',    '/api/data-types/{type}/{id}',           [$dataTypesHandler, 'show']);
 $router->register('POST',   '/api/data-types/{type}/{id}/trash',     [$dataTypesHandler, 'trash']);

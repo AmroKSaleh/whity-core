@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.23).
+ * SDK identity (v1.24).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -135,13 +135,32 @@ namespace Whity\Sdk;
  * `addColumnIfMissing()`/`dropColumnIfExists()` go one step further and remove
  * the branch entirely: the migration states the shape it wants instead of
  * asking a question and acting on the answer. Additive; no SQL is hidden behind
- * a builder, so the tenant-isolation guards still read every statement).
+ * a builder, so the tenant-isolation guards still read every statement) ->
+ * 1.24 (the lifecycle WRITE contract: {@see \Whity\Sdk\DataType\DataTypeLifecycle}
+ * and the {@see \Whity\Sdk\DataType\LifecycleOutcome} it answers with. The host
+ * told adopters to route their lifecycle writes through it and then published
+ * only {@see \Whity\Sdk\DataType\DataTypeGuard} — read-only, deliberately, since
+ * its whole guarantee is that holding it confers no authority. So a plugin that
+ * needed to actually trash a record duck-typed a host-internal service: no
+ * contract, no compatibility promise, no obligation to keep its shape. Reads
+ * keep their guarantee — the guard is untouched and gains no mutators — and
+ * writes get a second contract instead of being smuggled into the first.
+ * The host binds it to the SAME object its generated endpoints authorize
+ * through, so an in-process call cannot skip a check the endpoint enforces:
+ * a type the caller may not read is UNKNOWN rather than forbidden, an action
+ * the type does not offer is refused, and the action's declared permission is
+ * resolved through the host's own checker. `$actorProfileId` is required for
+ * exactly that reason — it is the subject of the check, not a decoration.
+ * The outcome is the vocabulary the HTTP layer already publishes (`reason` as
+ * the stable key, `message` as the fallback sentence, `blockers`, and the
+ * status), so one branch serves both call paths. Bulk work is a LOOP over these
+ * calls; a bulk statement bypasses every guard, veto and hook at once).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.23.0';
+    public const VERSION = '1.24.0';
 
     /**
      * Static identity only — never instantiated.

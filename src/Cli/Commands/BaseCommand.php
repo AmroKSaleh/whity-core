@@ -192,6 +192,21 @@ abstract class BaseCommand
         // this file has already paid for in #717 and #724.
         \Whity\register_service(\Whity\Core\DataType\LifecycleStateMemory::class, $dataTypeLifecycle->stateMemory());
 
+        // The WRITE contract, registered here for the same reason every service
+        // above is: an entry-point divergence is this file's recurring bug class
+        // (#717, #724, #727). Registered over HTTP only, a plugin trashing a
+        // record through \Whity\app(DataTypeLifecycle::class) would work in a
+        // request and throw inside a `whity-cli` command — and the command is
+        // exactly where a bulk sweep (empty-trash, bulk retire) runs.
+        \Whity\register_service(
+            \Whity\Sdk\DataType\DataTypeLifecycle::class,
+            new \Whity\Core\DataType\GatedDataTypeLifecycle(
+                $dataTypeRegistry,
+                $dataTypeLifecycle,
+                $roleChecker
+            )
+        );
+
         $baseDir = dirname(__DIR__, 3);
         // The registries are passed HERE, not just constructed above: this loader
         // previously received neither, so plugin-declared permissions were never

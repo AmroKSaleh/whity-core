@@ -167,9 +167,34 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.23.0',
+            '1.24.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.23 adds the portable schema predicates (Schema\SchemaInspector '
+            'SDK 1.24 adds the lifecycle WRITE contract (DataType\DataTypeLifecycle '
+            . 'and the DataType\LifecycleOutcome it answers with). Core told adopters '
+            . 'to route their lifecycle writes through core and then published only '
+            . 'the read-only DataType\DataTypeGuard, so a plugin that needed to '
+            . 'actually trash a record duck-typed Whity\Core\DataType\DataTypeLifecycleService '
+            . '— a host internal with no contract and no compatibility promise. That '
+            . 'is core\'s fault, not theirs. Reads keep their guarantee: the guard is '
+            . 'untouched and gains no mutators, because "holding this confers no '
+            . 'authority" is the one sentence that makes it safe to hand out. Writes '
+            . 'get a SECOND contract, bound to the same object the generated endpoints '
+            . 'authorize through — so an in-process call cannot skip a check the '
+            . 'endpoint enforces: a type the caller may not read is reported UNKNOWN '
+            . 'rather than forbidden (holding the contract must not become a way to '
+            . 'enumerate the catalogue), an action the type does not offer is refused, '
+            . 'and the action\'s declared permission is resolved through the same '
+            . 'RoleChecker the RBAC middleware uses. $actorProfileId is REQUIRED for '
+            . 'that reason — it is the subject of the permission check, so an optional '
+            . 'one could only fail closed or run ungated. The outcome is the vocabulary '
+            . 'the HTTP layer already publishes (reason as the stable key, message as '
+            . 'the fallback, blockers, and the status), so a plugin calling in-process '
+            . 'and a client calling over HTTP branch on ONE contract. Bulk lifecycle '
+            . 'work is a LOOP over these calls — a bulk UPDATE bypasses every guard, '
+            . 'veto and hook at once — and no bulk API ships here, because "does one '
+            . 'veto abort the batch or is it skipped and reported" is a decision that '
+            . 'has not been made; '
+            . 'SDK 1.23 adds the portable schema predicates (Schema\SchemaInspector '
             . 'and the Schema\MigrationSchema trait). The SDK asks every migration '
             . 'to be idempotent and the host runs them on PostgreSQL and SQLite, '
             . 'but ALTER TABLE … ADD COLUMN IF NOT EXISTS is a PostgreSQL extension '
@@ -307,6 +332,88 @@ final class SdkPackageContractTest extends TestCase
         $this->assertTrue(
             $hasRole->getParameters()[3]->isOptional() && $hasRole->getParameters()[4]->isOptional(),
             'The role resource arguments must be optional so three-argument callers are unaffected.'
+        );
+    }
+
+    /**
+     * SDK 1.24: the lifecycle WRITE contract, and the read-only guarantee it
+     * deliberately does not touch.
+     *
+     * `DataTypeGuard` is documented as read-only — "every method answers a
+     * question; none trashes, retires or deletes anything" — and that sentence
+     * is what makes it safe to hand out. Adding mutators to it would falsify the
+     * one property it rests on, so the write surface is a SECOND contract. Both
+     * halves are pinned here: the new one has exactly the four mutating verbs,
+     * and the old one still has exactly its four questions.
+     */
+    public function testTheLifecycleWriteContractLivesInTheSdkAndTheGuardStaysReadOnly(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\DataType\DataTypeLifecycle::class));
+        $this->assertTrue(interface_exists(\Whity\Sdk\DataType\LifecycleOutcome::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\DataType\DataTypeLifecycle::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(['delete', 'restore', 'retire', 'trash'], $methods);
+
+        $readOnly = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\DataType\DataTypeGuard::class))->getMethods()
+        );
+        sort($readOnly);
+        $this->assertSame(
+            ['blockingReferences', 'canDelete', 'isReferenceable', 'stateOf'],
+            $readOnly,
+            'DataTypeGuard must stay read-only: its whole guarantee is that holding it confers no '
+            . 'authority a plugin does not already have.'
+        );
+    }
+
+    /**
+     * The ACTOR is required on every write, and the outcome carries the same
+     * refusal vocabulary the HTTP layer publishes.
+     *
+     * An optional actor would be a trap: the profile is the SUBJECT of the
+     * permission check, so an omitted one could only fail closed (a parameter
+     * that always fails) or run ungated (the bypass this contract exists to
+     * remove).
+     */
+    public function testEveryWriteTakesARequiredActorAndAnswersInTheHttpVocabulary(): void
+    {
+        foreach (['trash', 'restore', 'retire', 'delete'] as $action) {
+            $method = new \ReflectionMethod(\Whity\Sdk\DataType\DataTypeLifecycle::class, $action);
+
+            $this->assertSame(
+                ['dataType', 'tenantId', 'id', 'actorProfileId'],
+                array_map(
+                    static fn (\ReflectionParameter $p): string => $p->getName(),
+                    $method->getParameters()
+                ),
+                "{$action}() must take the acting profile explicitly."
+            );
+            $this->assertFalse(
+                $method->getParameters()[3]->isOptional(),
+                "{$action}()'s actor must be REQUIRED — it is what the permission check runs against."
+            );
+            $this->assertSame(
+                \Whity\Sdk\DataType\LifecycleOutcome::class,
+                (string) $method->getReturnType()
+            );
+        }
+
+        $outcome = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\DataType\LifecycleOutcome::class))->getMethods()
+        );
+        sort($outcome);
+        $this->assertSame(
+            ['blockers', 'httpStatus', 'isOk', 'message', 'reason', 'state', 'toArray'],
+            $outcome,
+            'The outcome publishes the same {reason, message} vocabulary — plus blockers and the '
+            . 'status — so a plugin calling in-process and a client calling over HTTP branch on ONE '
+            . 'contract.'
         );
     }
 

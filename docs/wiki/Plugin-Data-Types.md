@@ -1,6 +1,7 @@
 # Plugin Data Types — lifecycle and referential guards
 
-*(WC-723, "Door 2" — `registerDataType`. Plugin SDK 1.20.)*
+*(WC-723, "Door 2" — `registerDataType`. Plugin SDK 1.20; the lifecycle
+**write** contract, `DataTypeLifecycle`, since SDK 1.24.)*
 
 Every plugin that manages records re-implements the same admin surface: a list,
 a create/edit form, a delete path, and — if it is careful — a soft-delete state
@@ -382,6 +383,12 @@ through the same `RoleChecker` the RBAC middleware uses. Every statement binds
 a tenant predicate — a record in another tenant is reported absent, never
 forbidden.
 
+Every refusal these endpoints answer — including the authorization ones —
+carries a `details.reason` key. A `404` for an unknown-or-unreadable type is
+`unknown_data_type`, a `405` is `<action>_not_offered`, and a `403` is
+`insufficient_permissions` (with `details.required` naming the missing slug).
+Branch on `reason`, not on the status code.
+
 A refused delete answers `409` with the blockers attached:
 
 ```json
@@ -705,6 +712,104 @@ while the shape of "I deleted this outside core" is still settling, and the
 better long-term answer for most plugins is not to reach for `forget()` at all
 but to delete through `DELETE /api/data-types/{type}/{id}`, which already forgets.
 
+## Performing a transition from your own code
+
+Two contracts, and the split between them is deliberate:
+
+| | `DataTypeGuard` | `DataTypeLifecycle` (SDK 1.24) |
+|---|---|---|
+| What it does | **asks** | **acts** |
+| Methods | `stateOf`, `blockingReferences`, `isReferenceable`, `canDelete` | `trash`, `restore`, `retire`, `delete` |
+| Needs an actor | no — it changes nothing | **yes**, and it is required |
+
+```php
+$lifecycle = \Whity\app(\Whity\Sdk\DataType\DataTypeLifecycle::class);
+
+$outcome = $lifecycle->trash('acme:record', $tenantId, $id, $actorProfileId);
+if (!$outcome->isOk()) {
+    return Response::error($outcome->message(), $outcome->httpStatus(), [
+        'reason'   => $outcome->reason(),        // the stable key — branch on this
+        'blockers' => $outcome->blockers(),
+    ]);
+}
+```
+
+Registered in **both** entry points, so it resolves identically over HTTP and
+inside a `whity-cli` command.
+
+### Why this exists
+
+Core told you to route your writes through core, and then published only a read
+contract. The only way to actually trash a record in-process was to duck-type
+`Whity\Core\DataType\DataTypeLifecycleService` — a core internal, with no
+contract and no compatibility promise. That was core's fault, and this is the
+fix. If you are doing that today, this is what replaces it.
+
+`DataTypeGuard` stays **read-only**, and that is not an oversight: its whole
+guarantee is that holding it confers no authority, which is what makes it safe
+to hand out. Writes get a second contract rather than being smuggled into that
+one.
+
+### The same gates as the endpoint — including the ones you might hope to skip
+
+Calling in-process is **not** a way around a check:
+
+* a type you may not **read** is reported as **unknown** (`404`), never as
+  forbidden — so holding this contract is not a way to enumerate the catalogue;
+* an action the type does not **offer** is `405 <action>_not_offered`;
+* an action whose declared permission you lack is `403 insufficient_permissions`,
+  resolved through the same `RoleChecker` the RBAC middleware uses.
+
+This is not two implementations written to agree. `DataTypesApiHandler` performs
+no authorization of its own: the endpoint and this contract call the *same*
+object, so there is nothing to drift.
+
+That is also why `$actorProfileId` is **required**. It is the subject of the
+permission check and the actor on the audit entry; an optional one could only
+fail closed (a parameter that always fails is a trap) or run ungated.
+
+`$tenantId` is explicit, exactly as on `DataTypeGuard` — an in-process caller may
+be a queue worker or a CLI command with no ambient request. Passing another
+tenant's id is not a way in: the permission resolves per *(profile, tenant)*.
+
+### The outcome is the HTTP vocabulary
+
+`LifecycleOutcome` is the *same object* the endpoint builds its response from —
+not a parallel shape kept in step by hand. So `reason` is the same stable key,
+`message` the same fallback sentence, `blockers` the same list, and
+`httpStatus()` the same status. A plugin calling in-process and a client calling
+over HTTP branch on **one** contract.
+
+### Bulk operations: loop over single-record calls
+
+Emptying a trash or retiring a selection is a **loop**, and that is the
+sanctioned pattern rather than a stopgap:
+
+```php
+foreach ($ids as $id) {
+    $outcome = $lifecycle->delete('acme:record', $tenantId, $id, $actorProfileId);
+    if (!$outcome->isOk()) {
+        $skipped[$id] = $outcome->reason();   // a refusal here is normal, not an error
+    }
+}
+```
+
+The tempting alternative is one statement:
+
+```sql
+-- Do NOT do this.
+UPDATE acme_records SET status = 'archived' WHERE status = 'trashed' AND tenant_id = :tenant;
+```
+
+That bypasses **every** guard, **every** veto and **every** hook at once, and it
+does so silently — the exact "bypassed through a secondary path" failure declared
+guards exist to end. The loop is slower and correct.
+
+There is deliberately **no bulk API yet**. It needs a decision that has not been
+made: does one veto abort the whole batch, or is that record skipped and
+reported? Shipping either as an implicit default would be worse than shipping
+none, so it is a separate conversation.
+
 ## Keeping your own delete route
 
 The escape hatch stays open, but enforce through the **same** evaluator — two
@@ -725,6 +830,11 @@ if (!$guard->isReferenceable('acme:record', $tenantId, $id)) {
 `isReferenceable()` is the one a picker or a foreign-key validation should
 consult — it is false for both trashed and retired records, which is the single
 axis on which the two states agree.
+
+If your route's reason for existing is that it *performs* the transition rather
+than just checking it, reach for `DataTypeLifecycle` above instead: it applies
+the same permission gate your route would have had to re-derive, and it keeps
+one lifecycle memory for the record rather than two.
 
 ## Reference implementation
 

@@ -8,6 +8,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\DataType\DataTypeDefinition;
 use Whity\Core\DataType\DataTypeLifecycleService;
 use Whity\Core\DataType\DataTypeRegistry;
+use Whity\Core\DataType\GatedDataTypeLifecycle;
 use Whity\Core\DataType\LifecycleAction;
 use Whity\Core\DataType\LifecycleResult;
 use Whity\Core\Request;
@@ -34,6 +35,14 @@ use Whity\Core\Tenant\TenantContext;
  *    permission, resolved through the same {@see RoleChecker} the middleware
  *    uses so the two can never give different answers.
  *
+ * Those three gates are NOT implemented here. They live in
+ * {@see GatedDataTypeLifecycle}, which is also what a plugin resolves through
+ * the SDK's write contract — so "an in-process call cannot skip a check the
+ * endpoint enforces" is true because there is ONE implementation of the check,
+ * not two written to agree. This handler contributes the parts that are genuinely
+ * HTTP: resolving the request's tenant and caller, reading the path parameters,
+ * and turning a {@see LifecycleResult} into a response.
+ *
  * Honest degradation is enforced here as well as rendered: `GET /api/data-types`
  * publishes only the actions a type actually offers AND the caller may actually
  * use, so a generated screen that renders exactly what it is told can never
@@ -45,21 +54,21 @@ final class DataTypesApiHandler
 
     private DataTypeLifecycleService $lifecycle;
 
-    private RoleChecker $roleChecker;
+    private GatedDataTypeLifecycle $gate;
 
     /**
-     * @param DataTypeRegistry         $registry    Catalogue of declared types.
-     * @param DataTypeLifecycleService $lifecycle   The single enforcement point.
-     * @param RoleChecker              $roleChecker Authoritative permission resolution.
+     * @param DataTypeRegistry         $registry  Catalogue of declared types.
+     * @param DataTypeLifecycleService $lifecycle The single enforcement point, for reads.
+     * @param GatedDataTypeLifecycle   $gate      Authorization + the gated transitions, shared with the SDK contract.
      */
     public function __construct(
         DataTypeRegistry $registry,
         DataTypeLifecycleService $lifecycle,
-        RoleChecker $roleChecker
+        GatedDataTypeLifecycle $gate
     ) {
         $this->registry = $registry;
         $this->lifecycle = $lifecycle;
-        $this->roleChecker = $roleChecker;
+        $this->gate = $gate;
     }
 
     /**
@@ -82,14 +91,14 @@ final class DataTypesApiHandler
 
         $data = [];
         foreach ($this->registry->all() as $definition) {
-            if (!$this->may($definition, LifecycleAction::READ, $profileId, $tenantId)) {
+            if (!$this->gate->may($definition, LifecycleAction::READ, $profileId, $tenantId)) {
                 continue;
             }
 
             $payload = $definition->toArray();
             $payload['actions'] = array_values(array_filter(
                 $definition->offeredActions(),
-                fn (string $action): bool => $this->may($definition, $action, $profileId, $tenantId)
+                fn (string $action): bool => $this->gate->may($definition, $action, $profileId, $tenantId)
             ));
             $data[] = $payload;
         }
@@ -212,14 +221,18 @@ final class DataTypesApiHandler
         }
         [$definition, $tenantId, $profileId, $id] = $resolved;
 
+        // Through the SAME object a plugin resolves as the SDK's write contract.
+        // It re-runs the gates `resolve()` just applied, which is deliberate: the
+        // endpoint must not be the only place they are enforced, and a duplicated
+        // permission lookup is request-scoped and cached.
         $result = match ($action) {
-            LifecycleAction::TRASH => $this->lifecycle->trash($definition->key(), $tenantId, $id, $profileId),
-            LifecycleAction::RESTORE => $this->lifecycle->restore($definition->key(), $tenantId, $id, $profileId),
-            LifecycleAction::RETIRE => $this->lifecycle->retire($definition->key(), $tenantId, $id, $profileId),
-            default => $this->lifecycle->delete($definition->key(), $tenantId, $id, $profileId),
+            LifecycleAction::TRASH => $this->gate->trash($definition->key(), $tenantId, $id, $profileId),
+            LifecycleAction::RESTORE => $this->gate->restore($definition->key(), $tenantId, $id, $profileId),
+            LifecycleAction::RETIRE => $this->gate->retire($definition->key(), $tenantId, $id, $profileId),
+            default => $this->gate->delete($definition->key(), $tenantId, $id, $profileId),
         };
 
-        return $this->respond($definition, $result);
+        return $this->respond($definition->key(), $result);
     }
 
     /**
@@ -228,29 +241,44 @@ final class DataTypesApiHandler
      * A refusal keeps its blockers and its stable reason key, so a client can
      * both show the sentence and branch on the cause without parsing prose.
      *
+     * EVERY refusal comes through here, including the authorization ones — a 404
+     * for an unknown-or-unreadable type, a 405 for an action the type does not
+     * offer, a 403 for a permission the caller lacks. They used to be built as
+     * ad-hoc responses beside the transition ones, which meant the 403 carried no
+     * `reason` at all: a client had to branch on the status code for those three
+     * and on `reason` for everything else. One envelope now covers all of them,
+     * which is also what makes the in-process contract able to publish the same
+     * vocabulary.
+     *
      * A plugin veto arrives here as an ordinary refusal and needs no special
      * case: `409`, `reason: "blocked_by_plugin"`, and the plugin's own
      * client-safe sentence as the message. That uniformity is the point — one
      * envelope for "this transition did not happen, and here is why", whether
      * the reason was core's rule or a plugin's.
+     *
+     * @param string $key The canonical type key, echoed on success.
      */
-    private function respond(DataTypeDefinition $definition, LifecycleResult $result): Response
+    private function respond(string $key, LifecycleResult $result): Response
     {
         if ($result->isOk()) {
             return Response::json([
-                'data' => ['key' => $definition->key()] + $result->toArray(),
+                'data' => ['key' => $key] + $result->toArray(),
             ]);
         }
 
-        return Response::error(
-            $result->message(),
-            $result->httpStatus(),
-            [
-                'reason' => $result->reason(),
-                'state' => $result->state(),
-                'blockers' => $result->blockers(),
-            ]
-        );
+        $details = [
+            'reason' => $result->reason(),
+            'state' => $result->state(),
+            'blockers' => $result->blockers(),
+        ];
+        // Naming the missing permission is not a disclosure — the caller can read
+        // the whole map from GET /api/data-types — and a 403 that does not say
+        // which one was missing sends an operator hunting.
+        if ($result->required() !== null) {
+            $details['required'] = $result->required();
+        }
+
+        return Response::error($result->message(), $result->httpStatus(), $details);
     }
 
     /**
@@ -274,27 +302,18 @@ final class DataTypesApiHandler
         }
         [$tenantId, $profileId] = $context;
 
-        $definition = $this->registry->get((string) ($params['type'] ?? ''));
-        if ($definition === null) {
-            return Response::error('Unknown data type', 404);
-        }
-        if (!$this->may($definition, LifecycleAction::READ, $profileId, $tenantId)) {
-            return Response::error('Unknown data type', 404);
+        $type = (string) ($params['type'] ?? '');
+        $refusal = $this->gate->authorize($type, $action, $tenantId, $profileId);
+        if ($refusal !== null) {
+            return $this->respond($type, $refusal);
         }
 
-        if (!$definition->offers($action)) {
-            return Response::error(
-                "This data type does not offer the '{$action}' action",
-                405,
-                ['reason' => $action . '_not_offered']
-            );
-        }
-        if (!$this->may($definition, $action, $profileId, $tenantId)) {
-            return Response::error(
-                'Insufficient permissions',
-                403,
-                ['required' => $definition->permissionFor($action)]
-            );
+        $definition = $this->registry->get($type);
+        if ($definition === null) {
+            // Unreachable: authorize() answers "unknown" for a type that is not
+            // registered. Kept because the alternative is a nullable local that
+            // every reader has to re-derive the impossibility of.
+            return Response::error('Unknown data type', 404);
         }
 
         $id = trim((string) ($params['id'] ?? ''));
@@ -303,22 +322,6 @@ final class DataTypesApiHandler
         }
 
         return [$definition, $tenantId, $profileId, $id];
-    }
-
-    /**
-     * Whether the caller holds the permission a type declares for an action.
-     *
-     * An action with no declared permission is NOT open — it was never offered,
-     * so nobody holds it. Fail closed.
-     */
-    private function may(DataTypeDefinition $definition, string $action, int $profileId, int $tenantId): bool
-    {
-        $permission = $definition->permissionFor($action);
-        if ($permission === null) {
-            return false;
-        }
-
-        return $this->roleChecker->hasPermissionForProfile($profileId, $permission, $tenantId);
     }
 
     /**

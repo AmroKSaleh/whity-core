@@ -11,6 +11,7 @@ use Whity\Api\DataTypesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\DataType\DataTypeLifecycleService;
 use Whity\Core\DataType\DataTypeRegistry;
+use Whity\Core\DataType\GatedDataTypeLifecycle;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
@@ -581,10 +582,12 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
 
         $types = $this->dataTypes($permissions);
 
+        $service = new DataTypeLifecycleService($this->pdo, $types, $hooks);
+
         return new DataTypesApiHandler(
             $types,
-            new DataTypeLifecycleService($this->pdo, $types, $hooks),
-            new RoleChecker($this->wrap($this->pdo), $registry)
+            $service,
+            new GatedDataTypeLifecycle($types, $service, new RoleChecker($this->wrap($this->pdo), $registry))
         );
     }
 
