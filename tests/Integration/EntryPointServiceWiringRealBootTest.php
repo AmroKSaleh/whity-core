@@ -327,6 +327,133 @@ final class EntryPointServiceWiringRealBootTest extends TestCase
         );
     }
 
+    /**
+     * The SDK's lifecycle WRITE contract must be resolvable from a booted HTTP
+     * host — and must be the SAME object the generated endpoints gate themselves
+     * with.
+     *
+     * The second half is the load-bearing one. Core told adopters to route their
+     * writes through core and published only a read contract, so they duck-typed
+     * a core internal; publishing a write contract fixes that only if it cannot
+     * become a way around a check the endpoint enforces. Two gates — one for the
+     * container, one for the handler — would be identical the day they were
+     * written and free to drift on every day after, silently, in the direction
+     * that grants a plugin more authority than the endpoint would.
+     *
+     * The probe also CALLS it, against a type that does not exist, to prove the
+     * object is wired to a live registry and connection rather than merely
+     * constructed. The answer must be the unknown-type refusal, not an exception.
+     */
+    public function testHttpEntryPointResolvesTheSameGatedLifecycleTheEndpointsUse(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            $_SERVER['REQUEST_URI']    = '/api/health';
+            $_SERVER['HTTP_HOST']      = 'localhost';
+            $_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            $resolved = \Whity\app(\Whity\Sdk\DataType\DataTypeLifecycle::class);
+
+            $outcome = null;
+            $error = '';
+            try {
+                // A type nobody declared: the gate answers before any table is
+                // touched, so this is harmless and still proves the object works.
+                $outcome = $resolved->trash('probe:none', 0, 'no-such-record', 1);
+            } catch (\Throwable $e) {
+                $error = $e->getMessage();
+            }
+
+            whity_probe_emit([
+                // $gatedDataTypeLifecycle is index.php's own variable — literally
+                // the object it passed to new DataTypesApiHandler(...).
+                'same_instance' => $resolved === $gatedDataTypeLifecycle,
+                'is_contract'   => $resolved instanceof \Whity\Sdk\DataType\DataTypeLifecycle,
+                'status'        => $outcome?->httpStatus(),
+                'reason'        => $outcome?->reason(),
+                'error'         => $error,
+            ]);
+            PHP);
+
+        self::assertTrue(
+            $result['same_instance'],
+            'The container must publish the very gate the generated endpoints authorize through. A '
+            . 'second instance is a second authorization implementation waiting to diverge.'
+        );
+        self::assertTrue($result['is_contract']);
+        self::assertSame(
+            404,
+            $result['status'],
+            'The contract must be callable on a live host. Error: ' . (string) $result['error']
+        );
+        self::assertSame(
+            'unknown_data_type',
+            $result['reason'],
+            'and an unknown type must be refused rather than thrown, in the published vocabulary.'
+        );
+    }
+
+    /**
+     * The same capability through the CLI kernel. Registered in one entry point
+     * only, an in-process trash would work over HTTP and throw inside a
+     * `whity-cli` command — and a command is exactly where a bulk sweep
+     * (empty-trash, bulk retire) runs.
+     */
+    public function testCliEntryPointResolvesTheSameWriteContract(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            require __DIR__ . '/vendor/autoload.php';
+            require __DIR__ . '/src/helpers.php';
+
+            $command = new class extends \Whity\Cli\Commands\BaseCommand {
+                public function execute(array $argv): int
+                {
+                    return 0;
+                }
+
+                public function boot(): void
+                {
+                    $this->setupKernel();
+                }
+            };
+
+            ob_start();
+            $command->boot();
+            ob_end_clean();
+
+            $resolved = \Whity\app(\Whity\Sdk\DataType\DataTypeLifecycle::class);
+
+            $outcome = null;
+            $error = '';
+            try {
+                $outcome = $resolved->delete('probe:none', 0, 'no-such-record', 1);
+            } catch (\Throwable $e) {
+                $error = $e->getMessage();
+            }
+
+            whity_probe_emit([
+                'is_contract'     => $resolved instanceof \Whity\Sdk\DataType\DataTypeLifecycle,
+                'stable_identity' => $resolved === \Whity\app(\Whity\Sdk\DataType\DataTypeLifecycle::class),
+                'status'          => $outcome?->httpStatus(),
+                'reason'          => $outcome?->reason(),
+                'error'           => $error,
+            ]);
+            PHP);
+
+        self::assertTrue(
+            $result['is_contract'],
+            'BaseCommand::setupKernel() must register the write contract too. Error: '
+            . (string) $result['error']
+        );
+        self::assertTrue($result['stable_identity'], 'The container must not mint a new gate per lookup.');
+        self::assertSame(404, $result['status']);
+        self::assertSame('unknown_data_type', $result['reason']);
+    }
+
     // ─── probe plumbing ──────────────────────────────────────────────────────
 
     /**

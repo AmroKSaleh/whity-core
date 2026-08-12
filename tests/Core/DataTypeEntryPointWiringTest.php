@@ -95,6 +95,19 @@ final class DataTypeEntryPointWiringTest extends TestCase
         );
     }
 
+    public function testHttpEntryPointRegistersTheSdkWriteContract(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\DataType\\\\DataTypeLifecycle::class/',
+            $source,
+            'Core told adopters to route their lifecycle WRITES through core and published only a '
+            . 'read contract, so they duck-typed DataTypeLifecycleService — a core internal with no '
+            . 'compatibility promise. Without this registration that is still their only option.'
+        );
+    }
+
     public function testHttpEntryPointRegistersTheRestoreStateMemory(): void
     {
         $source = $this->read(__DIR__ . '/../../public/index.php');
@@ -170,6 +183,49 @@ final class DataTypeEntryPointWiringTest extends TestCase
             '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\DataType\\\\DataTypeGuard::class/',
             $source,
             'A plugin reached through a CLI command must resolve the same guard contract.'
+        );
+    }
+
+    public function testCliEntryPointRegistersTheSdkWriteContractToo(): void
+    {
+        $source = $this->read(__DIR__ . '/../../src/Cli/Commands/BaseCommand.php');
+
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\DataType\\\\DataTypeLifecycle::class/',
+            $source,
+            'Registered over HTTP only, a plugin trashing a record in-process would work in a '
+            . 'request and throw inside a whity-cli command — and a command is exactly where a bulk '
+            . 'sweep runs. The divergence bug class #717, #724 and #727 already paid for.'
+        );
+    }
+
+    /**
+     * The endpoint and the SDK write contract must be handed the SAME gate.
+     *
+     * This is the property that makes "an in-process call cannot skip a check
+     * the endpoint enforces" true by construction. If the host built one gate for
+     * the container and a second for the handler, the two would be identical on
+     * the day they were written and free to drift on every day after — and the
+     * drift direction that matters is silent: a plugin holding more authority
+     * than the endpoint grants.
+     */
+    public function testTheHttpHandlerIsBuiltOverTheSameGateTheContractPublishes(): void
+    {
+        $source = $this->read(__DIR__ . '/../../public/index.php');
+
+        self::assertMatchesRegularExpression(
+            '/\$gatedDataTypeLifecycle\s*=\s*new\s+\\\\?Whity\\\\Core\\\\DataType\\\\GatedDataTypeLifecycle\(/',
+            $source
+        );
+        self::assertMatchesRegularExpression(
+            '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\DataType\\\\DataTypeLifecycle::class,\s*\$gatedDataTypeLifecycle\s*\)/',
+            $source,
+            'The container must publish the gate the file built…'
+        );
+        self::assertMatchesRegularExpression(
+            '/new \\\\?Whity\\\\Api\\\\DataTypesApiHandler\((?:[^;]*?)\$gatedDataTypeLifecycle/s',
+            $source,
+            '…and the generated endpoints must gate themselves with that same object.'
         );
     }
 
