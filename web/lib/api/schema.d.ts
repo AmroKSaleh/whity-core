@@ -2605,6 +2605,7 @@ export interface components {
             };
             lifecycle: components["schemas"]["DataTypeLifecycle"];
             blocks_delete: components["schemas"]["DataTypeReference"][];
+            cascade_delete: components["schemas"]["DataTypeComposition"][];
             actions: ("read" | "trash" | "restore" | "retire" | "delete")[];
             permissions?: {
                 [key: string]: string;
@@ -2614,6 +2615,11 @@ export interface components {
             table: string;
             label: string;
             count: number;
+        };
+        DataTypeComposition: {
+            table: string;
+            column: string;
+            label: string;
         };
         DataTypeLifecycle: {
             declared: boolean;
@@ -2637,6 +2643,7 @@ export interface components {
                 restorable: boolean;
                 deletable: boolean;
                 blockers: components["schemas"]["DataTypeBlocker"][];
+                cascade: components["schemas"]["DataTypeBlocker"][];
                 refusals: components["schemas"]["DataTypeRefusals"];
             };
         };
@@ -2650,7 +2657,7 @@ export interface components {
         };
         DataTypeRefusal: {
             /** @enum {string} */
-            reason: "still_referenced" | "trash_before_deleting" | "retired_records_are_permanent" | "retired_records_cannot_be_trashed" | "retirement_is_permanent" | "restore_before_retiring" | "nothing_to_restore" | "trash_not_offered" | "restore_not_offered" | "retire_not_offered" | "delete_not_offered";
+            reason: "still_referenced" | "composition_still_referenced" | "composition_is_permanent" | "cascade_would_nest" | "trash_before_deleting" | "retired_records_are_permanent" | "retired_records_cannot_be_trashed" | "retirement_is_permanent" | "restore_before_retiring" | "nothing_to_restore" | "trash_not_offered" | "restore_not_offered" | "retire_not_offered" | "delete_not_offered";
             message: string;
         };
         DataTypeRefusals: {

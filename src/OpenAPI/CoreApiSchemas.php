@@ -3253,17 +3253,37 @@ final class CoreApiSchemas
                     'additionalProperties' => ['type' => 'array', 'items' => self::str()],
                 ],
             ], ['table', 'column', 'label', 'ignore_when']),
+            // One declared edge of the COMPOSITION graph: rows that are PART of
+            // the record and are deleted WITH it. The exact opposite of a
+            // DataTypeReference, published beside it because the pair is only
+            // readable together — nothing about a table's shape says which of
+            // the two a plugin meant, and with no foreign keys between plugin
+            // tables the database will not choose either.
+            //
+            // No `ignore_when` here, and its absence is the contract: a cascade
+            // that skipped some of the rows it owns would leave exactly the
+            // orphans it exists to remove, so a declaration carrying one is
+            // refused rather than honoured half-way.
+            'DataTypeComposition' => self::object([
+                'table' => self::str(),
+                'column' => self::str(),
+                'label' => self::str(),
+            ], ['table', 'column', 'label']),
             'DataType' => self::object([
                 'key' => self::str(),
                 'source' => self::str(),
                 'label' => ['type' => 'object', 'x-whity-localized-text' => true, 'properties' => ['ar' => self::str(), 'en' => self::str()]],
                 'lifecycle' => SchemaBuilder::ref('DataTypeLifecycle'),
                 'blocks_delete' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeReference')],
+                'cascade_delete' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeComposition')],
                 'actions' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['read', 'trash', 'restore', 'retire', 'delete']]],
                 'permissions' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
-            ], ['key', 'source', 'label', 'lifecycle', 'blocks_delete', 'actions']),
+            ], ['key', 'source', 'label', 'lifecycle', 'blocks_delete', 'cascade_delete', 'actions']),
             'DataTypeListResponse' => self::listEnvelope('DataType'),
-            // A single guard's blocking rows, with the plugin's own label.
+            // A counted set of rows with the plugin's own label for them. Used
+            // for both questions a delete raises: what is in the way
+            // (`blockers`) and what would go with it (`cascade`). One shape, so
+            // a renderer needs no second code path to say "3 catalogue notes".
             'DataTypeBlocker' => self::object([
                 'table' => self::str(),
                 'label' => self::str(),
@@ -3274,13 +3294,25 @@ final class CoreApiSchemas
             // own sentence, offered as a fallback and never as the contract —
             // string-matching prose is not an API.
             //
-            // Three causes, one vocabulary: a reference, the record's state, or
-            // the type not offering the action. The `*_not_offered` keys are the
-            // SAME ones the mutation endpoint's 405 body carries, so the preview
+            // Four causes, one vocabulary: a reference, the record's state, the
+            // type not offering the action, or the record's COMPOSITION —
+            // something points at a row this record owns
+            // (`composition_still_referenced`), one of those rows is retired
+            // (`composition_is_permanent`), or an owned table owns rows of its
+            // own (`cascade_would_nest`). The `*_not_offered` keys are the SAME
+            // ones the mutation endpoint's 405 body carries, so the preview
             // predicts the endpoint's answer down to the reason.
+            //
+            // `still_referenced` and `composition_still_referenced` are separate
+            // keys deliberately: one says "detach what points at this record",
+            // the other "something points at one of its parts", and they send
+            // the reader to different places.
             'DataTypeRefusal' => self::object([
                 'reason' => ['type' => 'string', 'enum' => [
                     'still_referenced',
+                    'composition_still_referenced',
+                    'composition_is_permanent',
+                    'cascade_would_nest',
                     'trash_before_deleting',
                     'retired_records_are_permanent',
                     'retired_records_cannot_be_trashed',
@@ -3319,6 +3351,13 @@ final class CoreApiSchemas
             // nothing to refuse, and `state` sits right beside them.
             // `referenceable` is false for BOTH trashed and retired;
             // `pending_removal` is what separates the two.
+            //
+            // `cascade` is a THIRD question and stays apart from both: not what
+            // stops this delete, and not which action is unavailable, but what
+            // ELSE this delete would remove. A record with composition is still
+            // deletable — this is what lets a confirmation dialog say "and 4
+            // line items" instead of destroying them silently. Empty means
+            // nothing else goes; zero-count edges are omitted, as in `blockers`.
             'DataTypeRecordState' => self::dataEnvelope(self::object([
                 'key' => self::str(),
                 'state' => self::str(true),
@@ -3327,6 +3366,7 @@ final class CoreApiSchemas
                 'restorable' => self::bool(),
                 'deletable' => self::bool(),
                 'blockers' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
+                'cascade' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeBlocker')],
                 'refusals' => SchemaBuilder::ref('DataTypeRefusals'),
             ], [
                 'key',
@@ -3336,6 +3376,7 @@ final class CoreApiSchemas
                 'restorable',
                 'deletable',
                 'blockers',
+                'cascade',
                 'refusals',
             ])),
             'DataTypeTransitionResponse' => self::dataEnvelope(self::object([

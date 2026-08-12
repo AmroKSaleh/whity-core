@@ -34,12 +34,18 @@ use Whity\Core\Tenant\TableOwnershipRegistry;
  *
  * Ownership is the gate
  * ---------------------
- * Every table a declaration names — its own AND every referencing table in
- * `blocks_delete` — must be one {@see TableOwnershipRegistry} says this source
- * owns, and must be tenant-scoped. This is the entire reason the ownership
- * registry exists: without it "which rows still reference this?" is a way to
- * count rows in another plugin's data by declaration alone, and tenant
- * isolation would rest on a plugin's own say-so.
+ * Every table a declaration names — its own, every referencing table in
+ * `blocks_delete`, and every owned table in `cascade_delete` — must be one
+ * {@see TableOwnershipRegistry} says this source owns, and must be
+ * tenant-scoped. This is the entire reason the ownership registry exists:
+ * without it "which rows still reference this?" is a way to count rows in
+ * another plugin's data by declaration alone, and tenant isolation would rest on
+ * a plugin's own say-so.
+ *
+ * The gate matters MORE for a composition than for a guard, and it is the same
+ * gate deliberately: a guard turns a declaration into a COUNT over the named
+ * table, while a cascade turns it into a DELETE. One reads data the plugin could
+ * not otherwise reach; the other destroys it.
  *
  * Instance, not static
  * --------------------
@@ -184,6 +190,11 @@ class DataTypeRegistry implements HostWiredService
 
         $this->assertOwnedTenantTable($key, $table, $source);
 
+        // Guards first: the composition validator has to see them, because a
+        // table declared BOTH as blocking and as owned is a contradiction the
+        // host must not resolve by picking one.
+        $guards = $this->guards($key, $source, $declaration['blocks_delete'] ?? []);
+
         return new DataTypeDefinition(
             $key,
             $source,
@@ -192,8 +203,9 @@ class DataTypeRegistry implements HostWiredService
             $tenantColumn,
             self::labels($declaration['label'] ?? [], $slug),
             self::lifecycle($key, $declaration['lifecycle'] ?? null),
-            $this->guards($key, $source, $declaration['blocks_delete'] ?? []),
-            self::permissions($key, $declaration['permissions'] ?? [])
+            $guards,
+            self::permissions($key, $declaration['permissions'] ?? []),
+            $this->cascades($key, $source, $declaration['cascade_delete'] ?? [], $table, $guards)
         );
     }
 
@@ -273,6 +285,107 @@ class DataTypeRegistry implements HostWiredService
         }
 
         return $guards;
+    }
+
+    /**
+     * Validate the composition graph — the rows a delete must take with it.
+     *
+     * Four refusals, and each one exists because the alternative is a delete
+     * that does something other than what the declaration says:
+     *
+     *  - the OWNERSHIP gate, the same one guards pass. A cascade is a DELETE
+     *    over the named table, so declaring one over somebody else's table would
+     *    be strictly worse than the read a guard would have been: not "count
+     *    rows I cannot otherwise reach" but "destroy them".
+     *  - `ignore_when` is REFUSED rather than honoured. A guard legitimately
+     *    disregards some referencing rows; a cascade that disregarded some would
+     *    leave exactly the orphans it exists to prevent, and a plugin writing one
+     *    has misunderstood the field in a direction that loses data. Accepting
+     *    and ignoring it would be the quietest possible way to be wrong.
+     *  - a type may not cascade onto its OWN table. `DELETE FROM t WHERE
+     *    parent_id = :id` against the table the record lives in is either a
+     *    no-op or a self-recursive composition core does not implement, and
+     *    neither is what the declarer meant.
+     *  - a table may not be declared BOTH blocking and owned. The two say
+     *    opposite things about the same rows — "refuse while these exist" and
+     *    "delete these" — and there is no reading under which both hold.
+     *
+     * @param string               $key    The type key.
+     * @param string               $source The declaring source.
+     * @param mixed                $raw    The raw `cascade_delete` value.
+     * @param string               $own    The type's own table.
+     * @param list<ReferenceGuard> $guards The already-validated reference graph.
+     * @return list<CascadeEdge>
+     *
+     * @throws InvalidDataTypeException
+     */
+    private function cascades(string $key, string $source, mixed $raw, string $own, array $guards): array
+    {
+        if ($raw === [] || $raw === null) {
+            return [];
+        }
+        if (!is_array($raw)) {
+            throw InvalidDataTypeException::forCascade(
+                $key,
+                'cascade_delete must be a list of composition declarations'
+            );
+        }
+
+        $blocking = array_map(static fn (ReferenceGuard $guard): string => $guard->table(), $guards);
+
+        $cascades = [];
+        foreach ($raw as $entry) {
+            if (!is_array($entry)) {
+                throw InvalidDataTypeException::forCascade($key, 'each entry must be an array');
+            }
+
+            $table = self::identifier($key, 'cascade_delete.table', $entry['table'] ?? null);
+            $column = self::identifier($key, 'cascade_delete.column', $entry['column'] ?? null);
+            $tenantColumn = self::identifier(
+                $key,
+                'cascade_delete.tenant_column',
+                $entry['tenant_column'] ?? 'tenant_id'
+            );
+
+            $this->assertOwnedTenantTable($key, $table, $source);
+
+            if ($table === $own) {
+                throw InvalidDataTypeException::forCascade(
+                    $key,
+                    "'{$table}' is this type's own table — a record cannot be part of itself, and "
+                    . 'core does not delete a composition recursively'
+                );
+            }
+            if (in_array($table, $blocking, true)) {
+                throw InvalidDataTypeException::forCascade(
+                    $key,
+                    "'{$table}' is already declared in blocks_delete. A table's rows either OUTLIVE "
+                    . 'this record or DIE WITH it; declaring both leaves the host to choose, and '
+                    . 'either choice silently discards half of what was declared'
+                );
+            }
+            if (($entry['ignore_when'] ?? null) !== null) {
+                throw InvalidDataTypeException::forCascade(
+                    $key,
+                    "'ignore_when' is not accepted on a composition. A cascade that skipped some of "
+                    . 'the rows it owns would orphan exactly the rows this declaration exists to '
+                    . 'remove; if some rows must survive, they are a reference, not a part'
+                );
+            }
+
+            $label = $entry['label'] ?? null;
+            if (!is_string($label) || trim($label) === '') {
+                throw InvalidDataTypeException::forCascade(
+                    $key,
+                    "a non-empty 'label' is required for table '{$table}' — it is what the delete "
+                    . 'preview calls those rows, and what a refusal names'
+                );
+            }
+
+            $cascades[] = new CascadeEdge($table, $column, trim($label), $tenantColumn);
+        }
+
+        return $cascades;
     }
 
     /**

@@ -159,6 +159,22 @@ class InvalidDataTypeException extends InvalidArgumentException
     }
 
     /**
+     * A composition declaration that is not a well-formed ownership edge.
+     *
+     * Held to a stricter standard than a guard, because the statement it
+     * produces is a DELETE rather than a COUNT: an accepted-but-wrong guard
+     * over-refuses, which is visible and recoverable, while an accepted-but-wrong
+     * cascade removes rows nobody asked it to and reports success.
+     *
+     * @param string $key    The type key.
+     * @param string $detail What is wrong.
+     */
+    public static function forCascade(string $key, string $detail): self
+    {
+        return new self("Data type '{$key}': invalid cascade_delete entry — {$detail}");
+    }
+
+    /**
      * Two sources (or one source twice) claiming the same canonical key.
      *
      * @param string $key The contested canonical key.

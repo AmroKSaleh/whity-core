@@ -117,7 +117,83 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         self::assertSame(['read', 'trash', 'restore', 'retire', 'delete'], $entry['actions']);
     }
 
+    public function testThePublishedEntryRoundTripsTheCompositionBesideTheGuards(): void
+    {
+        // The two lists are only readable together: `blocks_delete` names rows
+        // that must OUTLIVE the record, `cascade_delete` names rows that die
+        // WITH it, and the tables are shaped identically. A reader shown one and
+        // not the other draws the wrong conclusion about their own schema.
+        $entry = $this->onlyEntry($this->handler->list($this->request(self::MANAGER_A, self::TENANT_A)));
+
+        self::assertSame(
+            [['table' => 'acme_lines', 'column' => 'record_id', 'label' => 'line items']],
+            $entry['cascade_delete'],
+            'The composition must be reconstructable from the response, exactly as the guards are.'
+        );
+        self::assertArrayNotHasKey(
+            'ignore_when',
+            $entry['cascade_delete'][0],
+            'and it must not sprout a field that cannot be declared: an empty filter reads as one '
+            . 'that matched nothing rather than one this declaration does not have.'
+        );
+    }
+
     // ==================== 2. An unavailable action explains itself ====================
+
+    public function testTheRecordPayloadPublishesWhatADeleteWouldAlsoRemove(): void
+    {
+        // A composition is invisible in every other field of this payload, and
+        // invisible destruction is the worst kind. This is what lets a generated
+        // confirmation say "and 2 line items" instead of taking them silently.
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $this->seedLine(self::TENANT_A, $recordId);
+        $this->seedLine(self::TENANT_A, $recordId);
+
+        $body = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        ));
+
+        self::assertSame(
+            [['table' => 'acme_lines', 'label' => 'line items', 'count' => 2]],
+            $body['cascade']
+        );
+        self::assertTrue($body['deletable'], 'Composition is a warning, not a blocker.');
+        self::assertSame([], $body['blockers'], 'and it stays out of the field that answers a different question');
+    }
+
+    public function testARecordThatOwnsNothingPublishesAnEmptyCascade(): void
+    {
+        $body = $this->data($this->handler->show(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $this->seedRecord(self::TENANT_A, 'trashed')]
+        ));
+
+        self::assertSame([], $body['cascade']);
+    }
+
+    public function testDeletingThroughTheEndpointRemovesTheCompositionWithTheRecord(): void
+    {
+        // End to end at the boundary an adopter actually calls, read back with
+        // SQL: the 200 is not the evidence here, the row counts are.
+        $recordId = $this->seedRecord(self::TENANT_A, 'trashed');
+        $this->seedLine(self::TENANT_A, $recordId);
+        $survivor = $this->seedLine(self::TENANT_A, $this->seedRecord(self::TENANT_A, 'active'));
+
+        $response = $this->handler->delete(
+            $this->request(self::MANAGER_A, self::TENANT_A),
+            ['type' => 'acme:record', 'id' => (string) $recordId]
+        );
+
+        self::assertSame(200, $response->getStatusCode(), $response->getBody());
+        $remaining = $this->pdo->query('SELECT id FROM acme_lines');
+        self::assertNotFalse($remaining);
+        self::assertSame(
+            [(string) $survivor],
+            array_map(static fn (mixed $id): string => (string) $id, $remaining->fetchAll(PDO::FETCH_COLUMN)),
+            'The deleted record\'s line is gone and the other record\'s line is untouched.'
+        );
+    }
 
     public function testAPolicyRefusalIsPublishedWithItsReasonAndAnEmptyBlockerList(): void
     {
@@ -521,6 +597,7 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
         $tables->register('Acme', [
             'acme_records' => TableOwnershipRegistry::SCOPE_TENANT,
             'acme_entries' => TableOwnershipRegistry::SCOPE_TENANT,
+            'acme_lines' => TableOwnershipRegistry::SCOPE_TENANT,
         ]);
 
         $registry = new DataTypeRegistry($tables);
@@ -542,6 +619,11 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
                     'column' => 'record_id',
                     'label' => 'recorded entries',
                     'ignore_when' => ['status' => ['trashed', 'void']],
+                ]],
+                'cascade_delete' => [[
+                    'table' => 'acme_lines',
+                    'column' => 'record_id',
+                    'label' => 'line items',
                 ]],
                 'permissions' => $permissions ?? [
                     'read' => 'acme:read',
@@ -598,6 +680,24 @@ final class DataTypesApiHandlerRealEngineTest extends TestCase
                 status VARCHAR(50) NOT NULL DEFAULT \'active\'
             )
         ');
+        // The composition half: rows that are PART of a record and die with it.
+        // Shaped exactly like the table above, deliberately — nothing but the
+        // declaration says which of the two a plugin meant.
+        $this->pdo->exec('
+            CREATE TABLE acme_lines (
+                id SERIAL PRIMARY KEY,
+                tenant_id INTEGER NOT NULL,
+                record_id INTEGER NOT NULL
+            )
+        ');
+    }
+
+    private function seedLine(int $tenantId, int $recordId): int
+    {
+        $this->pdo->prepare('INSERT INTO acme_lines (tenant_id, record_id) VALUES (?, ?)')
+            ->execute([$tenantId, $recordId]);
+
+        return (int) $this->pdo->lastInsertId();
     }
 
     private function grant(int $roleId, string $permission): void
