@@ -235,9 +235,10 @@ final class SchemaFromMigrations
     // database, so it is O(schema size) rather than O(migrations) and is exact
     // by construction — the clone IS the migrated schema, not a reconstruction
     // of it.  The template is built once per Postgres server and keyed on a
-    // fingerprint of the migration files, so it survives across PHPUnit
-    // processes (every CI shard after the first pays nothing) and rebuilds
-    // itself automatically the moment a migration changes.
+    // fingerprint of everything the schema depends on — the migration files AND
+    // the environment they read — so it survives across PHPUnit processes
+    // (every CI shard after the first pays nothing) and rebuilds itself
+    // automatically the moment either input changes.
 
     /** Prefix for the cached, migration-fingerprinted template databases. */
     private const PG_TEMPLATE_PREFIX = 'whity_phpunit_tpl_';
