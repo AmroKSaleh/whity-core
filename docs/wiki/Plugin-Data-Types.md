@@ -299,6 +299,51 @@ by being declared.
   records what went with it (`metadata.cascaded`), which is the only place that
   count survives the write.
 
+### CI catches the edge you forgot to declare
+
+Both lists are only as good as your memory of writing them. `blocks_delete` and
+`cascade_delete` are opposite answers to what happens to a record's children —
+but an edge in **neither** list is worse than either: core will not refuse the
+delete and will not clean up after it, so the rows are simply left pointing at
+an id that no longer resolves, in a state no screen lists and no guard protects.
+The delete answers `200`.
+
+`scripts/ci-undeclared-reference-guard.php` fails the build on exactly that
+case:
+
+> flag a column named `<something>_id` when it points at a table that actually
+> exists, carries **no** `FOREIGN KEY`, and appears in **neither**
+> `blocks_delete` nor `cascade_delete`.
+
+Run it over your own plugin the same way you run the tenant conformance kit:
+
+```
+php scripts/ci-undeclared-reference-guard.php path/to/YourPlugin
+```
+
+**It does not ask you to add foreign keys.** No FKs between plugin tables is the
+convention here — it is why these lists exist at all — and a schema with none at
+all passes completely, provided its relationships are declared. A column that
+names no known table (`stripe_customer_id`, `external_ref_id`) is not treated as
+a reference. `tenant_id` is never flagged: that is a different invariant, with
+[its own two linters](./TENANT_ISOLATION.md).
+
+Fix a finding in whichever way is **true** — `blocks_delete` if the rows must
+outlive the parent, `cascade_delete` if they are part of it, a `FOREIGN KEY` if
+the engine should enforce it. If it genuinely is not a reference, annotate the
+column inside the `CREATE TABLE`:
+
+```sql
+CREATE TABLE acme_import_staging (
+    -- @reference-lint-ignore: raw import rows; ids are unresolved until the importer runs
+    acme_record_id INTEGER,
+    ...
+)
+```
+
+The reason is **required** — a bare tag silences nothing. Use
+`-- @reference-lint-ignore-table: <reason>` to exempt a whole table.
+
 ## The published entry round-trips your declaration
 
 `GET /api/data-types` echoes back **every field you declared**, as the host

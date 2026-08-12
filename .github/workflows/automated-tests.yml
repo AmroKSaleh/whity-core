@@ -358,6 +358,17 @@ jobs:
       - name: Plugin tenant-isolation conformance (HelloWorld)
         run: php scripts/ci-plugin-tenant-conformance.php
 
+      # Undeclared-reference guard: fail CI on a relationship core CANNOT SEE —
+      # an `*_id` column pointing at a real table that carries NEITHER a foreign
+      # key NOR a `blocks_delete`/`cascade_delete` declaration. With no foreign
+      # keys between plugin tables (the convention here) nothing stops a delete
+      # orphaning a record's children, and an undeclared edge is precisely the
+      # case where core neither refuses the delete nor cleans up after it.
+      # It deliberately does NOT flag "an *_id column with no foreign key" —
+      # that would fire on the intended design of nearly every plugin table.
+      - name: Undeclared-reference guard (in-tree plugins)
+        run: php scripts/ci-undeclared-reference-guard.php
+
   # Migrations / seed / idempotency and the Security suite against a real
   # PostgreSQL engine. Measured 3 s of migrate+seed+re-migrate and 33 s of
   # Security — the whole job is well under two minutes, so it no longer has any

@@ -189,6 +189,9 @@ job_unit() {
 
   log "Plugin tenant-isolation conformance (HelloWorld)"
   run_in_ci php scripts/ci-plugin-tenant-conformance.php
+
+  log "Undeclared-reference guard (in-tree plugins)"
+  run_in_ci php scripts/ci-undeclared-reference-guard.php
 }
 
 job_phpstan() {
