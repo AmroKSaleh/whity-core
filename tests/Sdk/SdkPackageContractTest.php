@@ -167,9 +167,16 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.25.0',
+            '1.26.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.25 adds the portable writes: Sql\Upsert, whose tenantScoped() '
+            'SDK 1.26 adds the undeclared-reference linter (Schema\UndeclaredReferenceLinter '
+            . 'and Schema\ReferenceDeclarations): it flags an *_id column that points at a '
+            . 'table that really exists, carries NO foreign key, and appears in NEITHER '
+            . 'blocks_delete NOR cascade_delete — a relationship core cannot see, which is '
+            . 'the orphaning bug. It deliberately does NOT flag an *_id column merely for '
+            . 'lacking a foreign key: no FKs between plugin tables is the convention here, '
+            . 'and a rule that fires on the intended design is muted within a day; '
+            . 'SDK 1.25 adds the portable writes: Sql\Upsert, whose tenantScoped() '
             . 'takes the tenant id as a required separate argument and prepends it to '
             . 'the conflict target, so an ON CONFLICT (client_uuid) that should have '
             . 'been ON CONFLICT (tenant_id, client_uuid) — cross-tenant data loss '
@@ -661,6 +668,39 @@ final class SdkPackageContractTest extends TestCase
                 'tableExists',
             ],
             $methods
+        );
+    }
+
+    /**
+     * SDK 1.26: the undeclared-reference linter. It belongs in the SDK for the
+     * same reason the tenant conformance kit does — an out-of-repo plugin has
+     * to be able to run it in its own CI with nothing but `whity/plugin-sdk`.
+     */
+    public function testUndeclaredReferenceLinterLivesInTheSdk(): void
+    {
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Schema\UndeclaredReferenceLinter::class),
+            'The undeclared-reference linter must live in the SDK'
+        );
+        $this->assertTrue(
+            class_exists(\Whity\Sdk\Schema\ReferenceDeclarations::class),
+            'The declared-reference set must live in the SDK'
+        );
+
+        // Both halves of the reference graph are read. `blocks_delete` and
+        // `cascade_delete` are opposite answers to what happens to a record's
+        // children, but identical answers to "does core know this edge exists?"
+        // — and an edge in neither list is the bug.
+        $source = (string) file_get_contents(self::SDK_DIR . '/src/Schema/ReferenceDeclarations.php');
+        $this->assertStringContainsString("'blocks_delete'", $source);
+        $this->assertStringContainsString("'cascade_delete'", $source);
+
+        // The escape hatch demands a reason. A tag that silences a finding
+        // without recording why is a muted alarm, which is how a linter stops
+        // being worth running.
+        $this->assertSame(
+            '@reference-lint-ignore',
+            \Whity\Sdk\Schema\UndeclaredReferenceLinter::IGNORE_TAG
         );
     }
 

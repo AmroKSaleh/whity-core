@@ -1020,7 +1020,14 @@ guidance see [MCP-Server.md](./MCP-Server.md).
 - [ ] Permissions use `resource:action` colon notation.
 - [ ] Hooks subscribe only to events the core actually dispatches
       (e.g. `user.creating`) and return the payload.
-- [ ] Migrations are idempotent and tenant-scoped.
+- [ ] Migrations are idempotent and tenant-scoped. Adding a column to a table
+      you already shipped uses `MigrationSchema::addColumnIfMissing()`, not a
+      hand-written driver branch (Step 5).
+- [ ] Every reference is either enforced by a `FOREIGN KEY` or declared in the
+      owning data type's `blocks_delete` / `cascade_delete` —
+      `php scripts/ci-undeclared-reference-guard.php path/to/YourPlugin` is
+      clean. (This does **not** ask you to add foreign keys; it asks you not to
+      have relationships core cannot see.)
 - [ ] A test under `tests/` exercises the plugin; full suite + PHPStan are green.
 - [ ] (Optional) Frontend feature descriptors validate: own permission, own
       registered GET `basePath`, matching route permission (Step 8).

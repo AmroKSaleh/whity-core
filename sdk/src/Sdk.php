@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.25).
+ * SDK identity (v1.26).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -173,13 +173,34 @@ namespace Whity\Sdk;
  * plugin that needs uniquely numbered records now declares nothing, migrates
  * nothing and writes no SQL; it asks the host for a number, and the host
  * allocates it in one statement with no read-then-write window for two clients
- * to both observe. Gaps are possible and documented; duplicates are not).
+ * to both observe. Gaps are possible and documented; duplicates are not) ->
+ * 1.26 (UNDECLARED-REFERENCE LINTING:
+ * {@see \Whity\Sdk\Schema\UndeclaredReferenceLinter} and
+ * {@see \Whity\Sdk\Schema\ReferenceDeclarations}. With no foreign keys between
+ * plugin tables — the convention here, and the reason `blocks_delete` /
+ * `cascade_delete` are declared as data at all — nothing at the database level
+ * stops a delete orphaning a record's children. An adopter's schema had zero
+ * foreign keys and deleting a parent silently left its children pointing at an
+ * id that no longer resolved; the delete answered 200.
+ * The linter flags a `<something>_id` column that points at a table that really
+ * exists, carries NO foreign key, AND appears in NEITHER declaration list —
+ * "you have a relationship core cannot see". It deliberately does NOT flag an
+ * `*_id` column merely for lacking a foreign key: that rule fires on the
+ * intended design of nearly every plugin table, is muted within a day, and
+ * takes the credibility of the tenant linters with it. A schema with zero
+ * foreign keys passes completely, provided its relationships are declared.
+ * `tenant_id` is never flagged — that is a different invariant with its own two
+ * linters — and a column naming no known table is not treated as a reference at
+ * all. The escape hatch mirrors `@tenant-guard-ignore`:
+ * `-- @reference-lint-ignore: <reason>` on the column, with the REASON
+ * required, because a decision nobody wrote down is indistinguishable from a
+ * muted alarm).
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.25.0';
+    public const VERSION = '1.26.0';
 
     /**
      * Static identity only — never instantiated.
