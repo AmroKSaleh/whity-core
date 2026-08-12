@@ -772,13 +772,13 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         $this->pdo->prepare(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                  two_factor_backup_codes_version, token_epoch, created_at, updated_at)
-             VALUES (?, 'x', 0, 0, 0, NOW(), NOW())"
+             VALUES (?, 'x', false, 0, 0, NOW(), NOW())"
         )->execute([explode('@', $email)[0]]);
         $profileId = (int) $this->pdo->lastInsertId();
 
         $this->pdo->prepare(
             'INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (?, ?, 1, 1, NOW())'
+             VALUES (?, ?, true, true, NOW())'
         )->execute([$profileId, $email]);
 
         $this->pdo->prepare(
@@ -821,6 +821,12 @@ final class ResourceRoleGrantRealEngineTest extends TestCase
         $pdo->exec("INSERT OR IGNORE INTO tenants (id, name) VALUES (1, 'tenant-a'), (2, 'tenant-b')");
         $pdo->exec("INSERT OR IGNORE INTO roles (id, name, created_at) VALUES
             (3, 'editor', NOW()), (4, 'viewer', NOW()), (5, 'approver', NOW())");
+
+        // Those roles were seeded at EXPLICIT ids, which PostgreSQL's sequence
+        // does not notice — seedTenantRole() then inserts without an id, is
+        // handed 3 again, and the test dies on roles_pkey having asserted
+        // nothing. SQLite hides this because its counter reads the table.
+        SchemaFromMigrations::syncSequences($pdo);
 
         return $pdo;
     }

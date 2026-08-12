@@ -98,6 +98,56 @@ final class SchemaFromMigrations
         self::runMigrations($pdo, $db);
     }
 
+    /**
+     * Move every auto-increment sequence past the largest id its table holds.
+     *
+     * Call this in a fixture AFTER seeding rows at EXPLICIT ids. SQLite's
+     * `INTEGER PRIMARY KEY AUTOINCREMENT` derives the next value from the table
+     * itself, so an explicit id moves the counter and a later id-less INSERT is
+     * safe. PostgreSQL's `SERIAL` is a SEPARATE sequence that an explicit id
+     * does not touch — so the next id-less INSERT hands back a number the
+     * fixture already used, and the test dies on `duplicate key value violates
+     * unique constraint`, having tested nothing.
+     *
+     * A no-op on SQLite, so a fixture calls it unconditionally.
+     */
+    public static function syncSequences(PDO $pdo): void
+    {
+        if ((string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'pgsql') {
+            return;
+        }
+
+        $stmt = $pdo->query(
+            "SELECT table_name, column_name,
+                    pg_get_serial_sequence(quote_ident(table_name), column_name) AS seq
+             FROM information_schema.columns
+             WHERE table_schema = current_schema()
+               AND column_default LIKE 'nextval(%'"
+        );
+        if ($stmt === false) {
+            return;
+        }
+
+        /** @var list<array{table_name: string, column_name: string, seq: ?string}> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $seq = $row['seq'] ?? null;
+            if (!is_string($seq) || $seq === '') {
+                continue;
+            }
+
+            $table  = '"' . str_replace('"', '""', $row['table_name']) . '"';
+            $column = '"' . str_replace('"', '""', $row['column_name']) . '"';
+            $max    = "COALESCE((SELECT MAX({$column}) FROM {$table}), 0)";
+
+            // Third argument false when the table is empty so the sequence still
+            // hands out 1 next; true otherwise so it hands out MAX + 1.
+            $pdo->exec(
+                'SELECT setval(' . $pdo->quote($seq) . ', GREATEST(' . $max . ', 1), ' . $max . ' > 0)'
+            );
+        }
+    }
+
     // ─── PostgreSQL real-engine path ─────────────────────────────────────────
 
     /**
@@ -220,8 +270,17 @@ final class SchemaFromMigrations
     /** Set once the template path is known to be unusable, to stop retrying it. */
     private static bool $pgTemplateUnavailable = false;
 
-    /** Resolved template database name for this process (null until first build). */
-    private static ?string $pgTemplate = null;
+    /**
+     * Template databases this process has confirmed ready, keyed by fingerprint.
+     *
+     * A map rather than a single name because the fingerprint covers the
+     * environment the migrations read, and a test may change that mid-run — see
+     * {@see PG_TEMPLATE_ENV_INPUTS}. Each distinct input set gets its own
+     * template, built once, and none of them evicts another.
+     *
+     * @var array<string, string>
+     */
+    private static array $pgTemplates = [];
 
     /**
      * Fast path: hand out a throwaway copy of a cached, fully-migrated template
@@ -253,7 +312,7 @@ final class SchemaFromMigrations
 
         try {
             $admin    = self::pgAdminConnection($adminDsn, $user, $password);
-            $template = self::$pgTemplate ??= self::ensureTemplateDatabase($admin, $dsn, $user, $password);
+            $template = self::ensureTemplateDatabase($admin, $dsn, $user, $password);
 
             // Reclaim the disk of clones whose test has long since finished.
             self::pruneClones($admin);
@@ -292,13 +351,18 @@ final class SchemaFromMigrations
      */
     private static function ensureTemplateDatabase(PDO $admin, string $dsn, string $user, string $password): string
     {
-        $name = self::PG_TEMPLATE_PREFIX . self::migrationsFingerprint();
-
-        if (self::templateIsReady($admin, $name)) {
-            return $name;
+        $fingerprint = self::migrationsFingerprint();
+        if (isset(self::$pgTemplates[$fingerprint])) {
+            return self::$pgTemplates[$fingerprint];
         }
 
-        return self::withTemplateLock($admin, static function () use ($admin, $name, $dsn, $user, $password): string {
+        $name = self::PG_TEMPLATE_PREFIX . $fingerprint;
+
+        if (self::templateIsReady($admin, $name)) {
+            return self::$pgTemplates[$fingerprint] = $name;
+        }
+
+        self::$pgTemplates[$fingerprint] = self::withTemplateLock($admin, static function () use ($admin, $name, $dsn, $user, $password): string {
             // Another process may have built it while we waited for the lock.
             if (self::templateIsReady($admin, $name)) {
                 return $name;
@@ -342,6 +406,8 @@ final class SchemaFromMigrations
 
             return $name;
         });
+
+        return self::$pgTemplates[$fingerprint];
     }
 
     /** Whether the named database exists AND carries the "fully built" marker. */
@@ -357,25 +423,61 @@ final class SchemaFromMigrations
     }
 
     /**
-     * A stable fingerprint of the migration set.
+     * Environment variables the migrations READ, and therefore bake into the
+     * schema they produce.
      *
-     * Contents, not mtimes: a fresh CI checkout rewrites every mtime but must
-     * still hit the template another shard built moments earlier, while a
-     * one-character edit to a migration must miss it.
+     * Migration 010/036 hash INITIAL_SYSTEM_ADMIN_PASSWORD into the seeded
+     * system-admin credential, and at least one test
+     * (SystemTenantProfileSeederRealEngineTest) sets that variable in setUp()
+     * precisely so the schema it gets back carries ITS password and it can then
+     * log in with it. A cache keyed only on the migration files would hand that
+     * test somebody else's hash and turn its 200 into a 401 — so these are part
+     * of the key, and a test that varies one simply gets its own template.
+     *
+     * @var list<string>
+     */
+    private const PG_TEMPLATE_ENV_INPUTS = [
+        'INITIAL_SYSTEM_ADMIN_PASSWORD',
+        'INITIAL_ADMIN_PASSWORD',
+        'INITIAL_USER_PASSWORD',
+        'INITIAL_SUPERUSER_PASSWORD',
+    ];
+
+    /** Content hash of database/migrations, computed once per process. */
+    private static ?string $migrationsHash = null;
+
+    /**
+     * A stable fingerprint of everything the built schema depends on: the
+     * migration set, and the environment the migrations read.
+     *
+     * File CONTENTS, not mtimes: a fresh CI checkout rewrites every mtime but
+     * must still hit the template another shard built moments earlier, while a
+     * one-character edit to a migration must miss it. The file half is hashed
+     * once per process; the environment half is re-read on every call, because
+     * a test may have changed it since the last one.
      */
     private static function migrationsFingerprint(): string
     {
-        $dir   = dirname(__DIR__, 2) . '/database/migrations';
-        $files = glob($dir . '/*.php') ?: [];
-        sort($files);
+        if (self::$migrationsHash === null) {
+            $dir   = dirname(__DIR__, 2) . '/database/migrations';
+            $files = glob($dir . '/*.php') ?: [];
+            sort($files);
 
-        $hash = hash_init('sha256');
-        foreach ($files as $file) {
-            hash_update($hash, basename($file));
-            hash_update_file($hash, $file);
+            $hash = hash_init('sha256');
+            foreach ($files as $file) {
+                hash_update($hash, basename($file));
+                hash_update_file($hash, $file);
+            }
+            self::$migrationsHash = hash_final($hash);
         }
 
-        return substr(hash_final($hash), 0, 16);
+        $env = '';
+        foreach (self::PG_TEMPLATE_ENV_INPUTS as $name) {
+            $value = $_ENV[$name] ?? getenv($name);
+            $env .= $name . '=' . (is_string($value) ? $value : '') . "\n";
+        }
+
+        return substr(hash('sha256', self::$migrationsHash . "\n" . $env), 0, 16);
     }
 
     /**
@@ -459,16 +561,27 @@ final class SchemaFromMigrations
      * Remove templates built from an older migration set.  Without this, every
      * migration added during a day of local work leaves another ~8 MB database
      * behind on the developer's server.
+     *
+     * Every template THIS process is using is kept, not just the one just built:
+     * a run whose fingerprint alternates (a test that varies one of the
+     * environment inputs, then one that does not) would otherwise have each
+     * template evict the other and pay the full migration run every time — the
+     * exact cost this cache exists to remove.
      */
-    private static function dropStaleTemplates(PDO $admin, string $keep): void
+    private static function dropStaleTemplates(PDO $admin, string $justBuilt): void
     {
+        $keep = array_values(self::$pgTemplates);
+        $keep[] = $justBuilt;
+
         try {
             $stmt = $admin->prepare(
-                'SELECT datname FROM pg_database WHERE datname LIKE :prefix AND datname <> :keep'
+                'SELECT datname FROM pg_database WHERE datname LIKE :prefix'
             );
-            $stmt->execute([':prefix' => self::PG_TEMPLATE_PREFIX . '%', ':keep' => $keep]);
-            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $stale) {
-                self::dropDatabase($admin, (string) $stale);
+            $stmt->execute([':prefix' => self::PG_TEMPLATE_PREFIX . '%']);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $candidate) {
+                if (!in_array((string) $candidate, $keep, true)) {
+                    self::dropDatabase($admin, (string) $candidate);
+                }
             }
         } catch (\Throwable) {
             // best-effort housekeeping

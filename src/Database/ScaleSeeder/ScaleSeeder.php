@@ -640,18 +640,27 @@ final class ScaleSeeder
             $profileId = (int) $existing['profile_id'];
             $result->usersReused++;
         } else {
+            // `two_factor_enabled` is BOOLEAN. The literal must be `false`, not
+            // `0`: PostgreSQL types a bare `0` as integer and refuses the insert
+            // outright ("column two_factor_enabled is of type boolean but
+            // expression is of type integer"), while SQLite stores it happily.
+            // The pgsql branch here was written FOR PostgreSQL and still carried
+            // the SQLite literal, because the only engine it was ever executed
+            // on was SQLite — `scale:seed` was broken on every real deployment.
+            // The two integer zeros that follow are the INTEGER
+            // two_factor_backup_codes_version / token_epoch and are correct.
             $profileInsertSql = $driver === 'pgsql'
                 ? "INSERT INTO profiles
                        (display_name, password_hash, two_factor_enabled, two_factor_secret,
                         two_factor_backup_codes_version, token_epoch, created_at, updated_at)
                    VALUES
-                       (:display_name, :password_hash, 0, NULL, 0, 0, NOW(), NOW())
+                       (:display_name, :password_hash, false, NULL, 0, 0, NOW(), NOW())
                    RETURNING id"
                 : "INSERT INTO profiles
                        (display_name, password_hash, two_factor_enabled, two_factor_secret,
                         two_factor_backup_codes_version, token_epoch, created_at, updated_at)
                    VALUES
-                       (:display_name, :password_hash, 0, NULL, 0, 0, NOW(), NOW())";
+                       (:display_name, :password_hash, false, NULL, 0, 0, NOW(), NOW())";
             $profileStmt = $pdo->prepare($profileInsertSql);
             $profileStmt->execute([':display_name' => $displayName, ':password_hash' => $passwordHash]);
 

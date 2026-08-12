@@ -105,14 +105,14 @@ final class AuthHandlerAccountStatusRealEngineTest extends TestCase
         $stmt = $this->pdo->prepare(
             "INSERT INTO profiles (display_name, password_hash, two_factor_enabled,
                  two_factor_backup_codes_version, token_epoch, status, created_at, updated_at)
-             VALUES (?, ?, 0, 0, 0, ?, datetime('now'), datetime('now'))"
+             VALUES (?, ?, false, 0, 0, ?, datetime('now'), datetime('now'))"
         );
         $stmt->execute([explode('@', $email)[0], $hash, $status]);
         $profileId = (int) $this->pdo->lastInsertId();
 
         $this->pdo->prepare(
             "INSERT INTO profile_emails (profile_id, email, verified, is_primary, created_at)
-             VALUES (?, ?, 1, 1, datetime('now'))"
+             VALUES (?, ?, true, true, datetime('now'))"
         )->execute([$profileId, $email]);
 
         $roleStmt = $this->pdo->query("SELECT id FROM roles WHERE name = 'user'");

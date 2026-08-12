@@ -237,10 +237,22 @@ contains. The `rowCount()` one flips an emptiness check from "always empty" to
 | Column created as `"tenantId"`, read as `tenantId` | resolves | `column "tenantid" does not exist` (unquoted folds to lower case) |
 | `INSERT` of 16 chars into `VARCHAR(8)` | accepted | `value too long for type character varying(8)` |
 | Orphan row for a declared `REFERENCES` | **accepted** (FKs off unless `PRAGMA foreign_keys = ON`) | `foreign key violation` |
+| Insert an explicit `id`, then insert without one | next id is `max(id) + 1` | `duplicate key value violates unique constraint` |
 
 The foreign-key one is worth re-reading: a SQLite test can insert data that
 production would reject outright, and the fixture it builds is one production
 could never contain.
+
+The last row bites any fixture that seeds rows at fixed ids. SQLite's
+`INTEGER PRIMARY KEY AUTOINCREMENT` derives the next value from the table, so an
+explicit id moves the counter. PostgreSQL's `SERIAL` is a *separate* sequence
+that an explicit id does not touch — so the next `INSERT` without an id reuses a
+number already taken. Either seed everything explicitly, or bump the sequence
+after seeding:
+
+```sql
+SELECT setval('roles_id_seq', (SELECT MAX(id) FROM roles));
+```
 
 ### Transactions
 
