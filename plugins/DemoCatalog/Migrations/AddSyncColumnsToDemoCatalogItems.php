@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace DemoCatalog\Migrations;
 
 use Whity\Sdk\MigrationInterface;
+use Whity\Sdk\Schema\MigrationSchema;
 
 /**
  * AddSyncColumnsToDemoCatalogItems (WC-desktop-sync).
@@ -32,12 +33,22 @@ use Whity\Sdk\MigrationInterface;
  * write transaction. A fully rigorous log would use commit-ordered capture — out
  * of scope for this pilot.
  *
- * Idempotent + SQLite/Postgres-safe: each ADD COLUMN is guarded by a column-exists
- * check (so re-runs are no-ops), defaults are constants (valid for SQLite ALTER),
- * and `client_uuid` is backfilled per-row in PHP before its unique index.
+ * Idempotent + SQLite/Postgres-safe: each column is DECLARED through
+ * {@see MigrationSchema::addColumnIfMissing()} rather than guarded by a
+ * hand-written dialect branch (so re-runs are no-ops on either engine),
+ * defaults are constants (valid for SQLite ALTER), and `client_uuid` is
+ * backfilled per-row in PHP before its unique index.
+ *
+ * This migration used to carry its own private `columnExists()` — the
+ * `information_schema` / `PRAGMA table_info` branch every plugin author ends up
+ * writing. Its PostgreSQL query filtered on `table_name` alone with no schema
+ * predicate, so it would have answered for a same-named table in ANY schema.
+ * The SDK helper constrains the lookup to the connection's own search path.
  */
 final class AddSyncColumnsToDemoCatalogItems implements MigrationInterface
 {
+    use MigrationSchema;
+
     /** @var array<string, string> column => SQL definition (constant defaults only). */
     private const COLUMNS = [
         'version'     => 'INTEGER NOT NULL DEFAULT 1',
@@ -50,9 +61,7 @@ final class AddSyncColumnsToDemoCatalogItems implements MigrationInterface
     public function up(\PDO $pdo): void
     {
         foreach (self::COLUMNS as $column => $definition) {
-            if (!$this->columnExists($pdo, $column)) {
-                $pdo->exec("ALTER TABLE demo_catalog_items ADD COLUMN {$column} {$definition}");
-            }
+            $this->addColumnIfMissing($pdo, 'demo_catalog_items', $column, $definition);
         }
 
         // Backfill a stable uuid for every pre-existing row before the unique index.
@@ -90,35 +99,11 @@ final class AddSyncColumnsToDemoCatalogItems implements MigrationInterface
         $pdo->exec('DROP TABLE IF EXISTS demo_catalog_change_seq');
         $pdo->exec('DROP INDEX IF EXISTS idx_demo_catalog_items_tenant_uuid');
         $pdo->exec('DROP INDEX IF EXISTS idx_demo_catalog_items_tenant_seq');
-        // Postgres and SQLite >= 3.35 support DROP COLUMN.
+        // Postgres has DROP COLUMN IF EXISTS; SQLite >= 3.35 has DROP COLUMN but
+        // no IF EXISTS for it. The helper closes that gap.
         foreach (array_keys(self::COLUMNS) as $column) {
-            if ($this->columnExists($pdo, $column)) {
-                $pdo->exec("ALTER TABLE demo_catalog_items DROP COLUMN {$column}");
-            }
+            $this->dropColumnIfExists($pdo, 'demo_catalog_items', $column);
         }
-    }
-
-    private function columnExists(\PDO $pdo, string $column): bool
-    {
-        $driver = (string) $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
-        if ($driver === 'sqlite') {
-            $infoStmt = $pdo->query('PRAGMA table_info(demo_catalog_items)');
-            $rows = $infoStmt === false ? [] : $infoStmt->fetchAll(\PDO::FETCH_ASSOC);
-            foreach ($rows as $row) {
-                if (strcasecmp((string) ($row['name'] ?? ''), $column) === 0) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        $stmt = $pdo->prepare(
-            "SELECT 1 FROM information_schema.columns
-             WHERE table_name = 'demo_catalog_items' AND column_name = :column"
-        );
-        $stmt->execute([':column' => $column]);
-
-        return $stmt->fetchColumn() !== false;
     }
 
     /** RFC-4122 v4 UUID (no ext dependency). */
