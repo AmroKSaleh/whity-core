@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -20,6 +20,7 @@ import {
 } from '@amroksaleh/ui/select';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconPlus, IconRefresh } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { EditableTranslationCell } from './editable-cell';
 import { AddKeyModal } from './add-key-modal';
 import { errorMessage } from '../languages/shared';
@@ -31,6 +32,14 @@ import type { TranslationAdminRow } from './types';
  * depends on the caller: the system tenant (id 0) edits only the
  * system-default column, a regular tenant edits only its own tenant-override
  * column (WC-583, mirroring the base-roles / global-settings asymmetry).
+ *
+ * This screen is also the WORKFLOW for everything the extraction pipeline
+ * produces. `whity-cli i18n:sync` seeds English and nothing else — deliberately,
+ * because a machine-translated or English-copied row is indistinguishable from a
+ * finished one — so every other language arrives here as a gap, and the person
+ * who closes it is a translator, not an engineer. Hence the coverage panel:
+ * before it existed, a list of rows could only show work already DONE, and a
+ * language looked most complete exactly when nobody had started it.
  */
 const SYSTEM_TENANT_ID = 0;
 const DEFAULT_DOMAIN = 'common';
@@ -39,18 +48,27 @@ export default function TranslationsPage() {
   const { user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
+  const t = useTranslation('admin');
 
   const canManage = hasPermission(TRANSLATIONS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
 
   const [languageCode, setLanguageCode] = useState('en');
   const [domain, setDomain] = useState(DEFAULT_DOMAIN);
-  const [appliedFilter, setAppliedFilter] = useState({ languageCode: 'en', domain: DEFAULT_DOMAIN });
+  const [untranslatedOnly, setUntranslatedOnly] = useState(false);
+  const [appliedFilter, setAppliedFilter] = useState({
+    languageCode: 'en',
+    domain: DEFAULT_DOMAIN,
+    untranslatedOnly: false,
+  });
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-  const { data: languageOptions } = useFetch(async () => {
-    const { data: body } = await api.GET('/api/v1/languages');
-    return body?.languages ?? [];
+  const { data: coverage, refetch: refetchCoverage } = useFetch(async () => {
+    const { data: body, error } = await api.GET('/api/v1/translations/coverage');
+    if (body === undefined) {
+      throw new Error(errorMessage(error, t('translations.coverage.error', 'Failed to load translation coverage')));
+    }
+    return body.data;
   }, []);
 
   const {
@@ -60,10 +78,16 @@ export default function TranslationsPage() {
     refetch,
   } = useFetch(async () => {
     const { data: body, error } = await api.GET('/api/v1/translations', {
-      params: { query: { language_code: appliedFilter.languageCode, domain: appliedFilter.domain } },
+      params: {
+        query: {
+          language_code: appliedFilter.languageCode,
+          domain: appliedFilter.domain,
+          ...(appliedFilter.untranslatedOnly ? { untranslated: '1' } : {}),
+        },
+      },
     });
     if (body === undefined) {
-      throw new Error(errorMessage(error, 'Failed to load translations'));
+      throw new Error(errorMessage(error, t('translations.error.load', 'Failed to load translations')));
     }
     return body.data;
   }, [appliedFilter]);
@@ -74,12 +98,32 @@ export default function TranslationsPage() {
     }
   }, [error, addToast]);
 
-  const handleLoad = () => {
-    if (languageCode.trim() === '' || domain.trim() === '') {
-      addToast('Choose a language and enter a domain first.', 'error');
+  const languages = useMemo(() => coverage?.languages ?? [], [coverage]);
+  const selectedCoverage = useMemo(
+    () => languages.find((language) => language.language_code === languageCode),
+    [languages, languageCode]
+  );
+  // Shown only once we KNOW the selected language is not the source language —
+  // there is nothing to translate English from, and a column of em-dashes while
+  // coverage is still loading is worse than no column.
+  const showSourceColumn = coverage != null && languageCode !== coverage.source_language_code;
+  const columnCount = showSourceColumn ? 4 : 3;
+
+  const handleLoad = (nextDomain = domain, nextUntranslatedOnly = untranslatedOnly) => {
+    if (languageCode.trim() === '' || nextDomain.trim() === '') {
+      addToast(
+        t('translations.filter.required', 'Choose a language and enter a domain first.'),
+        'error'
+      );
       return;
     }
-    setAppliedFilter({ languageCode, domain: domain.trim() });
+    setDomain(nextDomain);
+    setUntranslatedOnly(nextUntranslatedOnly);
+    setAppliedFilter({
+      languageCode,
+      domain: nextDomain.trim(),
+      untranslatedOnly: nextUntranslatedOnly,
+    });
   };
 
   const handleSaveCell = useCallback(
@@ -98,12 +142,13 @@ export default function TranslationsPage() {
             },
           });
       if (error) {
-        throw new Error(errorMessage(error, 'Failed to save translation'));
+        throw new Error(errorMessage(error, t('translations.error.save', 'Failed to save translation')));
       }
-      addToast('Translation saved.', 'success');
+      addToast(t('translations.saved', 'Translation saved.'), 'success');
       refetch();
+      refetchCoverage();
     },
-    [appliedFilter, addToast, refetch]
+    [appliedFilter, addToast, refetch, refetchCoverage, t]
   );
 
   const handleDelete = useCallback(
@@ -112,13 +157,17 @@ export default function TranslationsPage() {
         params: { path: { id } },
       });
       if (error) {
-        addToast(errorMessage(error, `Failed to delete the ${label}`), 'error');
+        addToast(
+          errorMessage(error, t('translations.delete.failed', 'Failed to delete the {label}', { label })),
+          'error'
+        );
         return;
       }
-      addToast(`${label} deleted.`, 'success');
+      addToast(t('translations.deleted', '{label} deleted.', { label }), 'success');
       refetch();
+      refetchCoverage();
     },
-    [addToast, refetch]
+    [addToast, refetch, refetchCoverage, t]
   );
 
   if (isCapabilitiesLoading) {
@@ -132,15 +181,14 @@ export default function TranslationsPage() {
   if (!canManage) {
     return (
       <AccessDenied
-        description={
-          <>
-            You do not have the required permission (<code>translations:manage</code>) to view
-            Translations.
-          </>
-        }
+        description={t(
+          'translations.accessDenied',
+          'You do not have the required permission ({permission}) to view Translations.',
+          { permission: TRANSLATIONS_MANAGE }
+        )}
         action={
           <Button onClick={() => window.history.back()} variant="outline">
-            Go Back
+            {t('translations.goBack', 'Go Back')}
           </Button>
         }
       />
@@ -150,48 +198,158 @@ export default function TranslationsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Translations"
+        title={t('translations.title', 'Translations')}
         description={
           isSystemTenant
-            ? 'Edit the system-default translation strings shared by every tenant.'
-            : "Edit your tenant's translation overrides. System defaults are shown alongside for reference."
+            ? t(
+                'translations.description.system',
+                'Edit the system-default translation strings shared by every tenant.'
+              )
+            : t(
+                'translations.description.tenant',
+                "Edit your tenant's translation overrides. System defaults are shown alongside for reference."
+              )
         }
         action={
           <Button onClick={() => setIsAddModalOpen(true)} className="gap-2">
             <IconPlus size={18} />
-            Add Key
+            {t('translations.addKey', 'Add Key')}
           </Button>
         }
       />
 
+      <section className="space-y-3 rounded-lg border border-border p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">
+            {t('translations.coverage.title', 'Translation coverage')}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'translations.coverage.hint',
+              'English comes from the code itself. Every other language is filled in here.'
+            )}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {languages.map((language) => {
+            const isSource = language.language_code === coverage?.source_language_code;
+            return (
+              <button
+                key={language.language_code}
+                type="button"
+                onClick={() => setLanguageCode(language.language_code)}
+                className={`rounded-md border px-3 py-2 text-start text-sm transition-colors ${
+                  language.language_code === languageCode
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:bg-muted/40'
+                }`}
+              >
+                <span className="font-medium">
+                  {language.name} ({language.language_code})
+                </span>
+                <span className="ms-2 text-xs text-muted-foreground">
+                  {t('translations.coverage.summary', '{translated} of {total} translated', {
+                    translated: language.translated,
+                    total: language.total,
+                  })}
+                </span>
+                {isSource ? (
+                  <Badge variant="secondary" className="ms-2 text-[10px]">
+                    {t('translations.coverage.sourceLanguage', 'Source language')}
+                  </Badge>
+                ) : language.missing > 0 ? (
+                  <Badge variant="destructive" className="ms-2 text-[10px]">
+                    {t('translations.coverage.missing', '{count} missing', { count: language.missing })}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="ms-2 text-[10px]">
+                    {t('translations.coverage.complete', 'Complete')}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {selectedCoverage && selectedCoverage.domains.length > 0 && (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {selectedCoverage.domains.map((domainCoverage) => (
+              <li key={domainCoverage.domain}>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 p-2.5 text-start text-sm hover:bg-muted/40"
+                  onClick={() => handleLoad(domainCoverage.domain, domainCoverage.missing > 0)}
+                >
+                  <span className="font-mono text-xs">{domainCoverage.domain}</span>
+                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {t('translations.coverage.summary', '{translated} of {total} translated', {
+                      translated: domainCoverage.translated,
+                      total: domainCoverage.total,
+                    })}
+                    {domainCoverage.missing > 0 && (
+                      <Badge variant="destructive" className="text-[10px]">
+                        {t('translations.coverage.missing', '{count} missing', {
+                          count: domainCoverage.missing,
+                        })}
+                      </Badge>
+                    )}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/20 p-4">
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">Language</label>
+          <label className="text-sm font-medium text-foreground">
+            {t('translations.filter.language', 'Language')}
+          </label>
           <Select value={languageCode} onValueChange={setLanguageCode}>
             <SelectTrigger className="w-44">
-              <SelectValue placeholder="Select a language" />
+              <SelectValue placeholder={t('translations.filter.languagePlaceholder', 'Select a language')} />
             </SelectTrigger>
             <SelectContent>
-              {(languageOptions ?? []).map((lang) => (
-                <SelectItem key={lang.code} value={lang.code}>
-                  {lang.name} ({lang.code})
+              {languages.map((language) => (
+                <SelectItem key={language.language_code} value={language.language_code}>
+                  {language.name} ({language.language_code})
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm font-medium text-foreground">Domain</label>
+          <label className="text-sm font-medium text-foreground" htmlFor="translation-domain">
+            {t('translations.filter.domain', 'Domain')}
+          </label>
           <Input
+            id="translation-domain"
+            list="translation-domains"
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
-            placeholder="e.g. common"
+            placeholder={t('translations.filter.domainPlaceholder', 'e.g. common')}
             className="w-48"
           />
+          <datalist id="translation-domains">
+            {(selectedCoverage?.domains ?? []).map((domainCoverage) => (
+              <option key={domainCoverage.domain} value={domainCoverage.domain} />
+            ))}
+          </datalist>
         </div>
-        <Button onClick={handleLoad} variant="outline" className="gap-2">
+        <label className="flex items-center gap-2 pb-2 text-sm font-medium text-foreground">
+          <input
+            type="checkbox"
+            className="size-4"
+            checked={untranslatedOnly}
+            onChange={(e) => setUntranslatedOnly(e.target.checked)}
+          />
+          {t('translations.filter.untranslatedOnly', 'Only untranslated')}
+        </label>
+        <Button onClick={() => handleLoad()} variant="outline" className="gap-2">
           <IconRefresh size={16} />
-          Load
+          {t('translations.filter.load', 'Load')}
         </Button>
       </div>
 
@@ -199,20 +357,25 @@ export default function TranslationsPage() {
         <table className="w-full text-sm">
           <thead className="bg-muted/40">
             <tr>
-              <th className="p-3 text-start font-medium">Key</th>
+              <th className="p-3 text-start font-medium">{t('translations.column.key', 'Key')}</th>
+              {showSourceColumn && (
+                <th className="p-3 text-start font-medium">
+                  {t('translations.column.source', 'English source')}
+                </th>
+              )}
               <th className="p-3 text-start font-medium">
-                System default
+                {t('translations.column.systemDefault', 'System default')}
                 {isSystemTenant && (
                   <Badge variant="secondary" className="ms-2 text-[10px]">
-                    editable
+                    {t('translations.badge.editable', 'editable')}
                   </Badge>
                 )}
               </th>
               <th className="p-3 text-start font-medium">
-                Tenant override
+                {t('translations.column.tenantOverride', 'Tenant override')}
                 {!isSystemTenant && (
                   <Badge variant="secondary" className="ms-2 text-[10px]">
-                    editable
+                    {t('translations.badge.editable', 'editable')}
                   </Badge>
                 )}
               </th>
@@ -221,30 +384,44 @@ export default function TranslationsPage() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={3} className="p-6 text-center text-muted-foreground">
-                  Loading…
+                <td colSpan={columnCount} className="p-6 text-center text-muted-foreground">
+                  {t('translations.loading', 'Loading…')}
                 </td>
               </tr>
             ) : (rows ?? []).length === 0 ? (
               <tr>
-                <td colSpan={3} className="p-6 text-center text-muted-foreground">
-                  No keys found for this language and domain yet. Use &quot;Add Key&quot; to
-                  create one.
+                <td colSpan={columnCount} className="p-6 text-center text-muted-foreground">
+                  {appliedFilter.untranslatedOnly
+                    ? t(
+                        'translations.empty.untranslated',
+                        'Nothing left untranslated in this domain.'
+                      )
+                    : t(
+                        'translations.empty',
+                        'No keys found for this language and domain yet. Use "Add Key" to create one.'
+                      )}
                 </td>
               </tr>
             ) : (
               (rows ?? []).map((row) => (
                 <tr key={row.key} className="border-t border-border align-top">
                   <td className="p-3 font-mono text-xs">{row.key}</td>
+                  {showSourceColumn && (
+                    <td className="p-3 text-sm text-muted-foreground">{row.source_text ?? '—'}</td>
+                  )}
                   <td className="p-3">
                     <EditableTranslationCell
                       value={row.system_default?.translation ?? null}
                       editable={isSystemTenant}
-                      placeholder="No system default yet"
+                      placeholder={t('translations.cell.noSystemDefault', 'No system default yet')}
                       onSave={(value) => handleSaveCell(row, row.system_default?.id, value)}
                       onDelete={
                         isSystemTenant && row.system_default
-                          ? () => handleDelete(row.system_default!.id, 'system default')
+                          ? () =>
+                              handleDelete(
+                                row.system_default!.id,
+                                t('translations.label.systemDefault', 'system default')
+                              )
                           : undefined
                       }
                     />
@@ -252,17 +429,27 @@ export default function TranslationsPage() {
                   <td className="p-3">
                     {isSystemTenant ? (
                       <span className="text-sm text-muted-foreground">
-                        The system tenant has no per-tenant override layer.
+                        {t(
+                          'translations.systemTenantNoOverride',
+                          'The system tenant has no per-tenant override layer.'
+                        )}
                       </span>
                     ) : (
                       <EditableTranslationCell
                         value={row.tenant_override?.translation ?? null}
                         editable={!isSystemTenant}
-                        placeholder="No override — using the system default"
+                        placeholder={t(
+                          'translations.cell.noOverride',
+                          'No override — using the system default'
+                        )}
                         onSave={(value) => handleSaveCell(row, row.tenant_override?.id, value)}
                         onDelete={
                           row.tenant_override
-                            ? () => handleDelete(row.tenant_override!.id, 'override')
+                            ? () =>
+                                handleDelete(
+                                  row.tenant_override!.id,
+                                  t('translations.label.override', 'override')
+                                )
                             : undefined
                         }
                       />
@@ -283,6 +470,7 @@ export default function TranslationsPage() {
         onSuccess={() => {
           setIsAddModalOpen(false);
           refetch();
+          refetchCoverage();
         }}
       />
     </div>

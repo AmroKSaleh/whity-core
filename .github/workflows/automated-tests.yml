@@ -40,6 +40,7 @@ concurrency:
 #             ├─ postgres-migrations
 #             ├─ postgres-integration (shard 1..5)
 #             ├─ postgres-dialect (shard 1..2)
+#             ├─ i18n-catalogue
 #             ├─ web
 #             └─ render-service
 #
@@ -71,6 +72,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       render_service: ${{ steps.filter.outputs.render_service }}
+      i18n: ${{ steps.filter.outputs.i18n }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -115,6 +117,21 @@ jobs:
               - 'web/lib/documents/**'
               - 'packages/ui/src/documents/**'
               - 'packages/ui/src/math-text.tsx'
+              - '.github/workflows/automated-tests.yml'
+            # The English catalogue is derived from the t() calls in the
+            # frontend, but the guard that checks it is PHP. It therefore
+            # deliberately does NOT ride on either existing filter: `backend`
+            # would skip it on the frontend-only PRs that produce almost all of
+            # the drift, and `frontend` runs a Node job with no PHP. Its own
+            # filter is the only way it fires on every change that can move the
+            # catalogue.
+            i18n:
+              - 'web/**'
+              - 'packages/**'
+              - 'database/i18n/**'
+              - 'src/Core/i18n/**'
+              - 'src/Cli/Commands/I18nCommand.php'
+              - 'scripts/ci-i18n-catalog-drift.php'
               - '.github/workflows/automated-tests.yml'
 
   # The whole PHPUnit suite (the `default` testsuite = every *Test.php under
@@ -368,6 +385,46 @@ jobs:
       # that would fire on the intended design of nearly every plugin table.
       - name: Undeclared-reference guard (in-tree plugins)
         run: php scripts/ci-undeclared-reference-guard.php
+
+  # The English translation catalogue must stay a faithful projection of the
+  # t() calls that produce it. A converted screen whose keys were never
+  # extracted degrades silently and looks successful: the fallback renders, the
+  # key never reaches the translations table, and a translator finishes the
+  # language with that string still in English.
+  #
+  # Its own job, and not a step in `static-analysis`, because the input it reads
+  # is the FRONTEND and the guard is PHP — see the `i18n` path filter above.
+  i18n-catalogue:
+    name: i18n catalogue drift
+    needs: changes
+    if: needs.changes.outputs.i18n == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring
+          coverage: none
+
+      # Same key as static-analysis, so this job normally restores rather than
+      # resolves — the guard needs the autoloader and nothing else.
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: i18n catalogue drift guard
+        run: php scripts/ci-i18n-catalog-drift.php
 
   # Migrations / seed / idempotency and the Security suite against a real
   # PostgreSQL engine. Measured 3 s of migrate+seed+re-migrate and 33 s of

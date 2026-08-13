@@ -166,15 +166,26 @@ final class TranslationsApiHandler
      * GET /api/v1/translations — admin: raw translation rows for a
      * language+domain, for a management UI.
      *
-     * Query params: `language_code` (required), `domain` (required). Unlike
-     * {@see self::getTranslations()} (which returns one merged key => value
-     * map), this returns the system-default and this tenant's override SIDE
-     * BY SIDE per key so the UI can show both distinctly. The system tenant
-     * (id 0) sees only system-default rows — it has no override layer of
-     * its own to show.
+     * Query params: `language_code` (required), `domain` (required),
+     * `untranslated` (optional, `1`/`true`). Unlike {@see self::getTranslations()}
+     * (which returns one merged key => value map), this returns the
+     * system-default and this tenant's override SIDE BY SIDE per key so the UI
+     * can show both distinctly. The system tenant (id 0) sees only
+     * system-default rows — it has no override layer of its own to show.
+     *
+     * KEYS WITH NO ROW IN THIS LANGUAGE ARE INCLUDED. That is the point of the
+     * screen: a key seeded in English and never translated has no Arabic row at
+     * all, so listing only what exists would show a translator an empty table
+     * and call the language finished. The key universe is therefore the union of
+     * this language's rows and the SOURCE language's system defaults, and each
+     * row carries `source_text` — the English a translator is translating FROM —
+     * plus `translated`, whether this language actually resolves to anything.
+     *
+     * `untranslated=1` narrows the list to exactly the work remaining.
      *
      * Response: `{ data: [ { key, system_default: {id, translation}|null,
-     * tenant_override: {id, translation}|null }, ... ] }` (200).
+     * tenant_override: {id, translation}|null, source_text: string|null,
+     * translated: bool }, ... ] }` (200).
      */
     public function adminList(Request $request): Response
     {
@@ -187,6 +198,7 @@ final class TranslationsApiHandler
         $query = self::queryParams($request);
         $languageCode = $query['language_code'] ?? '';
         $domain = $query['domain'] ?? '';
+        $untranslatedOnly = in_array($query['untranslated'] ?? '', ['1', 'true'], true);
 
         if ($languageCode === '' || $domain === '') {
             return Response::error('language_code and domain query parameters are required', 400);
@@ -206,28 +218,164 @@ final class TranslationsApiHandler
                 ? ($this->translationRepository->findAllTenantOverrides($language->id, $tenantId)[$domain] ?? [])
                 : [];
 
-            $keys = array_values(array_unique(array_merge(array_keys($systemDefaults), array_keys($overrides))));
+            // The English a translator works FROM, and the reason a
+            // never-translated key still gets a row.
+            $sourceTexts = [];
+            if ($languageCode !== LanguageRegistry::SOURCE_LANGUAGE) {
+                $sourceLanguage = $this->languageRepository->findByCode(LanguageRegistry::SOURCE_LANGUAGE);
+                if ($sourceLanguage !== null) {
+                    $sourceTexts = $this->translationRepository->findAllSystemDefaults($sourceLanguage->id)[$domain] ?? [];
+                }
+            }
+
+            $keys = array_values(array_unique(array_merge(
+                array_keys($systemDefaults),
+                array_keys($overrides),
+                array_keys($sourceTexts)
+            )));
             sort($keys);
 
             $rows = array_map(
                 /** @return array<string, mixed> */
-                static function (string $key) use ($systemDefaults, $overrides): array {
+                static function (string $key) use ($systemDefaults, $overrides, $sourceTexts): array {
                     $sys = $systemDefaults[$key] ?? null;
                     $ovr = $overrides[$key] ?? null;
+                    $source = $sourceTexts[$key] ?? null;
                     return [
                         'key' => $key,
                         'system_default' => $sys !== null ? ['id' => $sys->id, 'translation' => $sys->translation] : null,
                         'tenant_override' => $ovr !== null ? ['id' => $ovr->id, 'translation' => $ovr->translation] : null,
+                        'source_text' => $source?->translation,
+                        'translated' => $sys !== null || $ovr !== null,
                     ];
                 },
                 $keys
             );
+
+            if ($untranslatedOnly) {
+                $rows = array_filter($rows, static fn (array $row): bool => $row['translated'] === false);
+            }
 
             return Response::json(['data' => array_values($rows)], 200);
         } catch (\Throwable $e) {
             error_log('[TranslationsApiHandler] adminList failed: ' . $e->getMessage());
             return Response::error('Failed to list translations', 500);
         }
+    }
+
+    /**
+     * GET /api/v1/translations/coverage — admin: how much of each language is
+     * actually translated, per domain.
+     *
+     * THE QUESTION THIS ANSWERS is "what still needs translating for language
+     * X", and before it existed nothing could. Missing keys have no rows, so
+     * every list in the system was a list of work already DONE; the work
+     * remaining was invisible, and a language looked complete precisely when
+     * nobody had started it. That matters more now than it did: strings are
+     * extracted from source in bulk and seeded in English only, so the gap is
+     * the normal state of every language except the source, and the person who
+     * closes it is a translator with no access to the code.
+     *
+     * A key counts as TRANSLATED in a language when the caller's scope resolves
+     * it to text — a system default for the system tenant, a system default or
+     * this tenant's own override for anyone else. Totals are the union of that
+     * language's keys and the source language's, so a key that exists only in
+     * Arabic still counts, and a key that exists only in English counts as
+     * missing rather than vanishing.
+     *
+     * No query parameters: it reports every enabled language at once, because
+     * the screen's first question is which language needs attention.
+     *
+     * Response: `{ data: { source_language_code, languages: [ { language_code,
+     * name, total, translated, missing, domains: [ { domain, total, translated,
+     * missing } ] } ] } }` (200).
+     */
+    public function coverage(Request $request): Response
+    {
+        $auth = $this->authorize($request, CorePermissions::TRANSLATIONS_MANAGE);
+        if ($auth instanceof Response) {
+            return $auth;
+        }
+        ['tenantId' => $tenantId] = $auth;
+
+        // The system tenant reads and writes system defaults; everyone else
+        // sees a key as translated when either layer supplies the text.
+        $scopeTenantId = $tenantId === 0 ? null : $tenantId;
+
+        try {
+            $languages = $this->languageRepository->findAll(true);
+
+            $sourceKeys = [];
+            foreach ($languages as $language) {
+                if ($language->code === LanguageRegistry::SOURCE_LANGUAGE) {
+                    $sourceKeys = $this->translationRepository->keysByDomain($language->id, null);
+                    break;
+                }
+            }
+
+            $report = [];
+            foreach ($languages as $language) {
+                $present = $this->translationRepository->keysByDomain($language->id, $scopeTenantId);
+                $report[] = self::coverageForLanguage($language->code, $language->name, $sourceKeys, $present);
+            }
+
+            return Response::json([
+                'data' => [
+                    'source_language_code' => LanguageRegistry::SOURCE_LANGUAGE,
+                    'languages' => $report,
+                ],
+            ], 200);
+        } catch (\Throwable $e) {
+            error_log('[TranslationsApiHandler] coverage failed: ' . $e->getMessage());
+            return Response::error('Failed to compute translation coverage', 500);
+        }
+    }
+
+    /**
+     * Fold one language's key sets into the counts the console renders.
+     *
+     * @param array<string, array<string, true>> $sourceKeys domain => key => true
+     * @param array<string, array<string, true>> $present    domain => key => true
+     * @return array<string, mixed>
+     */
+    private static function coverageForLanguage(
+        string $code,
+        string $name,
+        array $sourceKeys,
+        array $present,
+    ): array {
+        $domains = [];
+        $total = 0;
+        $translated = 0;
+
+        /** @var list<string> $domainNames */
+        $domainNames = array_values(array_unique(array_merge(array_keys($sourceKeys), array_keys($present))));
+        sort($domainNames);
+
+        foreach ($domainNames as $domain) {
+            $universe = ($sourceKeys[$domain] ?? []) + ($present[$domain] ?? []);
+            $domainTotal = count($universe);
+            $domainTranslated = count($present[$domain] ?? []);
+
+            $domains[] = [
+                'domain' => $domain,
+                'total' => $domainTotal,
+                'translated' => $domainTranslated,
+                'missing' => $domainTotal - $domainTranslated,
+            ];
+
+            $total += $domainTotal;
+            $translated += $domainTranslated;
+        }
+
+        return [
+            'language_code' => $code,
+            'name' => $name,
+            'total' => $total,
+            'translated' => $translated,
+            'missing' => $total - $translated,
+            'domains' => $domains,
+        ];
     }
 
     /**

@@ -313,7 +313,117 @@ final class TranslationsApiHandlerTest extends TestCase
         $this->assertSame(403, $response->getStatusCode());
     }
 
+    // ==================== the untranslated gap ====================
+    //
+    // A missing translation has NO ROW, so every listing here could only ever
+    // show work already done — and a language read as complete precisely when
+    // nobody had started it. Since strings are now extracted from source and
+    // seeded in English only, that gap is the normal state of every language
+    // but the source, and these are the tests that make it visible.
+
+    public function testAdminListIncludesAKeyThatHasNoRowInThisLanguageYet(): void
+    {
+        $arabicLanguageId = $this->languageId('ar');
+        $this->translationRepository->create($this->englishLanguageId, 'common', 'greeting', 'Hello', null);
+        $this->translationRepository->create($arabicLanguageId, 'common', 'farewell', 'مع السلامة', null);
+
+        $response = $this->handler->adminList(
+            $this->req(0, 930, 'GET', null, '/api/translations?language_code=ar&domain=common')
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $byKey = array_column(json_decode($response->getBody(), true)['data'], null, 'key');
+
+        $this->assertArrayHasKey('greeting', $byKey, 'a key seeded in English must appear in Arabic as untranslated work');
+        $this->assertNull($byKey['greeting']['system_default']);
+        $this->assertFalse($byKey['greeting']['translated']);
+        $this->assertSame('Hello', $byKey['greeting']['source_text'], 'the translator needs the English they are translating FROM');
+        $this->assertTrue($byKey['farewell']['translated']);
+    }
+
+    public function testAdminListUntranslatedFilterReturnsExactlyTheWorkRemaining(): void
+    {
+        $arabicLanguageId = $this->languageId('ar');
+        $this->translationRepository->create($this->englishLanguageId, 'common', 'greeting', 'Hello', null);
+        $this->translationRepository->create($this->englishLanguageId, 'common', 'farewell', 'Bye', null);
+        $this->translationRepository->create($arabicLanguageId, 'common', 'farewell', 'مع السلامة', null);
+
+        $response = $this->handler->adminList(
+            $this->req(0, 930, 'GET', null, '/api/translations?language_code=ar&domain=common&untranslated=1')
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $rows = json_decode($response->getBody(), true)['data'];
+
+        $this->assertSame(['greeting'], array_column($rows, 'key'));
+    }
+
+    public function testAdminListCountsATenantOverrideAsTranslatedForThatTenant(): void
+    {
+        $arabicLanguageId = $this->languageId('ar');
+        $this->translationRepository->create($this->englishLanguageId, 'common', 'greeting', 'Hello', null);
+        $this->translationRepository->create($arabicLanguageId, 'common', 'greeting', 'مرحبا', 1);
+
+        $response = $this->handler->adminList(
+            $this->req(1, 910, 'GET', null, '/api/translations?language_code=ar&domain=common&untranslated=1')
+        );
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $this->assertSame(
+            [],
+            json_decode($response->getBody(), true)['data'],
+            "a tenant's own override is what its users read, so the key is not outstanding work for it"
+        );
+    }
+
+    public function testCoverageReportsTheGapPerLanguageAndDomain(): void
+    {
+        $arabicLanguageId = $this->languageId('ar');
+        // `auth` is already seeded in BOTH languages by migration 091, so it
+        // contributes nothing to the gap — which is exactly the shape a real
+        // instance has: some domains done, some untouched.
+        $this->translationRepository->create($this->englishLanguageId, 'common', 'greeting', 'Hello', null);
+        $this->translationRepository->create($this->englishLanguageId, 'common', 'farewell', 'Bye', null);
+        $this->translationRepository->create($this->englishLanguageId, 'errors', 'notFound', 'Not found', null);
+        $this->translationRepository->create($arabicLanguageId, 'common', 'greeting', 'مرحبا', null);
+
+        $response = $this->handler->coverage($this->req(0, 930, 'GET', null, '/api/translations/coverage'));
+
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+        $body = json_decode($response->getBody(), true)['data'];
+        $this->assertSame('en', $body['source_language_code']);
+
+        $byLanguage = array_column($body['languages'], null, 'language_code');
+        $this->assertSame(0, $byLanguage['en']['missing'], 'the source language is complete by construction');
+        $this->assertSame($byLanguage['en']['total'], $byLanguage['ar']['total'], 'the universe of keys is the source language, not what Arabic happens to have');
+        $this->assertSame(2, $byLanguage['ar']['missing']);
+
+        $byDomain = array_column($byLanguage['ar']['domains'], null, 'domain');
+        $this->assertSame(2, $byDomain['common']['total']);
+        $this->assertSame(1, $byDomain['common']['translated']);
+        $this->assertSame(1, $byDomain['common']['missing']);
+        $this->assertSame(1, $byDomain['errors']['missing'], 'a domain Arabic has NO rows in must still be reported, or it is invisible');
+        $this->assertSame(0, $byDomain['auth']['missing']);
+    }
+
+    public function testCoverageWithoutPermissionIsForbidden(): void
+    {
+        $response = $this->handler->coverage($this->req(1, 911, 'GET', null, '/api/translations/coverage'));
+
+        $this->assertSame(403, $response->getStatusCode());
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** The id of a seeded language, for fixtures in a language other than English. */
+    private function languageId(string $code): int
+    {
+        $statement = $this->pdo->prepare('SELECT id FROM languages WHERE code = :code');
+        $this->assertNotFalse($statement);
+        $statement->execute([':code' => $code]);
+
+        return (int) $statement->fetchColumn();
+    }
 
     /** Create a fixture row directly via the repository, bypassing the handler. */
     private function seedRow(?int $tenantId, string $key, string $text): int

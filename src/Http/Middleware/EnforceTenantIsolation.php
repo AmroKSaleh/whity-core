@@ -178,10 +178,28 @@ class EnforceTenantIsolation
         // (a pre-login user has no session/tenant); the OIDC state/nonce/PKCE flow
         // is the safeguard, and the callback logs in only an already-linked identity.
         '/api/v1/auth/sso/',
-        // i18n: public translation fetching endpoint. Path includes {language_code}
-        // and {domain} segments, so a prefix check is used. Clients fetch
-        // translations before auth is available (to render UI in correct language).
-        '/api/v1/translations/',
+    ];
+
+    /**
+     * Anchored public path SHAPES — the same discipline as
+     * {@see self::PLUGIN_STORE_PUBLIC_GET_PATTERNS}, for routes whose public
+     * form is parametrised but must not make everything beneath them public.
+     *
+     * @var list<string>
+     */
+    private const PUBLIC_ROUTE_PATTERNS = [
+        // i18n: the public translation BUNDLE, /translations/{language_code}/{domain}.
+        // Clients fetch it before auth exists, to render the interface in the
+        // right language.
+        //
+        // Anchored to exactly two segments, deliberately. This was an open
+        // `/api/v1/translations/` prefix, which made every deeper path public
+        // by default — and the first admin route added under it
+        // (`/translations/coverage`) inherited that silently. It failed closed
+        // (the handler needs a tenant context it never got) rather than open,
+        // but "the next route under this prefix is public unless someone
+        // notices" is not a property worth keeping.
+        '#^/api/v1/translations/[^/]+/[^/]+$#',
     ];
 
     /**
@@ -588,11 +606,12 @@ class EnforceTenantIsolation
     /**
      * Check whether a route is public (no JWT / tenant context required).
      *
-     * Checks both the exact-match list ({@see self::PUBLIC_ROUTES}) and the
-     * prefix list ({@see self::PUBLIC_ROUTE_PREFIXES}). The prefix check enables
-     * public access to parametrised paths (e.g. asset-serving routes whose full
-     * path includes a tenant id and filename segment) without enumerating every
-     * possible combination.
+     * Checks the exact-match list ({@see self::PUBLIC_ROUTES}), the prefix list
+     * ({@see self::PUBLIC_ROUTE_PREFIXES}) and the anchored shape list
+     * ({@see self::PUBLIC_ROUTE_PATTERNS}). Both of the latter exist for
+     * parametrised paths that cannot be enumerated (a tenant id and filename in
+     * an asset URL); prefer the ANCHORED form, since a prefix silently makes
+     * every future route beneath it public too.
      *
      * @param string $path The request path (without query string).
      * @return bool True if the route is public.
@@ -604,6 +623,11 @@ class EnforceTenantIsolation
         }
         foreach (self::PUBLIC_ROUTE_PREFIXES as $prefix) {
             if (str_starts_with($path, $prefix)) {
+                return true;
+            }
+        }
+        foreach (self::PUBLIC_ROUTE_PATTERNS as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
                 return true;
             }
         }

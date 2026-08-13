@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@amroksaleh/ui/button';
 import { Textarea } from '@amroksaleh/ui/textarea';
 import { IconCheck, IconPencil, IconTrash, IconX } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 interface EditableTranslationCellProps {
   /** The current translation text, or null when no row exists for this scope yet. */
@@ -31,6 +32,7 @@ export function EditableTranslationCell({
   onSave,
   onDelete,
 }: EditableTranslationCellProps) {
+  const t = useTranslation('admin');
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
   const [isSaving, setIsSaving] = useState(false);
@@ -58,7 +60,7 @@ export function EditableTranslationCell({
             size="icon-sm"
             variant="ghost"
             disabled={isSaving || draft.trim() === ''}
-            aria-label="Save"
+            aria-label={t('translations.cell.save', 'Save')}
             onClick={() => {
               void (async () => {
                 setIsSaving(true);
@@ -77,7 +79,7 @@ export function EditableTranslationCell({
             type="button"
             size="icon-sm"
             variant="ghost"
-            aria-label="Cancel"
+            aria-label={t('translations.cell.cancel', 'Cancel')}
             onClick={() => {
               setDraft(value ?? '');
               setIsEditing(false);
@@ -100,7 +102,7 @@ export function EditableTranslationCell({
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Edit"
+          aria-label={t('translations.cell.edit', 'Edit')}
           onClick={() => {
             setDraft(value ?? '');
             setIsEditing(true);
@@ -114,7 +116,7 @@ export function EditableTranslationCell({
             size="icon-sm"
             variant="ghost"
             className="text-destructive hover:text-destructive"
-            aria-label="Delete"
+            aria-label={t('translations.cell.delete', 'Delete')}
             disabled={isDeleting}
             onClick={() => {
               void (async () => {

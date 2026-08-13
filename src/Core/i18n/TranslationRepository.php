@@ -132,6 +132,53 @@ final class TranslationRepository implements TranslationRepositoryInterface
     }
 
     /**
+     * Every (domain, key) that HAS text in a language, within one scope.
+     *
+     * This is the question a coverage report asks, and it deliberately fetches
+     * keys rather than rows: "what still needs translating into Arabic" is
+     * answered by subtracting this set for `ar` from the same set for the
+     * source language, and loading every translation string to count them would
+     * be pointless traffic on a table that will hold tens of thousands of rows.
+     *
+     * `$tenantId === null` means system defaults only — the scope the system
+     * tenant edits. A regular tenant sees a key as translated when EITHER a
+     * system default or its own override supplies the text, which is exactly
+     * what its users will read.
+     *
+     * @param int|null $tenantId The caller's tenant, or null for system defaults only.
+     * @return array<string, array<string, true>> domain => key => true
+     */
+    public function keysByDomain(int $languageId, ?int $tenantId): array
+    {
+        if ($tenantId === null) {
+            $stmt = $this->pdo->prepare(
+                'SELECT DISTINCT domain, key FROM translations
+                 WHERE language_id = :language_id AND tenant_id IS NULL'
+            );
+            $stmt->execute([':language_id' => $languageId]);
+        } else {
+            $stmt = $this->pdo->prepare(
+                'SELECT DISTINCT domain, key FROM translations
+                 WHERE language_id = :language_id AND (tenant_id IS NULL OR tenant_id = :tenant_id)'
+            );
+            $stmt->execute([':language_id' => $languageId, ':tenant_id' => $tenantId]);
+        }
+
+        $keys = [];
+        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $keys[(string) $row['domain']][(string) $row['key']] = true;
+        }
+
+        foreach ($keys as $domain => $domainKeys) {
+            ksort($domainKeys);
+            $keys[$domain] = $domainKeys;
+        }
+        ksort($keys);
+
+        return $keys;
+    }
+
+    /**
      * Find a single translation row by its id, regardless of tenant scope.
      *
      * Unscoped by design — this is the admin guard lookup consumed by

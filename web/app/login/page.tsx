@@ -47,8 +47,27 @@ import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
  * never surfaces a raw slug to a user. The map is keyed by the BACKEND's slug
  * and holds our key — the two namespaces stay separate deliberately, so
  * renaming a translation key never has to be coordinated with a backend release.
+ *
+ * The keys below reach `t()` through a variable (`t(entry.key, entry.fallback)`),
+ * which no static scanner can read — so they are declared here, and the
+ * extractor takes the catalogue from this block rather than pretending the scan
+ * saw them. The declaration is what a translator gets, so the two must not
+ * drift; `web/__tests__/login-sso-key-declaration.test.ts` fails if they do.
+ *
+ * @i18n-keys auth
+ *   sso.error.disabled = Single sign-on is currently disabled for this instance.
+ *   sso.error.providerUnavailable = That sign-in provider is unavailable right now. Please try again later.
+ *   sso.error.unknownProvider = That sign-in provider is not available.
+ *   sso.error.emailUnverified = Your email with that provider is not verified. Verify it and try again.
+ *   sso.error.linkConflict = An account with that email already exists. Sign in with your password to link it.
+ *   sso.error.noAccount = No account here matches that identity. Ask an administrator for an invite.
+ *   sso.error.noMembership = Your account has no active workspace yet. Ask an administrator for access.
+ *   sso.error.stateMismatch = Your sign-in session could not be verified. Please try again.
+ *   sso.error.expired = Your sign-in attempt timed out. Please try again.
+ *   sso.error.denied = Sign-in was cancelled.
+ *   sso.error.failed = Sign-in failed. Please try again.
  */
-const SSO_ERROR_KEYS: Record<string, { key: string; fallback: string }> = {
+export const SSO_ERROR_KEYS: Record<string, { key: string; fallback: string }> = {
   sso_disabled: {
     key: 'sso.error.disabled',
     fallback: 'Single sign-on is currently disabled for this instance.',

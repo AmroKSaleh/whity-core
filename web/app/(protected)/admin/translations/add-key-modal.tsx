@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -25,14 +25,24 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { errorMessage } from '../languages/shared';
 
-const addKeySchema = z.object({
-  key: z.string().min(1, 'Key is required'),
-  translation: z.string().min(1, 'Translation is required'),
-});
+/**
+ * Built from `t` rather than declared at module scope: a validation message is
+ * user-facing text like any other, and a schema frozen at import time would
+ * always speak English. The translate function is passed in — the shape the
+ * sign-in screen's `ssoErrorMessage(t, reason)` established.
+ */
+const buildAddKeySchema = (t: TranslateFn) =>
+  z.object({
+    key: z.string().min(1, t('translations.add.keyRequired', 'Key is required')),
+    translation: z
+      .string()
+      .min(1, t('translations.add.translationRequired', 'Translation is required')),
+  });
 
-type AddKeyFormData = z.infer<typeof addKeySchema>;
+type AddKeyFormData = z.infer<ReturnType<typeof buildAddKeySchema>>;
 
 interface AddKeyModalProps {
   isOpen: boolean;
@@ -56,10 +66,12 @@ export function AddKeyModal({
   onSuccess,
 }: AddKeyModalProps) {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const schema = useMemo(() => buildAddKeySchema(t), [t]);
   const form = useForm<AddKeyFormData>({
-    resolver: zodResolver(addKeySchema),
+    resolver: zodResolver(schema),
     defaultValues: { key: '', translation: '' },
   });
 
@@ -75,14 +87,21 @@ export function AddKeyModal({
         },
       });
       if (error) {
-        throw new Error(errorMessage(error, 'Failed to create translation'));
+        throw new Error(
+          errorMessage(error, t('translations.add.error', 'Failed to create translation'))
+        );
       }
 
-      addToast('Translation key added.', 'success');
+      addToast(t('translations.add.success', 'Translation key added.'), 'success');
       form.reset();
       onSuccess();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Failed to create translation', 'error');
+      addToast(
+        err instanceof Error
+          ? err.message
+          : t('translations.add.error', 'Failed to create translation'),
+        'error'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -98,10 +117,17 @@ export function AddKeyModal({
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Translation Key</DialogTitle>
+          <DialogTitle>{t('translations.add.title', 'Add Translation Key')}</DialogTitle>
+          {/* One sentence with two holes, not four concatenated fragments around
+              two <strong> tags: the order of "key", language and domain differs
+              between languages, and a sentence assembled from pieces cannot be
+              reordered by a translator. */}
           <DialogDescription>
-            Adds a new key for <strong>{languageCode}</strong> / <strong>{domain}</strong> in
-            your current scope.
+            {t(
+              'translations.add.description',
+              'Adds a new key for {language} / {domain} in your current scope.',
+              { language: languageCode, domain }
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -112,9 +138,12 @@ export function AddKeyModal({
               name="key"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Key</FormLabel>
+                  <FormLabel>{t('translations.add.key', 'Key')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., greeting" {...field} />
+                    <Input
+                      placeholder={t('translations.add.keyPlaceholder', 'e.g., greeting')}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -126,9 +155,13 @@ export function AddKeyModal({
               name="translation"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Translation</FormLabel>
+                  <FormLabel>{t('translations.add.translation', 'Translation')}</FormLabel>
                   <FormControl>
-                    <Textarea rows={3} placeholder="e.g., Hello" {...field} />
+                    <Textarea
+                      rows={3}
+                      placeholder={t('translations.add.translationPlaceholder', 'e.g., Hello')}
+                      {...field}
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -137,10 +170,12 @@ export function AddKeyModal({
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t('translations.add.cancel', 'Cancel')}
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Adding...' : 'Add Key'}
+                {isSubmitting
+                  ? t('translations.add.submitting', 'Adding...')
+                  : t('translations.add.submit', 'Add Key')}
               </Button>
             </DialogFooter>
           </form>

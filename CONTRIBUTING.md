@@ -243,6 +243,12 @@ rebase (`git push --force-with-lease`).
 
 ### TypeScript (frontend)
 
+- **User-facing text goes through `t()`**, with the English string passed as the
+  fallback at the call site: `t('login.submit', 'Sign in')`. That second
+  argument IS the English catalogue — `php bin/whity-cli i18n:extract` derives
+  `database/i18n/<domain>.json` from it and a CI guard fails on drift, so a
+  hardcoded string is a string no translator can ever see. See
+  [Internationalization](docs/wiki/Internationalization.md).
 - **Strict types** — `strict: true` is on in `web/tsconfig.json`. Do **not** use
   `any`; prefer precise types, `unknown` + narrowing, or generics.
 - **ESLint** must pass: `cd web && npm run lint` (config in
@@ -413,6 +419,10 @@ seeded accounts and shared-database discipline.
        OpenAPI-spec drift check, `phpstan analyse src tests plugins sdk`, the
        plugin-load smoke, the tenant-predicate guard, and the plugin
        tenant-isolation conformance check.
+     - **i18n catalogue drift** — regenerates the English catalogue from the
+       `t()` calls in the source and fails if it differs from
+       `database/i18n/`. Runs on frontend changes too, because that is where
+       the drift comes from.
      - **Migrations + seed on real PostgreSQL** — migrate / seed / idempotent
        re-migrate against a real Postgres service, plus the Security suite.
      - **Integration + dialect suites on real PostgreSQL** — `tests/Integration`

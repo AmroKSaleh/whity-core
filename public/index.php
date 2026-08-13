@@ -1425,6 +1425,10 @@ $translationsHandler = new \Whity\Api\TranslationsApiHandler(
     $roleChecker,
     $languageRegistry
 );
+// Registered BEFORE the two-segment public bundle route so a literal path can
+// never be read as a {language_code} — the segment counts differ, but the
+// ordering makes that independent of how the matcher is implemented.
+$router->register('GET',    '/api/translations/coverage',   [$translationsHandler, 'coverage'],  null, null, CorePermissions::TRANSLATIONS_MANAGE);
 $router->register('GET',    '/api/translations/{language_code}/{domain}', [$translationsHandler, 'getTranslations'], null);
 $router->register('GET',    '/api/translations',            [$translationsHandler, 'adminList'], null, null, CorePermissions::TRANSLATIONS_MANAGE);
 $router->register('POST',   '/api/translations',            [$translationsHandler, 'create'],    null, null, CorePermissions::TRANSLATIONS_MANAGE);
