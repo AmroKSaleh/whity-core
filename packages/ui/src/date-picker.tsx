@@ -58,6 +58,9 @@ export interface DatePickerProps {
   /** Accessible names for the month navigation buttons. */
   previousMonthLabel?: string
   nextMonthLabel?: string
+  /** Footer button text. */
+  todayLabel?: string
+  clearButtonLabel?: string
   /**
    * Disables the date picker control.
    */
@@ -119,6 +122,8 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
       tooltipTriggerLabel = "More information",
       previousMonthLabel = "Previous month",
       nextMonthLabel = "Next month",
+      todayLabel = "Today",
+      clearButtonLabel = "Clear",
       disabled,
       clearable = true,
       className,
@@ -310,7 +315,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
               }}
               className="text-[0.6875rem] font-semibold text-primary hover:underline"
             >
-              Today
+              {todayLabel}
             </button>
             {selectedDate && (
               <button
@@ -322,7 +327,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
                 }}
                 className="text-[0.6875rem] text-muted-foreground hover:text-foreground"
               >
-                Clear
+                {clearButtonLabel}
               </button>
             )}
           </div>

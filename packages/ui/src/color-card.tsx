@@ -21,6 +21,10 @@ export interface ColorCardProps extends React.ComponentProps<"div"> {
   onColorSelect?: (shade: ColorShade) => void
   /** Accessible name for the MAIN-shade marker. Defaults to "Main Brand Color". */
   mainShadeLabel?: string
+  /** Short badge on the main shade. Defaults to "MAIN". */
+  mainBadgeLabel?: string
+  /** Confirmation flash after copying a swatch. Defaults to "COPIED". */
+  copiedLabel?: string
   /**
    * Tooltip for a swatch. A function, not a string: the shade name and hex
    * sit inside the phrase and languages order them differently.
@@ -176,6 +180,8 @@ export function ColorCard({
   mainShade = 600,
   onColorSelect,
   mainShadeLabel = "Main Brand Color",
+  mainBadgeLabel = "MAIN",
+  copiedLabel = "COPIED",
   copyHint = (name: string, hex: string) => `Click to copy ${name} (${hex})`,
   ...props
 }: ColorCardProps) {
@@ -237,7 +243,7 @@ export function ColorCard({
                     color: shade.textColor,
                   }}
                 >
-                  MAIN
+                  {mainBadgeLabel}
                 </span>
               )}
 
@@ -248,7 +254,7 @@ export function ColorCard({
               {isCopied ? (
                 <div className="flex items-center justify-center gap-0.5 text-[8px] font-bold text-emerald-400 bg-slate-950 px-1 py-0.5 rounded-xs animate-pulse ring-1 ring-emerald-500/50">
                   <IconCheck className="size-2.5 shrink-0" />
-                  <span>COPIED</span>
+                  <span>{copiedLabel}</span>
                 </div>
               ) : (
                 <span className="text-[8.5px] font-mono uppercase opacity-90 font-semibold truncate">

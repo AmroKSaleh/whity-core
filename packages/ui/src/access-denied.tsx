@@ -49,6 +49,8 @@ export interface AccessDeniedProps extends Omit<React.ComponentProps<"div">, "ti
   showSearch?: boolean
   /** Placeholder text for the search input. */
   searchPlaceholder?: string
+  /** Text of the search submit button. Defaults to "Search". */
+  searchButtonLabel?: string
   /** Callback fired when search form is submitted or query changes. */
   onSearch?: (query: string) => void
   /** Optional pre-populated or filtered search results list. */
@@ -163,6 +165,7 @@ function AccessDenied({
   description,
   showSearch = variant === "not-found",
   searchPlaceholder = "Search site pages, resources, or docs...",
+  searchButtonLabel = "Search",
   onSearch,
   searchResults,
   primaryAction,
@@ -245,7 +248,7 @@ function AccessDenied({
             </div>
             <Button type="submit" size="default" variant={config.buttonVariant}>
               <IconSearch data-icon="inline-start" />
-              Search
+              {searchButtonLabel}
             </Button>
           </form>
 

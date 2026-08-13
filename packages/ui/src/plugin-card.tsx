@@ -58,10 +58,81 @@ export interface PluginItem {
   versions?: PluginVersion[]
 }
 
+/**
+ * Copy for the plugin cards and their details/rollback dialogs.
+ *
+ * Every entry defaults to the English it replaced, so a caller that passes
+ * nothing renders exactly as before. `rollbackConfirmation` returns a NODE
+ * because its default is one sentence with three emphasised values inside it —
+ * the plugin name and both versions. Splitting that into fixed fragments would
+ * freeze English word order around them, so the caller supplies the finished
+ * sentence (built with useRichTranslation if it wants).
+ */
+export interface PluginCardLabels {
+  verified?: string
+  moreInfo?: string
+  install?: string
+  details?: string
+  activate?: string
+  deactivate?: string
+  restricted?: string
+  active?: string
+  inactive?: string
+  disabledBySystem?: string
+  updateAvailable?: (latestVersion?: string) => string
+  governanceNotice?: string
+  rollback?: string
+  versionHistory?: string
+  configure?: string
+  confirmRollbackTitle?: string
+  rollbackConfirmation?: (pluginName: string, from: string, to: string) => React.ReactNode
+  cancel?: string
+  overview?: string
+  securityVerified?: string
+  close?: string
+  installPlugin?: string
+  previousScreenshot?: string
+  nextScreenshot?: string
+}
+
+const DEFAULT_PLUGIN_CARD_LABELS = {
+  verified: "Verified",
+  moreInfo: "More Info",
+  install: "Install",
+  details: "Details",
+  activate: "Activate",
+  deactivate: "Deactivate",
+  restricted: "Restricted",
+  active: "Active",
+  inactive: "Inactive",
+  disabledBySystem: "Disabled by System",
+  updateAvailable: (latestVersion?: string) => `Update Available v${latestVersion}`,
+  governanceNotice:
+    "This plugin has been automatically disabled by system governance due to security or compatibility policy.",
+  rollback: "Rollback",
+  versionHistory: "Version History",
+  configure: "Configure plugin",
+  confirmRollbackTitle: "Confirm Version Rollback",
+  rollbackConfirmation: (pluginName: string, from: string, to: string): React.ReactNode => (
+    <>
+      Are you sure you want to rollback <strong>{pluginName}</strong> from version{" "}
+      <strong>v{from}</strong> back to <strong>v{to}</strong>?
+    </>
+  ),
+  cancel: "Cancel",
+  overview: "Overview",
+  securityVerified: "Security Verified",
+  close: "Close",
+  installPlugin: "Install Plugin",
+  previousScreenshot: "Previous screenshot",
+  nextScreenshot: "Next screenshot",
+} satisfies Required<PluginCardLabels>
+
 export interface PluginStoreCardProps extends React.ComponentProps<"div"> {
   plugin: PluginItem
   onInstall?: (plugin: PluginItem) => void
   onConfigure?: (plugin: PluginItem) => void
+  labels?: PluginCardLabels
 }
 
 /**
@@ -73,8 +144,10 @@ export function PluginStoreCard({
   plugin,
   onInstall,
   onConfigure,
+  labels,
   ...props
 }: PluginStoreCardProps) {
+  const text = { ...DEFAULT_PLUGIN_CARD_LABELS, ...labels }
   const [detailsOpen, setDetailsOpen] = React.useState(false)
 
   return (
@@ -110,7 +183,7 @@ export function PluginStoreCard({
           {plugin.verified && (
             <div className="absolute top-2.5 right-2.5">
               <Badge variant="default" className="text-[10px] shadow-xs">
-                Verified
+                {text.verified}
               </Badge>
             </div>
           )}
@@ -156,7 +229,7 @@ export function PluginStoreCard({
             className="text-xs text-muted-foreground hover:text-foreground"
           >
             <IconInfoCircle data-icon="inline-start" />
-            More Info
+            {text.moreInfo}
           </Button>
 
           <Button
@@ -165,7 +238,7 @@ export function PluginStoreCard({
             onClick={() => onInstall?.(plugin)}
           >
             <IconDownload data-icon="inline-start" />
-            Install
+            {text.install}
           </Button>
         </CardFooter>
       </Card>
@@ -176,6 +249,7 @@ export function PluginStoreCard({
         onOpenChange={setDetailsOpen}
         plugin={plugin}
         onInstall={onInstall}
+        labels={labels}
       />
     </>
   )
@@ -194,16 +268,7 @@ export interface InstalledPluginCardProps extends React.ComponentProps<"div"> {
    * `updateAvailable` is a function because the version number sits inside
    * the phrase and languages place it differently.
    */
-  labels?: {
-    active?: string
-    inactive?: string
-    disabledBySystem?: string
-    updateAvailable?: (latestVersion?: string) => string
-    governanceNotice?: string
-    rollback?: string
-    versionHistory?: string
-    configure?: string
-  }
+  labels?: PluginCardLabels
 }
 
 /**
@@ -220,18 +285,7 @@ export function InstalledPluginCard({
   labels,
   ...props
 }: InstalledPluginCardProps) {
-  const text = {
-    active: "Active",
-    inactive: "Inactive",
-    disabledBySystem: "Disabled by System",
-    updateAvailable: (latestVersion?: string) => `Update Available v${latestVersion}`,
-    governanceNotice:
-      "This plugin has been automatically disabled by system governance due to security or compatibility policy.",
-    rollback: "Rollback",
-    versionHistory: "Version History",
-    configure: "Configure plugin",
-    ...labels,
-  }
+  const text = { ...DEFAULT_PLUGIN_CARD_LABELS, ...labels }
   const [detailsOpen, setDetailsOpen] = React.useState(false)
   const [rollbackTarget, setRollbackTarget] = React.useState<string | null>(null)
 
@@ -344,7 +398,7 @@ export function InstalledPluginCard({
             className="text-xs text-muted-foreground hover:text-foreground"
           >
             <IconInfoCircle data-icon="inline-start" />
-            Details
+            {text.details}
           </Button>
 
           <div className="flex items-center gap-2">
@@ -366,7 +420,7 @@ export function InstalledPluginCard({
                 onClick={() => onToggleState?.(plugin, "inactive")}
               >
                 <IconPower data-icon="inline-start" />
-                Deactivate
+                {text.deactivate}
               </Button>
             )}
 
@@ -377,14 +431,14 @@ export function InstalledPluginCard({
                 onClick={() => onToggleState?.(plugin, "active")}
               >
                 <IconCheck data-icon="inline-start" />
-                Activate
+                {text.activate}
               </Button>
             )}
 
             {state === "disabled" && (
               <Button size="sm" variant="outline" disabled>
                 <IconLock data-icon="inline-start" />
-                Restricted
+                {text.restricted}
               </Button>
             )}
 
@@ -408,6 +462,7 @@ export function InstalledPluginCard({
         onOpenChange={setDetailsOpen}
         plugin={plugin}
         installed
+        labels={labels}
       />
 
       {/* Rollback Confirmation Modal */}
@@ -417,10 +472,10 @@ export function InstalledPluginCard({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base">
                 <IconArrowBackUp className="size-5 text-amber-600 dark:text-amber-400" />
-                Confirm Version Rollback
+                {text.confirmRollbackTitle}
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Are you sure you want to rollback <strong>{plugin.name}</strong> from version <strong>v{plugin.version}</strong> back to <strong>v{rollbackTarget}</strong>?
+                {text.rollbackConfirmation(plugin.name, plugin.version, rollbackTarget)}
               </DialogDescription>
             </DialogHeader>
 
@@ -436,7 +491,7 @@ export function InstalledPluginCard({
 
             <DialogFooter className="gap-2 sm:gap-0">
               <Button variant="outline" onClick={() => setRollbackTarget(null)}>
-                Cancel
+                {text.cancel}
               </Button>
               <Button
                 variant="warning-solid"
@@ -464,6 +519,7 @@ interface PluginDetailsModalProps {
   plugin: PluginItem
   installed?: boolean
   onInstall?: (plugin: PluginItem) => void
+  labels?: PluginCardLabels
 }
 
 function PluginDetailsModal({
@@ -472,7 +528,9 @@ function PluginDetailsModal({
   plugin,
   installed = false,
   onInstall,
+  labels,
 }: PluginDetailsModalProps) {
+  const text = { ...DEFAULT_PLUGIN_CARD_LABELS, ...labels }
   const versions = plugin.versions ?? [
     { version: plugin.version, releasedAt: "2 weeks ago", changelog: "Added multi-tenant isolation support and performance indexing." },
     { version: "2.3.1", releasedAt: "1 month ago", changelog: "Fixed memory leak in background worker queue." },
@@ -490,7 +548,7 @@ function PluginDetailsModal({
             <div>
               <DialogTitle className="text-lg font-bold flex items-center gap-2">
                 {plugin.name}
-                {plugin.verified && <Badge variant="default" className="text-[10px]">Verified</Badge>}
+                {plugin.verified && <Badge variant="default" className="text-[10px]">{text.verified}</Badge>}
               </DialogTitle>
               <DialogDescription className="text-xs">
                 by {plugin.author} · Version v{plugin.version}
@@ -502,7 +560,7 @@ function PluginDetailsModal({
         <Tabs defaultValue="overview" className="w-full text-xs">
           <TabsList className="w-full justify-start border-b rounded-none bg-transparent p-0 h-9">
             <TabsTrigger value="overview" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent">
-              Overview
+              {text.overview}
             </TabsTrigger>
             <TabsTrigger value="versions" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent">
               Changelog & Versions
@@ -523,6 +581,8 @@ function PluginDetailsModal({
               pluginName={plugin.name}
               category={plugin.category}
               bannerGradient={plugin.bannerGradient}
+              previousLabel={text.previousScreenshot}
+              nextLabel={text.nextScreenshot}
             />
 
             <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -533,7 +593,7 @@ function PluginDetailsModal({
               </div>
               <div className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-muted/40 px-3 py-1.5 text-xs">
                 <IconShieldCheck className="size-3.5 text-emerald-500" />
-                <span className="font-semibold">Security Verified</span>
+                <span className="font-semibold">{text.securityVerified}</span>
               </div>
             </div>
           </TabsContent>
@@ -571,7 +631,7 @@ function PluginDetailsModal({
 
         <DialogFooter className="border-t border-border/40 pt-3 flex items-center justify-between">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
+            {text.close}
           </Button>
           {!installed && (
             <Button
@@ -582,7 +642,7 @@ function PluginDetailsModal({
               }}
             >
               <IconDownload data-icon="inline-start" />
-              Install Plugin
+              {text.installPlugin}
             </Button>
           )}
         </DialogFooter>
@@ -616,8 +676,8 @@ function PluginImageGallery({
   pluginName,
   category,
   bannerGradient = "from-primary/20 via-muted to-muted/80",
-  previousLabel = "Previous screenshot",
-  nextLabel = "Next screenshot",
+  previousLabel,
+  nextLabel,
 }: PluginImageGalleryProps) {
   const [activeIndex, setActiveIndex] = React.useState(0)
 
