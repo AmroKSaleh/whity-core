@@ -706,6 +706,39 @@ describe('FeatureFlagsSettingsPage — registry-driven, isFlag-filtered form', (
     await waitFor(() => expect(addToast).toHaveBeenCalledWith(expect.any(String), 'success'));
   });
 
+  /**
+   * The i18n master switch is a feature flag like any other — which is the
+   * point: turning the product's whole language surface off is one toggle on
+   * this page, not a deploy. Pinned here because the value it sends is the
+   * LITERAL 'false', not '0': a boolean setting that round-trips through the
+   * wrong literal reads back as unset and displays as ON while behaving as OFF.
+   */
+  it('offers the i18n master switch, ON by default, and switches it off as the literal false', async () => {
+    setTenant(0);
+    grant('settings:manage');
+    // Default 'true' — a shipped feature is never switched off by an upgrade.
+    const registry = [...REGISTRY, { key: 'i18n.enabled', type: 'bool', default: 'true', isFlag: true }];
+    const global = { ...GLOBAL, 'i18n.enabled': 'true' };
+    routeGet(['site_name'], true, registry, global);
+
+    render(<FeatureFlagsSettingsPage />);
+
+    const toggle = await screen.findByTestId('setting-switch-i18n.enabled');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('Multiple languages')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByRole('button', { name: /save feature flags/i }));
+
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith(
+        '/api/v1/settings/global',
+        expect.objectContaining({ body: { settings: { 'i18n.enabled': 'false' } } })
+      )
+    );
+  });
+
   it('shows an empty state and a disabled Save when no keys are flagged', async () => {
     setTenant(0);
     grant('settings:manage');

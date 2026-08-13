@@ -24,6 +24,22 @@ export interface LanguageSettings {
   available_languages: Language[]
 }
 
+/**
+ * The public language catalogue, plus whether this instance offers a CHOICE of
+ * language at all.
+ *
+ * `i18nEnabled` is the operator's `i18n.enabled` feature flag, served on the
+ * public languages payload because it must be known before a session exists —
+ * the sign-in screen mounts the provider too. It is read from that explicit
+ * field rather than inferred from how many languages came back: a single-language
+ * install with the feature ON is a different thing from the feature being OFF,
+ * and only the second one hides the switcher.
+ */
+export interface LanguageCatalogue {
+  languages: Language[]
+  i18nEnabled: boolean
+}
+
 export interface TranslationMap {
   [key: string]: string
 }
@@ -37,6 +53,26 @@ export interface LanguageContextValue {
   availableLanguages: Language[]
   /** The resolved language's direction; 'ltr' until a language resolves. */
   direction: Direction
+  /**
+   * Whether this instance offers a choice of language (`i18n.enabled`), or
+   * `null` while the catalogue has not answered yet.
+   *
+   * FALSE means every user reads the default language left-to-right whatever
+   * their profile stores, and NO language affordance is rendered anywhere.
+   * Translation still works — `t()` returns the default language's text — so
+   * this is not a switch that breaks translated screens; it is a switch that
+   * removes the CHOICE.
+   *
+   * THREE-VALUED on purpose. "Not known yet" is a different thing from "off",
+   * and the two want opposite treatment: an AFFORDANCE must stay hidden until
+   * we know one is offered (paint-then-retract is the confusion this flag
+   * exists to remove), while a NOTICE explaining that the feature is off must
+   * not be shown until we know it actually is — an admin screen that asserts
+   * the wrong thing for 200ms on every load is its own small lie. Read it
+   * through `useI18nEnabled` for the first case and `useI18nAvailability` for
+   * the second.
+   */
+  i18nEnabled: boolean | null
   translations: CachedTranslations
   isLoading: boolean
   error: Error | null

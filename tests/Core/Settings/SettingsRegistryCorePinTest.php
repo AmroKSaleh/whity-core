@@ -94,6 +94,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'error_tracking.environment',
             'error_tracking.notify_admins',
             'error_tracking.retention_days',
+            'i18n.enabled',
         ];
     }
 
@@ -191,6 +192,10 @@ final class SettingsRegistryCorePinTest extends TestCase
             'error_tracking.environment' => '',
             'error_tracking.notify_admins' => 'true',
             'error_tracking.retention_days' => '90',
+            // ENABLED, unlike the other opt-in capability flags above: i18n
+            // shipped before its flag did, so defaulting it off would switch a
+            // live feature off on every existing deployment at upgrade time.
+            'i18n.enabled' => 'true',
         ];
     }
 
@@ -267,6 +272,13 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['data_types.bulk_max_ids', '0', false],
             ['data_types.bulk_max_ids', '10001', false],
             ['data_types.bulk_max_ids', 'lots', false],
+            // The i18n master switch stores the LITERAL 'true'/'false'. A key
+            // that quietly began accepting '1' would read back as unset and
+            // display as ON while the product behaved as OFF.
+            ['i18n.enabled', 'true', true],
+            ['i18n.enabled', 'false', true],
+            ['i18n.enabled', '1', false],
+            ['i18n.enabled', 'off', false],
             ['branding_favicon', 'anything', false],
             ['not_a_setting_at_all', 'x', false],
         ];
@@ -331,9 +343,16 @@ final class SettingsRegistryCorePinTest extends TestCase
         // switch is not.
         self::assertFalse(SettingsRegistry::isGlobalOnly('documents.render_max_rows'));
 
+        // Languages are a PLATFORM catalogue with no tenant_id column, and the
+        // sign-in screen resolves one before any tenant is known.
+        self::assertTrue(SettingsRegistry::isGlobalOnly('i18n.enabled'));
+
         self::assertTrue(SettingsRegistry::isFeatureFlag('mcp.enabled'));
         self::assertFalse(SettingsRegistry::isFeatureFlag('mail.events.welcome_enabled'));
         self::assertFalse(SettingsRegistry::isFeatureFlag('storage.s3.path_style'));
+        // Marked isFlag so it appears on the admin Feature Flags tab, which
+        // filters on that field alone rather than a hardcoded key list.
+        self::assertTrue(SettingsRegistry::isFeatureFlag('i18n.enabled'));
 
         self::assertSame('asset', SettingsRegistry::kindFor('branding_favicon'));
         self::assertSame('text', SettingsRegistry::kindFor('site_name'));
@@ -359,6 +378,14 @@ final class SettingsRegistryCorePinTest extends TestCase
         self::assertSame(
             ['key' => 'mcp.enabled', 'type' => 'bool', 'default' => 'false', 'isFlag' => true],
             $byKey['mcp.enabled'] ?? null
+        );
+        // The i18n master switch, exactly as the Feature Flags tab receives it:
+        // a bool flag whose published DEFAULT is 'true'. This is the descriptor
+        // an upgrading deployment reads before it has stored any value, so the
+        // literal here is what keeps a shipped feature switched on.
+        self::assertSame(
+            ['key' => 'i18n.enabled', 'type' => 'bool', 'default' => 'true', 'isFlag' => true],
+            $byKey['i18n.enabled'] ?? null
         );
     }
 }

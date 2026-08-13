@@ -45,7 +45,10 @@ final class SettingsRegistryTest extends TestCase
              // through the settings surface this list describes.
              'error_tracking.enabled', 'error_tracking.provider',
              'error_tracking.environment', 'error_tracking.notify_admins',
-             'error_tracking.retention_days'],
+             'error_tracking.retention_days',
+             // WC-i18n-feature-flag. The master switch for the whole interface
+             // language surface; ENABLED by default (see SettingsRegistry).
+             'i18n.enabled'],
             SettingsRegistry::keys()
         );
     }
@@ -206,7 +209,7 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        self::assertCount(51, $describe);
+        self::assertCount(52, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
