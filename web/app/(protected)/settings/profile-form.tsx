@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
@@ -18,6 +18,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicator';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 
 /**
  * Self-service profile editor (WC-64).
@@ -39,26 +40,41 @@ import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicato
  */
 const MIN_PASSWORD_LENGTH = 8;
 
-const profileSchema = z
-  .object({
-    email: z.string().email('Invalid email address'),
-    currentPassword: z.string().min(1, 'Current password is required'),
-    newPassword: z
-      .string()
-      .min(MIN_PASSWORD_LENGTH, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
-      .optional()
-      .or(z.literal('')),
-    confirmPassword: z.string().optional().or(z.literal('')),
-  })
-  .refine(
-    (data) => (data.newPassword ?? '') === (data.confirmPassword ?? ''),
-    {
-      message: 'Passwords do not match',
-      path: ['confirmPassword'],
-    }
-  );
+/**
+ * The schema is BUILT from `t` rather than declared at module scope, because a
+ * validation message is as user-facing as a label and there is nowhere else to
+ * put it. It is memoised on `t` in the component, so the resolver is rebuilt
+ * only when the language actually changes — never per keystroke.
+ */
+function makeProfileSchema(t: TranslateFn) {
+  return z
+    .object({
+      email: z.string().email(t('profile.email.invalid', 'Invalid email address')),
+      currentPassword: z
+        .string()
+        .min(1, t('profile.currentPassword.required', 'Current password is required')),
+      newPassword: z
+        .string()
+        .min(
+          MIN_PASSWORD_LENGTH,
+          t('profile.newPassword.tooShort', 'Password must be at least {min} characters', {
+            min: MIN_PASSWORD_LENGTH,
+          })
+        )
+        .optional()
+        .or(z.literal('')),
+      confirmPassword: z.string().optional().or(z.literal('')),
+    })
+    .refine(
+      (data) => (data.newPassword ?? '') === (data.confirmPassword ?? ''),
+      {
+        message: t('profile.confirmPassword.mismatch', 'Passwords do not match'),
+        path: ['confirmPassword'],
+      }
+    );
+}
 
-type ProfileFormData = z.infer<typeof profileSchema>;
+type ProfileFormData = z.infer<ReturnType<typeof makeProfileSchema>>;
 
 interface ProfilePayload {
   email: string;
@@ -69,7 +85,10 @@ interface ProfilePayload {
 export function ProfileForm() {
   const { user, apiClient, refreshAuth } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('auth');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const profileSchema = useMemo(() => makeProfileSchema(t), [t]);
 
   const currentEmail = user?.email ?? '';
   // The display name is derived from the email local-part (no users.name column).
@@ -106,7 +125,7 @@ export function ProfileForm() {
     const passwordChanged = (data.newPassword ?? '') !== '';
 
     if (!emailChanged && !passwordChanged) {
-      addToast('Nothing to update', 'info');
+      addToast(t('profile.nothingToUpdate', 'Nothing to update'), 'info');
       return;
     }
 
@@ -132,7 +151,9 @@ export function ProfileForm() {
           error?: string;
           message?: string;
         };
-        throw new Error(errorData.error || errorData.message || 'Failed to update profile');
+        throw new Error(
+          errorData.error || errorData.message || t('profile.error.update', 'Failed to update profile')
+        );
       }
 
       // Confirm the change actually persisted before claiming success: the
@@ -143,10 +164,12 @@ export function ProfileForm() {
         | null;
       const persistedEmail = result?.user?.email;
       if (persistedEmail !== undefined && persistedEmail !== data.email) {
-        throw new Error('Profile update did not persist the new email');
+        throw new Error(
+          t('profile.error.notPersisted', 'Profile update did not persist the new email')
+        );
       }
 
-      addToast('Profile updated successfully', 'success');
+      addToast(t('profile.updated', 'Profile updated successfully'), 'success');
 
       // Refresh the auth context so the new email shows immediately; the backend
       // re-issued the auth cookies, so /api/me reflects the change.
@@ -161,7 +184,7 @@ export function ProfileForm() {
       });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to update profile';
+        error instanceof Error ? error.message : t('profile.error.update', 'Failed to update profile');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -176,11 +199,14 @@ export function ProfileForm() {
             htmlFor="profile-name"
             className="text-sm font-medium leading-none"
           >
-            Display Name
+            {t('profile.displayName.label', 'Display Name')}
           </label>
           <Input id="profile-name" value={derivedName} disabled />
           <p className="text-xs text-muted-foreground">
-            Name is derived from your email and cannot be changed yet.
+            {t(
+              'profile.displayName.hint',
+              'Name is derived from your email and cannot be changed yet.'
+            )}
           </p>
         </div>
 
@@ -189,9 +215,13 @@ export function ProfileForm() {
           name="email"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Email Address</FormLabel>
+              <FormLabel>{t('profile.email.label', 'Email Address')}</FormLabel>
               <FormControl>
-                <Input type="email" placeholder="you@example.com" {...field} />
+                <Input
+                  type="email"
+                  placeholder={t('profile.email.placeholder', 'you@example.com')}
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -203,7 +233,7 @@ export function ProfileForm() {
           name="newPassword"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>New Password</FormLabel>
+              <FormLabel>{t('profile.newPassword.label', 'New Password')}</FormLabel>
               <FormControl>
                 <Input
                   type="password"
@@ -214,7 +244,7 @@ export function ProfileForm() {
               </FormControl>
               <PasswordStrengthIndicator password={field.value ?? ''} />
               <FormDescription>
-                Leave blank to keep your current password.
+                {t('profile.newPassword.hint', 'Leave blank to keep your current password.')}
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -226,7 +256,7 @@ export function ProfileForm() {
           name="confirmPassword"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Confirm New Password</FormLabel>
+              <FormLabel>{t('profile.confirmPassword.label', 'Confirm New Password')}</FormLabel>
               <FormControl>
                 <Input
                   type="password"
@@ -245,7 +275,7 @@ export function ProfileForm() {
           name="currentPassword"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Current Password</FormLabel>
+              <FormLabel>{t('profile.currentPassword.label', 'Current Password')}</FormLabel>
               <FormControl>
                 <Input
                   type="password"
@@ -255,7 +285,10 @@ export function ProfileForm() {
                 />
               </FormControl>
               <FormDescription>
-                Required to confirm any change to your email or password.
+                {t(
+                  'profile.currentPassword.hint',
+                  'Required to confirm any change to your email or password.'
+                )}
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -263,7 +296,9 @@ export function ProfileForm() {
         />
 
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? 'Saving...' : 'Save Changes'}
+          {isSubmitting
+            ? t('profile.submit.pending', 'Saving...')
+            : t('profile.submit', 'Save Changes')}
         </Button>
       </form>
     </Form>

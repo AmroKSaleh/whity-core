@@ -9,6 +9,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Password-reset landing page (WC-password-reset-2fa-recovery). This is where
@@ -29,6 +30,7 @@ function ResetPasswordInner() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const branding = useBranding();
+  const t = useTranslation('auth');
 
   const [status, setStatus] = useState<Status>(token ? 'form' : 'no-token');
   const [password, setPassword] = useState('');
@@ -45,11 +47,11 @@ function ResetPasswordInner() {
       return;
     }
     if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+      setError(t('resetPassword.error.tooShort', 'Password must be at least 8 characters'));
       return;
     }
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError(t('resetPassword.error.mismatch', 'Passwords do not match'));
       return;
     }
 
@@ -74,7 +76,11 @@ function ResetPasswordInner() {
       }
       if (response.status === 422) {
         const data = await response.json().catch(() => ({}));
-        setError(typeof data?.error === 'string' ? data.error : 'Please choose a stronger password');
+        setError(
+          typeof data?.error === 'string'
+            ? data.error
+            : t('resetPassword.error.weak', 'Please choose a stronger password')
+        );
         return;
       }
 
@@ -103,13 +109,15 @@ function ResetPasswordInner() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           {logo}
-          <CardTitle className="text-2xl">Reset your password</CardTitle>
+          <CardTitle className="text-2xl">
+            {t('resetPassword.title', 'Reset your password')}
+          </CardTitle>
           <CardDescription>
             {status === 'applied'
-              ? 'Your password has been reset'
+              ? t('resetPassword.subtitle.applied', 'Your password has been reset')
               : status === 'awaiting_approval'
-                ? 'Submitted for approval'
-                : 'Choose a new password for your account'}
+                ? t('resetPassword.subtitle.awaitingApproval', 'Submitted for approval')
+                : t('resetPassword.subtitle', 'Choose a new password for your account')}
           </CardDescription>
         </CardHeader>
 
@@ -123,12 +131,12 @@ function ResetPasswordInner() {
               )}
               <div className="space-y-2">
                 <label htmlFor="password" className="text-sm font-medium">
-                  New password
+                  {t('resetPassword.password.label', 'New password')}
                 </label>
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Enter a new password"
+                  placeholder={t('resetPassword.password.placeholder', 'Enter a new password')}
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
@@ -139,12 +147,15 @@ function ResetPasswordInner() {
               </div>
               <div className="space-y-2">
                 <label htmlFor="confirmPassword" className="text-sm font-medium">
-                  Confirm password
+                  {t('resetPassword.confirmPassword.label', 'Confirm password')}
                 </label>
                 <Input
                   id="confirmPassword"
                   type="password"
-                  placeholder="Re-enter the new password"
+                  placeholder={t(
+                    'resetPassword.confirmPassword.placeholder',
+                    'Re-enter the new password'
+                  )}
                   value={confirmPassword}
                   onChange={(e) => {
                     setConfirmPassword(e.target.value);
@@ -154,7 +165,9 @@ function ResetPasswordInner() {
                 />
               </div>
               <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? 'Resetting…' : 'Reset password'}
+                {submitting
+                  ? t('resetPassword.submit.pending', 'Resetting…')
+                  : t('resetPassword.submit', 'Reset password')}
               </Button>
             </form>
           )}
@@ -163,11 +176,14 @@ function ResetPasswordInner() {
             <div className="space-y-4 text-center" data-testid="reset-password-applied">
               <Alert>
                 <AlertDescription>
-                  Your password has been reset. You can now sign in with your new password.
+                  {t(
+                    'resetPassword.applied',
+                    'Your password has been reset. You can now sign in with your new password.'
+                  )}
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full">
-                <Link href="/login">Continue to sign in</Link>
+                <Link href="/login">{t('resetPassword.continue', 'Continue to sign in')}</Link>
               </Button>
             </div>
           )}
@@ -176,12 +192,14 @@ function ResetPasswordInner() {
             <div className="space-y-4 text-center" data-testid="reset-password-awaiting-approval">
               <Alert>
                 <AlertDescription>
-                  Your password reset has been submitted for administrator approval. You&rsquo;ll be
-                  able to sign in with your new password once it&rsquo;s approved.
+                  {t(
+                    'resetPassword.awaitingApproval',
+                    'Your password reset has been submitted for administrator approval. You’ll be able to sign in with your new password once it’s approved.'
+                  )}
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full" variant="outline">
-                <Link href="/login">Back to sign in</Link>
+                <Link href="/login">{t('resetPassword.backToSignIn', 'Back to sign in')}</Link>
               </Button>
             </div>
           )}
@@ -190,15 +208,20 @@ function ResetPasswordInner() {
             <div className="space-y-4" data-testid="reset-password-error">
               <Alert variant="destructive">
                 <AlertDescription>
-                  This reset link is invalid or has expired. Request a new one below.
+                  {t(
+                    'resetPassword.error.invalidLink',
+                    'This reset link is invalid or has expired. Request a new one below.'
+                  )}
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full">
-                <Link href="/forgot-password">Request a new link</Link>
+                <Link href="/forgot-password">
+                  {t('resetPassword.requestNewLink', 'Request a new link')}
+                </Link>
               </Button>
               <p className="text-sm text-center text-muted-foreground">
                 <Link href="/login" className="font-medium text-primary hover:underline">
-                  Back to sign in
+                  {t('resetPassword.backToSignIn', 'Back to sign in')}
                 </Link>
               </p>
             </div>
@@ -210,11 +233,13 @@ function ResetPasswordInner() {
 }
 
 export default function ResetPasswordPage() {
+  const t = useTranslation('auth');
+
   return (
     <Suspense
       fallback={
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t('resetPassword.loading', 'Loading…')}</p>
         </div>
       }
     >

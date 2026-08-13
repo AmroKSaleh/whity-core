@@ -10,6 +10,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@amroksaleh/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Email verification landing page (WC-235). This is where the verification link
@@ -33,6 +34,7 @@ function VerifyEmailInner() {
   const token = searchParams.get('token');
   const { addToast } = useToast();
   const branding = useBranding();
+  const t = useTranslation('auth');
 
   const [status, setStatus] = useState<VerifyStatus>(token ? 'verifying' : 'no-token');
   const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
@@ -47,6 +49,16 @@ function VerifyEmailInner() {
   // once even under React strict-mode's double effect invocation in dev — a
   // second POST would consume-fail and flip a genuine success to an error.
   const confirmStarted = useRef(false);
+
+  // Resolved to a STRING here, at render, and depended on as a string below —
+  // NEVER `t` itself. `useTranslation` returns a fresh callback the moment the
+  // translation bundle arrives, so listing `t` in the dependency array would
+  // re-run the confirm effect after load; the token is SINGLE-USE, and the
+  // re-run's POST would consume-fail. A string compares by value, so in English
+  // (bundle absent, or the bundle repeating the fallback) the effect never
+  // re-runs at all — and the `confirmStarted` ref catches the one case where a
+  // translated string does change identity.
+  const verifiedToastMessage = t('verifyEmail.toast.verified', 'Your email address has been verified.');
 
   useEffect(() => {
     if (!token) {
@@ -74,7 +86,7 @@ function VerifyEmailInner() {
           const data = await response.json().catch(() => ({}));
           setVerifiedEmail((data?.data?.email as string | undefined) ?? null);
           setStatus('success');
-          addToast('Your email address has been verified.', 'success');
+          addToast(verifiedToastMessage, 'success');
           return;
         }
 
@@ -85,7 +97,7 @@ function VerifyEmailInner() {
         setStatus('error');
       }
     })();
-  }, [token, addToast]);
+  }, [token, addToast, verifiedToastMessage]);
 
   const handleResend = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -93,7 +105,7 @@ function VerifyEmailInner() {
 
     const email = resendEmail.trim();
     if (!email) {
-      setResendError('Email is required');
+      setResendError(t('verifyEmail.email.required', 'Email is required'));
       return;
     }
 
@@ -110,20 +122,30 @@ function VerifyEmailInner() {
       });
 
       if (response.status === 422) {
-        setResendError('Please enter a valid email address');
+        setResendError(t('verifyEmail.error.invalidEmail', 'Please enter a valid email address'));
         return;
       }
       if (response.status === 429) {
-        setResendError('Too many requests. Please wait a little while and try again.');
+        setResendError(
+          t(
+            'verifyEmail.error.rateLimited',
+            'Too many requests. Please wait a little while and try again.'
+          )
+        );
         return;
       }
 
       // 202 (and any other non-error) → generic confirmation. We do NOT reveal
       // whether the address exists or still needs verification.
       setResendSent(true);
-      addToast('If that address needs verification, a link is on its way.', 'success');
+      addToast(
+        t('verifyEmail.toast.resent', 'If that address needs verification, a link is on its way.'),
+        'success'
+      );
     } catch {
-      setResendError('Unable to reach the server. Please try again.');
+      setResendError(
+        t('verifyEmail.error.transport', 'Unable to reach the server. Please try again.')
+      );
     } finally {
       setResendSubmitting(false);
     }
@@ -144,20 +166,23 @@ function VerifyEmailInner() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           {logo}
-          <CardTitle className="text-2xl">Verify your email</CardTitle>
+          <CardTitle className="text-2xl">{t('verifyEmail.title', 'Verify your email')}</CardTitle>
           <CardDescription>
             {status === 'success'
-              ? 'Your email address is confirmed'
+              ? t('verifyEmail.subtitle.success', 'Your email address is confirmed')
               : status === 'verifying'
-                ? 'Confirming your email address…'
-                : 'Confirm your email address to finish setting up your account'}
+                ? t('verifyEmail.subtitle.verifying', 'Confirming your email address…')
+                : t(
+                    'verifyEmail.subtitle',
+                    'Confirm your email address to finish setting up your account'
+                  )}
           </CardDescription>
         </CardHeader>
 
         <CardContent>
           {status === 'verifying' && (
             <p className="text-sm text-center text-muted-foreground" data-testid="verify-pending">
-              Verifying your link…
+              {t('verifyEmail.pending', 'Verifying your link…')}
             </p>
           )}
 
@@ -166,12 +191,17 @@ function VerifyEmailInner() {
               <Alert>
                 <AlertDescription>
                   {verifiedEmail
-                    ? `${verifiedEmail} has been verified. You can now sign in.`
-                    : 'Your email address has been verified. You can now sign in.'}
+                    ? t('verifyEmail.verified', '{email} has been verified. You can now sign in.', {
+                        email: verifiedEmail,
+                      })
+                    : t(
+                        'verifyEmail.verified.generic',
+                        'Your email address has been verified. You can now sign in.'
+                      )}
                 </AlertDescription>
               </Alert>
               <Button asChild className="w-full">
-                <Link href="/login">Continue to sign in</Link>
+                <Link href="/login">{t('verifyEmail.continue', 'Continue to sign in')}</Link>
               </Button>
             </div>
           )}
@@ -181,8 +211,10 @@ function VerifyEmailInner() {
               {status === 'error' && (
                 <Alert variant="destructive">
                   <AlertDescription>
-                    This verification link is invalid or has expired. Enter your email below and
-                    we&rsquo;ll send you a new one.
+                    {t(
+                      'verifyEmail.error.invalidLink',
+                      'This verification link is invalid or has expired. Enter your email below and we’ll send you a new one.'
+                    )}
                   </AlertDescription>
                 </Alert>
               )}
@@ -190,7 +222,10 @@ function VerifyEmailInner() {
               {resendSent ? (
                 <Alert data-testid="verify-resend-sent">
                   <AlertDescription>
-                    If that address needs verification, a new link is on its way. Check your inbox.
+                    {t(
+                      'verifyEmail.resend.sent',
+                      'If that address needs verification, a new link is on its way. Check your inbox.'
+                    )}
                   </AlertDescription>
                 </Alert>
               ) : (
@@ -202,12 +237,12 @@ function VerifyEmailInner() {
                   )}
                   <div className="space-y-2">
                     <label htmlFor="email" className="text-sm font-medium">
-                      Email
+                      {t('verifyEmail.email.label', 'Email')}
                     </label>
                     <Input
                       id="email"
                       type="email"
-                      placeholder="you@example.com"
+                      placeholder={t('verifyEmail.email.placeholder', 'you@example.com')}
                       value={resendEmail}
                       onChange={(e) => {
                         setResendEmail(e.target.value);
@@ -220,14 +255,16 @@ function VerifyEmailInner() {
                     />
                   </div>
                   <Button type="submit" className="w-full" disabled={resendSubmitting}>
-                    {resendSubmitting ? 'Sending…' : 'Send verification link'}
+                    {resendSubmitting
+                      ? t('verifyEmail.resend.submit.pending', 'Sending…')
+                      : t('verifyEmail.resend.submit', 'Send verification link')}
                   </Button>
                 </form>
               )}
 
               <p className="text-sm text-center text-muted-foreground">
                 <Link href="/login" className="font-medium text-primary hover:underline">
-                  Back to sign in
+                  {t('verifyEmail.backToSignIn', 'Back to sign in')}
                 </Link>
               </p>
             </div>
@@ -239,13 +276,15 @@ function VerifyEmailInner() {
 }
 
 export default function VerifyEmailPage() {
+  const t = useTranslation('auth');
+
   // useSearchParams requires a Suspense boundary so the rest of the route can
   // prerender while this client subtree hydrates (Next.js app-router).
   return (
     <Suspense
       fallback={
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t('verifyEmail.loading', 'Loading…')}</p>
         </div>
       }
     >
