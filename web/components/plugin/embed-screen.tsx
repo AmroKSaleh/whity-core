@@ -2,6 +2,7 @@
 
 import type { PluginFeature } from '@/lib/plugin-features';
 import { AdminHeader } from '@/components/admin/admin-header';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Generic "embed" screen (WC-246): iframes the plugin's own declared GET
@@ -26,6 +27,9 @@ import { AdminHeader } from '@/components/admin/admin-header';
  * navigation is not (a plugin screen can't navigate the admin shell away).
  */
 export function EmbedScreen({ feature }: { feature: PluginFeature }) {
+  // Called before the early return: a hook must run on every render.
+  const t = useTranslation('plugin');
+
   if (feature.embed === null) {
     return null;
   }
@@ -34,7 +38,9 @@ export function EmbedScreen({ feature }: { feature: PluginFeature }) {
     <div className="space-y-8">
       <AdminHeader
         title={feature.label}
-        description={`Provided by the ${feature.plugin} plugin.`}
+        description={t('feature.providedBy', 'Provided by the {plugin} plugin.', {
+          plugin: feature.plugin,
+        })}
       />
       <iframe
         src={feature.embed.path}

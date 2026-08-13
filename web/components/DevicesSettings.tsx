@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { deviceDisplayName } from '@/lib/device-label';
 import { IconDeviceMobile } from '@tabler/icons-react';
 
@@ -34,13 +35,14 @@ interface DeviceCredential {
 }
 
 function formatWhen(value: string): string {
-  const t = Date.parse(value.replace(' ', 'T') + 'Z');
-  return Number.isNaN(t) ? value : new Date(t).toLocaleString();
+  const parsed = Date.parse(value.replace(' ', 'T') + 'Z');
+  return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
 }
 
 export function DevicesSettings() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('auth');
   const [devices, setDevices] = useState<DeviceCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -76,13 +78,18 @@ export function DevicesSettings() {
     try {
       const res = await apiClient(`/api/v1/devices/${device.id}`, { method: 'DELETE' });
       if (!res.ok && res.status !== 404) {
-        addToast(`Failed to remove that device (${res.status}).`, 'error');
+        addToast(
+          t('devices.remove.errorWithStatus', 'Failed to remove that device ({status}).', {
+            status: res.status,
+          }),
+          'error'
+        );
         return;
       }
-      addToast('Device removed.', 'success');
+      addToast(t('devices.remove.success', 'Device removed.'), 'success');
       setDevices((prev) => prev.filter((d) => d.id !== device.id));
     } catch {
-      addToast('Failed to remove that device.', 'error');
+      addToast(t('devices.remove.error', 'Failed to remove that device.'), 'error');
     } finally {
       setBusyId(null);
     }
@@ -96,14 +103,14 @@ export function DevicesSettings() {
         </div>
       ) : loadError ? (
         <div className="text-sm text-destructive" data-testid="devices-load-error">
-          Failed to load your devices.{' '}
+          {t('devices.load.error', 'Failed to load your devices.')}{' '}
           <button type="button" onClick={() => void load()} className="underline font-medium">
-            Retry
+            {t('devices.load.retry', 'Retry')}
           </button>
         </div>
       ) : devices.length === 0 ? (
         <p className="text-sm text-muted-foreground" data-testid="devices-empty">
-          No registered devices.
+          {t('devices.empty', 'No registered devices.')}
         </p>
       ) : (
         <ul className="divide-y divide-border" data-testid="devices-list">
@@ -122,7 +129,11 @@ export function DevicesSettings() {
                       {deviceDisplayName(device.name, device.platform)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {device.last_seen_at ? `Last used ${formatWhen(device.last_seen_at)}` : 'Never used'}
+                      {device.last_seen_at
+                        ? t('devices.lastUsed', 'Last used {when}', {
+                            when: formatWhen(device.last_seen_at),
+                          })
+                        : t('devices.neverUsed', 'Never used')}
                     </p>
                   </div>
                 </div>
@@ -135,7 +146,7 @@ export function DevicesSettings() {
                   className="shrink-0"
                   data-testid={`device-revoke-${device.id}`}
                 >
-                  Remove
+                  {t('devices.remove', 'Remove')}
                 </Button>
               </li>
             );

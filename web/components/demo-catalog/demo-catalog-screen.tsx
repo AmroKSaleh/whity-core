@@ -5,6 +5,7 @@ import type { PluginFeature } from '@/lib/plugin-features';
 import { demoCatalogAdapter } from '@/lib/demo-catalog-adapter';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DemoCatalogList, DemoCatalogDetail } from '@amroksaleh/features/demo-catalog';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * web/'s bespoke screen for the DemoCatalog plugin's `screen: 'custom'`
@@ -29,13 +30,16 @@ import { DemoCatalogList, DemoCatalogDetail } from '@amroksaleh/features/demo-ca
 type View = { kind: 'list' } | { kind: 'detail'; itemId: number | null };
 
 export function DemoCatalogScreen({ feature }: { feature: PluginFeature }) {
+  const t = useTranslation('plugin');
   const [view, setView] = useState<View>({ kind: 'list' });
 
   return (
     <div className="space-y-8">
       <AdminHeader
         title={feature.label}
-        description={`Provided by the ${feature.plugin} plugin.`}
+        description={t('feature.providedBy', 'Provided by the {plugin} plugin.', {
+          plugin: feature.plugin,
+        })}
       />
 
       {view.kind === 'list' ? (

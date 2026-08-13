@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { tabsListVariants } from '@amroksaleh/ui/tabs';
+import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
  * Shared tab navigation for the unified "Approval Gating" admin surface
@@ -31,16 +32,44 @@ interface ApprovalGatingTabsProps {
   active: ApprovalGatingTabId;
 }
 
-const TABS: { id: ApprovalGatingTabId; label: string; href: string }[] = [
-  { id: 'signup', label: 'Signup', href: '/admin/registrations' },
-  { id: 'password-resets', label: 'Password reset', href: '/admin/approval-gating/password-resets' },
-  { id: 'two-factor-recovery', label: '2FA auth reset', href: '/admin/approval-gating/two-factor-recovery' },
+/**
+ * The tab labels reach `t()` through this table rather than as literals at the
+ * call site, which no static scanner can read — so they are declared here and
+ * the extractor takes the catalogue from this block. The English stays on the
+ * record as the runtime fallback.
+ *
+ * @i18n-keys admin
+ *   approvalGating.tab.signup = Signup
+ *   approvalGating.tab.passwordResets = Password reset
+ *   approvalGating.tab.twoFactorRecovery = 2FA auth reset
+ */
+export const TABS: { id: ApprovalGatingTabId; key: string; label: string; href: string }[] = [
+  {
+    id: 'signup',
+    key: 'approvalGating.tab.signup',
+    label: 'Signup',
+    href: '/admin/registrations',
+  },
+  {
+    id: 'password-resets',
+    key: 'approvalGating.tab.passwordResets',
+    label: 'Password reset',
+    href: '/admin/approval-gating/password-resets',
+  },
+  {
+    id: 'two-factor-recovery',
+    key: 'approvalGating.tab.twoFactorRecovery',
+    label: '2FA auth reset',
+    href: '/admin/approval-gating/two-factor-recovery',
+  },
 ];
 
 export function ApprovalGatingTabs({ active }: ApprovalGatingTabsProps) {
+  const t = useTranslation('admin');
+
   return (
     <nav
-      aria-label="Approval gating sections"
+      aria-label={t('approvalGating.nav.label', 'Approval gating sections')}
       data-testid="approval-gating-tabs"
       className={cn(tabsListVariants({ variant: 'default' }), 'w-full flex-wrap md:w-fit')}
     >
@@ -58,7 +87,7 @@ export function ApprovalGatingTabs({ active }: ApprovalGatingTabsProps) {
                 'bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30 dark:text-foreground'
             )}
           >
-            {tab.label}
+            {t(tab.key, tab.label)}
           </Link>
         );
       })}
