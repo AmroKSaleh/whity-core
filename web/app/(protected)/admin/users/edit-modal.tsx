@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -31,6 +31,7 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import type { User } from './page';
 import { useRoleOptions } from './use-role-options';
 import { useOuOptions } from './use-ou-options';
@@ -40,12 +41,17 @@ import { useOuOptions } from './use-ou-options';
 // are intentionally out of scope server-side, so both are presented read-only and
 // excluded from the editable schema. `ou_id` is nullable — clearing the picker
 // removes the user from any OU.
-const editUserSchema = z.object({
-  role: z.string().min(1, 'Role is required'),
-  ou_id: z.string().nullable(),
-});
+//
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English.
+const buildEditUserSchema = (t: TranslateFn) =>
+  z.object({
+    role: z.string().min(1, t('users.edit.validation.role', 'Role is required')),
+    ou_id: z.string().nullable(),
+  });
 
-type EditUserFormData = z.infer<typeof editUserSchema>;
+type EditUserFormData = z.infer<ReturnType<typeof buildEditUserSchema>>;
 
 interface EditUserModalProps {
   isOpen: boolean;
@@ -61,6 +67,7 @@ export function EditUserModal({
   onSuccess,
 }: EditUserModalProps) {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Role dropdown options come from the live tenant-visible role list, so only
   // roles that actually exist (and resolve server-side) are offered. This
@@ -76,8 +83,10 @@ export function EditUserModal({
     ou_id: u.ou_id != null ? String(u.ou_id) : null,
   });
 
+  const schema = useMemo(() => buildEditUserSchema(t), [t]);
+
   const form = useForm<EditUserFormData>({
-    resolver: zodResolver(editUserSchema),
+    resolver: zodResolver(schema),
     defaultValues: toFormValues(user),
   });
 
@@ -103,7 +112,7 @@ export function EditUserModal({
       });
 
       if (error !== undefined || !response.ok) {
-        throw new Error(error?.error ?? 'Failed to update user');
+        throw new Error(error?.error ?? t('users.edit.error', 'Failed to update user'));
       }
 
       // Confirm the change actually persisted before claiming success: the
@@ -111,14 +120,16 @@ export function EditUserModal({
       // matches what we asked for rather than trusting a bare 200 (WC-113).
       const persistedRole = payload?.data.role;
       if (persistedRole !== undefined && persistedRole !== data.role) {
-        throw new Error('User update did not persist the selected role');
+        throw new Error(
+          t('users.edit.notPersisted', 'User update did not persist the selected role')
+        );
       }
 
-      addToast('User updated successfully', 'success');
+      addToast(t('users.edit.success', 'User updated successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to update user';
+        error instanceof Error ? error.message : t('users.edit.error', 'Failed to update user');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -129,9 +140,9 @@ export function EditUserModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit User</DialogTitle>
+          <DialogTitle>{t('users.edit.title', 'Edit User')}</DialogTitle>
           <DialogDescription>
-            Update user information. Email cannot be changed.
+            {t('users.edit.description', 'Update user information. Email cannot be changed.')}
           </DialogDescription>
         </DialogHeader>
 
@@ -148,10 +159,12 @@ export function EditUserModal({
                 htmlFor="edit-user-email"
                 className="text-sm font-medium leading-none"
               >
-                Email
+                {t('users.edit.email.label', 'Email')}
               </label>
               <Input id="edit-user-email" type="email" value={user.email} disabled />
-              <p className="text-xs text-muted-foreground">Email cannot be changed</p>
+              <p className="text-xs text-muted-foreground">
+                {t('users.edit.email.hint', 'Email cannot be changed')}
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -159,11 +172,14 @@ export function EditUserModal({
                 htmlFor="edit-user-name"
                 className="text-sm font-medium leading-none"
               >
-                Name
+                {t('users.edit.name.label', 'Name')}
               </label>
               <Input id="edit-user-name" value={user.name} disabled />
               <p className="text-xs text-muted-foreground">
-                Name is derived from the email and cannot be changed
+                {t(
+                  'users.edit.name.hint',
+                  'Name is derived from the email and cannot be changed'
+                )}
               </p>
             </div>
 
@@ -172,13 +188,15 @@ export function EditUserModal({
               name="role"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Role</FormLabel>
+                  <FormLabel>{t('users.edit.role.label', 'Role')}</FormLabel>
                   <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue
                           placeholder={
-                            isLoadingRoles ? 'Loading roles…' : 'Select a role'
+                            isLoadingRoles
+                              ? t('users.edit.role.loading', 'Loading roles…')
+                              : t('users.edit.role.placeholder', 'Select a role')
                           }
                         />
                       </SelectTrigger>
@@ -201,7 +219,7 @@ export function EditUserModal({
               name="ou_id"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Organisational Unit</FormLabel>
+                  <FormLabel>{t('users.edit.ou.label', 'Organisational Unit')}</FormLabel>
                   <Select
                     onValueChange={(val) => field.onChange(val === '__none__' ? null : val)}
                     value={field.value ?? '__none__'}
@@ -210,13 +228,17 @@ export function EditUserModal({
                       <SelectTrigger>
                         <SelectValue
                           placeholder={
-                            isLoadingOus ? 'Loading OUs…' : 'None (root)'
+                            isLoadingOus
+                              ? t('users.edit.ou.loading', 'Loading OUs…')
+                              : t('users.edit.ou.none', 'None (root)')
                           }
                         />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="__none__">None (root)</SelectItem>
+                      <SelectItem value="__none__">
+                        {t('users.edit.ou.none', 'None (root)')}
+                      </SelectItem>
                       {ouOptions.map((ou) => (
                         <SelectItem key={ou.value} value={ou.value}>
                           {ou.label}
@@ -234,7 +256,7 @@ export function EditUserModal({
                 htmlFor="edit-user-tenant"
                 className="text-sm font-medium leading-none"
               >
-                Tenant
+                {t('users.edit.tenant.label', 'Tenant')}
               </label>
               <Input
                 id="edit-user-tenant"
@@ -243,7 +265,10 @@ export function EditUserModal({
                 disabled
               />
               <p className="text-xs text-muted-foreground">
-                Moving a user between tenants is not supported here
+                {t(
+                  'users.edit.tenant.hint',
+                  'Moving a user between tenants is not supported here'
+                )}
               </p>
             </div>
 
@@ -253,10 +278,12 @@ export function EditUserModal({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {t('users.edit.cancel', 'Cancel')}
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Saving...' : 'Save Changes'}
+                {isSubmitting
+                  ? t('users.edit.submitting', 'Saving...')
+                  : t('users.edit.submit', 'Save Changes')}
               </Button>
             </DialogFooter>
           </form>

@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -24,16 +24,23 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { PermissionCheckbox } from './permission-checkbox';
 import type { Permission, Role, RoleWithPermissions } from './types';
 
-const editRoleSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  description: z.string().min(1, 'Description is required'),
-  permissionIds: z.array(z.number()),
-});
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English.
+const buildEditRoleSchema = (t: TranslateFn) =>
+  z.object({
+    name: z.string().min(1, t('roles.edit.validation.nameRequired', 'Name is required')),
+    description: z
+      .string()
+      .min(1, t('roles.edit.validation.descriptionRequired', 'Description is required')),
+    permissionIds: z.array(z.number()),
+  });
 
-type EditRoleFormData = z.infer<typeof editRoleSchema>;
+type EditRoleFormData = z.infer<ReturnType<typeof buildEditRoleSchema>>;
 
 interface EditRoleModalProps {
   isOpen: boolean;
@@ -50,14 +57,17 @@ export function EditRoleModal({
 }: EditRoleModalProps) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
   const [roleData, setRoleData] = useState<RoleWithPermissions | null>(null);
   const [isLoadingRole, setIsLoadingRole] = useState(false);
 
+  const schema = useMemo(() => buildEditRoleSchema(t), [t]);
+
   const form = useForm<EditRoleFormData>({
-    resolver: zodResolver(editRoleSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       name: role.name,
       description: role.description,
@@ -71,19 +81,21 @@ export function EditRoleModal({
       const response = await apiClient('/api/v1/permissions?per_page=100');
 
       if (!response.ok) {
-        throw new Error('Failed to fetch permissions');
+        throw new Error(t('roles.edit.permissionsError', 'Failed to fetch permissions'));
       }
 
       const data = await response.json();
       setPermissions(data.data || []);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to fetch permissions';
+        error instanceof Error
+          ? error.message
+          : t('roles.edit.permissionsError', 'Failed to fetch permissions');
       addToast(message, 'error');
     } finally {
       setIsLoadingPermissions(false);
     }
-  }, [apiClient, addToast]);
+  }, [apiClient, addToast, t]);
 
   const fetchRole = useCallback(async () => {
     try {
@@ -91,19 +103,21 @@ export function EditRoleModal({
       const response = await apiClient(`/api/v1/roles/${role.id}`);
 
       if (!response.ok) {
-        throw new Error('Failed to fetch role');
+        throw new Error(t('roles.edit.roleError', 'Failed to fetch role'));
       }
 
       const data = await response.json();
       setRoleData(data.data);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to fetch role details';
+        error instanceof Error
+          ? error.message
+          : t('roles.edit.roleDetailsError', 'Failed to fetch role details');
       addToast(message, 'error');
     } finally {
       setIsLoadingRole(false);
     }
-  }, [apiClient, role.id, addToast]);
+  }, [apiClient, role.id, addToast, t]);
 
   useEffect(() => {
     if (isOpen) {
@@ -145,7 +159,10 @@ export function EditRoleModal({
         // friendly toast instead of a generic error / console noise.
         if (response.status === 404) {
           addToast(
-            "This role can't be modified by your tenant — global base roles are managed by the system tenant.",
+            t(
+              'roles.edit.notManageable',
+              "This role can't be modified by your tenant — global base roles are managed by the system tenant."
+            ),
             'error'
           );
           return;
@@ -153,15 +170,15 @@ export function EditRoleModal({
 
         const errorData = await response.json().catch(() => ({}));
         throw new Error(
-          errorData.message || 'Failed to update role'
+          errorData.message || t('roles.edit.error', 'Failed to update role')
         );
       }
 
-      addToast('Role updated successfully', 'success');
+      addToast(t('roles.edit.success', 'Role updated successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to update role';
+        error instanceof Error ? error.message : t('roles.edit.error', 'Failed to update role');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -178,15 +195,15 @@ export function EditRoleModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit Role</DialogTitle>
+          <DialogTitle>{t('roles.edit.title', 'Edit Role')}</DialogTitle>
           <DialogDescription>
-            Update role information and permissions.
+            {t('roles.edit.subtitle', 'Update role information and permissions.')}
           </DialogDescription>
         </DialogHeader>
 
         {isLoading ? (
           <div className="text-sm text-muted-foreground py-8 text-center">
-            Loading role details...
+            {t('roles.edit.loading', 'Loading role details...')}
           </div>
         ) : (
           <Form {...form}>
@@ -196,9 +213,12 @@ export function EditRoleModal({
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Role Name</FormLabel>
+                    <FormLabel>{t('roles.edit.name.label', 'Role Name')}</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., Editor" {...field} />
+                      <Input
+                        placeholder={t('roles.edit.name.placeholder', 'e.g., Editor')}
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -210,9 +230,12 @@ export function EditRoleModal({
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>{t('roles.edit.description.label', 'Description')}</FormLabel>
                     <FormControl>
-                      <Input placeholder="Role description" {...field} />
+                      <Input
+                        placeholder={t('roles.edit.description.placeholder', 'Role description')}
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -220,7 +243,7 @@ export function EditRoleModal({
               />
 
               <div className="space-y-2">
-                <FormLabel>Permissions</FormLabel>
+                <FormLabel>{t('roles.edit.permissions.label', 'Permissions')}</FormLabel>
                 <PermissionCheckbox
                   permissions={permissions}
                   selectedIds={form.watch('permissionIds')}
@@ -234,10 +257,12 @@ export function EditRoleModal({
                   variant="outline"
                   onClick={() => onOpenChange(false)}
                 >
-                  Cancel
+                  {t('roles.edit.cancel', 'Cancel')}
                 </Button>
                 <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? 'Saving...' : 'Save Changes'}
+                  {isSubmitting
+                    ? t('roles.edit.submitting', 'Saving...')
+                    : t('roles.edit.submit', 'Save Changes')}
                 </Button>
               </DialogFooter>
             </form>

@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import type { User } from './page';
 
 interface DeleteUserModalProps {
@@ -28,6 +29,7 @@ export function DeleteUserModal({
   onSuccess,
 }: DeleteUserModalProps) {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
@@ -39,14 +41,14 @@ export function DeleteUserModal({
       });
 
       if (error !== undefined || !response.ok) {
-        throw new Error(error?.error ?? 'Failed to delete user');
+        throw new Error(error?.error ?? t('users.delete.error', 'Failed to delete user'));
       }
 
-      addToast('User deleted successfully', 'success');
+      addToast(t('users.delete.success', 'User deleted successfully'), 'success');
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to delete user';
+        error instanceof Error ? error.message : t('users.delete.error', 'Failed to delete user');
       addToast(message, 'error');
     } finally {
       setIsDeleting(false);
@@ -57,9 +59,12 @@ export function DeleteUserModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete User</DialogTitle>
+          <DialogTitle>{t('users.delete.title', 'Delete User')}</DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete this user? This action cannot be undone.
+            {t(
+              'users.delete.description',
+              'Are you sure you want to delete this user? This action cannot be undone.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -81,7 +86,7 @@ export function DeleteUserModal({
             onClick={() => onOpenChange(false)}
             disabled={isDeleting}
           >
-            Cancel
+            {t('users.delete.cancel', 'Cancel')}
           </Button>
           <Button
             type="button"
@@ -89,7 +94,9 @@ export function DeleteUserModal({
             onClick={handleDelete}
             disabled={isDeleting}
           >
-            {isDeleting ? 'Deleting...' : 'Delete User'}
+            {isDeleting
+              ? t('users.delete.submitting', 'Deleting...')
+              : t('users.delete.submit', 'Delete User')}
           </Button>
         </DialogFooter>
       </DialogContent>
