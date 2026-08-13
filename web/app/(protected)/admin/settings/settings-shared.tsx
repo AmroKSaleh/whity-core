@@ -24,6 +24,7 @@ import type { useToast } from '@/lib/toast-context';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Input } from '@amroksaleh/ui/input';
 import { Switch } from '@amroksaleh/ui/switch';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 
 // Granular RBAC for the Website Settings console (mirrors the backend catalogue):
 //   read   → may view the effective/editable set (else Access Denied)
@@ -62,7 +63,7 @@ export type RegistryEntry = components['schemas']['SettingsRegistryEntry'] & {
    *     so an operator changing `acme:mode` on a shared screen knows whose
    *     setting it is and which plugin to remove to make it go away.
    *   - `label` / `description` — locale => text, supplied by the declaration.
-   *     Core keys carry neither (their copy lives in FIELD_META below).
+   *     Core keys carry neither (their copy lives in fieldMeta() below).
    * All optional: a core descriptor is unchanged.
    */
   source?: string;
@@ -93,12 +94,23 @@ export type GeneralSettingKey = 'site_name' | 'timezone' | 'support_email';
 // instance's "identity & language" surface) — see branding/page.tsx.
 export const GENERAL_SETTING_KEYS: readonly GeneralSettingKey[] = ['site_name', 'timezone', 'support_email'];
 
-export const FIELD_LABELS: Record<SettingKey, string> = {
-  site_name: 'Site name',
-  timezone: 'Timezone',
-  locale: 'Locale',
-  support_email: 'Support email',
-};
+/**
+ * Short labels for the fixed per-tenant key set, as rendered on the General and
+ * Branding tabs.
+ *
+ * A FUNCTION of `t` rather than a constant map because a constant cannot be
+ * translated: it is built once at module scope, before any provider exists.
+ * The keys stay literal at the call site, which is what keeps them extractable
+ * (see docs/wiki/Internationalization.md).
+ */
+export function generalFieldLabels(t: TranslateFn): Record<SettingKey, string> {
+  return {
+    site_name: t('settings.field.site_name', 'Site name'),
+    timezone: t('settings.field.timezone', 'Timezone'),
+    locale: t('settings.field.locale', 'Locale'),
+    support_email: t('settings.field.support_email', 'Support email'),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Field + section metadata (friendly labels / help text / grouping).
@@ -113,109 +125,201 @@ export interface FieldMeta {
  * Human-facing label + help for known keys. A key absent here still renders,
  * labelled from a humanised form of its key (see {@link fieldMetaFor}).
  */
-export const FIELD_META: Record<string, FieldMeta> = {
-  'error_tracking.enabled': {
-    label: 'Record errors',
-    help: 'Capture unhandled errors from this instance. Off means nothing is recorded or sent.',
-  },
-  'error_tracking.provider': {
-    label: 'Destination',
-    help: 'Keep errors on this instance in the built-in inbox, or forward them over the Sentry protocol.',
-  },
-  'error_tracking.environment': {
-    label: 'Environment label',
-    help: 'Tags events with the deployment they came from (e.g. staging, production). Leave blank to omit.',
-  },
-  'error_tracking.notify_admins': {
-    label: 'Email platform admins',
-    help: 'Alerts admins when an error group first appears, or reappears after being resolved. Sent through the durable queue, so a mail outage never loses an alert.',
-  },
-  'error_tracking.retention_days': {
-    label: 'Retention (days)',
-    help: 'How long resolved groups and their occurrences are kept before pruning.',
-  },
-  site_name: {
-    label: 'Site name',
-    help: 'The public name of this instance, shown in the browser title and on the sign-in screen.',
-  },
-  timezone: {
-    label: 'Default timezone',
-    help: 'Applied for tenants that have not chosen their own timezone.',
-  },
-  locale: {
-    label: 'Default locale',
-    help: 'Default interface language for tenants that have not overridden it.',
-  },
-  support_email: {
-    label: 'Support email',
-    help: 'Shown to users who need help. Leave blank to hide it.',
-  },
-  'mcp.enabled': {
-    label: 'Model Context Protocol (MCP) endpoint',
-    help: 'Expose the MCP tool endpoint so connected AI clients can call this instance.',
-  },
-  'auth.self_registration_enabled': {
-    label: 'Public sign-up',
-    help: 'Let anyone create an account from the public registration page. Off by default — an operator-provisioned instance opens sign-up explicitly.',
-  },
-  'auth.registration_approval_required': {
-    label: 'Require admin approval',
-    help: 'When sign-up is open, hold each new account as pending until an administrator approves it.',
-  },
-  'auth.sso_enabled': {
-    label: 'Single sign-on (SSO)',
-    help: 'Master switch for federated sign-in. When off, every configured identity provider is disabled instance-wide.',
-  },
-  'storage.driver': {
-    label: 'Storage driver',
-    help: 'Where uploaded files are stored: local disk, or an S3-compatible object store.',
-  },
-  'storage.s3.endpoint': {
-    label: 'S3 endpoint',
-    help: 'Base URL of the S3-compatible service.',
-  },
-  'storage.s3.region': { label: 'S3 region' },
-  'storage.s3.bucket': { label: 'S3 bucket' },
-  'storage.s3.access_key': {
-    label: 'S3 access key',
-    help: 'The matching secret key is supplied via the deployment environment and is never stored here.',
-  },
-  'storage.s3.path_style': {
-    label: 'S3 path-style addressing',
-    help: 'Use path-style bucket URLs (required by most self-hosted S3 gateways).',
-  },
-  'storage.s3.public_base_url': {
-    label: 'S3 public base URL',
-    help: 'Public base URL used to serve stored assets, when it differs from the endpoint.',
-  },
-  // Outgoing email (managed on the dedicated Email settings page).
-  'mail.transport': {
-    label: 'Transport',
-    help: 'How outgoing email is delivered.',
-  },
-  'mail.smtp.host': { label: 'SMTP host' },
-  'mail.smtp.port': { label: 'SMTP port', help: '587 = STARTTLS · 465 = SSL · 25 / 1025 = none' },
-  'mail.smtp.encryption': { label: 'Encryption' },
-  'mail.smtp.username': { label: 'SMTP username', help: 'Optional — leave blank for unauthenticated relays.' },
-  'mail.from_address': { label: 'From address', help: 'The address recipients see messages come from.' },
-  'mail.from_name': { label: 'From name', help: 'The display name shown alongside the from address.' },
-  'mail.events.welcome_enabled': {
-    label: 'Welcome email',
-    help: 'Send a welcome message when a new account is created.',
-  },
-  'mail.events.approval_enabled': {
-    label: 'Approval decision email',
-    help: 'Notify a registrant when their account is approved or rejected.',
-  },
-  'mail.events.invitation_enabled': {
-    label: 'Workspace invitation email',
-    help: 'Email people when they are invited to a workspace.',
-  },
-  'plugins.store_enabled': {
-    label: 'Plugin marketplace',
-    help: 'Allow installing plugins from a trusted external store. A non-empty plugins.store_allowed_hosts allowlist is also required — this switch lets an operator disable the whole integration without losing that host list.',
-  },
-};
+export function fieldMeta(t: TranslateFn): Record<string, FieldMeta> {
+  return {
+    'error_tracking.enabled': {
+      label: t('settings.meta.error_tracking.enabled.label', 'Record errors'),
+      help: t(
+        'settings.meta.error_tracking.enabled.help',
+        'Capture unhandled errors from this instance. Off means nothing is recorded or sent.'
+      ),
+    },
+    'error_tracking.provider': {
+      label: t('settings.meta.error_tracking.provider.label', 'Destination'),
+      help: t(
+        'settings.meta.error_tracking.provider.help',
+        'Keep errors on this instance in the built-in inbox, or forward them over the Sentry protocol.'
+      ),
+    },
+    'error_tracking.environment': {
+      label: t('settings.meta.error_tracking.environment.label', 'Environment label'),
+      help: t(
+        'settings.meta.error_tracking.environment.help',
+        'Tags events with the deployment they came from (e.g. staging, production). Leave blank to omit.'
+      ),
+    },
+    'error_tracking.notify_admins': {
+      label: t('settings.meta.error_tracking.notify_admins.label', 'Email platform admins'),
+      help: t(
+        'settings.meta.error_tracking.notify_admins.help',
+        'Alerts admins when an error group first appears, or reappears after being resolved. Sent through the durable queue, so a mail outage never loses an alert.'
+      ),
+    },
+    'error_tracking.retention_days': {
+      label: t('settings.meta.error_tracking.retention_days.label', 'Retention (days)'),
+      help: t(
+        'settings.meta.error_tracking.retention_days.help',
+        'How long resolved groups and their occurrences are kept before pruning.'
+      ),
+    },
+    site_name: {
+      label: t('settings.meta.site_name.label', 'Site name'),
+      help: t(
+        'settings.meta.site_name.help',
+        'The public name of this instance, shown in the browser title and on the sign-in screen.'
+      ),
+    },
+    timezone: {
+      label: t('settings.meta.timezone.label', 'Default timezone'),
+      help: t(
+        'settings.meta.timezone.help',
+        'Applied for tenants that have not chosen their own timezone.'
+      ),
+    },
+    locale: {
+      label: t('settings.meta.locale.label', 'Default locale'),
+      help: t(
+        'settings.meta.locale.help',
+        'Default interface language for tenants that have not overridden it.'
+      ),
+    },
+    support_email: {
+      label: t('settings.meta.support_email.label', 'Support email'),
+      help: t('settings.meta.support_email.help', 'Shown to users who need help. Leave blank to hide it.'),
+    },
+    'mcp.enabled': {
+      label: t('settings.meta.mcp.enabled.label', 'Model Context Protocol (MCP) endpoint'),
+      help: t(
+        'settings.meta.mcp.enabled.help',
+        'Expose the MCP tool endpoint so connected AI clients can call this instance.'
+      ),
+    },
+    'auth.self_registration_enabled': {
+      label: t('settings.meta.auth.self_registration_enabled.label', 'Public sign-up'),
+      help: t(
+        'settings.meta.auth.self_registration_enabled.help',
+        'Let anyone create an account from the public registration page. Off by default — an operator-provisioned instance opens sign-up explicitly.'
+      ),
+    },
+    'auth.registration_approval_required': {
+      label: t('settings.meta.auth.registration_approval_required.label', 'Require admin approval'),
+      help: t(
+        'settings.meta.auth.registration_approval_required.help',
+        'When sign-up is open, hold each new account as pending until an administrator approves it.'
+      ),
+    },
+    'auth.sso_enabled': {
+      label: t('settings.meta.auth.sso_enabled.label', 'Single sign-on (SSO)'),
+      help: t(
+        'settings.meta.auth.sso_enabled.help',
+        'Master switch for federated sign-in. When off, every configured identity provider is disabled instance-wide.'
+      ),
+    },
+    'storage.driver': {
+      label: t('settings.meta.storage.driver.label', 'Storage driver'),
+      help: t(
+        'settings.meta.storage.driver.help',
+        'Where uploaded files are stored: local disk, or an S3-compatible object store.'
+      ),
+    },
+    'storage.s3.endpoint': {
+      label: t('settings.meta.storage.s3.endpoint.label', 'S3 endpoint'),
+      help: t('settings.meta.storage.s3.endpoint.help', 'Base URL of the S3-compatible service.'),
+    },
+    'storage.s3.region': { label: t('settings.meta.storage.s3.region.label', 'S3 region') },
+    'storage.s3.bucket': { label: t('settings.meta.storage.s3.bucket.label', 'S3 bucket') },
+    'storage.s3.access_key': {
+      label: t('settings.meta.storage.s3.access_key.label', 'S3 access key'),
+      help: t(
+        'settings.meta.storage.s3.access_key.help',
+        'The matching secret key is supplied via the deployment environment and is never stored here.'
+      ),
+    },
+    'storage.s3.path_style': {
+      label: t('settings.meta.storage.s3.path_style.label', 'S3 path-style addressing'),
+      help: t(
+        'settings.meta.storage.s3.path_style.help',
+        'Use path-style bucket URLs (required by most self-hosted S3 gateways).'
+      ),
+    },
+    'storage.s3.public_base_url': {
+      label: t('settings.meta.storage.s3.public_base_url.label', 'S3 public base URL'),
+      help: t(
+        'settings.meta.storage.s3.public_base_url.help',
+        'Public base URL used to serve stored assets, when it differs from the endpoint.'
+      ),
+    },
+    // Outgoing email (managed on the dedicated Email settings page).
+    'mail.transport': {
+      label: t('settings.meta.mail.transport.label', 'Transport'),
+      help: t('settings.meta.mail.transport.help', 'How outgoing email is delivered.'),
+    },
+    'mail.smtp.host': { label: t('settings.meta.mail.smtp.host.label', 'SMTP host') },
+    'mail.smtp.port': {
+      label: t('settings.meta.mail.smtp.port.label', 'SMTP port'),
+      // Protocol port numbers and their transport names read the same in every
+      // language, so the mask itself is not translated.
+      help: '587 = STARTTLS · 465 = SSL · 25 / 1025 = none',
+    },
+    'mail.smtp.encryption': { label: t('settings.meta.mail.smtp.encryption.label', 'Encryption') },
+    'mail.smtp.username': {
+      label: t('settings.meta.mail.smtp.username.label', 'SMTP username'),
+      help: t(
+        'settings.meta.mail.smtp.username.help',
+        'Optional — leave blank for unauthenticated relays.'
+      ),
+    },
+    'mail.from_address': {
+      label: t('settings.meta.mail.from_address.label', 'From address'),
+      help: t(
+        'settings.meta.mail.from_address.help',
+        'The address recipients see messages come from.'
+      ),
+    },
+    'mail.from_name': {
+      label: t('settings.meta.mail.from_name.label', 'From name'),
+      help: t(
+        'settings.meta.mail.from_name.help',
+        'The display name shown alongside the from address.'
+      ),
+    },
+    'mail.events.welcome_enabled': {
+      label: t('settings.meta.mail.events.welcome_enabled.label', 'Welcome email'),
+      help: t(
+        'settings.meta.mail.events.welcome_enabled.help',
+        'Send a welcome message when a new account is created.'
+      ),
+    },
+    'mail.events.approval_enabled': {
+      label: t('settings.meta.mail.events.approval_enabled.label', 'Approval decision email'),
+      help: t(
+        'settings.meta.mail.events.approval_enabled.help',
+        'Notify a registrant when their account is approved or rejected.'
+      ),
+    },
+    'mail.events.invitation_enabled': {
+      label: t('settings.meta.mail.events.invitation_enabled.label', 'Workspace invitation email'),
+      help: t(
+        'settings.meta.mail.events.invitation_enabled.help',
+        'Email people when they are invited to a workspace.'
+      ),
+    },
+    'i18n.enabled': {
+      label: t('settings.meta.i18n.enabled.label', 'Multiple languages'),
+      help: t(
+        'settings.meta.i18n.enabled.help',
+        'Let people choose the language the interface is shown in, and mirror it for right-to-left languages. Off means everyone sees the default language, left-to-right, with no language control anywhere — stored preferences and translations are kept, so turning it back on restores them.'
+      ),
+    },
+    'plugins.store_enabled': {
+      label: t('settings.meta.plugins.store_enabled.label', 'Plugin marketplace'),
+      help: t(
+        'settings.meta.plugins.store_enabled.help',
+        'Allow installing plugins from a trusted external store. A non-empty plugins.store_allowed_hosts allowlist is also required — this switch lets an operator disable the whole integration without losing that host list.'
+      ),
+    },
+  };
+}
 
 export interface SectionDef {
   id: string;
@@ -230,46 +334,69 @@ export interface SectionDef {
  * limits, …) are added here as their keys land; until then any unclaimed key
  * still renders under "Other settings" so nothing is silently hidden.
  */
-export const SETTINGS_SECTIONS: readonly SectionDef[] = [
-  {
-    id: 'general',
-    title: 'General',
-    description: 'Instance identity and defaults inherited by every tenant.',
-    keys: ['site_name', 'support_email', 'timezone', 'locale'],
-  },
-  {
-    id: 'signup',
-    title: 'Sign-up governance',
-    description: 'Control whether and how new people can create accounts on this instance.',
-    keys: ['auth.self_registration_enabled', 'auth.registration_approval_required'],
-  },
-  {
-    id: 'signin',
-    title: 'Sign-in & SSO',
-    description: 'Federated sign-in across the whole instance.',
-    keys: ['auth.sso_enabled'],
-  },
-  {
-    id: 'integrations',
-    title: 'Integrations',
-    description: 'Machine-facing endpoints and connected tooling.',
-    keys: ['mcp.enabled'],
-  },
-  {
-    id: 'storage',
-    title: 'Storage',
-    description: 'Where uploaded files and assets are kept.',
-    keys: [
-      'storage.driver',
-      'storage.s3.endpoint',
-      'storage.s3.region',
-      'storage.s3.bucket',
-      'storage.s3.access_key',
-      'storage.s3.path_style',
-      'storage.s3.public_base_url',
-    ],
-  },
-];
+export function settingsSections(t: TranslateFn): readonly SectionDef[] {
+  return [
+    {
+      id: 'general',
+      title: t('settings.section.general.title', 'General'),
+      description: t(
+        'settings.section.general.description',
+        'Instance identity and defaults inherited by every tenant.'
+      ),
+      keys: ['site_name', 'support_email', 'timezone', 'locale'],
+    },
+    {
+      id: 'signup',
+      title: t('settings.section.signup.title', 'Sign-up governance'),
+      description: t(
+        'settings.section.signup.description',
+        'Control whether and how new people can create accounts on this instance.'
+      ),
+      keys: ['auth.self_registration_enabled', 'auth.registration_approval_required'],
+    },
+    {
+      id: 'i18n',
+      title: t('settings.section.i18n.title', 'Languages'),
+      description: t(
+        'settings.section.i18n.description',
+        'Whether this instance presents itself in more than one language.'
+      ),
+      keys: ['i18n.enabled'],
+    },
+    {
+      id: 'signin',
+      title: t('settings.section.signin.title', 'Sign-in & SSO'),
+      description: t(
+        'settings.section.signin.description',
+        'Federated sign-in across the whole instance.'
+      ),
+      keys: ['auth.sso_enabled'],
+    },
+    {
+      id: 'integrations',
+      title: t('settings.section.integrations.title', 'Integrations'),
+      description: t(
+        'settings.section.integrations.description',
+        'Machine-facing endpoints and connected tooling.'
+      ),
+      keys: ['mcp.enabled'],
+    },
+    {
+      id: 'storage',
+      title: t('settings.section.storage.title', 'Storage'),
+      description: t('settings.section.storage.description', 'Where uploaded files and assets are kept.'),
+      keys: [
+        'storage.driver',
+        'storage.s3.endpoint',
+        'storage.s3.region',
+        'storage.s3.bucket',
+        'storage.s3.access_key',
+        'storage.s3.path_style',
+        'storage.s3.public_base_url',
+      ],
+    },
+  ];
+}
 
 /**
  * Catch-all for PLUGIN-declared keys (#713 item 1).
@@ -281,20 +408,30 @@ export const SETTINGS_SECTIONS: readonly SectionDef[] = [
  * `admin => true` are published by the backend at all, so anything reaching
  * this section is here because its author chose to put it here.
  */
-const PLUGIN_SECTION: SectionDef = {
-  id: 'plugins',
-  title: 'Plugin settings',
-  description: 'Settings declared by the plugins installed on this instance.',
-  keys: [],
-};
+function pluginSection(t: TranslateFn): SectionDef {
+  return {
+    id: 'plugins',
+    title: t('settings.section.plugins.title', 'Plugin settings'),
+    description: t(
+      'settings.section.plugins.description',
+      'Settings declared by the plugins installed on this instance.'
+    ),
+    keys: [],
+  };
+}
 
 /** Catch-all for registry keys not claimed by a named section above. */
-const OTHER_SECTION: SectionDef = {
-  id: 'other',
-  title: 'Other settings',
-  description: 'Additional settings published by this instance.',
-  keys: [],
-};
+function otherSection(t: TranslateFn): SectionDef {
+  return {
+    id: 'other',
+    title: t('settings.section.other.title', 'Other settings'),
+    description: t(
+      'settings.section.other.description',
+      'Additional settings published by this instance.'
+    ),
+    keys: [],
+  };
+}
 
 export interface RegistrySection {
   section: SectionDef;
@@ -306,12 +443,12 @@ export interface RegistrySection {
  * keys is dropped; any key not claimed by a named section is appended under
  * "Other settings" so a newly-added backend key always appears somewhere.
  */
-export function groupRegistry(registry: readonly RegistryEntry[]): RegistrySection[] {
+export function groupRegistry(registry: readonly RegistryEntry[], t: TranslateFn): RegistrySection[] {
   const byKey = new Map(registry.map((entry) => [entry.key, entry]));
   const claimed = new Set<string>();
   const sections: RegistrySection[] = [];
 
-  for (const section of SETTINGS_SECTIONS) {
+  for (const section of settingsSections(t)) {
     const entries: RegistryEntry[] = [];
     for (const key of section.keys) {
       const entry = byKey.get(key);
@@ -331,7 +468,7 @@ export function groupRegistry(registry: readonly RegistryEntry[]): RegistrySecti
     claimed.add(entry.key);
   }
   if (pluginEntries.length > 0) {
-    sections.push({ section: PLUGIN_SECTION, entries: pluginEntries });
+    sections.push({ section: pluginSection(t), entries: pluginEntries });
   }
 
   // `mail.*` keys are managed on the dedicated Email settings page (transport-
@@ -341,7 +478,7 @@ export function groupRegistry(registry: readonly RegistryEntry[]): RegistrySecti
     (entry) => !claimed.has(entry.key) && !entry.key.startsWith('mail.')
   );
   if (leftover.length > 0) {
-    sections.push({ section: OTHER_SECTION, entries: leftover });
+    sections.push({ section: otherSection(t), entries: leftover });
   }
 
   return sections;
@@ -373,19 +510,19 @@ export function humanizeKey(key: string): string {
 }
 
 /** The label + help for a key, falling back to a humanised label. */
-export function fieldMetaFor(key: string): FieldMeta {
-  return FIELD_META[key] ?? { label: humanizeKey(key) };
+export function fieldMetaFor(key: string, t: TranslateFn): FieldMeta {
+  return fieldMeta(t)[key] ?? { label: humanizeKey(key) };
 }
 
 /**
  * Label + help for one descriptor, preferring what the DECLARATION said.
  *
- * Core keys keep their curated copy in FIELD_META. A plugin key cannot — core
+ * Core keys keep their curated copy in fieldMeta(). A plugin key cannot — core
  * has never heard of it — so the declaration carries its own label and
  * description and they win here. A plugin that declared neither still renders,
  * labelled from the humanised bare key.
  */
-export function entryMetaFor(entry: RegistryEntry): FieldMeta {
+export function entryMetaFor(entry: RegistryEntry, t: TranslateFn): FieldMeta {
   const declared = entry.label?.en ?? Object.values(entry.label ?? {})[0];
   if (declared || entry.description) {
     return {
@@ -394,7 +531,7 @@ export function entryMetaFor(entry: RegistryEntry): FieldMeta {
     };
   }
 
-  return fieldMetaFor(entry.key);
+  return fieldMetaFor(entry.key, t);
 }
 
 /** A boolean setting is the literal string 'true'. */
@@ -412,15 +549,17 @@ export function enumOptionLabel(option: string): string {
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
-const LOCALE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: 'en', label: 'English (en)' },
-  { value: 'en-US', label: 'English — United States (en-US)' },
-  { value: 'en-GB', label: 'English — United Kingdom (en-GB)' },
-  { value: 'de', label: 'German (de)' },
-  { value: 'fr', label: 'French (fr)' },
-  { value: 'es', label: 'Spanish (es)' },
-  { value: 'ar', label: 'Arabic (ar)' },
-];
+function localeOptions(t: TranslateFn): ReadonlyArray<{ value: string; label: string }> {
+  return [
+    { value: 'en', label: t('settings.localeOption.en', 'English (en)') },
+    { value: 'en-US', label: t('settings.localeOption.enUS', 'English — United States (en-US)') },
+    { value: 'en-GB', label: t('settings.localeOption.enGB', 'English — United Kingdom (en-GB)') },
+    { value: 'de', label: t('settings.localeOption.de', 'German (de)') },
+    { value: 'fr', label: t('settings.localeOption.fr', 'French (fr)') },
+    { value: 'es', label: t('settings.localeOption.es', 'Spanish (es)') },
+    { value: 'ar', label: t('settings.localeOption.ar', 'Arabic (ar)') },
+  ];
+}
 
 /** IANA timezone identifiers, with a guarded fallback for older runtimes. */
 function timezoneOptions(): string[] {
@@ -473,6 +612,9 @@ function TimezoneSelect({ id, value, disabled, invalid, describedBy, onChange }:
 
 /** Native <select> of short locale codes; keeps an out-of-list value selectable. */
 function LocaleSelect({ id, value, disabled, invalid, describedBy, onChange }: NativeSelectProps) {
+  const t = useTranslation('admin');
+  const options = localeOptions(t);
+
   return (
     <select
       id={id}
@@ -483,10 +625,10 @@ function LocaleSelect({ id, value, disabled, invalid, describedBy, onChange }: N
       onChange={(e) => onChange(e.target.value)}
       className={NATIVE_SELECT_CLASS}
     >
-      {!LOCALE_OPTIONS.some((o) => o.value === value) && value !== '' && (
+      {!options.some((o) => o.value === value) && value !== '' && (
         <option value={value}>{value}</option>
       )}
-      {LOCALE_OPTIONS.map((o) => (
+      {options.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
         </option>
@@ -508,13 +650,17 @@ function LocaleSelect({ id, value, disabled, invalid, describedBy, onChange }: N
  */
 export function validate(
   values: Pick<SettingsValueMap, 'site_name' | 'support_email'>,
-  requireSiteName: boolean
+  requireSiteName: boolean,
+  t: TranslateFn
 ): string | null {
   if (requireSiteName && values.site_name.trim() === '') {
-    return 'Site name cannot be empty.';
+    return t('settings.validation.siteNameRequired', 'Site name cannot be empty.');
   }
   if (values.support_email.trim() !== '' && !EMAIL_RE.test(values.support_email.trim())) {
-    return 'Support email must be a valid email address (or left blank).';
+    return t(
+      'settings.validation.supportEmailInvalid',
+      'Support email must be a valid email address (or left blank).'
+    );
   }
   return null;
 }
@@ -567,6 +713,16 @@ export function errorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * Badge text for the inherited/overridden indicator. Kept lowercase because the
+ * badge capitalises it in CSS, exactly as before translation.
+ */
+function statusLabel(status: 'overridden' | 'inherited', t: TranslateFn): string {
+  return status === 'overridden'
+    ? t('settings.status.overridden', 'overridden')
+    : t('settings.status.inherited', 'inherited');
+}
+
 interface SettingsFieldProps {
   settingKey: SettingKey;
   idPrefix: string;
@@ -593,6 +749,7 @@ export function SettingsField({
   onChange,
   status,
 }: SettingsFieldProps) {
+  const t = useTranslation('admin');
   const id = `${idPrefix}-${settingKey}`;
 
   return (
@@ -607,7 +764,7 @@ export function SettingsField({
             variant={status === 'overridden' ? 'default' : 'secondary'}
             className="text-[10px] font-medium capitalize"
           >
-            {status}
+            {statusLabel(status, t)}
           </Badge>
         )}
       </div>
@@ -656,8 +813,9 @@ export function RegistrySettingControl({
   status,
   onChange,
 }: RegistrySettingControlProps) {
+  const t = useTranslation('admin');
   const { key, type } = entry;
-  const meta = entryMetaFor(entry);
+  const meta = entryMetaFor(entry, t);
   const id = `${idPrefix}-${key.replace(/[.:]/g, '-')}`;
   const helpId = meta.help ? `${id}-help` : undefined;
   const errorId = error ? `${id}-error` : undefined;
@@ -734,7 +892,7 @@ export function RegistrySettingControl({
             variant={status === 'overridden' ? 'default' : 'secondary'}
             className="text-[10px] font-medium capitalize"
           >
-            {status}
+            {statusLabel(status, t)}
           </Badge>
         )}
       </div>

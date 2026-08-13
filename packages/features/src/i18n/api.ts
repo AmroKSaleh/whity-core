@@ -8,7 +8,29 @@
  * - GET /api/v1/translations/{language_code}/{domain} — fetch translations
  */
 
-import type { Direction, Language, LanguageSettings, TranslationMap } from './types'
+import type {
+  Direction,
+  Language,
+  LanguageCatalogue,
+  LanguageSettings,
+  TranslationMap,
+} from './types'
+
+/**
+ * Whether an instance whose payload predates the `i18n.enabled` flag — or one
+ * whose languages endpoint could not be reached — is treated as having i18n on.
+ *
+ * TRUE, matching the setting's own default: the feature shipped before the flag
+ * did, so "the field is missing" means "an older host", not "switched off". A
+ * transient network failure must not silently strip a working deployment's
+ * language switcher; the flag turns i18n off when an OPERATOR says so.
+ */
+const I18N_ENABLED_WHEN_UNSTATED = true
+
+/** Read the flag off a payload, tolerating a host that does not send it. */
+function toI18nEnabled(raw: unknown): boolean {
+  return typeof raw === 'boolean' ? raw : I18N_ENABLED_WHEN_UNSTATED
+}
 
 /**
  * Coerce a server-supplied language record into the client shape.
@@ -48,13 +70,19 @@ export type LanguagePreferenceUpdate =
   | { status: 'failed' }
 
 /**
- * Fetch the list of available languages from the API.
+ * Fetch the language catalogue — and whether this instance offers a CHOICE of
+ * language at all.
  *
  * GET /api/v1/languages (public endpoint, no auth required)
  *
- * @returns Resolved list of available languages, or empty array on error
+ * This is the first call the provider makes, before any session exists, which
+ * is why the `i18n.enabled` flag rides along on it: the sign-in screen has to
+ * know whether to offer a switcher, and it has no other source of instance
+ * settings.
+ *
+ * @returns The available languages and the flag, or an empty catalogue on error
  */
-export async function fetchAvailableLanguages(): Promise<Language[]> {
+export async function fetchLanguageCatalogue(): Promise<LanguageCatalogue> {
   try {
     const response = await fetch('/api/v1/languages', {
       method: 'GET',
@@ -67,14 +95,14 @@ export async function fetchAvailableLanguages(): Promise<Language[]> {
 
     if (!response.ok) {
       console.warn(`Language list unavailable (${response.status}); using the default language`)
-      return []
+      return { languages: [], i18nEnabled: I18N_ENABLED_WHEN_UNSTATED }
     }
 
     const data = await response.json()
-    return toLanguages(data.languages)
+    return { languages: toLanguages(data.languages), i18nEnabled: toI18nEnabled(data.i18n_enabled) }
   } catch (error) {
     console.warn('Language list unavailable; using the default language', error)
-    return []
+    return { languages: [], i18nEnabled: I18N_ENABLED_WHEN_UNSTATED }
   }
 }
 

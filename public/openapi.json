@@ -7640,10 +7640,14 @@
                                                     "direction"
                                                 ]
                                             }
+                                        },
+                                        "i18n_enabled": {
+                                            "type": "boolean"
                                         }
                                     },
                                     "required": [
-                                        "languages"
+                                        "languages",
+                                        "i18n_enabled"
                                     ]
                                 }
                             }
@@ -14781,7 +14785,7 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "The user's language preference and available languages",
+                        "description": "The user's EFFECTIVE language preference (null while i18n is disabled, whatever the profile stores) and the available languages",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -14816,11 +14820,15 @@
                                                     "direction"
                                                 ]
                                             }
+                                        },
+                                        "i18n_enabled": {
+                                            "type": "boolean"
                                         }
                                     },
                                     "required": [
                                         "language_code",
-                                        "available_languages"
+                                        "available_languages",
+                                        "i18n_enabled"
                                     ]
                                 }
                             }
@@ -14985,6 +14993,16 @@
                     },
                     "500": {
                         "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Language selection is disabled on this instance (i18n.enabled is off)",
                         "content": {
                             "application/json": {
                                 "schema": {

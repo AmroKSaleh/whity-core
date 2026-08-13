@@ -9,6 +9,8 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Core\i18n\Language;
 use Whity\Core\i18n\LanguageRegistry;
@@ -50,6 +52,28 @@ use Whity\Http\JsonBody;
  * the whole install. A user's language PREFERENCE remains per-profile and
  * follows them across all tenant memberships.
  *
+ * THE i18n FEATURE FLAG (`i18n.enabled`, WC-i18n-feature-flag)
+ * -----------------------------------------------------------
+ * When the operator turns i18n off, this handler is the server side of "one
+ * language, left-to-right, no affordances":
+ *
+ *  - Both END-USER payloads carry `i18n_enabled`, so a client knows to hide its
+ *    switcher without inferring anything from the catalogue's contents.
+ *  - {@see self::getLanguage()} reports the EFFECTIVE preference, which while
+ *    disabled is `null` (= the default language) whatever the profile stores.
+ *  - {@see self::patchLanguage()} REFUSES (503) rather than storing a preference
+ *    nothing would honour. A write that silently changes nothing observable is
+ *    worse than a refusal: it is the shape of bug found in production months
+ *    later by a user asking why their choice keeps reverting.
+ *  - The CATALOGUE itself is untouched. `list()` keeps serving every enabled
+ *    language and the ADMIN endpoints below keep working in full, because
+ *    preparing languages and translations BEFORE switching the feature on is the
+ *    entire reason to have a flag rather than a code branch. Hiding them would
+ *    make the feature impossible to get ready.
+ *  - NOTHING IS DESTROYED. `profiles.language_code` keeps its value while the
+ *    flag is off (the refusal above is what guarantees it), so re-enabling
+ *    restores every user's language exactly.
+ *
  * Holds no request state — safe for a FrankenPHP worker.
  */
 final class LanguagesApiHandler
@@ -58,17 +82,41 @@ final class LanguagesApiHandler
     private LanguageRegistry $languageRegistry;
     private LanguageRepositoryInterface $languageRepository;
     private RoleChecker $roleChecker;
+    private SettingsService $settings;
 
     public function __construct(
         PDO $db,
         LanguageRegistry $languageRegistry,
         LanguageRepositoryInterface $languageRepository,
-        RoleChecker $roleChecker
+        RoleChecker $roleChecker,
+        SettingsService $settings
     ) {
         $this->db = $db;
         $this->languageRegistry = $languageRegistry;
         $this->languageRepository = $languageRepository;
         $this->roleChecker = $roleChecker;
+        $this->settings = $settings;
+    }
+
+    /**
+     * Whether interface internationalisation is switched on for this instance.
+     *
+     * Read from the GLOBAL layer, never the per-tenant one: the key is
+     * global-only ({@see SettingsRegistry::I18N_ENABLED}), and these endpoints
+     * serve callers — a signed-out visitor on the sign-in screen — for whom no
+     * tenant has been resolved yet.
+     *
+     * Read fresh per request rather than memoised on the instance: this object
+     * lives for the whole life of a FrankenPHP worker, so a cached answer would
+     * leave some workers serving the old state after an operator flipped the
+     * switch (the worker-scoped-static hazard the permission cache already hit).
+     */
+    private function i18nEnabled(): bool
+    {
+        $global = $this->settings->getGlobal();
+
+        return ($global[SettingsRegistry::I18N_ENABLED]
+            ?? SettingsRegistry::defaultFor(SettingsRegistry::I18N_ENABLED)) === 'true';
     }
 
     /**
@@ -77,7 +125,16 @@ final class LanguagesApiHandler
      * No authentication required. Returns all enabled languages in the system.
      *
      * Response: { languages: [ { code: 'en', name: 'English', direction: 'ltr' },
-     *                          { code: 'ar', name: 'العربية', direction: 'rtl' } ] }
+     *                          { code: 'ar', name: 'العربية', direction: 'rtl' } ],
+     *             i18n_enabled: true }
+     *
+     * `i18n_enabled` is served here because this is the FIRST call a client
+     * makes, before it has resolved a language or a session — it is what lets
+     * the sign-in screen know not to offer a switcher. The `languages` array is
+     * NOT filtered when the flag is off: it is the catalogue, and the admin
+     * translations screen (reachable to any tenant holding `translations:manage`,
+     * so it cannot use the system-tenant-only admin listing) reads it to prepare
+     * a language before the operator switches i18n on.
      */
     public function list(Request $request): Response
     {
@@ -95,7 +152,10 @@ final class LanguagesApiHandler
                 $languages
             );
 
-            return Response::json(['languages' => array_values($data)], 200);
+            return Response::json([
+                'languages' => array_values($data),
+                'i18n_enabled' => $this->i18nEnabled(),
+            ], 200);
         } catch (\Throwable $e) {
             error_log('[LanguagesApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch languages', 500);
@@ -141,7 +201,14 @@ final class LanguagesApiHandler
      * Returns the current user's language preference and the list of available languages.
      * If the user has no explicit language_code set (NULL), returns null for language_code.
      *
-     * Response: { language_code: 'ar'|null, available_languages: [ { code, name, direction }, ... ] }
+     * Response: { language_code: 'ar'|null, available_languages: [ { code, name, direction }, ... ],
+     *             i18n_enabled: true }
+     *
+     * While i18n is DISABLED this reports the EFFECTIVE preference, which is
+     * `null` — the default language — no matter what the profile stores. The
+     * stored value is not read back out and not written over: it is simply not
+     * in force, and `i18n_enabled: false` says why. Switching the flag back on
+     * makes this endpoint report the user's own language again, unchanged.
      */
     public function getLanguage(Request $request): Response
     {
@@ -149,6 +216,8 @@ final class LanguagesApiHandler
         if ($profileId === null) {
             return Response::error('Authentication required', 403);
         }
+
+        $enabled = $this->i18nEnabled();
 
         try {
             // Fetch user's language preference from profiles table
@@ -174,8 +243,9 @@ final class LanguagesApiHandler
             );
 
             return Response::json([
-                'language_code' => $languageCode,
+                'language_code' => $enabled ? $languageCode : null,
                 'available_languages' => array_values($availableLanguages),
+                'i18n_enabled' => $enabled,
             ], 200);
         } catch (\Throwable $e) {
             error_log('[LanguagesApiHandler] getLanguage failed: ' . $e->getMessage());
@@ -192,12 +262,23 @@ final class LanguagesApiHandler
      * Returns 422 if language_code is invalid.
      *
      * Response: { language_code: 'ar' }
+     *
+     * REFUSED with 503 while i18n is disabled, ahead of any validation or
+     * write. The alternative — accepting the write and honouring nothing — is a
+     * silent no-op, and the UI has no switcher to make the call in the first
+     * place, so the only callers left are ones that should be told. The refusal
+     * is also what keeps `profiles.language_code` intact across a disable/enable
+     * cycle: nothing can overwrite a preference that cannot be written.
      */
     public function patchLanguage(Request $request): Response
     {
         $profileId = $this->getProfileId($request);
         if ($profileId === null) {
             return Response::error('Authentication required', 403);
+        }
+
+        if (!$this->i18nEnabled()) {
+            return Response::error('Language selection is disabled on this instance', 503);
         }
 
         $body = JsonBody::parsed($request);

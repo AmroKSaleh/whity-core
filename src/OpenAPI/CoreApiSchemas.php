@@ -1460,6 +1460,12 @@ final class CoreApiSchemas
             'direction' => ['type' => 'string', 'enum' => ['ltr', 'rtl']],
         ], ['code', 'name', 'direction']);
 
+        // Whether this instance offers more than one language at all
+        // (`i18n.enabled`). Served on both END-USER payloads so a client can
+        // hide its language switcher from one explicit field, rather than
+        // inferring it from how many languages the catalogue happens to hold.
+        $i18nEnabled = ['type' => 'boolean'];
+
         return [
             [
                 'method' => 'GET',
@@ -1474,7 +1480,8 @@ final class CoreApiSchemas
                             'The list of available languages',
                             self::object([
                                 'languages' => ['type' => 'array', 'items' => $languageObject],
-                            ], ['languages'])
+                                'i18n_enabled' => $i18nEnabled,
+                            ], ['languages', 'i18n_enabled'])
                         ),
                         500 => self::errorResponse('Internal error'),
                     ],
@@ -1490,11 +1497,12 @@ final class CoreApiSchemas
                     'tags' => ['languages'],
                     'responses' => [
                         200 => self::jsonResponse(
-                            'The user\'s language preference and available languages',
+                            'The user\'s EFFECTIVE language preference (null while i18n is disabled, whatever the profile stores) and the available languages',
                             self::object([
                                 'language_code' => self::str(nullable: true),
                                 'available_languages' => ['type' => 'array', 'items' => $languageObject],
-                            ], ['language_code', 'available_languages'])
+                                'i18n_enabled' => $i18nEnabled,
+                            ], ['language_code', 'available_languages', 'i18n_enabled'])
                         ),
                         403 => self::errorResponse('Authentication required'),
                         404 => self::errorResponse('User profile not found'),
@@ -1522,6 +1530,7 @@ final class CoreApiSchemas
                         400 => self::errorResponse('Invalid request body'),
                         403 => self::errorResponse('Authentication required'),
                         422 => self::errorResponse('Invalid language code'),
+                        503 => self::errorResponse('Language selection is disabled on this instance (i18n.enabled is off)'),
                     ] + self::authErrors(),
                 ],
             ],

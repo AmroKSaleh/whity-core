@@ -862,6 +862,11 @@ function ReviewStep({
   valueForKey: (key: string) => string;
 }) {
   const t = useTranslation('onboarding');
+  // Two domains on purpose. This screen's own copy is `onboarding`, but the
+  // registry field labels come from fieldMetaFor(), which is shared with the
+  // Settings console and keys its strings under `admin`. Passing the wrong one
+  // would silently render the English fallback for every field label.
+  const tAdmin = useTranslation('admin');
 
   if (changedKeys.length === 0) {
     return (
@@ -880,7 +885,7 @@ function ReviewStep({
         const value = valueForKey(key);
         return (
           <div key={key} className="flex items-center justify-between gap-4 py-2.5">
-            <dt className="text-sm font-medium text-foreground">{fieldMetaFor(key).label}</dt>
+            <dt className="text-sm font-medium text-foreground">{fieldMetaFor(key, tAdmin).label}</dt>
             <dd className="text-sm text-muted-foreground">{formatReviewValue(t, value)}</dd>
           </div>
         );

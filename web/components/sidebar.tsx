@@ -10,7 +10,7 @@ import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { Switcher } from '@amroksaleh/ui/switcher';
-import { LanguageSwitcher } from '@amroksaleh/features/i18n';
+import { LanguageSwitcher, useI18nEnabled } from '@amroksaleh/features/i18n';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
@@ -125,6 +125,8 @@ export function Sidebar() {
   const { items: navItemsFlat, getGroupedItems } = useNavigation();
   const branding = useBranding();
   const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeMode();
+  // Whether this instance offers a language choice at all (`i18n.enabled`).
+  const isI18nEnabled = useI18nEnabled();
   const groupedItems = getGroupedItems();
 
   // The single most-specific nav item matching the current path (e.g. on
@@ -352,8 +354,14 @@ export function Sidebar() {
             a state a user can usefully be in, and the pair used to drift
             apart. The choice is stored on the profile, so it follows the user
             across devices.
+
+            The WHOLE ROW — frame, globe icon and control — is gated on
+            `i18n.enabled`. The switcher self-suppresses too, but this wrapper
+            has to ask as well: otherwise an instance with i18n off would show
+            an empty bordered box with a globe in it, which is a worse
+            affordance than the switcher was.
           */}
-          {(!isCollapsed || isMobile) && (
+          {isI18nEnabled && (!isCollapsed || isMobile) && (
             <div
               className="flex w-full items-center gap-2 rounded-lg border border-input bg-input/20 px-3 py-2"
               data-testid="language-switcher"

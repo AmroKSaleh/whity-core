@@ -18,9 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@amroksaleh/ui/select';
+import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
 import { IconPlus, IconRefresh } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useI18nAvailability, useTranslation } from '@amroksaleh/features/i18n';
 import { EditableTranslationCell } from './editable-cell';
 import { AddKeyModal } from './add-key-modal';
 import { errorMessage } from '../languages/shared';
@@ -40,6 +41,15 @@ import type { TranslationAdminRow } from './types';
  * who closes it is a translator, not an engineer. Hence the coverage panel:
  * before it existed, a list of rows could only show work already DONE, and a
  * language looked most complete exactly when nobody had started it.
+ *
+ * REACHABLE EVEN WHEN i18n IS SWITCHED OFF (`i18n.enabled`), for the same reason
+ * as the Languages page — and with more force, given the paragraph above: doing
+ * this work BEFORE the operator turns the feature on is exactly what the flag is
+ * for. Every edit here is persisted for real. It reads the PUBLIC language list
+ * rather than the admin one deliberately — this page is open to any tenant
+ * holding `translations:manage`, while the admin listing is system-tenant-only —
+ * which is also why that endpoint keeps serving the whole catalogue with the
+ * flag off instead of narrowing to one language.
  */
 const SYSTEM_TENANT_ID = 0;
 const DEFAULT_DOMAIN = 'common';
@@ -49,6 +59,9 @@ export default function TranslationsPage() {
   const { addToast } = useToast();
   const { hasPermission, loading: isCapabilitiesLoading } = useCapabilities();
   const t = useTranslation('admin');
+  // Three-valued: the notice below ASSERTS the feature is off, so it must wait
+  // for a real answer rather than treating "not loaded yet" as "off".
+  const i18n = useI18nAvailability();
 
   const canManage = hasPermission(TRANSLATIONS_MANAGE);
   const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
@@ -217,6 +230,17 @@ export default function TranslationsPage() {
           </Button>
         }
       />
+
+      {i18n === 'disabled' && (
+        <Alert variant="info" data-testid="i18n-disabled-notice">
+          <AlertDescription>
+            {t(
+              'translations.i18nDisabled',
+              'Multiple languages are switched off for this instance, so everyone currently sees the default language. Translations edited here are saved and take effect as soon as an operator turns the feature on under Feature Flags.'
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <section className="space-y-3 rounded-lg border border-border p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
