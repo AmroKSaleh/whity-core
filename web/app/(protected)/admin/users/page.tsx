@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateUserModal } from './create-modal';
 import { EditUserModal } from './edit-modal';
 import { DeleteUserModal } from './delete-modal';
@@ -32,6 +33,7 @@ export type User = components['schemas']['User'];
 export default function UsersPage() {
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
+  const t = useTranslation('admin');
   const canCreate = hasPermission(USERS_WRITE);
   const canEdit = hasPermission(USERS_WRITE);
   const canDelete = hasPermission(USERS_DELETE);
@@ -50,7 +52,7 @@ export default function UsersPage() {
   const { data, loading: isLoading, error, refetch: fetchUsers } = useFetch(async () => {
     const response = await apiClient('/api/v1/users?per_page=100');
     if (!response.ok) {
-      throw new Error('Failed to fetch users');
+      throw new Error(t('users.error.load', 'Failed to fetch users'));
     }
     const body: { data: User[] } = await response.json();
     return body.data;
@@ -85,37 +87,59 @@ export default function UsersPage() {
       });
 
       if (error !== undefined || !response.ok) {
-        throw new Error(error?.error ?? 'Failed to update user status');
+        throw new Error(
+          error?.error ?? t('users.status.error', 'Failed to update user status')
+        );
       }
 
       addToast(
-        nextStatus === 'inactive' ? 'User deactivated' : 'User reactivated',
+        nextStatus === 'inactive'
+          ? t('users.status.deactivated', 'User deactivated')
+          : t('users.status.reactivated', 'User reactivated'),
         'success'
       );
       fetchUsers();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to update user status';
+        error instanceof Error
+          ? error.message
+          : t('users.status.error', 'Failed to update user status');
       addToast(message, 'error');
     }
   };
 
   const columns: DataTableColumn<User>[] = [
-    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'email', header: 'Email', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'role', header: 'Role', enableSorting: true },
-    { accessorKey: 'tenantId', header: 'Tenant ID' },
+    {
+      accessorKey: 'name',
+      header: t('users.table.name', 'Name'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    {
+      accessorKey: 'email',
+      header: t('users.table.email', 'Email'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    { accessorKey: 'role', header: t('users.table.role', 'Role'), enableSorting: true },
+    { accessorKey: 'tenantId', header: t('users.table.tenantId', 'Tenant ID') },
     {
       accessorKey: 'accountStatus',
-      header: 'Status',
+      header: t('users.table.status', 'Status'),
       enableSorting: true,
       cell: (user) => (
         <Badge variant={user.accountStatus === 'inactive' ? 'secondary' : 'outline'}>
-          {user.accountStatus === 'inactive' ? 'Inactive' : 'Active'}
+          {user.accountStatus === 'inactive'
+            ? t('users.status.inactive', 'Inactive')
+            : t('users.status.active', 'Active')}
         </Badge>
       ),
     },
-    { accessorKey: 'createdAt', header: 'Created At', enableSorting: true },
+    {
+      accessorKey: 'createdAt',
+      header: t('users.table.createdAt', 'Created At'),
+      enableSorting: true,
+    },
   ];
 
   const rowActions = (user: User) => {
@@ -123,19 +147,25 @@ export default function UsersPage() {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon-sm" aria-label="Row actions">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('users.rowActions.label', 'Row actions')}
+          >
             <IconMenu2 />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {canEdit && (
             <DropdownMenuItem onClick={() => handleEditClick(user)}>
-              Edit
+              {t('users.rowActions.edit', 'Edit')}
             </DropdownMenuItem>
           )}
           {canEdit && (
             <DropdownMenuItem onClick={() => handleToggleAccountStatus(user)}>
-              {user.accountStatus === 'inactive' ? 'Reactivate' : 'Deactivate'}
+              {user.accountStatus === 'inactive'
+                ? t('users.rowActions.reactivate', 'Reactivate')
+                : t('users.rowActions.deactivate', 'Deactivate')}
             </DropdownMenuItem>
           )}
           {canDelete && (
@@ -143,7 +173,7 @@ export default function UsersPage() {
               variant="destructive"
               onClick={() => handleDeleteClick(user)}
             >
-              Delete
+              {t('users.rowActions.delete', 'Delete')}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -154,8 +184,8 @@ export default function UsersPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="Users"
-        description="Manage users in your system"
+        title={t('users.title', 'Users')}
+        description={t('users.description', 'Manage users in your system')}
         action={
           canCreate ? (
             <Button
@@ -163,7 +193,7 @@ export default function UsersPage() {
               className="gap-2"
             >
               <IconPlus />
-              Create User
+              {t('users.createUser', 'Create User')}
             </Button>
           ) : undefined
         }
@@ -176,7 +206,7 @@ export default function UsersPage() {
         rowActions={rowActions}
         isLoading={isLoading}
         enableGlobalFilter
-        globalFilterPlaceholder="Search users…"
+        globalFilterPlaceholder={t('users.searchPlaceholder', 'Search users…')}
         pagination={{ pageSize: 10 }}
       />
 

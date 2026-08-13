@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '@/lib/api/client';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -31,6 +31,7 @@ import {
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
 import { useRoleOptions } from './use-role-options';
 import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicator';
 
@@ -38,13 +39,23 @@ import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicato
 // derives `name` from the email local-part and always creates the user in the
 // caller's tenant context, so the form offers neither (WC-168 — the previous
 // Name/Tenant inputs were silently ignored server-side).
-const createUserSchema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  role: z.string().min(1, 'Role is required'),
-});
+//
+// Built from `t` rather than declared at module scope: a validation message is
+// user-facing text like any other, and a schema frozen at import time would
+// always speak English (the shape `buildAddKeySchema(t)` established).
+const buildCreateUserSchema = (t: TranslateFn) =>
+  z.object({
+    email: z.string().email(t('users.create.validation.email', 'Invalid email address')),
+    password: z
+      .string()
+      .min(
+        8,
+        t('users.create.validation.password', 'Password must be at least 8 characters')
+      ),
+    role: z.string().min(1, t('users.create.validation.role', 'Role is required')),
+  });
 
-type CreateUserFormData = z.infer<typeof createUserSchema>;
+type CreateUserFormData = z.infer<ReturnType<typeof buildCreateUserSchema>>;
 
 interface CreateUserModalProps {
   isOpen: boolean;
@@ -58,13 +69,15 @@ export function CreateUserModal({
   onSuccess,
 }: CreateUserModalProps) {
   const { addToast } = useToast();
+  const t = useTranslation('admin');
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Role dropdown options come from the live tenant-visible role list, so only
   // roles that actually exist (and resolve server-side) are offered (WC-121).
   const { roleOptions, isLoadingRoles } = useRoleOptions(isOpen);
 
+  const schema = useMemo(() => buildCreateUserSchema(t), [t]);
   const form = useForm<CreateUserFormData>({
-    resolver: zodResolver(createUserSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
       email: '',
       password: '',
@@ -85,15 +98,17 @@ export function CreateUserModal({
       });
 
       if (error !== undefined || !response.ok) {
-        throw new Error(error?.error ?? 'Failed to create user');
+        throw new Error(error?.error ?? t('users.create.error', 'Failed to create user'));
       }
 
-      addToast('User created successfully', 'success');
+      addToast(t('users.create.success', 'User created successfully'), 'success');
       form.reset();
       onSuccess();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Failed to create user';
+        error instanceof Error
+          ? error.message
+          : t('users.create.error', 'Failed to create user');
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
@@ -104,9 +119,12 @@ export function CreateUserModal({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Create New User</DialogTitle>
+          <DialogTitle>{t('users.create.title', 'Create New User')}</DialogTitle>
           <DialogDescription>
-            Add a new user to your system. Fill in the form below.
+            {t(
+              'users.create.description',
+              'Add a new user to your system. Fill in the form below.'
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -117,7 +135,7 @@ export function CreateUserModal({
               name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Email</FormLabel>
+                  <FormLabel>{t('users.create.email.label', 'Email')}</FormLabel>
                   <FormControl>
                     <Input
                       type="email"

@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { useTranslation } from '@amroksaleh/features/i18n';
 import { CreateAiPrincipalModal } from './create-modal';
 import { CredentialModal } from './credential-modal';
 import { RevokeAiPrincipalModal } from './revoke-modal';
@@ -32,6 +33,7 @@ export default function AiPrincipalsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
+  const t = useTranslation('admin');
   const canManage = hasPermission(MCP_TOKENS_MANAGE);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -46,7 +48,7 @@ export default function AiPrincipalsPage() {
   const { data, loading: isLoading, error, refetch } = useFetch(async () => {
     const response = await apiClient('/api/v1/admin/mcp/tokens?per_page=100');
     if (!response.ok) {
-      throw new Error('Failed to fetch AI principals');
+      throw new Error(t('aiPrincipals.error.load', 'Failed to fetch AI principals'));
     }
     const body = (await response.json()) as AiPrincipalListResponse;
     return body.data ?? [];
@@ -72,18 +74,23 @@ export default function AiPrincipalsPage() {
   };
 
   const columns: DataTableColumn<AiPrincipal>[] = [
-    { accessorKey: 'name', header: 'Name', enableSorting: true, enableColumnFilter: true },
-    { accessorKey: 'principalKind', header: 'Kind', enableSorting: true },
-    { accessorKey: 'userId', header: 'User ID', enableSorting: true },
+    {
+      accessorKey: 'name',
+      header: t('aiPrincipals.table.name', 'Name'),
+      enableSorting: true,
+      enableColumnFilter: true,
+    },
+    { accessorKey: 'principalKind', header: t('aiPrincipals.table.kind', 'Kind'), enableSorting: true },
+    { accessorKey: 'userId', header: t('aiPrincipals.table.userId', 'User ID'), enableSorting: true },
     {
       accessorKey: 'expiresAt',
-      header: 'Expires',
+      header: t('aiPrincipals.table.expires', 'Expires'),
       enableSorting: true,
       cell: (row) => formatDate(row.expiresAt),
     },
     {
       accessorKey: 'createdAt',
-      header: 'Created',
+      header: t('aiPrincipals.table.created', 'Created'),
       enableSorting: true,
       cell: (row) => formatDate(row.createdAt),
     },
@@ -103,7 +110,7 @@ export default function AiPrincipalsPage() {
             className="text-destructive focus:text-destructive"
             onClick={() => handleRevokeClick(principal)}
           >
-            Revoke
+            {t('aiPrincipals.action.revoke', 'Revoke')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -113,8 +120,11 @@ export default function AiPrincipalsPage() {
   return (
     <div className="space-y-8">
       <AdminHeader
-        title="AI Principals"
-        description="Manage long-lived MCP bearer credentials issued to AI clients"
+        title={t('aiPrincipals.title', 'AI Principals')}
+        description={t(
+          'aiPrincipals.description',
+          'Manage long-lived MCP bearer credentials issued to AI clients'
+        )}
         action={
           canManage ? (
             <Button
@@ -122,7 +132,7 @@ export default function AiPrincipalsPage() {
               className="gap-2"
             >
               <IconPlus size={18} />
-              Create Credential
+              {t('aiPrincipals.header.create', 'Create Credential')}
             </Button>
           ) : undefined
         }
@@ -135,12 +145,14 @@ export default function AiPrincipalsPage() {
         rowActions={canManage ? rowActions : undefined}
         isLoading={isLoading}
         enableGlobalFilter
-        globalFilterPlaceholder="Search AI principals…"
+        globalFilterPlaceholder={t('aiPrincipals.searchPlaceholder', 'Search AI principals…')}
         pagination={{ pageSize: 10 }}
         emptyState={{
-          title: 'No active credentials',
-          description:
-            'No AI principal tokens have been issued yet. Create one to let an AI client authenticate via MCP.',
+          title: t('aiPrincipals.empty.title', 'No active credentials'),
+          description: t(
+            'aiPrincipals.empty.description',
+            'No AI principal tokens have been issued yet. Create one to let an AI client authenticate via MCP.'
+          ),
         }}
       />
 
