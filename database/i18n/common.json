@@ -66,6 +66,8 @@
         "ui.table.search": "Search…",
         "ui.tagInput.empty": "No tags selected",
         "ui.tagInput.remove": "Remove {tag}",
+        "ui.toast.dismiss": "Dismiss notification",
+        "ui.toast.region": "Notifications",
         "ui.tooltipTrigger": "More information"
     }
 }

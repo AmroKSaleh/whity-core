@@ -1024,6 +1024,7 @@
         "stats.growth.tab.users": "Users",
         "stats.growth.tenants.label": "new tenants",
         "stats.growth.title": "Growth Trends",
+        "stats.growth.tooltip": "{count} {term}",
         "stats.growth.users.label": "new users",
         "stats.roles.description": "Distribution of users across system roles",
         "stats.roles.title": "Users per Role",
